@@ -34,6 +34,10 @@
   /** Example name for rule cards: the first file in natural name order, so
    *  it does not jump around while the preview re-sorts. */
   const collator = new Intl.Collator(undefined, { numeric: true });
+  /** "+ Rule" menu in alphabetical order of the current language. */
+  const ruleTypes = $derived(
+    [...RULE_TYPES].sort((a, b) => t(`rule.${a}`).localeCompare(t(`rule.${b}`), LOCALES[settings.lang])),
+  );
   const sample = $derived(
     preview.items.reduce<string>((min, i) => (!min || collator.compare(i.original, min) < 0 ? i.original : min), ""),
   );
@@ -369,7 +373,7 @@
           <button class="primary-soft" onclick={() => (ruleMenu = !ruleMenu)}>{t("addRule")}</button>
           {#if ruleMenu}
             <div class="menu">
-              {#each RULE_TYPES as type (type)}
+              {#each ruleTypes as type (type)}
                 <button onclick={() => addRule(type)}>{t(`rule.${type}`)}</button>
               {/each}
             </div>
