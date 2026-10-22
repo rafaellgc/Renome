@@ -37,6 +37,7 @@ optionally act only on the extension or on the full name.
 |---|---|
 | Replace text | find, replace with, case-sensitive, first occurrence only |
 | Regular expression | pattern, replacement (`$1`, `${name}`), case-sensitive, first occurrence only |
+| Rearrange parts | separator; new order using part numbers and text (`1 - 3 - 2`); the parts of a sample file are shown and can be clicked to build the order. Parts are trimmed; parts left out are removed; names with fewer parts are unchanged |
 | Case | lowercase; UPPERCASE; Sentence case; Title Case; Title Case except connectives (of, the, de, da…) |
 | Insert | text, current date or file modification date (configurable format); at the start, at the end or at a position (from the start or the end) |
 | Number | template with `{n}` (number) and `{name}` (current name); start, step, minimum digits (zero padding) |

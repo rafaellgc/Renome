@@ -3,7 +3,8 @@
 Batch file renamer for Linux, Windows and macOS: stackable rules, live
 preview and undo. Built with Rust, Tauri 2 and Svelte 5.
 
-- Stackable rules with a live preview: replace, regular expression, case,
+- Stackable rules with a live preview: replace, regular expression,
+  rearrange parts (`Show - Title - S01E01` → `Show - S01E01 - Title`), case,
   insert text/date, numbering, remove characters, remove range, character
   at position, extension.
 - Edit any new name by hand right in the preview (double-click).

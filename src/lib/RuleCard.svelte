@@ -1,10 +1,12 @@
 <script lang="ts">
   import { t } from "./i18n";
+  import { splitExt, splitParts } from "./rules";
   import type { Step } from "./types";
 
   let {
     step = $bindable(),
     error = null,
+    sample = "",
     first = false,
     last = false,
     onmove,
@@ -12,6 +14,8 @@
   }: {
     step: Step;
     error?: string | null;
+    /** A file name from the list, to show examples. */
+    sample?: string;
     first?: boolean;
     last?: boolean;
     onmove: (delta: -1 | 1) => void;
@@ -20,6 +24,20 @@
 
   let open = $state(true);
   const r = $derived(step.rule);
+
+  const parts = $derived.by(() => {
+    if (r.type !== "rearrange" || !sample) return [];
+    const [stem, ext] = splitExt(sample);
+    const text = r.target === "name" ? stem : r.target === "ext" ? ext : sample;
+    return splitParts(text, r.separator);
+  });
+
+  /** Appends a part number to the order (clicking a part). */
+  function addPart(n: number) {
+    if (r.type !== "rearrange") return;
+    const sep = r.separator.trim() ? r.separator : " ";
+    r.order = r.order.trim() ? `${r.order}${sep}${n}` : `${n}`;
+  }
 </script>
 
 <article class="card" class:off={!step.enabled} class:has-error={!!error}>
@@ -55,6 +73,23 @@
         </div>
         {@render target()}
         <p class="hint mono">{t("groupsHint")}</p>
+      {:else if r.type === "rearrange"}
+        <label>{t("separator")} <input class="mono sep" bind:value={r.separator} spellcheck="false" placeholder=" - " /></label>
+        {#if parts.length}
+          <div class="parts">
+            <span class="hint">{t("partsOfSample")}</span>
+            {#each parts as part, i (i)}
+              <button class="part" title={t("addPartHint")} onclick={() => addPart(i + 1)}>
+                <b>{i + 1}</b><span>{part}</span>
+              </button>
+            {/each}
+          </div>
+        {:else if sample}
+          <p class="hint">{t("noParts")}</p>
+        {/if}
+        <label>{t("newOrder")} <input class="mono" bind:value={r.order} spellcheck="false" placeholder="1 - 3 - 2" /></label>
+        <p class="hint">{t("newOrderHint")}</p>
+        {@render target()}
       {:else if r.type === "case"}
         <label>{t("mode")}
           <select bind:value={r.mode}>
@@ -239,4 +274,30 @@
   .checks { display: flex; flex-direction: column; gap: 4px; }
   .hint { margin: -4px 0 0; font-size: 11px; color: var(--muted); }
   .error { margin: 0; font-size: 12px; color: var(--danger); }
+  .sep { white-space: pre; }
+  .parts { display: flex; flex-direction: column; gap: 3px; }
+  .parts .hint { margin: 0 0 2px; }
+  .part {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: auto;
+    min-height: 26px;
+    padding: 2px 8px 2px 4px;
+    text-align: left;
+    font-size: 12px;
+    white-space: normal;
+  }
+  .part b {
+    flex: none;
+    display: inline-grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 11px;
+  }
+  .part span { overflow-wrap: anywhere; }
 </style>

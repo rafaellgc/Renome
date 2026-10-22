@@ -19,7 +19,8 @@ export type Rule =
       inclusive: boolean;
     }
   | { type: "charAt"; position: number; fromEnd: boolean; onlyIf: string; replace: string }
-  | { type: "extension"; mode: "set" | "lower" | "upper" | "remove"; value: string };
+  | { type: "extension"; mode: "set" | "lower" | "upper" | "remove"; value: string }
+  | { type: "rearrange"; separator: string; order: string; target: Target };
 
 export type RuleType = Rule["type"];
 

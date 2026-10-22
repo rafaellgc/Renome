@@ -31,6 +31,12 @@
   let table = $state<FileTable>();
 
   const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc });
+  /** Example name for rule cards: the first file in natural name order, so
+   *  it does not jump around while the preview re-sorts. */
+  const collator = new Intl.Collator(undefined, { numeric: true });
+  const sample = $derived(
+    preview.items.reduce<string>((min, i) => (!min || collator.compare(i.original, min) < 0 ? i.original : min), ""),
+  );
   const canMove = $derived(selected.size > 0 && sortKey !== "newName");
 
   function ruleError(i: number) {
@@ -377,6 +383,7 @@
           <RuleCard
             bind:step={steps[i]}
             error={ruleError(i)}
+            {sample}
             first={i === 0}
             last={i === steps.length - 1}
             onmove={(d) => moveStep(i, d)}

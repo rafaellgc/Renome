@@ -173,6 +173,15 @@ pub enum Rule {
         #[serde(default)]
         value: String,
     },
+    /// Splits the name into parts at `separator` and rebuilds it from
+    /// `order`, where numbers refer to parts (1-based) and everything else
+    /// is kept as text: `1 - 3 - 2`.
+    Rearrange {
+        separator: String,
+        order: String,
+        #[serde(default)]
+        target: Target,
+    },
 }
 
 /// A rule configuration error: index in the list, code
@@ -485,8 +494,65 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             ExtMode::Remove => ext.clear(),
         },
 
-        Rule::Replace { .. } | Rule::Regex { .. } => unreachable!("compiladas à parte"),
+        Rule::Rearrange {
+            separator,
+            order,
+            target,
+        } => on_target(stem, ext, *target, |s| {
+            rearrange(s, separator, order).unwrap_or_else(|| s.to_string())
+        }),
+
+        Rule::Replace { .. } | Rule::Regex { .. } => unreachable!("compiled separately"),
     }
+}
+
+/// Piece of a rearrange `order`: a part number or literal text.
+enum Piece<'a> {
+    Part(usize),
+    Text(&'a str),
+}
+
+fn parse_order(order: &str) -> Vec<Piece<'_>> {
+    let mut pieces = Vec::new();
+    let mut rest = order;
+    while !rest.is_empty() {
+        let digits = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+        if digits > 0 {
+            pieces.push(Piece::Part(rest[..digits].parse().unwrap_or(usize::MAX)));
+            rest = &rest[digits..];
+        } else {
+            let text = rest.find(|c: char| c.is_ascii_digit()).unwrap_or(rest.len());
+            pieces.push(Piece::Text(&rest[..text]));
+            rest = &rest[text..];
+        }
+    }
+    pieces
+}
+
+/// Splits at `separator` (parts are trimmed, empty ones dropped) and
+/// rebuilds from `order`. `None` (name unchanged) when the order refers to
+/// a part the name does not have, so names that do not fit are left alone.
+pub fn rearrange(s: &str, separator: &str, order: &str) -> Option<String> {
+    if separator.is_empty() {
+        return None;
+    }
+    let parts: Vec<&str> = s
+        .split(separator)
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .collect();
+    let pieces = parse_order(order);
+    if !pieces.iter().any(|p| matches!(p, Piece::Part(_))) {
+        return None;
+    }
+    let mut out = String::new();
+    for piece in pieces {
+        match piece {
+            Piece::Text(t) => out.push_str(t),
+            Piece::Part(n) => out.push_str(parts.get(n.checked_sub(1)?)?),
+        }
+    }
+    Some(out)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -612,6 +678,38 @@ mod tests {
             run(vec![replace(".", "$1", false, false)], "a.b.txt", 0),
             "a$1b.txt"
         );
+    }
+
+    #[test]
+    fn rearrange_parts() {
+        let r = |sep: &str, order: &str| Rule::Rearrange {
+            separator: sep.into(),
+            order: order.into(),
+            target: Target::Name,
+        };
+        // Extra spaces around the separator are absorbed.
+        assert_eq!(
+            run(
+                vec![r(" - ", "1 - 3 - 2")],
+                "Heróis da Humanidade - Joana d’Arc  - S02E06.mkv",
+                0
+            ),
+            "Heróis da Humanidade - S02E06 - Joana d’Arc.mkv"
+        );
+        assert_eq!(
+            run(vec![r("-", "3 (1)")], "a -  b-c.txt", 0),
+            "c (a).txt"
+        );
+        assert_eq!(run(vec![r(", ", "2 1")], "Silva, Ana.txt", 0), "Ana Silva.txt");
+        // Missing part or no separator: unchanged.
+        assert_eq!(run(vec![r(" - ", "1 - 3")], "a - b.txt", 0), "a - b.txt");
+        assert_eq!(run(vec![r(" - ", "2 1")], "single.txt", 0), "single.txt");
+        // Order without numbers or part 0: unchanged.
+        assert_eq!(run(vec![r(" - ", "x")], "a - b.txt", 0), "a - b.txt");
+        assert_eq!(run(vec![r(" - ", "0 1")], "a - b.txt", 0), "a - b.txt");
+        // Two-digit part numbers.
+        let many = (1..=12).map(|i| i.to_string()).collect::<Vec<_>>().join("_");
+        assert_eq!(run(vec![r("_", "12_1")], &format!("{many}.txt"), 0), "12_1.txt");
     }
 
     #[test]

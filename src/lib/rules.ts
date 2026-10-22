@@ -2,7 +2,7 @@ import { settings } from "./settings.svelte";
 import type { Rule, RuleType, Step } from "./types";
 
 export const RULE_TYPES: RuleType[] = [
-  "replace", "regex", "case", "insert", "number", "remove", "removeRange", "charAt", "extension",
+  "replace", "regex", "rearrange", "case", "insert", "number", "remove", "removeRange", "charAt", "extension",
 ];
 
 const NAME_VAR = { pt: "{nome}", en: "{name}", es: "{nombre}" } as const;
@@ -27,7 +27,21 @@ export function newRule(type: RuleType): Rule {
       return { type, position: 1, fromEnd: false, onlyIf: "", replace: "" };
     case "extension":
       return { type, mode: "lower", value: "" };
+    case "rearrange":
+      return { type, separator: " - ", order: "", target: "name" };
   }
+}
+
+/** Same split as the Rust rule: trimmed parts, empty ones dropped. */
+export function splitParts(name: string, separator: string): string[] {
+  if (!separator) return [];
+  return name.split(separator).map((p) => p.trim()).filter(Boolean);
+}
+
+/** Splits `name.ext` like the Rust core (hidden files have no extension). */
+export function splitExt(name: string): [string, string] {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 && dot < name.length - 1 ? [name.slice(0, dot), name.slice(dot + 1)] : [name, ""];
 }
 
 let counter = 0;
