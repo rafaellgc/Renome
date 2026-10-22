@@ -67,6 +67,13 @@ jobs:
           args: ${{ matrix.args }}
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
           releaseName: "Renome ${{ github.ref_name }}"
+          releaseBody: |
+            **Downloads**
+            - Linux: `.AppImage` (any distro), `.deb` or `.rpm`
+            - Windows: `_x64-setup.exe` (or `.msi`)
+            - macOS: `_universal.dmg` (Intel and Apple Silicon)
+
+            The installers are not signed, so Windows and macOS will show a warning the first time. On macOS, right-click the app and choose **Open**.
           releaseDraft: true
 
       - uses: actions/upload-artifact@v7
