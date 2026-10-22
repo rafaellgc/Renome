@@ -22,6 +22,10 @@ pub struct Operation {
 pub enum ErrorKind {
     TempExists,
     TargetExists,
+    /// The source no longer exists (moved or deleted).
+    NotFound,
+    PermissionDenied,
+    /// Any other OS error; `detail` holds its message.
     Io,
     /// Failed and the original name could not be restored; `detail` is the temporary.
     RestoreFailed,
@@ -65,7 +69,10 @@ pub fn execute(ops: &[Operation]) -> ApplyReport {
         }
         match fs::rename(&op.from, &tmp) {
             Ok(()) => staged.push((op, tmp)),
-            Err(e) => report.errors.push(err(op, ErrorKind::Io, e.to_string())),
+            Err(e) => {
+                let (kind, detail) = io_kind(&e);
+                report.errors.push(err(op, kind, detail));
+            }
         }
     }
 
@@ -73,7 +80,7 @@ pub fn execute(ops: &[Operation]) -> ApplyReport {
         let result = if fs::symlink_metadata(&op.to).is_ok() {
             Err((ErrorKind::TargetExists, String::new()))
         } else {
-            fs::rename(&tmp, &op.to).map_err(|e| (ErrorKind::Io, e.to_string()))
+            fs::rename(&tmp, &op.to).map_err(|e| io_kind(&e))
         };
         match result {
             Ok(()) => report.done.push(op.clone()),
@@ -88,6 +95,20 @@ pub fn execute(ops: &[Operation]) -> ApplyReport {
         }
     }
     report
+}
+
+/// Maps an OS error to a kind the UI can translate; only unknown errors keep
+/// the OS message (without the "(os error N)" suffix).
+fn io_kind(e: &std::io::Error) -> (ErrorKind, String) {
+    match e.kind() {
+        std::io::ErrorKind::NotFound => (ErrorKind::NotFound, String::new()),
+        std::io::ErrorKind::PermissionDenied => (ErrorKind::PermissionDenied, String::new()),
+        _ => {
+            let text = e.to_string();
+            let text = text.split(" (os error").next().unwrap_or(&text);
+            (ErrorKind::Io, text.to_string())
+        }
+    }
 }
 
 fn err(op: &Operation, kind: ErrorKind, detail: String) -> OpError {
@@ -108,6 +129,9 @@ struct Journal {
     /// How many were already undone (partial undo).
     #[serde(default)]
     reverted: usize,
+    /// How many failed on the last undo attempt.
+    #[serde(default)]
+    failed: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -119,6 +143,8 @@ pub struct HistoryEntry {
     pub undone: bool,
     /// Undone so far, when an undo was only partial.
     pub reverted: usize,
+    /// Failed on the last undo attempt (e.g. files moved or deleted).
+    pub failed: usize,
 }
 
 /// Rename history, one JSON file per operation.
@@ -164,6 +190,7 @@ impl History {
                 undone: false,
                 ops: report.done.clone(),
                 reverted: 0,
+                failed: 0,
             };
             match self.write(&id, &j) {
                 Ok(()) => report.history_id = Some(id),
@@ -195,11 +222,17 @@ impl History {
                     count: j.ops.len() + j.reverted,
                     undone: j.undone,
                     reverted: j.reverted,
+                    failed: j.failed,
                 })
             })
             .collect();
         out.sort_by_key(|e| std::cmp::Reverse(e.created));
         out
+    }
+
+    /// Deletes a history entry (the files are left as they are).
+    pub fn delete(&self, id: &str) -> Result<(), String> {
+        fs::remove_file(self.path(id)?).map_err(|e| e.to_string())
     }
 
     /// Undoes a history entry by renaming back. It is only marked as undone
@@ -226,6 +259,7 @@ impl History {
                 .iter()
                 .any(|d| d.from == op.to && d.to == op.from)
         });
+        j.failed = report.errors.len();
         j.undone = j.ops.is_empty();
         self.write(id, &j)?;
         Ok(report)
@@ -290,7 +324,8 @@ mod tests {
         assert_eq!(u.errors.len(), 1);
         let e = &h.list()[0];
         assert!(!e.undone);
-        assert_eq!((e.count, e.reverted), (2, 1));
+        assert_eq!((e.count, e.reverted, e.failed), (2, 1, 1));
+        assert_eq!(u.errors[0].kind, ErrorKind::NotFound);
 
         // Once it is back in place, the undo completes.
         fs::rename(p.join("sub/b2"), p.join("b2")).unwrap();
@@ -298,6 +333,10 @@ mod tests {
         assert!(u.errors.is_empty());
         assert_eq!(read(p.join("b")), "B");
         assert!(h.list()[0].undone);
+        assert_eq!(h.list()[0].failed, 0);
+
+        h.delete(&id).unwrap();
+        assert!(h.list().is_empty());
     }
 
     #[test]

@@ -65,7 +65,7 @@ export interface View {
   descending: boolean;
 }
 
-export type ErrorKind = "tempExists" | "targetExists" | "io" | "restoreFailed" | "history";
+export type ErrorKind = "tempExists" | "targetExists" | "notFound" | "permissionDenied" | "io" | "restoreFailed" | "history";
 export interface OpError { from: string; to: string; kind: ErrorKind; detail: string }
 
 export interface ApplyReport {
@@ -81,6 +81,8 @@ export interface HistoryEntry {
   undone: boolean;
   /** Undone so far, when an undo was partial. */
   reverted: number;
+  /** Failed on the last undo attempt. */
+  failed: number;
 }
 
 /** File list sort orders (done in Rust). */

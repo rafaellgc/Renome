@@ -100,4 +100,7 @@ code { font-family: ui-monospace, monospace; font-size: 0.95em; background: var(
   box-shadow: var(--shadow);
 }
 .modal h2 { margin: 0; font-size: 16px; }
+.modal-foot { display: flex; justify-content: flex-end; gap: 8px; }
+button.danger-fill { background: var(--danger); border-color: var(--danger); color: white; font-weight: 600; }
+button.danger-fill:hover:not(:disabled) { background: var(--danger); filter: brightness(1.08); }
 input[type="search"]::-webkit-search-cancel-button { cursor: pointer; }

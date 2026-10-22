@@ -69,7 +69,11 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
 - Each applied operation is recorded in a history (in the user's data
   folder, e.g. `~/.local/share/renome/history/`), allowing **undo** even
   after closing the program. If part of an undo fails (file moved or
-  deleted), the entry is shown as "partly undone" and can be retried later.
+  deleted), the entry shows the failure and can be retried once the files
+  are back in place. Entries can be deleted from the history.
+- Confirmations and error reports use the app's own dialogs; the safe
+  choice (Cancel) is focused by default. Errors name the file and the
+  reason (e.g. "file not found").
 
 ## 5. Options
 

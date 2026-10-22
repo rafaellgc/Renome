@@ -16,6 +16,7 @@ export const api = {
     invoke<ApplyReport>("apply", { steps, overrides, view }),
   history: () => invoke<HistoryEntry[]>("history"),
   undo: (id: string) => invoke<ApplyReport>("undo", { id }),
+  deleteHistory: (id: string) => invoke<void>("delete_history", { id }),
   savePreset: (path: string, steps: Step[]) => invoke<void>("save_preset", { path, steps }),
   loadPreset: (path: string) => invoke<Step[]>("load_preset", { path }),
 };

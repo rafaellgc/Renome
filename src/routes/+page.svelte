@@ -1,8 +1,10 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
-  import { ask, message, open, save } from "@tauri-apps/plugin-dialog";
+  import { open, save } from "@tauri-apps/plugin-dialog";
   import { api } from "$lib/api";
+  import Dialog from "$lib/Dialog.svelte";
+  import { closeDialog, confirm, dialog, notify } from "$lib/dialog.svelte";
   import FileTable from "$lib/FileTable.svelte";
   import Options from "$lib/Options.svelte";
   import RuleCard from "$lib/RuleCard.svelte";
@@ -168,29 +170,27 @@
   }
 
   const basename = (p: string) => p.split("/").pop() ?? p;
-  const errText = (e: OpError) =>
-    e.kind === "history"
-      ? `${t("err.history")} (${e.detail})`
-      : `${basename(e.from)}: ${t(`err.${e.kind}`)}${e.detail ? ` (${e.detail})` : ""}`;
+  const errText = (e: OpError) => {
+    if (e.kind === "history") return `${t("err.history")} (${e.detail})`;
+    const why = e.kind === "io" ? e.detail || t("err.io") : t(`err.${e.kind}`);
+    return `${basename(e.from)} — ${why}`;
+  };
 
-  function summary(r: ApplyReport, doneKey: "renamedN" | "restoredN") {
-    let text = t(doneKey, { n: r.done.length });
-    if (r.errors.length) {
-      const list = r.errors.slice(0, 8).map((e) => `• ${errText(e)}`).join("\n");
-      text += `\n\n${t("errorsN", { n: r.errors.length })}:\n${list}` + (r.errors.length > 8 ? "\n…" : "");
-    }
-    return text;
+  /** Shows the files that failed, if any. */
+  function showErrors(r: ApplyReport, title: string, text: string) {
+    if (!r.errors.length) return;
+    return notify({ title, text, items: r.errors.map(errText) });
   }
 
   async function applyAll() {
     if (!preview.changed) return;
     if (settings.confirmApply) {
       const extra = preview.conflicts ? `\n${t("confirmConflicts", { n: preview.conflicts })}` : "";
-      const ok = await ask(`${t("confirmText", { n: preview.changed })}${extra}\n\n${t("confirmUndoHint")}`, {
+      const ok = await confirm({
         title: t("confirmTitle"),
-        kind: "warning",
-        okLabel: t("confirmOk"),
-        cancelLabel: t("cancel"),
+        text: `${t("confirmText", { n: preview.changed })}${extra}\n\n${t("confirmUndoHint")}`,
+        ok: t("confirmOk"),
+        cancel: t("cancel"),
       });
       if (!ok) return;
     }
@@ -201,7 +201,7 @@
       overrides = {};
       notice = t("renamedN", { n: r.done.length }) + (r.errors.length ? ` · ${t("errorsN", { n: r.errors.length })}` : "");
       await refresh();
-      if (r.errors.length) await message(summary(r, "renamedN"), { title: t("resultTitle"), kind: "warning" });
+      await showErrors(r, t("resultTitle"), `${t("renamedN", { n: r.done.length })}\n${t("errorsN", { n: r.errors.length })}:`);
     } catch (e) {
       notice = `${t("error")}: ${tError(e)}`;
     } finally {
@@ -218,14 +218,35 @@
     try {
       const r = await api.undo(id);
       notice = t("restoredN", { n: r.done.length });
-      await message(summary(r, "restoredN"), { title: t("undo"), kind: r.errors.length ? "warning" : "info" });
       history = await api.history();
       await refresh();
+      await showErrors(
+        r,
+        r.done.length ? t("resultTitle") : t("undoFailed"),
+        `${r.done.length ? `${t("restoredN", { n: r.done.length })}\n` : ""}${t("undoFailedHint")}`,
+      );
     } catch (e) {
-      await message(tError(e), { title: t("undo"), kind: "error" });
+      await notify({ title: t("undoFailed"), text: tError(e) });
     } finally {
       busy = false;
     }
+  }
+
+  async function deleteEntry(id: string) {
+    const ok = await confirm({
+      title: t("deleteEntry"),
+      text: t("deleteEntryText"),
+      ok: t("delete"),
+      cancel: t("cancel"),
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.deleteHistory(id);
+    } catch (e) {
+      await notify({ title: t("deleteEntry"), text: tError(e) });
+    }
+    history = await api.history();
   }
 
   const presetFilter = () => [{ name: t("presetFile"), extensions: ["json"] }];
@@ -245,11 +266,16 @@
       steps = (await api.loadPreset(path)).map((s) => newStep(s.rule, s.enabled));
       notice = t("rulesLoaded");
     } catch (e) {
-      await message(tError(e), { title: t("openRules"), kind: "error" });
+      await notify({ title: t("openRules"), text: tError(e) });
     }
   }
 
   function onkeydown(e: KeyboardEvent) {
+    // An open dialog takes the keyboard; Esc closes only it.
+    if (dialog.current) {
+      if (e.key === "Escape") closeDialog(false);
+      return;
+    }
     if (e.key === "Escape") {
       addMenu = ruleMenu = false;
       history = null;
@@ -319,9 +345,8 @@
     <div class="group">
       <button onclick={openHistory}>{t("history")}</button>
       <button class="icon" title={t("options")} aria-label={t("options")} onclick={() => (showOptions = true)}>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true">
-          <path d="M10.3 2.5h3.4l.5 2.6a7.5 7.5 0 0 1 1.9 1.1l2.5-.9 1.7 2.9-2 1.7a7.6 7.6 0 0 1 0 2.2l2 1.7-1.7 2.9-2.5-.9a7.5 7.5 0 0 1-1.9 1.1l-.5 2.6h-3.4l-.5-2.6a7.5 7.5 0 0 1-1.9-1.1l-2.5.9-1.7-2.9 2-1.7a7.6 7.6 0 0 1 0-2.2l-2-1.7 1.7-2.9 2.5.9a7.5 7.5 0 0 1 1.9-1.1z" />
-          <circle cx="12" cy="12" r="3" />
+        <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+          <path fill="currentColor" fill-rule="evenodd" stroke="currentColor" stroke-width="1" stroke-linejoin="round" d="M12.15 3.76L11.96 1.50L8.04 1.50L7.85 3.76L5.67 5.02L3.62 4.05L1.66 7.45L3.52 8.74L3.52 11.26L1.66 12.55L3.62 15.95L5.67 14.98L7.85 16.24L8.04 18.50L11.96 18.50L12.15 16.24L14.33 14.98L16.38 15.95L18.34 12.55L16.48 11.26L16.48 8.74L18.34 7.45L16.38 4.05L14.33 5.02ZM13 10a3 3 0 1 0-6 0a3 3 0 1 0 6 0Z" />
         </svg>
       </button>
       <button class="primary" disabled={!preview.changed || busy} onclick={applyAll}>
@@ -413,12 +438,15 @@
               <span class="muted">{t("files", { n: h.count })}</span>
               {#if h.undone}
                 <span class="muted">{t("undone")}</span>
-              {:else if h.reverted}
-                <span class="muted">{t("partlyUndone", { n: h.reverted, total: h.count })}</span>
-                <button onclick={() => undo(h.id)} disabled={busy}>{t("undoRetry")}</button>
+              {:else if h.failed || h.reverted}
+                <span class="failed" title={t("undoFailedHint")}>
+                  {h.reverted ? t("partlyUndone", { n: h.reverted, total: h.count }) : t("undoFailed")}
+                </span>
+                <button onclick={() => undo(h.id)} disabled={busy} title={t("undoFailedHint")}>{t("retry")}</button>
               {:else}
                 <button onclick={() => undo(h.id)} disabled={busy}>{t("undo")}</button>
               {/if}
+              <button class="icon danger" title={t("deleteEntry")} aria-label={t("deleteEntry")} onclick={() => deleteEntry(h.id)} disabled={busy}>✕</button>
             </li>
           {/each}
         </ul>
@@ -433,6 +461,8 @@
 {#if showOptions}
   <Options onclose={() => (showOptions = false)} />
 {/if}
+
+<Dialog />
 
 <style>
   .app { display: flex; flex-direction: column; height: 100vh; }
@@ -502,5 +532,5 @@
   .modal li { display: flex; align-items: center; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--row-line); }
   .modal li > :first-child { flex: 1; }
   .muted { color: var(--muted); }
-  .modal-foot { display: flex; justify-content: flex-end; }
+  .failed { color: var(--danger); font-size: 13px; }
 </style>
