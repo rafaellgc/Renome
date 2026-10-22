@@ -1,0 +1,36 @@
+import { settings } from "./settings.svelte";
+import type { Rule, RuleType, Step } from "./types";
+
+export const RULE_TYPES: RuleType[] = [
+  "replace", "regex", "case", "insert", "number", "remove", "removeRange", "charAt", "extension",
+];
+
+const NAME_VAR = { pt: "{nome}", en: "{name}", es: "{nombre}" } as const;
+
+export function newRule(type: RuleType): Rule {
+  switch (type) {
+    case "replace":
+      return { type, find: "", replace: "", caseSensitive: false, firstOnly: false, target: "name" };
+    case "regex":
+      return { type, pattern: "", replace: "", caseSensitive: false, firstOnly: false, target: "name" };
+    case "case":
+      return { type, mode: "titleSmart", target: "name" };
+    case "insert":
+      return { type, source: "text", text: "", dateFormat: "%Y-%m-%d", at: "start", position: 1 };
+    case "number":
+      return { type, template: `${NAME_VAR[settings.lang]} {n}`, start: 1, step: 1, digits: 2 };
+    case "remove":
+      return { type, allSpaces: false, extraSpaces: true, accents: false, digits: false, chars: "", target: "name" };
+    case "removeRange":
+      return { type, from: "text", fromPosition: 1, fromText: "(", to: "text", toPosition: 1, toText: ")", inclusive: true };
+    case "charAt":
+      return { type, position: 1, fromEnd: false, onlyIf: "", replace: "" };
+    case "extension":
+      return { type, mode: "lower", value: "" };
+  }
+}
+
+let counter = 0;
+export function newStep(rule: Rule, enabled = true): Step {
+  return { id: `s${Date.now().toString(36)}${counter++}`, enabled, rule };
+}
