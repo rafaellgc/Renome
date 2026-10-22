@@ -5,7 +5,8 @@
 
   let box = $state<HTMLDivElement>();
 
-  // Focus the safe choice: "cancel" when there is one, otherwise "ok".
+  // Focus the button Enter should press: the confirm button, except in
+  // destructive dialogs, where it is "cancel".
   $effect(() => {
     if (dialog.current && box) {
       tick().then(() => box?.querySelector<HTMLButtonElement>("button[data-default]")?.focus());
@@ -28,8 +29,8 @@
       {/if}
       <div class="modal-foot">
         {#if d.cancel}
-          <button data-default onclick={() => closeDialog(false)}>{d.cancel}</button>
-          <button class={d.danger ? "danger-fill" : "primary"} onclick={() => closeDialog(true)}>{d.ok ?? t("close")}</button>
+          <button data-default={d.danger || undefined} onclick={() => closeDialog(false)}>{d.cancel}</button>
+          <button data-default={!d.danger || undefined} class={d.danger ? "danger-fill" : "primary"} onclick={() => closeDialog(true)}>{d.ok ?? t("close")}</button>
         {:else}
           <button data-default class="primary" onclick={() => closeDialog(true)}>{d.ok ?? t("close")}</button>
         {/if}

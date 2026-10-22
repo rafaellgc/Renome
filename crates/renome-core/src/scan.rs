@@ -13,6 +13,9 @@ pub struct ScanOptions {
     pub recursive: bool,
     /// Includes files and folders whose name starts with a dot.
     pub include_hidden: bool,
+    /// Adds the given folders themselves (to rename them) instead of
+    /// their contents.
+    pub folders_as_items: bool,
 }
 
 impl Default for ScanOptions {
@@ -20,6 +23,7 @@ impl Default for ScanOptions {
         Self {
             recursive: true,
             include_hidden: false,
+            folders_as_items: false,
         }
     }
 }
@@ -79,7 +83,7 @@ pub fn scan(paths: &[PathBuf], opts: &ScanOptions, known: &HashSet<PathBuf>) -> 
                 continue;
             }
         };
-        if !meta.is_dir() {
+        if !meta.is_dir() || opts.folders_as_items {
             push(path, &mut out);
             continue;
         }
@@ -135,8 +139,24 @@ mod tests {
         o = ScanOptions {
             recursive: false,
             include_hidden: false,
+            folders_as_items: false,
         };
         assert_eq!(names(&o), ["a.JPG"]);
+
+        let r = scan(
+            &[root.join("sub")],
+            &ScanOptions {
+                folders_as_items: true,
+                ..Default::default()
+            },
+            &HashSet::new(),
+        );
+        assert_eq!(r.files.len(), 1);
+        assert!(r.files[0].is_dir);
+        assert_eq!(
+            (r.files[0].stem.as_str(), r.files[0].ext.as_str()),
+            ("sub", "")
+        );
     }
 
     #[test]

@@ -15,7 +15,12 @@ use tauri::State;
 #[derive(Default)]
 struct Session {
     files: Vec<FileEntry>,
+    /// Earlier states of the list and of the hand-edited names, for Ctrl+Z.
+    undo: Vec<(Vec<FileEntry>, Overrides)>,
 }
+
+/// How many list edits can be undone.
+const UNDO_LIMIT: usize = 100;
 
 struct AppState {
     session: Mutex<Session>,
@@ -30,6 +35,32 @@ struct AddResult {
     /// Paths actually added (so the UI can select them).
     added: Vec<PathBuf>,
     skipped: Vec<Skipped>,
+}
+
+/// Saves the current state before the UI changes the list.
+#[tauri::command]
+fn checkpoint(state: State<AppState>, overrides: Overrides) {
+    let s = &mut *state.session.lock().unwrap();
+    if s.undo.len() == UNDO_LIMIT {
+        s.undo.remove(0);
+    }
+    s.undo.push((s.files.clone(), overrides));
+}
+
+/// Drops the last checkpoint (the edit changed nothing).
+#[tauri::command]
+fn drop_checkpoint(state: State<AppState>) {
+    state.session.lock().unwrap().undo.pop();
+}
+
+/// Restores the list to the last checkpoint and returns its hand-edited
+/// names; `None` when there is nothing to undo.
+#[tauri::command]
+fn undo_list(state: State<AppState>) -> Option<Overrides> {
+    let s = &mut *state.session.lock().unwrap();
+    let (files, overrides) = s.undo.pop()?;
+    s.files = files;
+    Some(overrides)
 }
 
 #[tauri::command]
@@ -95,14 +126,24 @@ fn preview(state: State<AppState>, steps: Vec<Step>, overrides: Overrides, view:
     )
 }
 
-/// Updates the session entries after renaming.
+/// Updates the session entries after renaming. Renames run in order, and a
+/// renamed folder also moves the entries inside it.
 fn refresh_renamed(files: &mut [FileEntry], report: &ApplyReport) {
-    let moved: HashMap<&PathBuf, &PathBuf> =
-        report.done.iter().map(|op| (&op.from, &op.to)).collect();
+    if report.done.is_empty() {
+        return;
+    }
     for f in files.iter_mut() {
-        if let Some(to) = moved.get(&f.path)
-            && let Ok(meta) = std::fs::symlink_metadata(to)
-            && let Some(e) = FileEntry::from_path(to, &meta)
+        let mut path = f.path.clone();
+        for op in &report.done {
+            if path == op.from {
+                path = op.to.clone();
+            } else if let Ok(rest) = path.strip_prefix(&op.from) {
+                path = op.to.join(rest);
+            }
+        }
+        if path != f.path
+            && let Ok(meta) = std::fs::symlink_metadata(&path)
+            && let Some(e) = FileEntry::from_path(&path, &meta)
         {
             *f = e;
         }
@@ -121,6 +162,8 @@ fn apply(
     let ops = renome_core::preview(&s.files, &steps, &overrides, &view).operations();
     let report = state.history.apply(&ops);
     refresh_renamed(&mut s.files, &report);
+    // Earlier states point to the old names.
+    s.undo.clear();
     report
 }
 
@@ -132,7 +175,9 @@ fn history(state: State<AppState>) -> Vec<HistoryEntry> {
 #[tauri::command]
 fn undo(state: State<AppState>, id: String) -> Result<ApplyReport, String> {
     let report = state.history.undo(&id)?;
-    refresh_renamed(&mut state.session.lock().unwrap().files, &report);
+    let s = &mut *state.session.lock().unwrap();
+    refresh_renamed(&mut s.files, &report);
+    s.undo.clear();
     Ok(report)
 }
 
@@ -258,6 +303,9 @@ pub fn run() {
             history: History::new(history_dir),
         })
         .invoke_handler(tauri::generate_handler![
+            checkpoint,
+            drop_checkpoint,
+            undo_list,
             add_paths,
             remove_files,
             clear_files,

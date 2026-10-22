@@ -4,6 +4,9 @@ import type { ApplyReport, HistoryEntry, Preview, ScanOptions, SortKey, Step, Vi
 type Overrides = Record<string, string>;
 
 export const api = {
+  checkpoint: (overrides: Overrides) => invoke<void>("checkpoint", { overrides }),
+  dropCheckpoint: () => invoke<void>("drop_checkpoint"),
+  undoList: () => invoke<Overrides | null>("undo_list"),
   addPaths: (paths: string[], options: ScanOptions) =>
     invoke<{ added: string[]; skipped: { path: string; reason: string }[] }>("add_paths", { paths, options }),
   removeFiles: (paths: string[]) => invoke<void>("remove_files", { paths }),

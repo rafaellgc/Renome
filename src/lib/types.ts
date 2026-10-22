@@ -9,8 +9,13 @@ export type Rule =
   | { type: "replace"; find: string; replace: string; caseSensitive: boolean; firstOnly: boolean; target: Target }
   | { type: "regex"; pattern: string; replace: string; caseSensitive: boolean; firstOnly: boolean; target: Target }
   | { type: "case"; mode: CaseMode; target: Target }
-  | { type: "insert"; source: "text" | "now" | "modified"; text: string; dateFormat: string; at: Anchor; position: number }
-  | { type: "number"; template: string; start: number; step: number; digits: number }
+  | {
+      type: "insert";
+      source: "text" | "now" | "modified" | "taken" | "folder";
+      text: string; dateFormat: string; fallback: boolean;
+      at: Anchor; position: number;
+    }
+  | { type: "number"; template: string; start: number; step: number; digits: number; perFolder: boolean }
   | { type: "remove"; allSpaces: boolean; extraSpaces: boolean; accents: boolean; digits: boolean; chars: string; target: Target }
   | {
       type: "removeRange";
@@ -18,7 +23,7 @@ export type Rule =
       to: Bound; toPosition: number; toText: string;
       inclusive: boolean;
     }
-  | { type: "charAt"; position: number; fromEnd: boolean; onlyIf: string; replace: string }
+  | { type: "charAt"; position: number; fromEnd: boolean; onlyIf: string; caseSensitive: boolean; replace: string }
   | { type: "extension"; mode: "set" | "lower" | "upper" | "remove"; value: string }
   | { type: "rearrange"; separator: string; order: string; target: Target };
 
@@ -38,6 +43,7 @@ export interface PreviewItem {
   dir: string;
   size: number;
   modified: number | null;
+  isDir: boolean;
   original: string;
   newName: string;
   status: Status;
@@ -58,6 +64,8 @@ export interface Preview {
 export interface ScanOptions {
   recursive: boolean;
   includeHidden: boolean;
+  /** Adds folders themselves (to rename them) instead of their contents. */
+  foldersAsItems: boolean;
 }
 
 export interface View {

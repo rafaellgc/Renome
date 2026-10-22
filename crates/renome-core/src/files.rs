@@ -1,10 +1,13 @@
 use std::cmp::Ordering;
 use std::fs::Metadata;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
+use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 
-/// A file in the list, with its name already split into stem and extension.
+/// A file (or folder) in the list, with its name already split into stem
+/// and extension.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct FileEntry {
@@ -17,13 +20,20 @@ pub struct FileEntry {
     pub size: u64,
     /// Modification time in Unix seconds.
     pub modified: Option<i64>,
+    /// A folder renamed as an item; its name has no extension.
+    #[serde(default)]
+    pub is_dir: bool,
+    /// Date the photo was taken (EXIF), read on first use.
+    #[serde(skip)]
+    pub(crate) taken: OnceLock<Option<NaiveDateTime>>,
 }
 
 impl FileEntry {
     /// Builds the entry from a path; `None` if the name is not valid UTF-8.
     pub fn from_path(path: &Path, meta: &Metadata) -> Option<Self> {
         let name = path.file_name()?.to_str()?;
-        let (stem, ext) = split_name(name);
+        let is_dir = meta.is_dir();
+        let (stem, ext) = if is_dir { (name, "") } else { split_name(name) };
         let modified = meta
             .modified()
             .ok()
@@ -34,14 +44,44 @@ impl FileEntry {
             dir: path.parent().map(Path::to_path_buf).unwrap_or_default(),
             stem: stem.to_string(),
             ext: ext.to_string(),
-            size: meta.len(),
+            size: if is_dir { 0 } else { meta.len() },
             modified,
+            is_dir,
+            taken: OnceLock::new(),
         })
+    }
+
+    /// Date the photo was taken, from its EXIF data (JPEG, HEIC, PNG, WebP,
+    /// TIFF and RAW formats based on it). Read once and cached.
+    pub fn taken(&self) -> Option<NaiveDateTime> {
+        if self.is_dir {
+            return None;
+        }
+        *self.taken.get_or_init(|| read_taken(&self.path))
     }
 
     pub fn file_name(&self) -> String {
         join_name(&self.stem, &self.ext)
     }
+}
+
+fn read_taken(path: &Path) -> Option<NaiveDateTime> {
+    use exif::{In, Tag, Value};
+
+    let file = std::fs::File::open(path).ok()?;
+    let data = exif::Reader::new()
+        .read_from_container(&mut std::io::BufReader::new(file))
+        .ok()?;
+    [Tag::DateTimeOriginal, Tag::DateTimeDigitized, Tag::DateTime]
+        .iter()
+        .find_map(|&tag| match &data.get_field(tag, In::PRIMARY)?.value {
+            Value::Ascii(v) => {
+                let d = exif::DateTime::from_ascii(v.first()?).ok()?;
+                chrono::NaiveDate::from_ymd_opt(d.year.into(), d.month.into(), d.day.into())?
+                    .and_hms_opt(d.hour.into(), d.minute.into(), d.second.into())
+            }
+            _ => None,
+        })
 }
 
 /// Splits `name.ext` at the last dot. Hidden files (`.bashrc`) and names

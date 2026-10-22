@@ -61,7 +61,7 @@
         <label>{t("replaceWith")} <input bind:value={r.replace} spellcheck="false" /></label>
         <div class="row">
           <label class="check"><input type="checkbox" bind:checked={r.caseSensitive} /> {t("caseSensitive")}</label>
-          <label class="check"><input type="checkbox" bind:checked={r.firstOnly} /> {t("firstOnly")}</label>
+          <label class="check" title={t("firstOnlyHint")}><input type="checkbox" bind:checked={r.firstOnly} /> {t("firstOnly")}</label>
         </div>
         {@render target()}
       {:else if r.type === "regex"}
@@ -69,7 +69,7 @@
         <label>{t("replaceWith")} <input class="mono" bind:value={r.replace} spellcheck="false" placeholder="$2 ($1)" /></label>
         <div class="row">
           <label class="check"><input type="checkbox" bind:checked={r.caseSensitive} /> {t("caseSensitive")}</label>
-          <label class="check"><input type="checkbox" bind:checked={r.firstOnly} /> {t("firstOnly")}</label>
+          <label class="check" title={t("firstOnlyHint")}><input type="checkbox" bind:checked={r.firstOnly} /> {t("firstOnly")}</label>
         </div>
         {@render target()}
         <p class="hint mono">{t("groupsHint")}</p>
@@ -107,13 +107,19 @@
             <option value="text">{t("srcText")}</option>
             <option value="now">{t("srcNow")}</option>
             <option value="modified">{t("srcModified")}</option>
+            <option value="taken">{t("srcTaken")}</option>
+            <option value="folder">{t("srcFolder")}</option>
           </select>
         </label>
         {#if r.source === "text"}
           <label>{t("text")} <input bind:value={r.text} spellcheck="false" /></label>
-        {:else}
+        {:else if r.source !== "folder"}
           <label>{t("format")} <input class="mono" bind:value={r.dateFormat} spellcheck="false" /></label>
           <p class="hint mono">{t("formatHint")}</p>
+          {#if r.source === "taken"}
+            <label class="check"><input type="checkbox" bind:checked={r.fallback} /> {t("takenFallback")}</label>
+            <p class="hint">{t("takenHint")}</p>
+          {/if}
         {/if}
         <div class="row">
           <label>{t("where")}
@@ -136,6 +142,7 @@
           <label class="narrow">{t("step")} <input type="number" bind:value={r.step} /></label>
           <label class="narrow">{t("digits")} <input type="number" min="0" max="12" bind:value={r.digits} /></label>
         </div>
+        <label class="check"><input type="checkbox" bind:checked={r.perFolder} /> {t("perFolder")}</label>
       {:else if r.type === "remove"}
         <div class="checks">
           <label class="check"><input type="checkbox" bind:checked={r.extraSpaces} /> {t("rmExtraSpaces")}</label>
@@ -186,6 +193,9 @@
           <label>{t("onlyIf")} <input bind:value={r.onlyIf} maxlength="4" placeholder={t("any")} /></label>
           <label>{t("replaceBy")} <input bind:value={r.replace} placeholder={t("deleteIt")} /></label>
         </div>
+        {#if r.onlyIf}
+          <label class="check"><input type="checkbox" bind:checked={r.caseSensitive} /> {t("caseSensitive")}</label>
+        {/if}
       {:else if r.type === "extension"}
         <div class="row">
           <label>{t("action")}

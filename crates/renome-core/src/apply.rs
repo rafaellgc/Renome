@@ -3,6 +3,11 @@
 //! Phase 1 moves each source to a temporary name in the same folder; phase 2
 //! moves each temporary to its target. This makes swaps (a↔b), cycles and
 //! case-only changes work, and nothing is ever overwritten.
+//!
+//! Folders can be renamed in the same batch as files inside them. Renames
+//! run by depth: deepest first when applying (so a folder is renamed after
+//! its contents), shallowest first when undoing (so the folder is back in
+//! place before its contents are restored).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -54,12 +59,42 @@ fn temp_path(from: &Path, i: usize) -> PathBuf {
     from.with_file_name(format!(".renome-{}-{i}.tmp", std::process::id()))
 }
 
-/// Runs the operations. Errors are per file: the others still go ahead.
-pub fn execute(ops: &[Operation]) -> ApplyReport {
+/// Order in which depth levels run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Depth {
+    DeepestFirst,
+    ShallowestFirst,
+}
+
+/// Runs the operations, one depth level at a time. Errors are per file:
+/// the others still go ahead. `done` lists the renames in the order they
+/// happened.
+pub fn execute(ops: &[Operation], order: Depth) -> ApplyReport {
+    let depth = |op: &Operation| op.from.components().count();
+    let mut levels: Vec<usize> = ops.iter().map(depth).collect();
+    levels.sort_unstable();
+    levels.dedup();
+    if order == Depth::DeepestFirst {
+        levels.reverse();
+    }
     let mut report = ApplyReport::default();
+    for level in levels {
+        let batch: Vec<(usize, &Operation)> = ops
+            .iter()
+            .enumerate()
+            .filter(|(_, op)| depth(op) == level)
+            .collect();
+        execute_level(&batch, &mut report);
+    }
+    report
+}
+
+/// Two-phase rename of operations at the same depth. `i` keeps the
+/// temporary names unique across levels.
+fn execute_level(ops: &[(usize, &Operation)], report: &mut ApplyReport) {
     let mut staged: Vec<(&Operation, PathBuf)> = Vec::with_capacity(ops.len());
 
-    for (i, op) in ops.iter().enumerate() {
+    for &(i, op) in ops {
         let tmp = temp_path(&op.from, i);
         if fs::symlink_metadata(&tmp).is_ok() {
             report
@@ -94,7 +129,6 @@ pub fn execute(ops: &[Operation]) -> ApplyReport {
             }
         }
     }
-    report
 }
 
 /// Maps an OS error to a kind the UI can translate; only unknown errors keep
@@ -177,7 +211,7 @@ impl History {
 
     /// Runs and records in the history.
     pub fn apply(&self, ops: &[Operation]) -> ApplyReport {
-        let mut report = execute(ops);
+        let mut report = execute(ops, Depth::DeepestFirst);
         if !report.done.is_empty() {
             let created = Local::now();
             let id = format!(
@@ -251,7 +285,7 @@ impl History {
                 to: op.from.clone(),
             })
             .collect();
-        let report = execute(&reverse);
+        let report = execute(&reverse, Depth::ShallowestFirst);
         j.reverted += report.done.len();
         j.ops.retain(|op| {
             !report
@@ -340,12 +374,34 @@ mod tests {
     }
 
     #[test]
+    fn folder_and_contents_together() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        fs::create_dir_all(p.join("old/inner")).unwrap();
+        fs::write(p.join("old/inner/a"), "A").unwrap();
+        let h = History::new(p.join("hist"));
+
+        // Listed parent first: the order must not matter.
+        let r = h.apply(&[
+            op(p, "old", "new"),
+            op(p, "old/inner", "old/deep"),
+            op(p, "old/inner/a", "old/inner/b"),
+        ]);
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        assert_eq!(read(p.join("new/deep/b")), "A");
+
+        let u = h.undo(&r.history_id.unwrap()).unwrap();
+        assert!(u.errors.is_empty(), "{:?}", u.errors);
+        assert_eq!(read(p.join("old/inner/a")), "A");
+    }
+
+    #[test]
     fn never_overwrites() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path();
         fs::write(p.join("a"), "A").unwrap();
         fs::write(p.join("b"), "B").unwrap();
-        let r = execute(&[op(p, "a", "b")]);
+        let r = execute(&[op(p, "a", "b")], Depth::DeepestFirst);
         assert_eq!(r.errors.len(), 1);
         assert_eq!(read(p.join("a")), "A");
         assert_eq!(read(p.join("b")), "B");
@@ -356,7 +412,7 @@ mod tests {
     #[test]
     fn missing_source_reported() {
         let d = tempfile::tempdir().unwrap();
-        let r = execute(&[op(d.path(), "nao-existe", "x")]);
+        let r = execute(&[op(d.path(), "nao-existe", "x")], Depth::DeepestFirst);
         assert_eq!(r.errors.len(), 1);
         assert!(r.done.is_empty());
     }

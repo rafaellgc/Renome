@@ -8,7 +8,7 @@
   import FileTable from "$lib/FileTable.svelte";
   import Options from "$lib/Options.svelte";
   import RuleCard from "$lib/RuleCard.svelte";
-  import { LOCALES, t, tError } from "$lib/i18n";
+  import { LOCALES, MOD, t, tError } from "$lib/i18n";
   import { RULE_TYPES, newRule, newStep } from "$lib/rules";
   import { loadSettings, saveSettings, settings } from "$lib/settings.svelte";
   import type { ApplyReport, HistoryEntry, OpError, Preview, RuleType, Step, View, ViewSort } from "$lib/types";
@@ -112,11 +112,13 @@
     await refresh();
   }
 
-  async function addPaths(paths: string[]) {
+  async function addPaths(paths: string[], foldersAsItems = false) {
     if (!paths.length) return;
     busy = true;
     try {
-      const r = await api.addPaths(paths, { recursive: true, includeHidden: settings.includeHidden });
+      await remember();
+      const r = await api.addPaths(paths, { recursive: true, includeHidden: settings.includeHidden, foldersAsItems });
+      if (!r.added.length) await api.dropCheckpoint();
       await applySort();
       await refresh();
       // Highlight what was just added.
@@ -137,20 +139,23 @@
     if (r) await addPaths(Array.isArray(r) ? r : [r]);
   }
 
-  async function pickFolders() {
+  async function pickFolders(asItems = false) {
     addMenu = false;
-    const r = await open({ directory: true, multiple: true, title: t("addFolders") });
-    if (r) await addPaths(Array.isArray(r) ? r : [r]);
+    const title = t(asItems ? "addFolderItems" : "addFolders");
+    const r = await open({ directory: true, multiple: true, title });
+    if (r) await addPaths(Array.isArray(r) ? r : [r], asItems);
   }
 
   async function removeSelected() {
     if (!selected.size) return;
+    await remember();
     await api.removeFiles([...selected]);
     selected = new Set();
     await refresh();
   }
 
   async function clearAll() {
+    await remember();
     await api.clearFiles();
     selected = new Set();
     overrides = {};
@@ -159,6 +164,7 @@
 
   async function move(delta: -1 | 1) {
     if (!canMove) return;
+    await remember();
     await api.moveFiles([...selected], delta);
     sortKey = "manual";
     await refresh();
@@ -174,7 +180,8 @@
     [steps[i], steps[j]] = [steps[j], steps[i]];
   }
 
-  function setOverride(path: string, name: string | null) {
+  async function setOverride(path: string, name: string | null) {
+    await remember();
     if (name === null) delete overrides[path];
     else overrides[path] = name;
   }
@@ -193,6 +200,9 @@
   }
 
   async function applyAll() {
+    // A shortcut may come before the debounced preview update.
+    clearTimeout(timer);
+    await refresh();
     if (!preview.changed) return;
     if (settings.confirmApply) {
       const extra = preview.conflicts ? `\n${t("confirmConflicts", { n: preview.conflicts })}` : "";
@@ -228,7 +238,7 @@
     try {
       const r = await api.undo(id);
       notice = t("restoredN", { n: r.done.length });
-      history = await api.history();
+      if (history) history = await api.history();
       await refresh();
       await showErrors(
         r,
@@ -240,6 +250,23 @@
     } finally {
       busy = false;
     }
+  }
+
+  /** Saves the list and the hand-edited names before an edit, for Ctrl+Z. */
+  const remember = () => api.checkpoint($state.snapshot(overrides));
+
+  /** Undoes the last edit to the list (Ctrl+Z). Renames are undone in the History. */
+  async function undoListEdit() {
+    const prev = await api.undoList();
+    if (prev === null) {
+      notice = t("nothingToUndo");
+      return;
+    }
+    overrides = prev;
+    await refresh();
+    const paths = new Set(preview.items.map((i) => i.path));
+    selected = new Set([...selected].filter((p) => paths.has(p)));
+    notice = t("listEditUndone");
   }
 
   async function deleteEntry(id: string) {
@@ -291,11 +318,34 @@
       history = null;
       showOptions = false;
     }
+    if (history || showOptions || busy) return;
+    const mod = e.ctrlKey || e.metaKey;
+    const key = e.key.toLowerCase();
+    // These work even while typing in a rule.
+    if (mod && key === "enter") {
+      e.preventDefault();
+      applyAll();
+      return;
+    }
+    if (mod && key === "o" && !e.shiftKey) {
+      e.preventDefault();
+      pickFiles();
+      return;
+    }
+    // Inside a text field, keys keep their usual meaning (Ctrl+Z undoes typing).
     if ((e.target as HTMLElement).closest("input, select, textarea")) return;
     if (e.key === "Delete") removeSelected();
-    if (e.key === "a" && (e.ctrlKey || e.metaKey)) {
+    if (mod && key === "a") {
       e.preventDefault();
       selected = new Set(preview.items.map((i) => i.path));
+    }
+    if (mod && key === "z" && !e.shiftKey) {
+      e.preventDefault();
+      undoListEdit();
+    }
+    if (e.key === "F2" && selected.size === 1) {
+      e.preventDefault();
+      table?.edit([...selected][0]);
     }
   }
 
@@ -330,7 +380,8 @@
       {#if addMenu}
         <div class="menu">
           <button onclick={pickFiles}>{t("addFiles")}</button>
-          <button onclick={pickFolders}>{t("addFolders")}</button>
+          <button onclick={() => pickFolders()}>{t("addFolders")}</button>
+          <button onclick={() => pickFolders(true)}>{t("addFolderItems")}</button>
         </div>
       {/if}
     </div>
@@ -359,7 +410,7 @@
           <path fill="currentColor" fill-rule="evenodd" stroke="currentColor" stroke-width="1" stroke-linejoin="round" d="M12.15 3.76L11.96 1.50L8.04 1.50L7.85 3.76L5.67 5.02L3.62 4.05L1.66 7.45L3.52 8.74L3.52 11.26L1.66 12.55L3.62 15.95L5.67 14.98L7.85 16.24L8.04 18.50L11.96 18.50L12.15 16.24L14.33 14.98L16.38 15.95L18.34 12.55L16.48 11.26L16.48 8.74L18.34 7.45L16.38 4.05L14.33 5.02ZM13 10a3 3 0 1 0-6 0a3 3 0 1 0 6 0Z" />
         </svg>
       </button>
-      <button class="primary" disabled={!preview.changed || busy} onclick={applyAll}>
+      <button class="primary" title="{MOD}+Enter" disabled={!preview.changed || busy} onclick={applyAll}>
         {t("rename")} {preview.changed || ""}
       </button>
     </div>

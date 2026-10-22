@@ -1,8 +1,18 @@
 <script lang="ts">
-  import { LANG_NAMES, t } from "./i18n";
+  import { LANG_NAMES, MOD, t, type Key } from "./i18n";
   import { applyTheme, settings, type Lang } from "./settings.svelte";
 
   let { onclose }: { onclose: () => void } = $props();
+
+  const shortcuts: [string, Key][] = [
+    [`${MOD}+Enter`, "kRename"],
+    [`${MOD}+Z`, "kUndo"],
+    [`${MOD}+O`, "kAddFiles"],
+    ["F2", "kEdit"],
+    ["Delete", "kRemove"],
+    [`${MOD}+A`, "kSelectAll"],
+    ["Esc", "kClose"],
+  ];
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
@@ -54,6 +64,16 @@
       </label>
     </section>
 
+    <section>
+      <h3>{t("sectionShortcuts")}</h3>
+      <dl class="keys">
+        {#each shortcuts as [keys, label] (label)}
+          <dt><kbd>{keys}</kbd></dt>
+          <dd>{t(label)}</dd>
+        {/each}
+      </dl>
+    </section>
+
     <div class="foot"><button class="primary" onclick={onclose}>{t("close")}</button></div>
   </div>
 </div>
@@ -72,4 +92,15 @@
   .check span { display: flex; flex-direction: column; }
   small { color: var(--muted); font-size: 12px; }
   .foot { display: flex; justify-content: flex-end; }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; align-items: center; }
+  dd { margin: 0; }
+  kbd {
+    font: 12px ui-monospace, monospace;
+    padding: 1px 6px;
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--surface-2);
+    white-space: nowrap;
+  }
 </style>

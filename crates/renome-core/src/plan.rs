@@ -54,6 +54,7 @@ pub struct PreviewItem {
     pub dir: PathBuf,
     pub size: u64,
     pub modified: Option<i64>,
+    pub is_dir: bool,
     pub original: String,
     pub new_name: String,
     pub status: Status,
@@ -96,9 +97,7 @@ fn validate(name: &str) -> Option<Problem> {
         Some(Problem::Empty)
     } else if name.contains(['/', '\0']) {
         Some(Problem::Slash)
-    } else if cfg!(windows)
-        && (name.contains(WINDOWS_UNSAFE) || name.ends_with(['.', ' ']))
-    {
+    } else if cfg!(windows) && (name.contains(WINDOWS_UNSAFE) || name.ends_with(['.', ' '])) {
         Some(Problem::WindowsChars)
     } else if name.len() > 255 {
         Some(Problem::TooLong)
@@ -152,16 +151,28 @@ pub fn preview(
         Err(e) => (Filter::default(), Some(e)),
     };
 
+    let mut per_folder: HashMap<&Path, usize> = HashMap::new();
     let mut items: Vec<PreviewItem> = files
         .iter()
         .filter(|f| filter.matches(&f.file_name()))
         .enumerate()
         .map(|(index, file)| {
             let original = file.file_name();
+            let folder_index = {
+                let n = per_folder.entry(&file.dir).or_default();
+                *n += 1;
+                *n - 1
+            };
             let (new_name, manual) = match overrides.get(&file.path) {
                 Some(name) => (name.clone(), true),
                 None => {
-                    let (stem, ext) = pipeline.run(&Ctx { index, file, now });
+                    let ctx = Ctx {
+                        index,
+                        folder_index,
+                        file,
+                        now,
+                    };
+                    let (stem, ext) = pipeline.run(&ctx);
                     (join_name(&stem, &ext), false)
                 }
             };
@@ -179,6 +190,7 @@ pub fn preview(
                 dir: file.dir.clone(),
                 size: file.size,
                 modified: file.modified,
+                is_dir: file.is_dir,
                 original,
                 new_name,
                 status,
@@ -371,6 +383,7 @@ mod tests {
                 start: 1,
                 step: 1,
                 digits: 1,
+                per_folder: false,
             },
         }];
         let view = View {
@@ -382,6 +395,28 @@ mod tests {
         let names: Vec<_> = p.items.iter().map(|i| i.new_name.as_str()).collect();
         assert_eq!(names, ["1.jpg", "2.jpg"]);
         assert_eq!(p.operations().len(), 2);
+    }
+
+    #[test]
+    fn numbering_per_folder() {
+        let d = tempfile::tempdir().unwrap();
+        fs::create_dir(d.path().join("x")).unwrap();
+        fs::create_dir(d.path().join("y")).unwrap();
+        let mut files = entries(&d.path().join("x"), &["a", "b"]);
+        files.extend(entries(&d.path().join("y"), &["c"]));
+        let steps = vec![Step {
+            enabled: true,
+            rule: Rule::Number {
+                template: "{folder}-{n}".into(),
+                start: 1,
+                step: 1,
+                digits: 1,
+                per_folder: true,
+            },
+        }];
+        let p = preview(&files, &steps, &HashMap::new(), &View::default());
+        let names: Vec<_> = p.items.iter().map(|i| i.new_name.as_str()).collect();
+        assert_eq!(names, ["x-1", "x-2", "y-1"]);
     }
 
     #[test]

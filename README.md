@@ -5,9 +5,13 @@ preview and undo. Built with Rust, Tauri 2 and Svelte 5.
 
 - Stackable rules with a live preview: replace, regular expression,
   rearrange parts (`Show - Title - S01E01` → `Show - S01E01 - Title`), case,
-  insert text/date, numbering, remove characters, remove range, character
-  at position, extension.
-- Edit any new name by hand right in the preview (double-click).
+  insert text, date (including the date a photo was taken, from EXIF) or
+  folder name, numbering (optionally per folder), remove characters, remove
+  range, character at position, extension.
+- Renames folders too, even together with the files inside them.
+- The preview highlights what changes in each name.
+- Edit any new name by hand right in the preview (double-click or F2).
+- Keyboard shortcuts: Ctrl+Enter renames, Ctrl+Z undoes the last change to the list.
 - List filter: only the visible files are renamed.
 - Sort by new name (default) or by any column.
 - Conflicts are caught before renaming (duplicate names, existing files,

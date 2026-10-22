@@ -2,7 +2,7 @@
 //! the [`Pipeline`] compiles the list and applies the rules in order.
 
 use chrono::format::{Item, StrftimeItems};
-use chrono::{DateTime, Local, TimeZone};
+use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use regex::{NoExpand, Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
 
@@ -47,6 +47,10 @@ pub enum InsertSource {
     Text,
     Now,
     Modified,
+    /// Date the photo was taken (EXIF).
+    Taken,
+    /// Name of the folder the file is in.
+    Folder,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -117,16 +121,23 @@ pub enum Rule {
         /// strftime format for dates (`%Y-%m-%d`).
         #[serde(default)]
         date_format: String,
+        /// For `Taken`: files without that date use the modification date.
+        #[serde(default)]
+        fallback: bool,
         at: Anchor,
         #[serde(default)]
         position: usize,
     },
     Number {
-        /// Template with `{n}` and `{name}` (or `{nome}`, `{nombre}`).
+        /// Template with `{n}`, `{name}` and `{folder}` (or the Portuguese
+        /// and Spanish names: `{nome}`, `{nombre}`, `{pasta}`, `{carpeta}`).
         template: String,
         start: i64,
         step: i64,
         digits: usize,
+        /// Restarts the numbering in each folder.
+        #[serde(default)]
+        per_folder: bool,
     },
     Remove {
         #[serde(default)]
@@ -164,6 +175,9 @@ pub enum Rule {
         /// Only changes it if the current character is this one (empty = any).
         #[serde(default)]
         only_if: String,
+        /// Whether `only_if` must match case.
+        #[serde(default)]
+        case_sensitive: bool,
         /// Replacement; empty deletes the character.
         #[serde(default)]
         replace: String,
@@ -196,6 +210,8 @@ pub struct RuleError {
 /// Per-file context while applying the rules.
 pub struct Ctx<'a> {
     pub index: usize,
+    /// Position among the files of the same folder.
+    pub folder_index: usize,
     pub file: &'a FileEntry,
     pub now: DateTime<Local>,
 }
@@ -263,6 +279,12 @@ impl Pipeline {
                 }
                 Compiled::Plain(rule) => apply_plain(rule, &mut stem, &mut ext, ctx),
             }
+            // Folder names have no extension: undo any split made by a
+            // rule on the full name.
+            if ctx.file.is_dir && !ext.is_empty() {
+                stem = join_name(&stem, &ext);
+                ext.clear();
+            }
         }
         (stem, ext)
     }
@@ -309,7 +331,7 @@ fn compile(rule: &Rule) -> Result<Option<Compiled>, (&'static str, String)> {
             )
         }
         Rule::Insert {
-            source: InsertSource::Now | InsertSource::Modified,
+            source: InsertSource::Now | InsertSource::Modified | InsertSource::Taken,
             date_format,
             ..
         } => {
@@ -351,7 +373,7 @@ fn on_target(stem: &mut String, ext: &mut String, target: Target, f: impl Fn(&st
     }
 }
 
-fn format_date(ts: DateTime<Local>, fmt: &str) -> String {
+fn format_date(ts: NaiveDateTime, fmt: &str) -> String {
     let fmt = if fmt.is_empty() { "%Y-%m-%d" } else { fmt };
     // `/` cannot appear in file names.
     ts.format(fmt).to_string().replace('/', "-")
@@ -371,18 +393,29 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             source,
             text: literal,
             date_format,
+            fallback,
             at,
             position,
         } => {
+            let modified = || {
+                let t = Local.timestamp_opt(ctx.file.modified?, 0).single()?;
+                Some(t.naive_local())
+            };
+            let date = match source {
+                InsertSource::Now => Some(ctx.now.naive_local()),
+                InsertSource::Modified => modified(),
+                InsertSource::Taken => ctx
+                    .file
+                    .taken()
+                    .or_else(|| if *fallback { modified() } else { None }),
+                InsertSource::Text | InsertSource::Folder => None,
+            };
             let piece = match source {
                 InsertSource::Text => literal.clone(),
-                InsertSource::Now => format_date(ctx.now, date_format),
-                InsertSource::Modified => match ctx
-                    .file
-                    .modified
-                    .and_then(|t| Local.timestamp_opt(t, 0).single())
-                {
+                InsertSource::Folder => folder_name(ctx.file),
+                _ => match date {
                     Some(t) => format_date(t, date_format),
+                    // No date for this file: leave the name as it is.
                     None => return,
                 },
             };
@@ -401,13 +434,22 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             start,
             step,
             digits,
+            per_folder,
         } => {
-            let n = start.saturating_add(step.saturating_mul(ctx.index as i64));
+            let index = if *per_folder {
+                ctx.folder_index
+            } else {
+                ctx.index
+            };
+            let n = start.saturating_add(step.saturating_mul(index as i64));
             let num = format!("{n:0digits$}");
-            *stem = ["{nome}", "{name}", "{nombre}"]
-                .iter()
-                .fold(template.clone(), |t, k| t.replace(k, stem))
-                .replace("{n}", &num);
+            let folder = folder_name(ctx.file);
+            *stem = expand(template, |key| match key {
+                "n" => Some(num.as_str()),
+                "name" | "nome" | "nombre" => Some(stem.as_str()),
+                "folder" | "pasta" | "carpeta" => Some(folder.as_str()),
+                _ => None,
+            });
         }
 
         Rule::Remove {
@@ -465,6 +507,7 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             position,
             from_end,
             only_if,
+            case_sensitive,
             replace,
         } => {
             let mut g = text::graphemes(stem);
@@ -476,7 +519,12 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             } else {
                 position - 1
             };
-            if !only_if.is_empty() && g[i] != only_if {
+            let same = if *case_sensitive {
+                g[i] == only_if
+            } else {
+                g[i].to_lowercase() == only_if.to_lowercase()
+            };
+            if !only_if.is_empty() && !same {
                 return;
             }
             if replace.is_empty() {
@@ -487,6 +535,7 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             *stem = g.concat();
         }
 
+        Rule::Extension { .. } if ctx.file.is_dir => {}
         Rule::Extension { mode, value } => match mode {
             ExtMode::Set => *ext = value.trim_start_matches('.').to_string(),
             ExtMode::Lower => *ext = ext.to_lowercase(),
@@ -506,6 +555,39 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
     }
 }
 
+fn folder_name(file: &FileEntry) -> String {
+    file.dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// Replaces `{key}` in a single pass, so values that contain braces are
+/// not expanded again. Unknown keys are kept as they are.
+fn expand<'a>(template: &str, value: impl Fn(&str) -> Option<&'a str>) -> String {
+    let mut out = String::new();
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let tail = &rest[open..];
+        match tail
+            .find('}')
+            .and_then(|close| Some((close, value(&tail[1..close])?)))
+        {
+            Some((close, v)) => {
+                out.push_str(v);
+                rest = &tail[close + 1..];
+            }
+            None => {
+                out.push('{');
+                rest = &tail[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Piece of a rearrange `order`: a part number or literal text.
 enum Piece<'a> {
     Part(usize),
@@ -516,12 +598,16 @@ fn parse_order(order: &str) -> Vec<Piece<'_>> {
     let mut pieces = Vec::new();
     let mut rest = order;
     while !rest.is_empty() {
-        let digits = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+        let digits = rest
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(rest.len());
         if digits > 0 {
             pieces.push(Piece::Part(rest[..digits].parse().unwrap_or(usize::MAX)));
             rest = &rest[digits..];
         } else {
-            let text = rest.find(|c: char| c.is_ascii_digit()).unwrap_or(rest.len());
+            let text = rest
+                .find(|c: char| c.is_ascii_digit())
+                .unwrap_or(rest.len());
             pieces.push(Piece::Text(&rest[..text]));
             rest = &rest[text..];
         }
@@ -627,6 +713,8 @@ mod tests {
             ext: ext.into(),
             size: 0,
             modified: Some(1_700_000_000),
+            is_dir: false,
+            taken: Default::default(),
         }
     }
 
@@ -640,10 +728,14 @@ mod tests {
             .collect();
         let p = Pipeline::new(&steps);
         assert!(p.errors.is_empty(), "{:?}", p.errors);
-        let f = file(name);
+        run_on(&p, &file(name), index)
+    }
+
+    fn run_on(p: &Pipeline, f: &FileEntry, index: usize) -> String {
         let (s, e) = p.run(&Ctx {
             index,
-            file: &f,
+            folder_index: index,
+            file: f,
             now: Local::now(),
         });
         join_name(&s, &e)
@@ -696,11 +788,11 @@ mod tests {
             ),
             "Heróis da Humanidade - S02E06 - Joana d’Arc.mkv"
         );
+        assert_eq!(run(vec![r("-", "3 (1)")], "a -  b-c.txt", 0), "c (a).txt");
         assert_eq!(
-            run(vec![r("-", "3 (1)")], "a -  b-c.txt", 0),
-            "c (a).txt"
+            run(vec![r(", ", "2 1")], "Silva, Ana.txt", 0),
+            "Ana Silva.txt"
         );
-        assert_eq!(run(vec![r(", ", "2 1")], "Silva, Ana.txt", 0), "Ana Silva.txt");
         // Missing part or no separator: unchanged.
         assert_eq!(run(vec![r(" - ", "1 - 3")], "a - b.txt", 0), "a - b.txt");
         assert_eq!(run(vec![r(" - ", "2 1")], "single.txt", 0), "single.txt");
@@ -708,8 +800,14 @@ mod tests {
         assert_eq!(run(vec![r(" - ", "x")], "a - b.txt", 0), "a - b.txt");
         assert_eq!(run(vec![r(" - ", "0 1")], "a - b.txt", 0), "a - b.txt");
         // Two-digit part numbers.
-        let many = (1..=12).map(|i| i.to_string()).collect::<Vec<_>>().join("_");
-        assert_eq!(run(vec![r("_", "12_1")], &format!("{many}.txt"), 0), "12_1.txt");
+        let many = (1..=12)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join("_");
+        assert_eq!(
+            run(vec![r("_", "12_1")], &format!("{many}.txt"), 0),
+            "12_1.txt"
+        );
     }
 
     #[test]
@@ -746,6 +844,7 @@ mod tests {
             start: 1,
             step: 2,
             digits: 3,
+            per_folder: false,
         };
         assert_eq!(run(vec![r()], "foto.jpg", 0), "foto - 001.jpg");
         assert_eq!(run(vec![r()], "foto.jpg", 4), "foto - 009.jpg");
@@ -757,6 +856,7 @@ mod tests {
             source: InsertSource::Text,
             text: "X".into(),
             date_format: String::new(),
+            fallback: false,
             at,
             position,
         };
@@ -776,10 +876,116 @@ mod tests {
             source: InsertSource::Modified,
             text: String::new(),
             date_format: "%Y_".into(),
+            fallback: false,
             at: Anchor::Start,
             position: 0,
         };
         assert_eq!(run(vec![r], "a.txt", 0), "2023_a.txt");
+    }
+
+    /// Minimal JPEG whose EXIF holds only `DateTime`.
+    fn jpeg_with_date(date: &str) -> Vec<u8> {
+        let mut tiff = b"II*\0\x08\0\0\0\x01\0\x32\x01\x02\0\x14\0\0\0\x1a\0\0\0\0\0\0\0".to_vec();
+        tiff.extend_from_slice(date.as_bytes());
+        tiff.push(0);
+        let mut app1 = b"Exif\0\0".to_vec();
+        app1.extend(tiff);
+        let mut jpg = vec![0xFF, 0xD8, 0xFF, 0xE1];
+        jpg.extend(((app1.len() + 2) as u16).to_be_bytes());
+        jpg.extend(app1);
+        jpg.extend([0xFF, 0xD9]);
+        jpg
+    }
+
+    #[test]
+    fn insert_date_taken() {
+        let d = tempfile::tempdir().unwrap();
+        let photo = d.path().join("IMG_1.jpg");
+        let plain = d.path().join("note.txt");
+        std::fs::write(&photo, jpeg_with_date("2021:03:04 05:06:07")).unwrap();
+        std::fs::write(&plain, "x").unwrap();
+        let entry =
+            |p: &std::path::Path| FileEntry::from_path(p, &std::fs::metadata(p).unwrap()).unwrap();
+        let taken = |fallback| {
+            Pipeline::new(&[Step {
+                enabled: true,
+                rule: Rule::Insert {
+                    source: InsertSource::Taken,
+                    text: String::new(),
+                    date_format: "%Y-%m-%d %H.%M.%S ".into(),
+                    fallback,
+                    at: Anchor::Start,
+                    position: 0,
+                },
+            }])
+        };
+        assert_eq!(
+            run_on(&taken(false), &entry(&photo), 0),
+            "2021-03-04 05.06.07 IMG_1.jpg"
+        );
+        // No EXIF: unchanged, or the modification date as a fallback.
+        assert_eq!(run_on(&taken(false), &entry(&plain), 0), "note.txt");
+        let year = Local::now().format("%Y-").to_string();
+        assert!(run_on(&taken(true), &entry(&plain), 0).starts_with(&year));
+    }
+
+    #[test]
+    fn folder_name_and_template() {
+        let r = Rule::Number {
+            template: "{pasta} {n} {x} {name}".into(),
+            start: 1,
+            step: 1,
+            digits: 2,
+            per_folder: false,
+        };
+        // `{n}` inside the current name is not expanded again; unknown keys stay.
+        assert_eq!(run(vec![r], "a{n}.txt", 0), "tmp 01 {x} a{n}.txt");
+        let ins = Rule::Insert {
+            source: InsertSource::Folder,
+            text: String::new(),
+            date_format: String::new(),
+            fallback: false,
+            at: Anchor::Start,
+            position: 0,
+        };
+        assert_eq!(run(vec![ins], "a.txt", 0), "tmpa.txt");
+    }
+
+    #[test]
+    fn folders_keep_dots() {
+        let mut f = file("Show.2020");
+        (f.stem, f.ext, f.is_dir) = ("Show.2020".into(), String::new(), true);
+        let p = Pipeline::new(&[
+            Step {
+                enabled: true,
+                rule: Rule::Extension {
+                    mode: ExtMode::Set,
+                    value: "jpg".into(),
+                },
+            },
+            Step {
+                enabled: true,
+                rule: Rule::Replace {
+                    find: "w.2".into(),
+                    replace: "w (2".into(),
+                    case_sensitive: false,
+                    first_only: false,
+                    target: Target::Full,
+                },
+            },
+            Step {
+                enabled: true,
+                rule: Rule::Insert {
+                    source: InsertSource::Text,
+                    text: ")".into(),
+                    date_format: String::new(),
+                    fallback: false,
+                    at: Anchor::End,
+                    position: 0,
+                },
+            },
+        ]);
+        assert_eq!(run_on(&p, &f, 0), "Show (2020)");
     }
 
     #[test]
@@ -790,6 +996,7 @@ mod tests {
                 source: InsertSource::Now,
                 text: String::new(),
                 date_format: "%Q".into(),
+                fallback: false,
                 at: Anchor::Start,
                 position: 0,
             },
@@ -873,12 +1080,23 @@ mod tests {
             position,
             from_end,
             only_if: only_if.into(),
+            case_sensitive: false,
             replace: replace.into(),
         };
         assert_eq!(run(vec![c(1, false, "", "Z")], "abc", 0), "Zbc");
         assert_eq!(run(vec![c(1, true, "", "")], "abc", 0), "ab");
         assert_eq!(run(vec![c(2, false, "x", "")], "abc", 0), "abc");
         assert_eq!(run(vec![c(9, false, "", "")], "abc", 0), "abc");
+        // "Only if" ignores case unless asked.
+        assert_eq!(run(vec![c(1, false, "A", "x")], "abc", 0), "xbc");
+        let strict = Rule::CharAt {
+            position: 1,
+            from_end: false,
+            only_if: "A".into(),
+            case_sensitive: true,
+            replace: "x".into(),
+        };
+        assert_eq!(run(vec![strict], "abc", 0), "abc");
     }
 
     #[test]
@@ -935,6 +1153,7 @@ mod tests {
         let f = file("a.txt");
         let (s, _) = Pipeline::new(&steps).run(&Ctx {
             index: 0,
+            folder_index: 0,
             file: &f,
             now: Local::now(),
         });

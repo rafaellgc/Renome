@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
+  import { diff, type Seg } from "./diff";
   import { LOCALES, t } from "./i18n";
   import { settings } from "./settings.svelte";
   import type { PreviewItem, ViewSort } from "./types";
@@ -33,6 +34,10 @@
   const start = $derived(Math.max(0, Math.floor(scrollTop / ROW) - OVERSCAN));
   const end = $derived(Math.min(items.length, Math.ceil((scrollTop + height) / ROW) + OVERSCAN));
   const visible = $derived(items.slice(start, end));
+  /** What changes in each visible row: removed (current name) and added (new name). */
+  const diffs = $derived(
+    new Map(visible.filter((i) => i.status !== "unchanged").map((i) => [i.path, diff(i.original, i.newName)])),
+  );
 
   /** Scrolls to the first of the given paths (if not visible). */
   export function reveal(paths: Iterable<string>) {
@@ -42,7 +47,17 @@
     const top = index * ROW;
     if (top < viewport.scrollTop || top + ROW > viewport.scrollTop + viewport.clientHeight) {
       viewport.scrollTop = Math.max(0, top - ROW * 2);
+      scrollTop = viewport.scrollTop;
     }
+  }
+
+  /** Starts editing the new name of a row (F2). */
+  export async function edit(path: string) {
+    const item = items.find((i) => i.path === path);
+    if (!item) return;
+    reveal([path]);
+    await tick();
+    await startEdit(item);
   }
 
   function select(e: MouseEvent, index: number) {
@@ -134,6 +149,7 @@
       {#each visible as item, k (item.path)}
         {@const index = start + k}
         {@const warn = item.windowsUnsafe && settings.warnWindows}
+        {@const d = diffs.get(item.path)}
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <div
           class="row {item.status}"
@@ -148,7 +164,9 @@
             {:else if warn}<span class="dot warn">!</span>
             {:else if item.status === "ok"}<span class="dot good">●</span>{/if}
           </span>
-          <span class="c-orig" title={item.path}>{item.original}</span>
+          <span class="c-orig" title={item.path}>
+            {#if item.isDir}<svg class="folder" viewBox="0 0 16 16" aria-label={t("isFolder")}><path fill="currentColor" d="M1.5 3.5A1 1 0 0 1 2.5 2.5h3.6l1.5 1.5h5.9a1 1 0 0 1 1 1v7.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" /></svg>{/if}{#if d}{@render segs(d[0], "del")}{:else}{item.original}{/if}
+          </span>
           <span class="c-new" role="gridcell" tabindex="-1" ondblclick={() => startEdit(item)} title={note(item) || t("editHint")}>
             {#if editing === item.path}
               <input
@@ -159,20 +177,22 @@
                 onblur={() => commit(item)}
               />
             {:else}
-              <span class="name" class:same={item.status === "unchanged"}>{item.newName}</span>
+              <span class="name" class:same={item.status === "unchanged"}>{#if d}{@render segs(d[1], "ins")}{:else}{item.newName}{/if}</span>
               {#if item.manual}
                 <button class="icon reset" title={t("resetManual")} onclick={(e) => { e.stopPropagation(); onoverride(item.path, null); }}>↺</button>
               {/if}
             {/if}
           </span>
           <span class="c-dir" title={item.dir}>{dir(item.dir)}</span>
-          <span class="c-size">{size(item.size)}</span>
+          <span class="c-size">{item.isDir ? "" : size(item.size)}</span>
           <span class="c-date">{date(item.modified)}</span>
         </div>
       {/each}
     </div>
   </div>
 </div>
+
+{#snippet segs(list: Seg[], cls: string)}{#each list as seg, i (i)}{#if seg.changed}<mark class={cls}>{seg.text}</mark>{:else}{seg.text}{/if}{/each}{/snippet}
 
 <style>
   .table {
@@ -232,8 +252,12 @@
   .row .c-dir { color: var(--muted); direction: rtl; text-align: left; }
   .c-new { display: flex; align-items: center; gap: 4px; }
   .name { overflow: hidden; text-overflow: ellipsis; }
-  .row.ok .name { color: var(--accent); font-weight: 500; }
   .row.conflict .name { color: var(--danger); }
+  mark { color: inherit; background: none; border-radius: 3px; }
+  mark.ins { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+  .row.conflict mark.ins { color: var(--danger); background: color-mix(in srgb, var(--danger) 16%, transparent); }
+  mark.del { color: var(--danger); text-decoration: line-through; text-decoration-thickness: 1px; }
+  .folder { width: 14px; height: 14px; margin-right: 5px; vertical-align: -2px; color: var(--muted); }
   .name.same { color: var(--muted); }
   .edit { width: 100%; height: 24px; padding: 0 6px; }
   .reset { height: 20px; width: 20px; font-size: 13px; }

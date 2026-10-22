@@ -16,15 +16,15 @@ export function newRule(type: RuleType): Rule {
     case "case":
       return { type, mode: "titleSmart", target: "name" };
     case "insert":
-      return { type, source: "text", text: "", dateFormat: "%Y-%m-%d", at: "start", position: 1 };
+      return { type, source: "text", text: "", dateFormat: "%Y-%m-%d", fallback: true, at: "start", position: 1 };
     case "number":
-      return { type, template: `${NAME_VAR[settings.lang]} {n}`, start: 1, step: 1, digits: 2 };
+      return { type, template: `${NAME_VAR[settings.lang]} {n}`, start: 1, step: 1, digits: 2, perFolder: false };
     case "remove":
       return { type, allSpaces: false, extraSpaces: true, accents: false, digits: false, chars: "", target: "name" };
     case "removeRange":
-      return { type, from: "text", fromPosition: 1, fromText: "(", to: "text", toPosition: 1, toText: ")", inclusive: true };
+      return { type, from: "text", fromPosition: 1, fromText: "", to: "text", toPosition: 1, toText: "", inclusive: true };
     case "charAt":
-      return { type, position: 1, fromEnd: false, onlyIf: "", replace: "" };
+      return { type, position: 1, fromEnd: false, onlyIf: "", caseSensitive: false, replace: "" };
     case "extension":
       return { type, mode: "lower", value: "" };
     case "rearrange":
