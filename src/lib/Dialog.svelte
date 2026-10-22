@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { closeDialog, dialog } from "./dialog.svelte";
+  import { closeDialog, dialog } from "./dialogs.svelte";
   import { t } from "./i18n";
 
   let box = $state<HTMLDivElement>();

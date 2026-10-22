@@ -4,7 +4,7 @@
   import { open, save } from "@tauri-apps/plugin-dialog";
   import { api } from "$lib/api";
   import Dialog from "$lib/Dialog.svelte";
-  import { closeDialog, confirm, dialog, notify } from "$lib/dialog.svelte";
+  import { closeDialog, confirm, dialog, notify } from "$lib/dialogs.svelte";
   import FileTable from "$lib/FileTable.svelte";
   import Options from "$lib/Options.svelte";
   import RuleCard from "$lib/RuleCard.svelte";
