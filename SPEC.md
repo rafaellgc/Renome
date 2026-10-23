@@ -52,8 +52,65 @@ optionally act only on the extension or on the full name.
 | Remove range | from: position N or first occurrence of a text; to: end, position N or occurrence of a text; include the delimiters or not |
 | Character at position | position N; optionally only if the current character is X (case-insensitive unless asked); replace with Y or delete |
 | Extension | set a new one; lowercase/uppercase; remove |
+| Movie (TMDB) | template with `{title}`, `{original}`, `{year}`, `{id}` (default `{title} ({year}) [tmdbid-{id}]`); what `:` becomes (default ` - `); a folder for each movie; save `.nfo` and poster (optionally fanart and logo) next to renamed videos. See 2.1 |
 
 Positions count **visible characters** (Unicode graphemes), starting at 1.
+
+### 2.1 Movies (TMDB)
+
+- Needs a TMDB API key (v3 key or v4 read token) in Options, plus the
+  language of titles (default: the interface's). The key stays in the
+  local settings; only the searched title and year are sent to TMDB.
+- "Search TMDB" looks up the visible files without a movie yet. Title and
+  year come from the name: dots and underscores become spaces; the year is
+  the last plausible one (1900–next year) with text before it; without a
+  year, the title stops at the first release tag (1080p, BluRay, x264…);
+  bracketed parts are dropped. Files with the same guess (a movie and its
+  subtitles) share one search and one choice.
+- Each search asks TMDB by title, and also by title within the year.
+  Candidates are ranked by title similarity (ignoring case, accents and
+  punctuation, against the localized and the original title) minus a
+  penalty for the year difference (±1 year is common and costs little).
+  The first one is picked automatically only with (almost) the same title,
+  the same year and no close second; otherwise the file waits for the
+  user.
+- Next to the new name, each file shows ✓ (picked), ? (choose) or ✕ (no
+  movie); clicking it opens the review window: candidates with poster,
+  title, original title, year and overview; click (or 1–9) to choose, a
+  search field to try another title or year, "None of these".
+- Files without a movie are left unchanged by the rule. Titles are made
+  safe for file names: `:` becomes the chosen text, slashes become
+  dashes, `? * < > |` are dropped; empty `()` or `[]` (no year) are
+  removed.
+- "Create a folder for each movie" moves each file with a movie (video
+  and subtitles alike) into a folder named after its new name, inside its
+  current folder; a file already in a folder with that name stays. The
+  preview shows the folder before the new name; the folder name is
+  checked like a file name. Missing folders are created when renaming,
+  recorded in the history entry, and removed by undo when left empty.
+- With "save .nfo and poster", renaming also writes `<new name>.nfo` next
+  to each renamed video, in Kodi format with every field Jellyfin's NFO
+  reader takes that TMDB provides: title, originaltitle, year, premiered,
+  releasedate, plot, tagline, runtime, rating, votes, mpaa (age rating of
+  the language's country: `PG-13` in the US, `BR-12` elsewhere, like
+  Jellyfin's own TMDB provider), genre, tag (keywords), country, studio,
+  trailer (YouTube, Kodi plugin form), set with `tmdbcolid`, director,
+  writer (writing department), tmdbid, imdbid, uniqueid (tmdb, imdb), and
+  actor entries with `type` (20 actors with role and photo, 5 producers,
+  composers). Images: poster, and optionally fanart (backdrop) and logo
+  (PNG title logo in the language, else English); named `poster.jpg`,
+  `fanart.jpg`, `logo.png` inside the movie's own folder, else
+  `<new name>-poster.jpg` and so on. Existing files are never replaced.
+  They are recorded in the rename's history entry and deleted by its undo.
+- Movies whose names are already right (unchanged rows with a movie) get
+  the metadata too when renaming: the Rename button counts them and the
+  confirmation mentions them. Files that already exist are skipped
+  without error (and not downloaded). Without any rename, the created
+  files get a history entry of their own ("N metadata files"), undone by
+  deleting them.
+- A name with `tmdbid-N` (as in `[tmdbid-603]`) is looked up by that id
+  directly, and picked automatically.
+- The About tab shows the TMDB logo and notice required by its terms.
 
 ## 3. Preview
 

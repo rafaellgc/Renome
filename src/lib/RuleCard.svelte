@@ -11,6 +11,7 @@
     last = false,
     onmove,
     onremove,
+    movie,
   }: {
     step: Step;
     error?: string | null;
@@ -20,6 +21,15 @@
     last?: boolean;
     onmove: (delta: -1 | 1) => void;
     onremove: () => void;
+    /** Movie rule: search state and actions. */
+    movie?: {
+      progress: string | null;
+      found: number;
+      choose: number;
+      none: number;
+      onsearch: () => void;
+      onreview: () => void;
+    };
   } = $props();
 
   let open = $state(true);
@@ -210,6 +220,29 @@
             <label>{t("newExt")} <input bind:value={r.value} spellcheck="false" placeholder="jpg" /></label>
           {/if}
         </div>
+      {:else if r.type === "movie"}
+        <p class="hint top">{t("movieHint")}</p>
+        <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
+        <p class="hint mono">{t("movieTemplateHint")}</p>
+        <label class="colon">{t("colonLabel")} <input class="mono sep" bind:value={r.colon} spellcheck="false" /></label>
+        <label class="check"><input type="checkbox" bind:checked={r.folder} /> <span>{t("folderLabel")}<small>{t("folderHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.sidecar} /> <span>{t("sidecarLabel")}<small>{t("sidecarHint")}</small></span></label>
+        {#if r.sidecar}
+          <label class="check sub"><input type="checkbox" bind:checked={r.fanart} /> {t("fanartLabel")}</label>
+        {/if}
+        {#if movie}
+          <div class="movie-actions">
+            <button class="primary-soft" disabled={!!movie.progress} onclick={movie.onsearch}>{t("tmdbSearch")}</button>
+            {#if movie.choose || movie.none}
+              <button onclick={movie.onreview}>{t("movieReview")} ({movie.choose + movie.none})</button>
+            {/if}
+          </div>
+          {#if movie.progress}
+            <p class="hint">{movie.progress}</p>
+          {:else if movie.found || movie.choose || movie.none}
+            <p class="hint">{t("movieSummary", { found: movie.found, choose: movie.choose, none: movie.none })}</p>
+          {/if}
+        {/if}
       {/if}
 
       {#if error}<p class="error">{error}</p>{/if}
@@ -290,6 +323,13 @@
   .hint { margin: -4px 0 0; font-size: 11px; color: var(--muted); }
   .error { margin: 0; font-size: 12px; color: var(--danger); }
   .sep { white-space: pre; }
+  .hint.top { margin: 0; }
+  label.colon { flex: none; align-self: flex-start; }
+  label.colon input { width: 90px; }
+  label.check span { display: flex; flex-direction: column; }
+  label.check small { color: var(--muted); font-size: 11px; }
+  label.check.sub { margin-left: 22px; }
+  .movie-actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .parts { display: flex; flex-direction: column; gap: 3px; }
   .parts .hint { margin: 0 0 2px; }
   .part {

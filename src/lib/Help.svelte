@@ -81,6 +81,12 @@
         </p>
         <p class="muted">{t("aboutBuilt")}<br />{t("aboutLicense")}<br />© 2026 {AUTHOR}</p>
         <button class="primary-soft" onclick={() => openUrl(REPO)}>{t("aboutRepo")}</button>
+        <div class="tmdb">
+          <button class="logo" title="themoviedb.org" onclick={() => openUrl("https://www.themoviedb.org")}>
+            <img src="/tmdb-logo.svg" alt="TMDB" width="140" />
+          </button>
+          <p class="muted">{t("tmdbNotice")}</p>
+        </div>
       </div>
     {/if}
   </div>
@@ -201,6 +207,9 @@
   .link { border: none; background: none; height: auto; padding: 0; color: var(--accent); }
   .link:hover:not(:disabled) { background: none; text-decoration: underline; }
   .muted { color: var(--muted); }
+  .tmdb { margin-top: 18px; display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: 420px; }
+  .tmdb .logo { border: none; background: none; height: auto; padding: 4px; }
+  .tmdb p { font-size: 12px; margin: 0; }
   @media (max-width: 640px) {
     nav { display: none; }
   }

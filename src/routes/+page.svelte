@@ -8,12 +8,13 @@
   import { closeDialog, confirm, dialog, notify } from "$lib/dialogs.svelte";
   import FileTable from "$lib/FileTable.svelte";
   import Help from "$lib/Help.svelte";
+  import MovieReview from "$lib/MovieReview.svelte";
   import Options from "$lib/Options.svelte";
   import RuleCard from "$lib/RuleCard.svelte";
   import { LOCALES, MOD, t, tError } from "$lib/i18n";
-  import { RULE_TYPES, newRule, newStep } from "$lib/rules";
-  import { loadSettings, saveSettings, settings } from "$lib/settings.svelte";
-  import type { ApplyReport, Copies, HistoryEntry, OpError, Preview, RuleType, Step, View, ViewSort } from "$lib/types";
+  import { RULE_TYPES, isVideo, newRule, newStep, splitExt } from "$lib/rules";
+  import { loadSettings, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
+  import type { ApplyReport, Candidate, Copies, MovieMatch, MovieState, HistoryEntry, OpError, Preview, RuleType, Step, View, ViewSort } from "$lib/types";
 
   let ready = $state(false);
   let steps = $state<Step[]>([]);
@@ -35,11 +36,46 @@
   /** Search progress (0–1) while reading whole files; null when idle. */
   let identicalProgress = $state<number | null>(null);
   const identicalCount = $derived(Object.keys(copies).length);
+
+  /** TMDB results and choices per file, for the movie rule. */
+  let movies = $state<Record<string, MovieState>>({});
+  /** Files in the movie review window; null when closed. */
+  let review = $state<string[] | null>(null);
+  let tmdbProgress = $state<{ done: number; total: number; kind: "search" | "save" } | null>(null);
+  const movieRule = $derived(steps.find((s) => s.enabled && s.rule.type === "movie"));
+  const movieMatches = $derived(
+    Object.fromEntries(
+      Object.entries(movies)
+        .filter(([, m]) => m.choice)
+        .map(([p, m]): [string, MovieMatch] => {
+          const c = m.choice!;
+          return [p, { id: c.id, title: c.title, originalTitle: c.originalTitle, year: c.year }];
+        }),
+    ),
+  );
+  /** Movies whose names are already right but that still get .nfo and
+   *  images (files that already exist are skipped when writing). */
+  const metaOnly = $derived(
+    movieRule?.rule.type === "movie" && movieRule.rule.sidecar
+      ? preview.items.filter((i) => i.status === "unchanged" && movies[i.path]?.choice && isVideo(i.original))
+      : [],
+  );
+  const movieStatus = $derived(movieRule ? Object.fromEntries(Object.entries(movies).map(([p, m]) => [p, m.status])) : {});
+  const movieCounts = $derived.by(() => {
+    let found = 0, choose = 0, none = 0;
+    for (const i of preview.items) {
+      const st = movies[i.path]?.status;
+      if (st === "auto" || st === "chosen") found++;
+      else if (st === "choose") choose++;
+      else if (st === "none") none++;
+    }
+    return { found, choose, none };
+  });
   let addMenu = $state(false);
   let ruleMenu = $state(false);
   let table = $state<FileTable>();
 
-  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly });
+  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, movies: movieMatches });
   /** Example name for rule cards: the first file in natural name order, so
    *  it does not jump around while the preview re-sorts. */
   const collator = new Intl.Collator(undefined, { numeric: true });
@@ -91,7 +127,8 @@
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
   $effect(() => {
     const deps = [settings.lang, settings.theme, settings.includeHidden, settings.confirmApply,
-      settings.disableRulesAfterApply, settings.warnWindows, settings.rememberRules, JSON.stringify(steps)];
+      settings.disableRulesAfterApply, settings.warnWindows, settings.rememberRules, settings.tmdbKey, settings.tmdbLang,
+      JSON.stringify(steps)];
     if (!ready || !deps) return;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
@@ -215,12 +252,17 @@
     // A shortcut may come before the debounced preview update.
     clearTimeout(timer);
     await refresh();
-    if (!preview.changed) return;
+    const meta = metaOnly.map((i) => ({ path: i.path, id: movies[i.path].choice!.id }));
+    if (!preview.changed && !meta.length) return;
     if (settings.confirmApply) {
-      const extra = preview.conflicts ? `\n${t("confirmConflicts", { n: preview.conflicts })}` : "";
+      const lines = [
+        preview.changed ? t("confirmText", { n: preview.changed }) : "",
+        meta.length ? t("confirmMeta", { n: meta.length }) : "",
+        preview.conflicts ? t("confirmConflicts", { n: preview.conflicts }) : "",
+      ].filter(Boolean);
       const ok = await confirm({
         title: t("confirmTitle"),
-        text: `${t("confirmText", { n: preview.changed })}${extra}\n\n${t("confirmUndoHint")}`,
+        text: `${lines.join("\n")}\n\n${t("confirmUndoHint")}`,
         ok: t("confirmOk"),
         cancel: t("cancel"),
       });
@@ -228,10 +270,26 @@
     }
     busy = true;
     try {
-      const r = await api.apply(payload(), $state.snapshot(overrides), $state.snapshot(view));
+      const rule = movieRule?.rule;
+      const r: ApplyReport = preview.changed
+        ? await api.apply(payload(), $state.snapshot(overrides), $state.snapshot(view))
+        : { done: [], errors: [], historyId: null };
+      let saved = 0;
+      if (rule?.type === "movie" && rule.sidecar) {
+        const items = r.done
+          .filter((op) => movies[op.from]?.choice && isVideo(op.to))
+          .map((op) => ({ path: op.to, id: movies[op.from].choice!.id }))
+          .concat(meta);
+        if (items.length) saved = await saveSidecars(r.historyId, items, rule.fanart, rule.folder);
+      }
+      followMovies(r);
       if (settings.disableRulesAfterApply) for (const s of steps) s.enabled = false;
       overrides = {};
-      notice = t("renamedN", { n: r.done.length }) + (r.errors.length ? ` · ${t("errorsN", { n: r.errors.length })}` : "");
+      notice = [
+        preview.changed ? t("renamedN", { n: r.done.length }) : "",
+        saved ? t("sidecarsN", { n: saved }) : "",
+        r.errors.length ? t("errorsN", { n: r.errors.length }) : "",
+      ].filter(Boolean).join(" · ");
       await refresh();
       checkIdentical();
       await showErrors(r, t("resultTitle"), `${t("renamedN", { n: r.done.length })}\n${t("errorsN", { n: r.errors.length })}:`);
@@ -250,6 +308,7 @@
     busy = true;
     try {
       const r = await api.undo(id);
+      followMovies(r);
       notice = t("restoredN", { n: r.done.length });
       if (history) history = await api.history();
       await refresh();
@@ -283,6 +342,110 @@
     } catch (e) {
       identicalProgress = null;
       notice = `${t("error")}: ${tError(e)}`;
+    }
+  }
+
+  /** Looks up the visible files without a movie yet on TMDB; files picked
+   *  with confidence are done, the rest go to the review window. */
+  async function searchMovies() {
+    if (!settings.tmdbKey.trim()) {
+      const ok = await confirm({ title: t("rule.movie"), text: t("tmdbNeedsKey"), ok: t("options"), cancel: t("cancel") });
+      if (ok) showOptions = true;
+      return;
+    }
+    const items = preview.items
+      .filter((i) => movies[i.path]?.status !== "auto" && movies[i.path]?.status !== "chosen")
+      .map((i) => ({ path: i.path, name: i.isDir ? i.original : splitExt(i.original)[0] }));
+    if (!items.length) {
+      notice = t("tmdbNoFiles");
+      return;
+    }
+    tmdbProgress = { done: 0, total: items.length, kind: "search" };
+    try {
+      const found = await api.tmdbLookup(settings.tmdbKey, tmdbLang(), items);
+      // Nothing was really searched (bad key, no connection): mark nothing.
+      const failed = found.find((f) => f.error);
+      if (failed && found.every((f) => f.error || !f.guess.title)) {
+        await notify({ title: t("rule.movie"), text: tError(failed.error) });
+        return;
+      }
+      for (const f of found) {
+        movies[f.path] = {
+          guess: f.guess,
+          candidates: f.candidates,
+          choice: f.auto ? f.candidates[0] : null,
+          status: f.auto ? "auto" : f.candidates.length ? "choose" : "none",
+          error: f.error,
+        };
+      }
+      if (found.some((f) => !f.auto && f.candidates.length)) openReview();
+    } catch (e) {
+      await notify({ title: t("rule.movie"), text: tError(e) });
+    } finally {
+      tmdbProgress = null;
+    }
+  }
+
+  /** Movie choices follow their files when renamed or restored. */
+  function followMovies(r: ApplyReport) {
+    for (const op of r.done) {
+      if (movies[op.from]) {
+        movies[op.to] = movies[op.from];
+        delete movies[op.from];
+      }
+    }
+  }
+
+  /** Opens the review on the files still without a movie (or on one). */
+  function openReview(start?: string) {
+    // Files with options first; those without results after.
+    const paths = preview.items.map((i) => i.path);
+    const pending = [
+      ...paths.filter((p) => movies[p]?.status === "choose"),
+      ...paths.filter((p) => movies[p]?.status === "none"),
+    ];
+    const queue = start ? [start, ...pending.filter((p) => p !== start)] : pending;
+    review = queue.length ? queue : null;
+  }
+
+  /** The user's pick for a file; undecided files with the same guess (its
+   *  subtitles, say) get it too. */
+  function chooseMovie(path: string, choice: Candidate | null, candidates?: Candidate[]) {
+    const m = movies[path];
+    if (!m) return;
+    const set = (p: string) => {
+      movies[p] = { ...movies[p], choice, status: choice ? "chosen" : "none", candidates: candidates ?? movies[p].candidates };
+    };
+    set(path);
+    for (const [p, o] of Object.entries(movies)) {
+      const same = o.guess.title === m.guess.title && o.guess.year === m.guess.year;
+      if (p !== path && same && (o.status === "choose" || o.status === "none")) set(p);
+    }
+  }
+
+  /** Writes .nfo and images next to renamed movies (undone with the rename). */
+  async function saveSidecars(
+    historyId: string | null,
+    items: { path: string; id: number }[],
+    fanart: boolean,
+    inFolder: boolean,
+  ): Promise<number> {
+    tmdbProgress = { done: 0, total: items.length, kind: "save" };
+    try {
+      const res = await api.writeSidecars(settings.tmdbKey, tmdbLang(), historyId, items, fanart, inFolder);
+      if (res.errors.length) {
+        await notify({
+          title: t("sidecarsTitle"),
+          text: t("sidecarsN", { n: res.created.length }),
+          items: res.errors.map(([file, why]) => (file ? `${file} — ${tError(why)}` : tError(why))),
+        });
+      }
+      return res.created.length;
+    } catch (e) {
+      await notify({ title: t("sidecarsTitle"), text: tError(e) });
+      return 0;
+    } finally {
+      tmdbProgress = null;
     }
   }
 
@@ -353,13 +516,14 @@
       history = null;
       showOptions = false;
       help = null;
+      review = null;
     }
     if (e.key === "F1") {
       e.preventDefault();
       help ??= "manual";
       return;
     }
-    if (history || showOptions || help || busy) return;
+    if (history || showOptions || help || review || busy) return;
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
     // These work even while typing in a rule.
@@ -405,6 +569,9 @@
       dragging = e.payload.type === "enter" || e.payload.type === "over";
       if (e.payload.type === "drop") addPaths(e.payload.paths);
     });
+    const unlistenTmdb = listen<{ done: number; total: number }>("tmdb-progress", (e) => {
+      if (tmdbProgress) tmdbProgress = { ...tmdbProgress, ...e.payload };
+    });
     const unlistenProgress = listen<{ done: number; total: number }>("identical-progress", (e) => {
       identicalProgress = e.payload.done < e.payload.total ? e.payload.done / e.payload.total : null;
     });
@@ -418,6 +585,7 @@
     return () => {
       unlisten.then((f) => f());
       unlistenProgress.then((f) => f());
+      unlistenTmdb.then((f) => f());
     };
   });
 </script>
@@ -463,8 +631,8 @@
           <path fill="currentColor" fill-rule="evenodd" stroke="currentColor" stroke-width="1" stroke-linejoin="round" d="M12.15 3.76L11.96 1.50L8.04 1.50L7.85 3.76L5.67 5.02L3.62 4.05L1.66 7.45L3.52 8.74L3.52 11.26L1.66 12.55L3.62 15.95L5.67 14.98L7.85 16.24L8.04 18.50L11.96 18.50L12.15 16.24L14.33 14.98L16.38 15.95L18.34 12.55L16.48 11.26L16.48 8.74L18.34 7.45L16.38 4.05L14.33 5.02ZM13 10a3 3 0 1 0-6 0a3 3 0 1 0 6 0Z" />
         </svg>
       </button>
-      <button class="primary" title="{MOD}+Enter" disabled={!preview.changed || busy} onclick={applyAll}>
-        {t("rename")} {preview.changed || ""}
+      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !metaOnly.length) || busy} onclick={applyAll}>
+        {t("rename")} {preview.changed + metaOnly.length || ""}
       </button>
     </div>
   </header>
@@ -496,6 +664,16 @@
             last={i === steps.length - 1}
             onmove={(d) => moveStep(i, d)}
             onremove={() => steps.splice(i, 1)}
+            movie={step.rule.type === "movie"
+              ? {
+                  ...movieCounts,
+                  progress: tmdbProgress
+                    ? t(tmdbProgress.kind === "search" ? "tmdbSearching" : "sidecarsWriting", tmdbProgress)
+                    : null,
+                  onsearch: searchMovies,
+                  onreview: () => openReview(),
+                }
+              : undefined}
           />
         {:else}
           <p class="empty">{t("emptyRules")}</p>
@@ -514,6 +692,8 @@
           onsort={sortBy}
           onoverride={setOverride}
           {copies}
+          {movieStatus}
+          onmovie={(p) => openReview(p)}
         />
         {#if !preview.items.length}<p class="no-match">{t("noMatch")}</p>{/if}
       {:else}
@@ -565,7 +745,7 @@
           {#each history as h (h.id)}
             <li>
               <span>{new Date(h.created).toLocaleString(LOCALES[settings.lang])}</span>
-              <span class="muted">{t("files", { n: h.count })}</span>
+              <span class="muted">{h.count || !h.extra ? t("files", { n: h.count }) : t("metadataN", { n: h.extra })}</span>
               {#if h.undone}
                 <span class="muted">{t("undone")}</span>
               {:else if h.failed || h.reverted}
@@ -586,6 +766,16 @@
       <div class="modal-foot"><button onclick={() => (history = null)}>{t("close")}</button></div>
     </div>
   </div>
+{/if}
+
+{#if review}
+  <MovieReview
+    queue={review}
+    {movies}
+    names={Object.fromEntries(preview.items.map((i) => [i.path, i.original]))}
+    onchoose={chooseMovie}
+    onclose={() => (review = null)}
+  />
 {/if}
 
 {#if help}

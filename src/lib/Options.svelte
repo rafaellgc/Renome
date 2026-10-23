@@ -1,8 +1,28 @@
 <script lang="ts">
-  import { LANG_NAMES, MOD, t, type Key } from "./i18n";
+  import { openUrl } from "@tauri-apps/plugin-opener";
+  import { api } from "./api";
+  import { LANG_NAMES, MOD, t, tError, type Key } from "./i18n";
   import { applyTheme, settings, type Lang } from "./settings.svelte";
 
   let { onclose }: { onclose: () => void } = $props();
+
+  const TMDB_LANGS = ["pt-BR", "pt-PT", "en-US", "en-GB", "es-ES", "es-MX", "fr-FR", "it-IT", "de-DE", "ja-JP"];
+  let showKey = $state(false);
+  let keyStatus = $state<{ ok: boolean; text: string } | null>(null);
+  let testing = $state(false);
+
+  async function testKey() {
+    testing = true;
+    keyStatus = null;
+    try {
+      await api.tmdbCheck(settings.tmdbKey);
+      keyStatus = { ok: true, text: t("tmdbKeyOk") };
+    } catch (e) {
+      keyStatus = { ok: false, text: tError(e) };
+    } finally {
+      testing = false;
+    }
+  }
 
   const shortcuts: [string, Key][] = $derived([
     [`${MOD}+Enter`, "kRename"],
@@ -66,6 +86,37 @@
     </section>
 
     <section>
+      <h3>{t("sectionTmdb")}</h3>
+      <div class="grid">
+        <label for="opt-tmdb-key">{t("tmdbKey")}</label>
+        <div class="key">
+          <input
+            id="opt-tmdb-key"
+            type={showKey ? "text" : "password"}
+            bind:value={settings.tmdbKey}
+            oninput={() => (keyStatus = null)}
+            spellcheck="false"
+            autocomplete="off"
+          />
+          <button onclick={() => (showKey = !showKey)}>{t(showKey ? "hide" : "show")}</button>
+          <button disabled={!settings.tmdbKey.trim() || testing} onclick={testKey}>{t("tmdbTest")}</button>
+        </div>
+        <span></span>
+        <small>
+          {#if keyStatus}<b class:good={keyStatus.ok} class:bad={!keyStatus.ok}>{keyStatus.text}</b> · {/if}
+          {t("tmdbKeyHint")}
+          <button class="link" onclick={() => openUrl("https://www.themoviedb.org/settings/api")}>{t("tmdbGetKey")}</button>
+        </small>
+
+        <label for="opt-tmdb-lang">{t("tmdbLangLabel")}</label>
+        <select id="opt-tmdb-lang" bind:value={settings.tmdbLang}>
+          <option value="">{t("tmdbLangAuto")}</option>
+          {#each TMDB_LANGS as code (code)}<option value={code}>{code}</option>{/each}
+        </select>
+      </div>
+    </section>
+
+    <section>
       <h3>{t("sectionShortcuts")}</h3>
       <dl class="keys">
         {#each shortcuts as [keys, label] (label)}
@@ -83,7 +134,7 @@
   h2 { margin: 0; font-size: 16px; }
   h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
   section { display: flex; flex-direction: column; gap: 10px; }
-  .grid { display: grid; grid-template-columns: 90px 1fr; align-items: center; gap: 10px; }
+  .grid { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 10px; }
   .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; width: fit-content; }
   .seg button { border: none; border-radius: 0; height: 28px; }
   .seg button + button { border-left: 1px solid var(--border); }
@@ -93,6 +144,12 @@
   .check span { display: flex; flex-direction: column; }
   small { color: var(--muted); font-size: 12px; }
   .foot { display: flex; justify-content: flex-end; }
+  .key { display: flex; gap: 6px; }
+  .key input { flex: 1; }
+  .good { color: #138a4e; }
+  .bad { color: var(--danger); }
+  .link { border: none; background: none; height: auto; padding: 0; color: var(--accent); font-size: 12px; }
+  .link:hover:not(:disabled) { background: none; text-decoration: underline; }
   .keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; align-items: center; }
   dd { margin: 0; }
   kbd {

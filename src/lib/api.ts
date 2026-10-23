@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ApplyReport, HistoryEntry, Preview, ScanOptions, SortKey, Step, View } from "./types";
+import type { ApplyReport, Candidate, HistoryEntry, Lookup, Preview, ScanOptions, SortKey, Step, View } from "./types";
 
 type Overrides = Record<string, string>;
 
@@ -19,6 +19,19 @@ export const api = {
   apply: (steps: Step[], overrides: Overrides, view: View) =>
     invoke<ApplyReport>("apply", { steps, overrides, view }),
   history: () => invoke<HistoryEntry[]>("history"),
+  tmdbCheck: (key: string) => invoke<void>("tmdb_check", { key }),
+  tmdbLookup: (key: string, lang: string, items: { path: string; name: string }[]) =>
+    invoke<Lookup[]>("tmdb_lookup", { key, lang, items }),
+  tmdbSearch: (key: string, lang: string, title: string, year: number | null) =>
+    invoke<Candidate[]>("tmdb_search", { key, lang, title, year }),
+  writeSidecars: (
+    key: string,
+    lang: string,
+    historyId: string | null,
+    items: { path: string; id: number }[],
+    fanart: boolean,
+    inFolder: boolean,
+  ) => invoke<{ created: string[]; errors: [string, string][] }>("write_sidecars", { key, lang, historyId, items, fanart, inFolder }),
   undo: (id: string) => invoke<ApplyReport>("undo", { id }),
   deleteHistory: (id: string) => invoke<void>("delete_history", { id }),
   savePreset: (path: string, steps: Step[]) => invoke<void>("save_preset", { path, steps }),

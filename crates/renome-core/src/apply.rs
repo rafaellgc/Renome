@@ -53,6 +53,9 @@ pub struct ApplyReport {
     pub errors: Vec<OpError>,
     /// Id of the history entry created (if anything was renamed).
     pub history_id: Option<String>,
+    /// Folders created to move files into, outermost first.
+    #[serde(skip)]
+    pub created_dirs: Vec<PathBuf>,
 }
 
 fn temp_path(from: &Path, i: usize) -> PathBuf {
@@ -112,6 +115,15 @@ fn execute_level(ops: &[(usize, &Operation)], report: &mut ApplyReport) {
     }
 
     for (op, tmp) in staged {
+        let made = match make_parent(&op.to, report) {
+            Ok(made) => made,
+            Err(e) => {
+                let (kind, detail) = io_kind(&e);
+                let _ = fs::rename(&tmp, &op.from);
+                report.errors.push(err(op, kind, detail));
+                continue;
+            }
+        };
         let result = if fs::symlink_metadata(&op.to).is_ok() {
             Err((ErrorKind::TargetExists, String::new()))
         } else {
@@ -120,6 +132,12 @@ fn execute_level(ops: &[(usize, &Operation)], report: &mut ApplyReport) {
         match result {
             Ok(()) => report.done.push(op.clone()),
             Err((kind, detail)) => {
+                // A folder made just for this file goes away again.
+                for dir in made.iter().rev() {
+                    if fs::remove_dir(dir).is_ok() {
+                        report.created_dirs.retain(|d| d != dir);
+                    }
+                }
                 // Restore the original name.
                 let (kind, detail) = match fs::rename(&tmp, &op.from) {
                     Ok(()) => (kind, detail),
@@ -129,6 +147,27 @@ fn execute_level(ops: &[(usize, &Operation)], report: &mut ApplyReport) {
             }
         }
     }
+}
+
+/// Creates the target's missing parent folders (moving into a new folder)
+/// and records them; returns the ones made now.
+fn make_parent(to: &Path, report: &mut ApplyReport) -> std::io::Result<Vec<PathBuf>> {
+    let Some(parent) = to.parent() else {
+        return Ok(Vec::new());
+    };
+    let missing: Vec<PathBuf> = parent
+        .ancestors()
+        .take_while(|p| !p.as_os_str().is_empty() && fs::symlink_metadata(p).is_err())
+        .map(Path::to_path_buf)
+        .collect();
+    if missing.is_empty() {
+        return Ok(missing);
+    }
+    fs::create_dir_all(parent)?;
+    // Outermost first.
+    let made: Vec<PathBuf> = missing.into_iter().rev().collect();
+    report.created_dirs.extend(made.iter().cloned());
+    Ok(made)
 }
 
 /// Maps an OS error to a kind the UI can translate; only unknown errors keep
@@ -166,6 +205,12 @@ struct Journal {
     /// How many failed on the last undo attempt.
     #[serde(default)]
     failed: usize,
+    /// Files created with the rename (`.nfo`, posters), deleted on undo.
+    #[serde(default)]
+    extra_files: Vec<PathBuf>,
+    /// Folders the rename created, removed by undo when empty.
+    #[serde(default)]
+    dirs: Vec<PathBuf>,
 }
 
 #[derive(Debug, Serialize)]
@@ -179,6 +224,8 @@ pub struct HistoryEntry {
     pub reverted: usize,
     /// Failed on the last undo attempt (e.g. files moved or deleted).
     pub failed: usize,
+    /// Files created along with the rename (`.nfo`, posters).
+    pub extra: usize,
 }
 
 /// Rename history, one JSON file per operation.
@@ -225,6 +272,8 @@ impl History {
                 ops: report.done.clone(),
                 reverted: 0,
                 failed: 0,
+                extra_files: Vec::new(),
+                dirs: report.created_dirs.clone(),
             };
             match self.write(&id, &j) {
                 Ok(()) => report.history_id = Some(id),
@@ -257,11 +306,41 @@ impl History {
                     undone: j.undone,
                     reverted: j.reverted,
                     failed: j.failed,
+                    extra: j.extra_files.len(),
                 })
             })
             .collect();
         out.sort_by_key(|e| std::cmp::Reverse(e.created));
         out
+    }
+
+    /// A history entry for files created without any rename (metadata for
+    /// movies whose names were already right), so undo deletes them.
+    pub fn record_files(&self, paths: &[PathBuf]) -> Result<String, String> {
+        let created = Local::now();
+        let id = format!(
+            "{}-{}",
+            created.format("%Y%m%d-%H%M%S-%3f"),
+            std::process::id()
+        );
+        let j = Journal {
+            created,
+            undone: false,
+            ops: Vec::new(),
+            reverted: 0,
+            failed: 0,
+            extra_files: paths.to_vec(),
+            dirs: Vec::new(),
+        };
+        self.write(&id, &j)?;
+        Ok(id)
+    }
+
+    /// Records files created along with a rename, so undo deletes them.
+    pub fn add_created(&self, id: &str, paths: &[PathBuf]) -> Result<(), String> {
+        let mut j = self.read(id)?;
+        j.extra_files.extend_from_slice(paths);
+        self.write(id, &j)
     }
 
     /// Deletes a history entry (the files are left as they are).
@@ -277,6 +356,11 @@ impl History {
         if j.undone {
             return Err("alreadyUndone".into());
         }
+        // Files the rename created go first (already gone is fine).
+        j.extra_files.retain(|p| match fs::remove_file(p) {
+            Ok(()) => false,
+            Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+        });
         let reverse: Vec<Operation> = j
             .ops
             .iter()
@@ -294,7 +378,15 @@ impl History {
                 .any(|d| d.from == op.to && d.to == op.from)
         });
         j.failed = report.errors.len();
-        j.undone = j.ops.is_empty();
+        if j.ops.is_empty() {
+            // Innermost first; a folder that is not empty (the user put
+            // something there) stays.
+            for dir in j.dirs.iter().rev() {
+                let _ = fs::remove_dir(dir);
+            }
+            j.dirs.clear();
+        }
+        j.undone = j.ops.is_empty() && j.extra_files.is_empty();
         self.write(id, &j)?;
         Ok(report)
     }
@@ -393,6 +485,51 @@ mod tests {
         let u = h.undo(&r.history_id.unwrap()).unwrap();
         assert!(u.errors.is_empty(), "{:?}", u.errors);
         assert_eq!(read(p.join("old/inner/a")), "A");
+    }
+
+    #[test]
+    fn moves_into_new_folder_and_back() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        fs::write(p.join("m.mkv"), "M").unwrap();
+        fs::write(p.join("m.srt"), "S").unwrap();
+        let h = History::new(p.join("hist"));
+        let r = h.apply(&[
+            op(p, "m.mkv", "Movie/Movie.mkv"),
+            op(p, "m.srt", "Movie/Movie.srt"),
+        ]);
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        assert_eq!(r.created_dirs, [p.join("Movie")]);
+        assert_eq!(read(p.join("Movie/Movie.mkv")), "M");
+        let id = r.history_id.unwrap();
+        fs::write(p.join("Movie/Movie.nfo"), "x").unwrap();
+        h.add_created(&id, &[p.join("Movie/Movie.nfo")]).unwrap();
+        h.undo(&id).unwrap();
+        assert_eq!(read(p.join("m.mkv")), "M");
+        assert!(!p.join("Movie").exists());
+    }
+
+    #[test]
+    fn undo_deletes_created_files() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        fs::write(p.join("a"), "A").unwrap();
+        let h = History::new(p.join("hist"));
+        let id = h.apply(&[op(p, "a", "b")]).history_id.unwrap();
+        fs::write(p.join("b.nfo"), "x").unwrap();
+        h.add_created(&id, &[p.join("b.nfo"), p.join("gone.jpg")])
+            .unwrap();
+        assert_eq!(h.list()[0].extra, 2);
+        h.undo(&id).unwrap();
+        assert!(!p.join("b.nfo").exists());
+        assert_eq!(read(p.join("a")), "A");
+        assert!(h.list()[0].undone);
+
+        // Metadata alone, without renames.
+        fs::write(p.join("c.nfo"), "x").unwrap();
+        let id = h.record_files(&[p.join("c.nfo")]).unwrap();
+        h.undo(&id).unwrap();
+        assert!(!p.join("c.nfo").exists());
     }
 
     #[test]

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::files::{FileEntry, join_name, split_name};
 use crate::text;
+use crate::tmdb::{self, MovieMatch};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -196,6 +197,28 @@ pub enum Rule {
         #[serde(default)]
         target: Target,
     },
+    /// Names the file after the movie chosen for it on TMDB (files without
+    /// one are left alone). The search itself happens outside the rules.
+    Movie {
+        /// `{title}`, `{original}`, `{year}`, `{id}` (or `{título}`, `{ano}`…).
+        template: String,
+        /// What `:` in titles becomes.
+        #[serde(default = "colon")]
+        colon: String,
+        /// Write `.nfo` and poster next to renamed videos.
+        #[serde(default)]
+        sidecar: bool,
+        /// Also the backdrop image and the title logo.
+        #[serde(default)]
+        fanart: bool,
+        /// Moves each file into a folder with the new name.
+        #[serde(default)]
+        folder: bool,
+    },
+}
+
+fn colon() -> String {
+    " - ".into()
 }
 
 /// A rule configuration error: index in the list, code
@@ -214,6 +237,8 @@ pub struct Ctx<'a> {
     pub folder_index: usize,
     pub file: &'a FileEntry,
     pub now: DateTime<Local>,
+    /// The movie chosen for this file, for the movie rule.
+    pub movie: Option<&'a MovieMatch>,
 }
 
 enum Compiled {
@@ -257,6 +282,14 @@ impl Pipeline {
 
     /// Computes a file's new name (stem, extension).
     pub fn run(&self, ctx: &Ctx) -> (String, String) {
+        let (stem, ext, _) = self.run_full(ctx);
+        (stem, ext)
+    }
+
+    /// Like [`run`](Self::run), plus whether the file goes into a folder
+    /// named after its new name (movie rule with "folder").
+    pub fn run_full(&self, ctx: &Ctx) -> (String, String, bool) {
+        let mut into_folder = false;
         let mut stem = ctx.file.stem.clone();
         let mut ext = ctx.file.ext.clone();
         for step in &self.steps {
@@ -277,7 +310,12 @@ impl Pipeline {
                         }
                     });
                 }
-                Compiled::Plain(rule) => apply_plain(rule, &mut stem, &mut ext, ctx),
+                Compiled::Plain(rule) => {
+                    if let Rule::Movie { folder: true, .. } = rule {
+                        into_folder |= ctx.movie.is_some() && !ctx.file.is_dir;
+                    }
+                    apply_plain(rule, &mut stem, &mut ext, ctx)
+                }
             }
             // Folder names have no extension: undo any split made by a
             // rule on the full name.
@@ -286,7 +324,7 @@ impl Pipeline {
                 ext.clear();
             }
         }
-        (stem, ext)
+        (stem, ext, into_folder)
     }
 }
 
@@ -551,6 +589,17 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             rearrange(s, separator, order).unwrap_or_else(|| s.to_string())
         }),
 
+        Rule::Movie {
+            template, colon, ..
+        } => {
+            if let Some(m) = ctx.movie {
+                let name = tmdb::movie_name(template, m, colon);
+                if !name.is_empty() {
+                    *stem = name;
+                }
+            }
+        }
+
         Rule::Replace { .. } | Rule::Regex { .. } => unreachable!("compiled separately"),
     }
 }
@@ -564,7 +613,7 @@ fn folder_name(file: &FileEntry) -> String {
 
 /// Replaces `{key}` in a single pass, so values that contain braces are
 /// not expanded again. Unknown keys are kept as they are.
-fn expand<'a>(template: &str, value: impl Fn(&str) -> Option<&'a str>) -> String {
+pub(crate) fn expand<'a>(template: &str, value: impl Fn(&str) -> Option<&'a str>) -> String {
     let mut out = String::new();
     let mut rest = template;
     while let Some(open) = rest.find('{') {
@@ -737,6 +786,7 @@ mod tests {
             folder_index: index,
             file: f,
             now: Local::now(),
+            movie: None,
         });
         join_name(&s, &e)
     }
@@ -1156,6 +1206,7 @@ mod tests {
             folder_index: 0,
             file: &f,
             now: Local::now(),
+            movie: None,
         });
         assert_eq!(s, "a");
     }

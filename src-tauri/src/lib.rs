@@ -13,6 +13,8 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+mod tmdb;
+
 /// The session's file list. It lives on the Rust side so the whole list
 /// is not sent over on every preview update.
 #[derive(Default)]
@@ -223,6 +225,69 @@ fn apply(
 }
 
 #[tauri::command]
+async fn tmdb_check(key: String) -> Result<(), String> {
+    tmdb::Client::new(&key, "en-US").check().await
+}
+
+/// Guesses title and year for each file and searches TMDB for them.
+#[tauri::command]
+async fn tmdb_lookup(
+    app: AppHandle,
+    key: String,
+    lang: String,
+    items: Vec<tmdb::LookupItem>,
+) -> Result<Vec<tmdb::Lookup>, String> {
+    let client = tmdb::Client::new(&key, &lang);
+    Ok(tmdb::lookup(&app, &client, items).await)
+}
+
+/// A search typed by the user in the review window.
+#[tauri::command]
+async fn tmdb_search(
+    key: String,
+    lang: String,
+    title: String,
+    year: Option<u16>,
+) -> Result<Vec<renome_core::tmdb::Candidate>, String> {
+    let guess = renome_core::tmdb::Guess {
+        title,
+        year,
+        id: None,
+    };
+    Ok(tmdb::Client::new(&key, &lang).search(&guess).await?.0)
+}
+
+/// Writes `.nfo` and images next to renamed movies and records them in the
+/// rename's history entry, so undo deletes them.
+#[tauri::command]
+async fn write_sidecars(
+    app: AppHandle,
+    key: String,
+    lang: String,
+    history_id: Option<String>,
+    items: Vec<tmdb::SidecarItem>,
+    fanart: bool,
+    in_folder: bool,
+) -> Result<tmdb::SidecarReport, String> {
+    let client = tmdb::Client::new(&key, &lang);
+    let mut report = tmdb::sidecars(&app, &client, items, fanart, in_folder).await;
+    if !report.created.is_empty() {
+        let history = &app.state::<AppState>().history;
+        // Without a rename (names already right), a history entry of its own.
+        let saved = match history_id {
+            Some(id) => history.add_created(&id, &report.created),
+            None => history.record_files(&report.created).map(|_| ()),
+        };
+        if let Err(e) = saved {
+            report
+                .errors
+                .push((String::new(), format!("err.history: {e}")));
+        }
+    }
+    Ok(report)
+}
+
+#[tauri::command]
 fn history(state: State<AppState>) -> Vec<HistoryEntry> {
     state.history.list()
 }
@@ -371,6 +436,10 @@ pub fn run() {
             sort_files,
             preview,
             find_identical,
+            tmdb_check,
+            tmdb_lookup,
+            tmdb_search,
+            write_sidecars,
             apply,
             history,
             undo,

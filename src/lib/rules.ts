@@ -2,10 +2,19 @@ import { settings } from "./settings.svelte";
 import type { Rule, RuleType, Step } from "./types";
 
 export const RULE_TYPES: RuleType[] = [
-  "replace", "regex", "rearrange", "case", "insert", "number", "remove", "removeRange", "charAt", "extension",
+  "replace", "regex", "rearrange", "case", "insert", "number", "remove", "removeRange", "charAt", "extension", "movie",
 ];
 
 const NAME_VAR = { pt: "{nome}", en: "{name}", es: "{nombre}" } as const;
+const MOVIE_TEMPLATE = {
+  pt: "{título} ({ano}) [tmdbid-{id}]",
+  en: "{title} ({year}) [tmdbid-{id}]",
+  es: "{título} ({año}) [tmdbid-{id}]",
+} as const;
+
+/** Extensions that get .nfo and images (subtitles share the movie's name but not those). */
+const VIDEO = new Set(["mkv", "mp4", "m4v", "avi", "mov", "wmv", "ts", "m2ts", "mts", "webm", "mpg", "mpeg", "flv", "ogv", "iso", "vob", "divx", "rmvb"]);
+export const isVideo = (name: string) => VIDEO.has(splitExt(name)[1].toLowerCase());
 
 export function newRule(type: RuleType): Rule {
   switch (type) {
@@ -29,6 +38,8 @@ export function newRule(type: RuleType): Rule {
       return { type, mode: "lower", value: "" };
     case "rearrange":
       return { type, separator: " - ", order: "", target: "name" };
+    case "movie":
+      return { type, template: MOVIE_TEMPLATE[settings.lang], colon: " - ", sidecar: false, fanart: false, folder: false };
   }
 }
 

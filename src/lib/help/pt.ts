@@ -236,6 +236,31 @@ ${ex("_foto.jpg", "foto.jpg")}
 <p>Pastas não são afetadas por esta regra.</p>`,
   },
   {
+    id: "r-movie",
+    title: "Filme (TMDB)",
+    sub: true,
+    html: `
+<p>Dá a cada filme o nome oficial do <b>TMDB</b> (themoviedb.org), no formato que o Jellyfin reconhece. Precisa de uma <b>chave da API do TMDB</b>, gratuita, informada nas Opções.</p>
+${ex("O.Senhor.dos.Aneis.2001.1080p.BluRay.x264.mkv", "O Senhor dos Anéis - A Sociedade do Anel (2001) [tmdbid-120].mkv")}
+<ol>
+  <li>Adicione a regra e clique em <b>Buscar no TMDB</b>. O programa tira o título e o ano do nome de cada arquivo (pontos viram espaços; somem colchetes, parênteses e marcas como 1080p, BluRay, x264) e procura no TMDB.</li>
+  <li>Quando o título e o ano batem sem dúvida, o filme é escolhido sozinho (<b>✓</b> ao lado do novo nome). Quando há dúvida (<b>?</b>), abre a janela de revisão: clique no filme certo (ou aperte 1–9). O ano do arquivo pode estar um ano antes ou depois do TMDB; isso é levado em conta.</li>
+  <li>Se nenhum servir, corrija o título ou o ano no campo de busca da janela, ou marque <b>Nenhum destes</b> (<b>✕</b>: o arquivo fica como está).</li>
+</ol>
+<ul>
+  <li><b>Modelo</b>: <code>{título}</code>, <code>{original}</code> (título original), <code>{ano}</code> e <code>{id}</code>. O padrão é <code>{título} ({ano}) [tmdbid-{id}]</code>.</li>
+  <li><b>Trocar ":" por</b>: dois-pontos não são aceitos no Windows; por padrão viram <code> - </code>. Barras viram hífens e <code>? * &lt; &gt; |</code> são removidos.</li>
+  <li>Legendas e outros arquivos com o mesmo nome do filme recebem a mesma escolha.</li>
+  <li><b>Criar uma pasta para cada filme</b>: o filme e as legendas vão para uma pasta com o novo nome, como o Jellyfin recomenda: <code>Filmes/Matrix (1999) [tmdbid-603]/Matrix (1999) [tmdbid-603].mkv</code>. Um filme que já está na pasta certa não é movido de novo. Desfazer devolve os arquivos e apaga a pasta, se ela ficar vazia.</li>
+  <li>Para tirar os acentos, acrescente a regra <b>Remover caracteres → Acentos</b> depois desta.</li>
+</ul>
+<h4>Metadados (.nfo e pôster)</h4>
+<p>Com <b>Salvar .nfo e pôster ao lado do filme</b>, ao renomear o programa cria, junto de cada vídeo, <code>Nome (ano) [tmdbid-…].nfo</code> e o pôster; opcionalmente também a imagem de fundo (fanart) e o logo do filme. Dentro da pasta do filme, as imagens se chamam <code>poster.jpg</code>, <code>fanart.jpg</code> e <code>logo.png</code>; soltas, levam o nome do filme na frente (<code>…-poster.jpg</code>). Jellyfin, Kodi e Emby leem esses arquivos.</p>
+<p>O <code>.nfo</code> traz tudo o que o TMDB tem e o Jellyfin lê: título e título original, ano e data de lançamento, sinopse e frase de efeito, duração, nota e votos, classificação indicativa do país do idioma escolhido (ex.: BR-12), gêneros, palavras-chave (como etiquetas), países, estúdios, coleção (ex.: "O Senhor dos Anéis – Coleção"), trailer do YouTube, direção, roteiro, elenco com personagens e fotos, produtores, compositor e os IDs do TMDB e do IMDb. O arquivo do filme não é alterado, arquivos que já existem não são substituídos, e <b>desfazer</b> a renomeação apaga o que foi criado.</p>
+<p>Filmes que <b>já têm o nome certo</b> também recebem os metadados: o botão Renomear os conta, e a confirmação avisa. Se o nome já traz <code>[tmdbid-…]</code>, o filme é reconhecido direto pelo ID, sem busca. Assim dá para completar uma biblioteca já organizada só com .nfo e imagens.</p>
+<p class="tip">Só o título e o ano procurados são enviados ao TMDB, nunca o nome completo do arquivo nem as pastas.</p>`,
+  },
+  {
     id: "preview",
     title: "Pré-visualização e conflitos",
     html: `

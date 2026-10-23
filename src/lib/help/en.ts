@@ -236,6 +236,31 @@ ${ex("_photo.jpg", "photo.jpg")}
 <p>Folders are not affected by this rule.</p>`,
   },
   {
+    id: "r-movie",
+    title: "Movie (TMDB)",
+    sub: true,
+    html: `
+<p>Gives each movie its official name from <b>TMDB</b> (themoviedb.org), in the format Jellyfin recognizes. It needs a free <b>TMDB API key</b>, entered in Options.</p>
+${ex("The.Lord.of.the.Rings.2001.1080p.BluRay.x264.mkv", "The Lord of the Rings - The Fellowship of the Ring (2001) [tmdbid-120].mkv")}
+<ol>
+  <li>Add the rule and click <b>Search TMDB</b>. The program takes the title and year from each file name (dots become spaces; brackets, parentheses and tags like 1080p, BluRay, x264 are dropped) and searches TMDB.</li>
+  <li>When title and year clearly match, the movie is picked automatically (<b>✓</b> next to the new name). When in doubt (<b>?</b>), the review window opens: click the right movie (or press 1–9). The year in the file may be one year off from TMDB; that is taken into account.</li>
+  <li>If none fits, fix the title or year in the window's search field, or choose <b>None of these</b> (<b>✕</b>: the file is left as it is).</li>
+</ol>
+<ul>
+  <li><b>Template</b>: <code>{title}</code>, <code>{original}</code> (original title), <code>{year}</code> and <code>{id}</code>. The default is <code>{title} ({year}) [tmdbid-{id}]</code>.</li>
+  <li><b>Replace ":" with</b>: Windows does not accept colons; by default they become <code> - </code>. Slashes become dashes and <code>? * &lt; &gt; |</code> are removed.</li>
+  <li>Subtitles and other files with the same name as the movie get the same choice.</li>
+  <li><b>Create a folder for each movie</b>: the movie and its subtitles go into a folder with the new name, as Jellyfin recommends: <code>Movies/The Matrix (1999) [tmdbid-603]/The Matrix (1999) [tmdbid-603].mkv</code>. A movie already in the right folder is not moved again. Undo puts the files back and deletes the folder if it is left empty.</li>
+  <li>To remove accents, add the <b>Remove characters → Accents</b> rule after this one.</li>
+</ul>
+<h4>Metadata (.nfo and poster)</h4>
+<p>With <b>Save .nfo and poster next to the movie</b>, renaming also creates, next to each video, <code>Name (year) [tmdbid-…].nfo</code> and the poster; optionally the background image (fanart) and the movie's logo too. Inside the movie's folder the images are named <code>poster.jpg</code>, <code>fanart.jpg</code> and <code>logo.png</code>; next to other movies they start with the movie's name (<code>…-poster.jpg</code>). Jellyfin, Kodi and Emby read these files.</p>
+<p>The <code>.nfo</code> holds everything TMDB has that Jellyfin reads: title and original title, year and release date, overview and tagline, runtime, rating and votes, the age rating of the chosen language's country (e.g. PG-13), genres, keywords (as tags), countries, studios, collection (e.g. "The Lord of the Rings Collection"), YouTube trailer, director, writers, cast with characters and photos, producers, composer and the TMDB and IMDb ids. The movie file is not changed, existing files are not replaced, and <b>undoing</b> the rename deletes what was created.</p>
+<p>Movies whose <b>names are already right</b> get the metadata too: the Rename button counts them and the confirmation says so. If the name already has <code>[tmdbid-…]</code>, the movie is recognized by that id, without searching. That way an organized library can get just the .nfo files and images.</p>
+<p class="tip">Only the searched title and year are sent to TMDB, never the full file name or the folders.</p>`,
+  },
+  {
     id: "preview",
     title: "Preview and conflicts",
     html: `

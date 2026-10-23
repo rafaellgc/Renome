@@ -236,6 +236,31 @@ ${ex("_foto.jpg", "foto.jpg")}
 <p>Esta regla no afecta a las carpetas.</p>`,
   },
   {
+    id: "r-movie",
+    title: "Película (TMDB)",
+    sub: true,
+    html: `
+<p>Da a cada película su nombre oficial de <b>TMDB</b> (themoviedb.org), en el formato que reconoce Jellyfin. Necesita una <b>clave de la API de TMDB</b>, gratuita, introducida en Opciones.</p>
+${ex("El.Senor.de.los.Anillos.2001.1080p.BluRay.x264.mkv", "El Señor de los Anillos - La comunidad del anillo (2001) [tmdbid-120].mkv")}
+<ol>
+  <li>Añada la regla y haga clic en <b>Buscar en TMDB</b>. El programa toma el título y el año del nombre de cada archivo (los puntos pasan a espacios; se quitan corchetes, paréntesis y marcas como 1080p, BluRay, x264) y busca en TMDB.</li>
+  <li>Cuando título y año coinciden sin duda, la película se elige sola (<b>✓</b> junto al nuevo nombre). Si hay dudas (<b>?</b>), se abre la ventana de revisión: haga clic en la película correcta (o pulse 1–9). El año del archivo puede diferir en uno del de TMDB; se tiene en cuenta.</li>
+  <li>Si ninguna sirve, corrija el título o el año en el campo de búsqueda de la ventana, o elija <b>Ninguna de estas</b> (<b>✕</b>: el archivo queda como está).</li>
+</ol>
+<ul>
+  <li><b>Plantilla</b>: <code>{título}</code>, <code>{original}</code> (título original), <code>{año}</code> e <code>{id}</code>. La predeterminada es <code>{título} ({año}) [tmdbid-{id}]</code>.</li>
+  <li><b>Cambiar ":" por</b>: Windows no acepta dos puntos; por defecto pasan a <code> - </code>. Las barras pasan a guiones y se quitan <code>? * &lt; &gt; |</code>.</li>
+  <li>Los subtítulos y otros archivos con el mismo nombre que la película reciben la misma elección.</li>
+  <li><b>Crear una carpeta para cada película</b>: la película y sus subtítulos van a una carpeta con el nuevo nombre, como recomienda Jellyfin: <code>Películas/Matrix (1999) [tmdbid-603]/Matrix (1999) [tmdbid-603].mkv</code>. Una película que ya está en la carpeta correcta no se mueve de nuevo. Deshacer devuelve los archivos y borra la carpeta si queda vacía.</li>
+  <li>Para quitar las tildes, añada la regla <b>Quitar caracteres → Acentos</b> después de esta.</li>
+</ul>
+<h4>Metadatos (.nfo y póster)</h4>
+<p>Con <b>Guardar .nfo y póster junto a la película</b>, al renombrar se crean, junto a cada vídeo, <code>Nombre (año) [tmdbid-…].nfo</code> y el póster; opcionalmente también la imagen de fondo (fanart) y el logo de la película. Dentro de la carpeta de la película, las imágenes se llaman <code>poster.jpg</code>, <code>fanart.jpg</code> y <code>logo.png</code>; sueltas, llevan delante el nombre de la película (<code>…-poster.jpg</code>). Jellyfin, Kodi y Emby leen estos archivos.</p>
+<p>El <code>.nfo</code> incluye todo lo que TMDB tiene y Jellyfin lee: título y título original, año y fecha de estreno, sinopsis y eslogan, duración, nota y votos, la clasificación por edades del país del idioma elegido (ej.: ES-12), géneros, palabras clave (como etiquetas), países, estudios, colección (ej.: "El Señor de los Anillos - Colección"), tráiler de YouTube, dirección, guion, reparto con personajes y fotos, productores, compositor y los ids de TMDB e IMDb. El archivo de la película no cambia, los archivos que ya existen no se reemplazan y <b>deshacer</b> el renombrado borra lo creado.</p>
+<p>Las películas que <b>ya tienen el nombre correcto</b> también reciben los metadatos: el botón Renombrar las cuenta y la confirmación lo avisa. Si el nombre ya trae <code>[tmdbid-…]</code>, la película se reconoce directamente por ese id, sin buscar. Así una biblioteca ya organizada puede recibir solo los .nfo y las imágenes.</p>
+<p class="tip">Solo se envían a TMDB el título y el año buscados, nunca el nombre completo del archivo ni las carpetas.</p>`,
+  },
+  {
     id: "preview",
     title: "Vista previa y conflictos",
     html: `

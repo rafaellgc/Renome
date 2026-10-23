@@ -10,6 +10,7 @@ use crate::apply::Operation;
 use crate::files::{FileEntry, join_name, natural_cmp};
 use crate::filter::Filter;
 use crate::rules::{Ctx, Pipeline, RuleError, Step};
+use crate::tmdb::MovieMatch;
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -50,6 +51,8 @@ pub struct View {
     /// Group of each file with identical copies (filled in by the app).
     #[serde(skip)]
     pub identical: HashMap<PathBuf, usize>,
+    /// The movie chosen for each file (TMDB), for the movie rule.
+    pub movies: HashMap<PathBuf, MovieMatch>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -62,6 +65,8 @@ pub struct PreviewItem {
     pub is_dir: bool,
     pub original: String,
     pub new_name: String,
+    /// Folder (inside `dir`) the file moves into, named after its new name.
+    pub folder: Option<String>,
     pub status: Status,
     pub problem: Option<Problem>,
     /// Non-blocking warning: contains characters Windows does not accept.
@@ -81,6 +86,16 @@ pub struct Preview {
     pub conflicts: usize,
 }
 
+impl PreviewItem {
+    /// Where the file ends up.
+    pub fn target(&self) -> PathBuf {
+        match &self.folder {
+            Some(f) => self.dir.join(f).join(&self.new_name),
+            None => self.dir.join(&self.new_name),
+        }
+    }
+}
+
 impl Preview {
     /// Operations to run (only changed rows without conflicts).
     pub fn operations(&self) -> Vec<Operation> {
@@ -89,7 +104,7 @@ impl Preview {
             .filter(|i| i.status == Status::Ok)
             .map(|i| Operation {
                 from: i.path.clone(),
-                to: i.path.with_file_name(&i.new_name),
+                to: i.target(),
             })
             .collect()
     }
@@ -172,6 +187,7 @@ pub fn preview(
             // The rules emptied the name but left the extension: `.txt` would
             // be a hidden file with no name.
             let mut empty_stem = false;
+            let mut folder = None;
             let (new_name, manual) = match overrides.get(&file.path) {
                 Some(name) => (name.clone(), true),
                 None => {
@@ -180,20 +196,29 @@ pub fn preview(
                         folder_index,
                         file,
                         now,
+                        movie: view.movies.get(&file.path),
                     };
-                    let (stem, ext) = pipeline.run(&ctx);
+                    let (stem, ext, into_folder) = pipeline.run_full(&ctx);
                     empty_stem = stem.is_empty() && !file.stem.is_empty();
+                    // Already in a folder with that name: stay there.
+                    let inside = file
+                        .dir
+                        .file_name()
+                        .is_some_and(|d| d.to_string_lossy() == stem);
+                    if into_folder && !inside {
+                        folder = Some(stem.clone());
+                    }
                     (join_name(&stem, &ext), false)
                 }
             };
             let problem = if empty_stem {
                 Some(Problem::Empty)
             } else {
-                validate(&new_name)
+                validate(&new_name).or_else(|| folder.as_deref().and_then(validate))
             };
             let status = if problem.is_some() {
                 Status::Conflict
-            } else if new_name == original {
+            } else if new_name == original && folder.is_none() {
                 Status::Unchanged
             } else {
                 Status::Ok
@@ -207,6 +232,7 @@ pub fn preview(
                 is_dir: file.is_dir,
                 original,
                 new_name,
+                folder,
                 status,
                 problem,
                 windows_unsafe,
@@ -219,10 +245,7 @@ pub fn preview(
     let mut targets: HashMap<PathBuf, Vec<usize>> = HashMap::new();
     for (i, item) in items.iter().enumerate() {
         if item.status != Status::Conflict {
-            targets
-                .entry(path_key(&item.path.with_file_name(&item.new_name)))
-                .or_default()
-                .push(i);
+            targets.entry(path_key(&item.target())).or_default().push(i);
         }
     }
     for idx in targets.values().filter(|v| v.len() > 1) {
@@ -246,7 +269,7 @@ pub fn preview(
             .enumerate()
             .filter(|(_, i)| i.status == Status::Ok)
         {
-            let target = item.path.with_file_name(&item.new_name);
+            let target = item.target();
             let exists = std::fs::symlink_metadata(&target).is_ok();
             // Case-only change on a case-insensitive file system:
             // the "target" is the file itself.
@@ -293,6 +316,7 @@ pub fn preview(
 mod tests {
     use super::*;
     use crate::rules::{Rule, Target};
+    use crate::tmdb::MovieMatch;
     use std::fs;
 
     fn entries(dir: &Path, names: &[&str]) -> Vec<FileEntry> {
@@ -449,6 +473,46 @@ mod tests {
         let p = preview(&files, &steps, &HashMap::new(), &View::default());
         let names: Vec<_> = p.items.iter().map(|i| i.new_name.as_str()).collect();
         assert_eq!(names, ["x-1", "x-2", "y-1"]);
+    }
+
+    #[test]
+    fn movie_into_folder() {
+        let d = tempfile::tempdir().unwrap();
+        let m = MovieMatch {
+            id: 1,
+            title: "Filme".into(),
+            original_title: String::new(),
+            year: Some(2001),
+        };
+        let steps = vec![Step {
+            enabled: true,
+            rule: Rule::Movie {
+                template: "{title} ({year})".into(),
+                colon: " - ".into(),
+                sidecar: false,
+                fanart: false,
+                folder: true,
+            },
+        }];
+        let files = entries(d.path(), &["f.2001.mkv"]);
+        let mut view = View::default();
+        view.movies.insert(files[0].path.clone(), m.clone());
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        assert_eq!(p.items[0].folder.as_deref(), Some("Filme (2001)"));
+        assert_eq!(
+            p.operations()[0].to,
+            d.path().join("Filme (2001)/Filme (2001).mkv")
+        );
+
+        // Already organized: no folder inside the folder, nothing to do.
+        let inner = d.path().join("Filme (2001)");
+        fs::create_dir(&inner).unwrap();
+        let files = entries(&inner, &["Filme (2001).mkv"]);
+        let mut view = View::default();
+        view.movies.insert(files[0].path.clone(), m);
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        assert_eq!(p.items[0].folder, None);
+        assert_eq!(p.items[0].status, Status::Unchanged);
     }
 
     #[test]

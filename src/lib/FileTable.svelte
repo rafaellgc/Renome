@@ -3,7 +3,7 @@
   import { diff, type Seg } from "./diff";
   import { LOCALES, t } from "./i18n";
   import { settings } from "./settings.svelte";
-  import type { Copies, PreviewItem, ViewSort } from "./types";
+  import type { Copies, MovieStatus, PreviewItem, ViewSort } from "./types";
 
   let {
     items,
@@ -13,6 +13,8 @@
     onsort,
     onoverride,
     copies = {},
+    movieStatus = {},
+    onmovie,
   }: {
     items: PreviewItem[];
     selected: Set<string>;
@@ -22,7 +24,13 @@
     onoverride: (path: string, name: string | null) => void;
     /** Identical copies of each file in the list. */
     copies?: Record<string, Copies>;
+    /** TMDB state of each file, while a movie rule is on. */
+    movieStatus?: Record<string, MovieStatus>;
+    onmovie?: (path: string) => void;
   } = $props();
+
+  const MOVIE_MARK: Record<MovieStatus, string> = { auto: "✓", chosen: "✓", choose: "?", none: "✕" };
+  const MOVIE_TIP = { auto: "movieAuto", chosen: "movieChosen", choose: "movieChoose", none: "movieNone" } as const;
 
   const ROW = 30;
   const OVERSCAN = 10;
@@ -192,6 +200,16 @@
                 onblur={() => commit(item)}
               />
             {:else}
+              {#if movieStatus[item.path]}
+                {@const ms = movieStatus[item.path]}
+                <button
+                  class="movie {ms}"
+                  title={t(MOVIE_TIP[ms])}
+                  aria-label={t(MOVIE_TIP[ms])}
+                  onclick={(e) => { e.stopPropagation(); onmovie?.(item.path); }}
+                >{MOVIE_MARK[ms]}</button>
+              {/if}
+              {#if item.folder}<span class="into" title={t("intoFolder", { folder: item.folder })}><svg class="folder" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M1.5 3.5A1 1 0 0 1 2.5 2.5h3.6l1.5 1.5h5.9a1 1 0 0 1 1 1v7.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" /></svg>/</span>{/if}
               <span class="name" class:same={item.status === "unchanged"}>{#if d}{@render segs(d[1], "ins")}{:else}{item.newName}{/if}</span>
               {#if item.manual}
                 <button class="icon reset" title={t("resetManual")} onclick={(e) => { e.stopPropagation(); onoverride(item.path, null); }}>↺</button>
@@ -305,6 +323,22 @@
   .name.same { color: var(--muted); }
   .edit { width: 100%; height: 24px; padding: 0 6px; }
   .reset { height: 20px; width: 20px; font-size: 13px; }
+  .into { flex: none; display: inline-flex; align-items: center; color: var(--accent); font-weight: 600; }
+  .into .folder { margin-right: 1px; color: var(--accent); }
+  .movie {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 18px;
+  }
+  .movie.auto, .movie.chosen { background: color-mix(in srgb, #1a9a5c 18%, transparent); color: #138a4e; }
+  .movie.choose { background: var(--warn); color: black; }
+  .movie.none { background: var(--hover); color: var(--muted); }
   .dot { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; font-size: 10px; font-weight: 700; }
   .dot.good { color: var(--accent); }
   .dot.bad { background: var(--danger); color: white; }

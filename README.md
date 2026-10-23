@@ -43,6 +43,10 @@ A built-in manual (F1) explains every rule with examples.
 - The preview highlights what is removed and added in each name.
 - Finds files with identical content in the list (even with different
   names) and shows them grouped, without deleting anything.
+- Movies: names files from TMDB (`Title (Year) [tmdbid-120]`, the format
+  Jellyfin recognizes), picking the movie automatically when sure and
+  letting you choose when not; optionally saves `.nfo` and poster next
+  to each movie for Jellyfin, Kodi and Emby.
 - Edit any new name by hand right in the preview (double-click or F2).
 - List filter: only the visible files are renamed.
 - Sort by new name (default) or by any column.

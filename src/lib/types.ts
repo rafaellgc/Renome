@@ -25,7 +25,8 @@ export type Rule =
     }
   | { type: "charAt"; position: number; fromEnd: boolean; onlyIf: string; caseSensitive: boolean; replace: string }
   | { type: "extension"; mode: "set" | "lower" | "upper" | "remove"; value: string }
-  | { type: "rearrange"; separator: string; order: string; target: Target };
+  | { type: "rearrange"; separator: string; order: string; target: Target }
+  | { type: "movie"; template: string; colon: string; sidecar: boolean; fanart: boolean; folder: boolean };
 
 export type RuleType = Rule["type"];
 
@@ -46,6 +47,8 @@ export interface PreviewItem {
   isDir: boolean;
   original: string;
   newName: string;
+  /** Folder (inside dir) the file moves into. */
+  folder: string | null;
   status: Status;
   problem: Problem | null;
   windowsUnsafe: boolean;
@@ -73,6 +76,46 @@ export interface View {
   sortByNewName: boolean;
   descending: boolean;
   identicalOnly: boolean;
+  /** The movie chosen for each file, for the movie rule. */
+  movies: Record<string, MovieMatch>;
+}
+
+/** A TMDB movie offered for a file, best first. */
+export interface Candidate {
+  id: number;
+  title: string;
+  originalTitle: string;
+  year: number | null;
+  overview: string;
+  posterPath: string | null;
+  score: number;
+}
+
+export type MovieMatch = Pick<Candidate, "id" | "title" | "originalTitle" | "year">;
+
+export interface Guess {
+  title: string;
+  year: number | null;
+}
+
+/** auto: picked with confidence; chosen: by the user; choose: waiting for
+ *  the user; none: no movie (no results, or the user said none fits). */
+export type MovieStatus = "auto" | "chosen" | "choose" | "none";
+
+export interface MovieState {
+  guess: Guess;
+  candidates: Candidate[];
+  choice: Candidate | null;
+  status: MovieStatus;
+  error: string | null;
+}
+
+export interface Lookup {
+  path: string;
+  guess: Guess;
+  candidates: Candidate[];
+  auto: boolean;
+  error: string | null;
 }
 
 export type ErrorKind = "tempExists" | "targetExists" | "notFound" | "permissionDenied" | "io" | "restoreFailed" | "history";
@@ -93,6 +136,8 @@ export interface HistoryEntry {
   reverted: number;
   /** Failed on the last undo attempt. */
   failed: number;
+  /** Files created with it (.nfo, images). */
+  extra: number;
 }
 
 /** A file's identical copies in the list: its group number (from 0) and

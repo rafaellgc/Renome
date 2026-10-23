@@ -12,6 +12,10 @@ export interface Settings {
   disableRulesAfterApply: boolean;
   warnWindows: boolean;
   rememberRules: boolean;
+  /** TMDB API key or read access token (empty: not set up). */
+  tmdbKey: string;
+  /** Language of TMDB titles; empty follows the interface. */
+  tmdbLang: string;
   /** Rules from the last session (when `rememberRules`). */
   rules: Step[];
 }
@@ -24,6 +28,8 @@ const DEFAULTS: Settings = {
   disableRulesAfterApply: true,
   warnWindows: true,
   rememberRules: true,
+  tmdbKey: "",
+  tmdbLang: "",
   rules: [],
 };
 
@@ -44,6 +50,11 @@ export async function loadSettings() {
     await saveSettings();
   }
   applyTheme();
+}
+
+/** Language for TMDB titles and overviews. */
+export function tmdbLang() {
+  return settings.tmdbLang || { pt: "pt-BR", en: "en-US", es: "es-ES" }[settings.lang];
 }
 
 export function saveSettings() {

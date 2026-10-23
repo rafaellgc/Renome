@@ -6,6 +6,7 @@
 //! - [`plan`]: computes the preview and checks for conflicts.
 //! - [`apply`]: renames in two phases, with a history for undo.
 //! - [`identical`]: finds files with identical content.
+//! - [`tmdb`]: movie title guessing, ranking and `.nfo` files for TMDB.
 
 pub mod apply;
 pub mod files;
@@ -15,6 +16,7 @@ pub mod plan;
 pub mod rules;
 pub mod scan;
 pub mod text;
+pub mod tmdb;
 
 pub use apply::{ApplyReport, History, HistoryEntry, Operation};
 pub use files::{FileEntry, SortKey, sort_files};
