@@ -259,6 +259,19 @@ ${ex("_foto.jpg", "foto.jpg")}
 <p>Em outros sistemas, esses caracteres do Windows só geram um aviso amarelo, desligável nas Opções. No Windows e no macOS, nomes que só diferem em maiúsculas contam como iguais.</p>`,
   },
   {
+    id: "identical",
+    title: "Cópias idênticas",
+    html: `
+<p>Depois que você adiciona arquivos, o programa procura, em segundo plano, arquivos da lista com <b>conteúdo idêntico</b>, mesmo que tenham nomes diferentes. Nada é apagado nem alterado: é só um aviso.</p>
+<ul>
+  <li>Arquivos com cópia ganham uma etiqueta com um <b>número de grupo</b> ao lado do nome: arquivos com o mesmo número são idênticos entre si, mesmo com nomes diferentes.</li>
+  <li><b>Selecione um arquivo</b> e as cópias dele ficam destacadas na lista. Passar o mouse sobre a etiqueta mostra os nomes das outras cópias.</li>
+  <li>O rodapé mostra quantos arquivos têm cópia. <b>Clique nele</b> para ver só esses arquivos, com as cópias lado a lado; clique de novo para ver todos. Daí você pode removê-los da lista ou renomeá-los à parte.</li>
+  <li>Quando duas cópias iriam ficar com o mesmo nome, o conflito avisa que os arquivos são idênticos.</li>
+</ul>
+<p>A busca é feita em etapas para ser rápida: só arquivos do mesmo tamanho são comparados; depois, só o começo e o fim; o arquivo inteiro só é lido quando tudo isso coincide. Com arquivos grandes, o rodapé mostra o progresso. Arquivos vazios, pastas e atalhos (links simbólicos) ficam de fora.</p>`,
+  },
+  {
     id: "apply",
     title: "Renomear e desfazer",
     html: `

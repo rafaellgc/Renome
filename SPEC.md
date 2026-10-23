@@ -69,6 +69,23 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   that differ only in case count as the same name.
 - Counters: total, changed, conflicts.
 
+### Identical copies
+
+- After the list changes, files with identical content are looked for in
+  the background (a newer search replaces an older one). Nothing is
+  deleted or changed.
+- Stages, each ruling out most candidates before the next: same size; same
+  physical file (hard links, without reading); a hash of the first and
+  last 4 KB; a hash of the whole file (xxHash3, 128 bits) only for what is
+  left. Hashes are cached per path while the file's size and modification
+  time stay the same. Empty files, folders and symlinks are left out.
+- Rows with a copy show a tag with the group number (same number =
+  identical; hover: which files), and selecting a file highlights its
+  copies. The footer shows how many files have a copy and the progress
+  while whole files are read;
+  clicking it shows only those files, grouped.
+- A "same name" conflict between identical files says so.
+
 ## 4. Apply
 
 - Confirmation before renaming. Rows with conflicts are not applied.

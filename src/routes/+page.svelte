@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
+  import { listen } from "@tauri-apps/api/event";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { open, save } from "@tauri-apps/plugin-dialog";
   import { api } from "$lib/api";
@@ -12,7 +13,7 @@
   import { LOCALES, MOD, t, tError } from "$lib/i18n";
   import { RULE_TYPES, newRule, newStep } from "$lib/rules";
   import { loadSettings, saveSettings, settings } from "$lib/settings.svelte";
-  import type { ApplyReport, HistoryEntry, OpError, Preview, RuleType, Step, View, ViewSort } from "$lib/types";
+  import type { ApplyReport, Copies, HistoryEntry, OpError, Preview, RuleType, Step, View, ViewSort } from "$lib/types";
 
   let ready = $state(false);
   let steps = $state<Step[]>([]);
@@ -28,11 +29,17 @@
   let history = $state<HistoryEntry[] | null>(null);
   let showOptions = $state(false);
   let help = $state<"manual" | "about" | null>(null);
+  /** Identical copies of each file in the list. */
+  let copies = $state<Record<string, Copies>>({});
+  let identicalOnly = $state(false);
+  /** Search progress (0–1) while reading whole files; null when idle. */
+  let identicalProgress = $state<number | null>(null);
+  const identicalCount = $derived(Object.keys(copies).length);
   let addMenu = $state(false);
   let ruleMenu = $state(false);
   let table = $state<FileTable>();
 
-  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc });
+  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly });
   /** Example name for rule cards: the first file in natural name order, so
    *  it does not jump around while the preview re-sorts. */
   const collator = new Intl.Collator(undefined, { numeric: true });
@@ -123,6 +130,7 @@
       if (!r.added.length) await api.dropCheckpoint();
       await applySort();
       await refresh();
+      checkIdentical();
       // Highlight what was just added.
       selected = new Set(r.added);
       await tick();
@@ -154,6 +162,7 @@
     await api.removeFiles([...selected]);
     selected = new Set();
     await refresh();
+    checkIdentical();
   }
 
   async function clearAll() {
@@ -162,6 +171,7 @@
     selected = new Set();
     overrides = {};
     await refresh();
+    checkIdentical();
   }
 
   async function move(delta: -1 | 1) {
@@ -223,6 +233,7 @@
       overrides = {};
       notice = t("renamedN", { n: r.done.length }) + (r.errors.length ? ` · ${t("errorsN", { n: r.errors.length })}` : "");
       await refresh();
+      checkIdentical();
       await showErrors(r, t("resultTitle"), `${t("renamedN", { n: r.done.length })}\n${t("errorsN", { n: r.errors.length })}:`);
     } catch (e) {
       notice = `${t("error")}: ${tError(e)}`;
@@ -242,6 +253,7 @@
       notice = t("restoredN", { n: r.done.length });
       if (history) history = await api.history();
       await refresh();
+      checkIdentical();
       await showErrors(
         r,
         r.done.length ? t("resultTitle") : t("undoFailed"),
@@ -251,6 +263,26 @@
       await notify({ title: t("undoFailed"), text: tError(e) });
     } finally {
       busy = false;
+    }
+  }
+
+  /** Looks for identical files in the background after the list changes.
+   *  A newer search replaces an older one, which then returns null. */
+  async function checkIdentical() {
+    try {
+      const groups = await api.findIdentical();
+      if (!groups) return;
+      const map: Record<string, Copies> = {};
+      groups.forEach((g, group) => {
+        for (const p of g) map[p] = { group, others: g.filter((x) => x !== p) };
+      });
+      copies = map;
+      if (!groups.length) identicalOnly = false;
+      identicalProgress = null;
+      await refresh();
+    } catch (e) {
+      identicalProgress = null;
+      notice = `${t("error")}: ${tError(e)}`;
     }
   }
 
@@ -266,6 +298,7 @@
     }
     overrides = prev;
     await refresh();
+    checkIdentical();
     const paths = new Set(preview.items.map((i) => i.path));
     selected = new Set([...selected].filter((p) => paths.has(p)));
     notice = t("listEditUndone");
@@ -357,6 +390,12 @@
     }
   }
 
+  /** The webview's own menu (Back, Reload…) makes no sense in the app;
+   *  text fields keep theirs, for cut, copy and paste. */
+  function oncontextmenu(e: MouseEvent) {
+    if (!(e.target as HTMLElement).closest("input, textarea")) e.preventDefault();
+  }
+
   function onpointerdown(e: PointerEvent) {
     if (!(e.target as Element).closest(".menu-host")) addMenu = ruleMenu = false;
   }
@@ -366,19 +405,24 @@
       dragging = e.payload.type === "enter" || e.payload.type === "over";
       if (e.payload.type === "drop") addPaths(e.payload.paths);
     });
+    const unlistenProgress = listen<{ done: number; total: number }>("identical-progress", (e) => {
+      identicalProgress = e.payload.done < e.payload.total ? e.payload.done / e.payload.total : null;
+    });
     (async () => {
       await loadSettings();
       if (settings.rememberRules) steps = settings.rules.map((s) => newStep(s.rule, s.enabled));
       ready = true;
       await refresh();
+      checkIdentical();
     })();
     return () => {
       unlisten.then((f) => f());
+      unlistenProgress.then((f) => f());
     };
   });
 </script>
 
-<svelte:window {onkeydown} {onpointerdown} />
+<svelte:window {onkeydown} {onpointerdown} {oncontextmenu} />
 
 {#if ready}
 <div class="app" class:busy>
@@ -469,6 +513,7 @@
           descending={sortDesc}
           onsort={sortBy}
           onoverride={setOverride}
+          {copies}
         />
         {#if !preview.items.length}<p class="no-match">{t("noMatch")}</p>{/if}
       {:else}
@@ -489,6 +534,20 @@
     <span class="ok">{t("changed", { n: preview.changed })}</span>
     {#if preview.conflicts}<span class="bad">{t("conflicts", { n: preview.conflicts })}</span>{/if}
     {#if selected.size}<span>{t("selected", { n: selected.size })}</span>{/if}
+    {#if identicalProgress !== null}
+      <span>{t("identicalScanning", { p: Math.floor(identicalProgress * 100) })}</span>
+    {:else if identicalCount}
+      <button
+        class="link"
+        class:on={identicalOnly}
+        aria-pressed={identicalOnly}
+        title={t("identicalFilterHint")}
+        onclick={() => (identicalOnly = !identicalOnly)}
+      >
+        <svg class="copy-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M5 1.5h7A1.5 1.5 0 0 1 13.5 3v8.5H12V3H5zM2.5 4.5A1.5 1.5 0 0 1 4 3h6a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 10 15H4a1.5 1.5 0 0 1-1.5-1.5zM4 4.5v9h6v-9z" /></svg>
+        {t("identicalCount", { n: identicalCount })}
+      </button>
+    {/if}
     <span class="spacer"></span>
     <span class="notice">{notice}</span>
   </footer>
@@ -603,6 +662,21 @@
   }
   footer .ok { color: var(--accent); }
   footer .bad { color: var(--danger); }
+  footer .link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: auto;
+    padding: 0 6px;
+    border: none;
+    border-radius: 4px;
+    background: none;
+    font-size: 12px;
+    color: var(--accent);
+  }
+  footer .link:hover:not(:disabled) { background: var(--hover); }
+  footer .link.on { background: var(--accent-soft); font-weight: 600; }
+  .copy-icon { width: 12px; height: 12px; }
   .modal ul { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
   .modal li { display: flex; align-items: center; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--row-line); }
   .modal li > :first-child { flex: 1; }

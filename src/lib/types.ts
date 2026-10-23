@@ -72,6 +72,7 @@ export interface View {
   filter: string;
   sortByNewName: boolean;
   descending: boolean;
+  identicalOnly: boolean;
 }
 
 export type ErrorKind = "tempExists" | "targetExists" | "notFound" | "permissionDenied" | "io" | "restoreFailed" | "history";
@@ -92,6 +93,13 @@ export interface HistoryEntry {
   reverted: number;
   /** Failed on the last undo attempt. */
   failed: number;
+}
+
+/** A file's identical copies in the list: its group number (from 0) and
+ *  the other files in the group. */
+export interface Copies {
+  group: number;
+  others: string[];
 }
 
 /** File list sort orders (done in Rust). */

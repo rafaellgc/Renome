@@ -41,6 +41,8 @@ A built-in manual (F1) explains every rule with examples.
   characters, remove range, character at position, extension.
 - Renames folders too, even together with the files inside them.
 - The preview highlights what is removed and added in each name.
+- Finds files with identical content in the list (even with different
+  names) and shows them grouped, without deleting anything.
 - Edit any new name by hand right in the preview (double-click or F2).
 - List filter: only the visible files are renamed.
 - Sort by new name (default) or by any column.

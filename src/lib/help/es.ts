@@ -259,6 +259,19 @@ ${ex("_foto.jpg", "foto.jpg")}
 <p>En otros sistemas, esos caracteres de Windows solo generan un aviso amarillo, que se puede desactivar en Opciones. En Windows y macOS, los nombres que solo difieren en mayúsculas cuentan como iguales.</p>`,
   },
   {
+    id: "identical",
+    title: "Copias idénticas",
+    html: `
+<p>Después de añadir archivos, el programa busca, en segundo plano, archivos de la lista con <b>contenido idéntico</b>, aunque tengan nombres distintos. No se borra ni se cambia nada: es solo un aviso.</p>
+<ul>
+  <li>Los archivos con copia llevan una etiqueta con un <b>número de grupo</b> junto al nombre: los archivos con el mismo número son idénticos entre sí, aunque tengan nombres distintos.</li>
+  <li><b>Seleccione un archivo</b> y sus copias se resaltan en la lista. Pasar el ratón sobre la etiqueta muestra los nombres de las otras copias.</li>
+  <li>El pie muestra cuántos archivos tienen copia. <b>Haga clic</b> para ver solo esos archivos, con las copias juntas; otro clic muestra todos. Desde ahí puede quitarlos de la lista o renombrarlos aparte.</li>
+  <li>Cuando dos copias quedarían con el mismo nombre, el conflicto avisa que los archivos son idénticos.</li>
+</ul>
+<p>La búsqueda se hace por etapas para ser rápida: solo se comparan archivos del mismo tamaño; luego solo el inicio y el final; el archivo entero solo se lee cuando todo eso coincide. Con archivos grandes, el pie muestra el progreso. Los archivos vacíos, las carpetas y los enlaces simbólicos quedan fuera.</p>`,
+  },
+  {
     id: "apply",
     title: "Renombrar y deshacer",
     html: `

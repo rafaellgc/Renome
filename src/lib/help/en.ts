@@ -259,6 +259,19 @@ ${ex("_photo.jpg", "photo.jpg")}
 <p>On other systems, those Windows characters only cause a yellow warning, which can be turned off in Options. On Windows and macOS, names that differ only in case count as the same.</p>`,
   },
   {
+    id: "identical",
+    title: "Identical copies",
+    html: `
+<p>After you add files, the program looks, in the background, for files in the list with <b>identical content</b>, even if their names differ. Nothing is deleted or changed: it is only a notice.</p>
+<ul>
+  <li>Files with a copy get a tag with a <b>group number</b> next to the name: files with the same number are identical to each other, even with different names.</li>
+  <li><b>Select a file</b> and its copies are highlighted in the list. Hovering over the tag shows the names of the other copies.</li>
+  <li>The footer shows how many files have a copy. <b>Click it</b> to see only those files, with the copies side by side; click again to see all. From there you can remove them from the list or rename them separately.</li>
+  <li>When two copies would get the same name, the conflict says the files are identical.</li>
+</ul>
+<p>The search runs in stages to be fast: only files of the same size are compared; then only their start and end; a whole file is read only when all of that matches. With large files, the footer shows the progress. Empty files, folders and symbolic links are left out.</p>`,
+  },
+  {
     id: "apply",
     title: "Renaming and undoing",
     html: `

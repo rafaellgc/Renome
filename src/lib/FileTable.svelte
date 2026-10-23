@@ -3,7 +3,7 @@
   import { diff, type Seg } from "./diff";
   import { LOCALES, t } from "./i18n";
   import { settings } from "./settings.svelte";
-  import type { PreviewItem, ViewSort } from "./types";
+  import type { Copies, PreviewItem, ViewSort } from "./types";
 
   let {
     items,
@@ -12,6 +12,7 @@
     descending,
     onsort,
     onoverride,
+    copies = {},
   }: {
     items: PreviewItem[];
     selected: Set<string>;
@@ -19,6 +20,8 @@
     descending: boolean;
     onsort: (key: Exclude<ViewSort, "manual">) => void;
     onoverride: (path: string, name: string | null) => void;
+    /** Identical copies of each file in the list. */
+    copies?: Record<string, Copies>;
   } = $props();
 
   const ROW = 30;
@@ -116,7 +119,16 @@
   // left-to-right marks keep "~" and the slashes where they belong.
   const dir = (d: string) => `\u200e${d.replace(home, "~")}\u200e`;
 
+  const byPath = $derived(new Map(items.map((i) => [i.path, i])));
+  /** Copies of the selected files, highlighted so you can find them. */
+  const twins = $derived(new Set([...selected].flatMap((p) => copies[p]?.others ?? []).filter((p) => !selected.has(p))));
+  const base = (p: string) => p.split(/[\\/]/).pop() ?? p;
+
   function note(item: PreviewItem) {
+    // Two copies of the same file heading for the same name: say so.
+    if (item.problem === "duplicate" && copies[item.path]?.others.some((p) => byPath.get(p)?.newName === item.newName)) {
+      return t("problem.duplicateIdentical");
+    }
     if (item.problem) return t(`problem.${item.problem}`);
     if (item.windowsUnsafe && settings.warnWindows) return t("windowsUnsafe");
     return "";
@@ -156,6 +168,7 @@
         <div
           class="row {item.status}"
           class:sel={selected.has(item.path)}
+          class:twin={twins.has(item.path)}
           style:top="{index * ROW}px"
           role="row"
           tabindex="-1"
@@ -167,7 +180,7 @@
             {:else if item.status === "ok"}<span class="dot good">●</span>{/if}
           </span>
           <span class="c-orig" title={item.path}>
-            {#if item.isDir}<svg class="folder" viewBox="0 0 16 16" aria-label={t("isFolder")}><path fill="currentColor" d="M1.5 3.5A1 1 0 0 1 2.5 2.5h3.6l1.5 1.5h5.9a1 1 0 0 1 1 1v7.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" /></svg>{/if}{#if d}{@render segs(d[0], "del")}{:else}{item.original}{/if}
+            {#if copies[item.path]}{@const c = copies[item.path]}{@const same = t("identicalTo", { names: c.others.map(base).join(", ") })}<span class="copy g{c.group % 6}" title={same} role="img" aria-label={same}><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M5 1.5h7A1.5 1.5 0 0 1 13.5 3v8.5H12V3H5zM2.5 4.5A1.5 1.5 0 0 1 4 3h6a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 10 15H4a1.5 1.5 0 0 1-1.5-1.5zM4 4.5v9h6v-9z" /></svg>{c.group + 1}</span>{/if}{#if item.isDir}<svg class="folder" viewBox="0 0 16 16" aria-label={t("isFolder")}><path fill="currentColor" d="M1.5 3.5A1 1 0 0 1 2.5 2.5h3.6l1.5 1.5h5.9a1 1 0 0 1 1 1v7.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" /></svg>{/if}{#if d}{@render segs(d[0], "del")}{:else}{item.original}{/if}
           </span>
           <span class="c-new" role="gridcell" tabindex="-1" ondblclick={() => startEdit(item)} title={note(item) || t("editHint")}>
             {#if editing === item.path}
@@ -264,6 +277,30 @@
   mark.ins { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
   .row.conflict mark.ins { color: var(--danger); background: color-mix(in srgb, var(--danger) 16%, transparent); }
   mark.del { color: var(--danger); text-decoration: line-through; text-decoration-thickness: 1px; }
+  /* Copy badge: icon + group number; the color repeats every 6 groups. */
+  .copy {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-right: 6px;
+    padding: 0 5px 0 4px;
+    border-radius: 9px;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 17px;
+    vertical-align: 1px;
+    color: var(--g);
+    background: color-mix(in srgb, var(--g) 15%, transparent);
+  }
+  .copy svg { width: 11px; height: 11px; }
+  .g0 { --g: #2f6fde; }
+  .g1 { --g: #138a5e; }
+  .g2 { --g: #c26100; }
+  .g3 { --g: #8a4fd6; }
+  .g4 { --g: #c0397a; }
+  .g5 { --g: #0e8aa3; }
+  :global(:root[data-theme="dark"]) .copy { filter: brightness(1.45); }
+  .row.twin { background: color-mix(in srgb, var(--accent) 9%, transparent); box-shadow: inset 3px 0 var(--accent); }
   .folder { width: 14px; height: 14px; margin-right: 5px; vertical-align: -2px; color: var(--muted); }
   .name.same { color: var(--muted); }
   .edit { width: 100%; height: 24px; padding: 0 6px; }

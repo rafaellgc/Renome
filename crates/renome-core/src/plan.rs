@@ -45,6 +45,11 @@ pub struct View {
     /// Sorts the preview by new name (otherwise keeps the list order).
     pub sort_by_new_name: bool,
     pub descending: bool,
+    /// Shows only files with an identical copy in the list, grouped.
+    pub identical_only: bool,
+    /// Group of each file with identical copies (filled in by the app).
+    #[serde(skip)]
+    pub identical: HashMap<PathBuf, usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -155,6 +160,7 @@ pub fn preview(
     let mut items: Vec<PreviewItem> = files
         .iter()
         .filter(|f| filter.matches(&f.file_name()))
+        .filter(|f| !view.identical_only || view.identical.contains_key(&f.path))
         .enumerate()
         .map(|(index, file)| {
             let original = file.file_name();
@@ -262,6 +268,10 @@ pub fn preview(
             let ord = natural_cmp(&a.new_name, &b.new_name);
             if view.descending { ord.reverse() } else { ord }
         });
+    }
+    if view.identical_only {
+        // Copies side by side; the order above holds within each group.
+        items.sort_by_key(|i| view.identical.get(&i.path).copied());
     }
 
     let changed = items.iter().filter(|i| i.status == Status::Ok).count();

@@ -13,6 +13,7 @@ export const api = {
   clearFiles: () => invoke<void>("clear_files"),
   moveFiles: (paths: string[], delta: -1 | 1) => invoke<void>("move_files", { paths, delta }),
   sortFiles: (key: SortKey, descending: boolean) => invoke<void>("sort_files", { key, descending }),
+  findIdentical: () => invoke<string[][] | null>("find_identical"),
   preview: (steps: Step[], overrides: Overrides, view: View) =>
     invoke<Preview>("preview", { steps, overrides, view }),
   apply: (steps: Step[], overrides: Overrides, view: View) =>

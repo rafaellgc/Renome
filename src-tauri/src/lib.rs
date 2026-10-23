@@ -1,14 +1,17 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use renome_core::scan::Skipped;
 use renome_core::{
-    ApplyReport, FileEntry, History, HistoryEntry, Preview, ScanOptions, SortKey, Step, View,
+    ApplyReport, FileEntry, HashCache, History, HistoryEntry, Preview, ScanOptions, SortKey, Step,
+    View,
 };
 use serde::Serialize;
 use serde_json::Value;
-use tauri::State;
+use tauri::{AppHandle, Emitter, Manager, State};
 
 /// The session's file list. It lives on the Rust side so the whole list
 /// is not sent over on every preview update.
@@ -17,6 +20,8 @@ struct Session {
     files: Vec<FileEntry>,
     /// Earlier states of the list and of the hand-edited names, for Ctrl+Z.
     undo: Vec<(Vec<FileEntry>, Overrides)>,
+    /// Group of each file with an identical copy in the list.
+    identical: HashMap<PathBuf, usize>,
 }
 
 /// How many list edits can be undone.
@@ -25,6 +30,10 @@ const UNDO_LIMIT: usize = 100;
 struct AppState {
     session: Mutex<Session>,
     history: History,
+    hashes: Mutex<HashCache>,
+    /// Bumped by each search for identical files; an older search that sees
+    /// a newer number stops.
+    identical_run: AtomicU64,
 }
 
 type Overrides = HashMap<PathBuf, String>;
@@ -117,13 +126,58 @@ fn sort_files(state: State<AppState>, key: SortKey, descending: bool) {
 }
 
 #[tauri::command]
-fn preview(state: State<AppState>, steps: Vec<Step>, overrides: Overrides, view: View) -> Preview {
-    renome_core::preview(
-        &state.session.lock().unwrap().files,
-        &steps,
-        &overrides,
-        &view,
-    )
+fn preview(
+    state: State<AppState>,
+    steps: Vec<Step>,
+    overrides: Overrides,
+    mut view: View,
+) -> Preview {
+    let s = state.session.lock().unwrap();
+    view.identical = s.identical.clone();
+    renome_core::preview(&s.files, &steps, &overrides, &view)
+}
+
+#[derive(Clone, Serialize)]
+struct IdenticalProgress {
+    done: u64,
+    total: u64,
+}
+
+/// Searches the list for files with identical content, in the background.
+/// Returns the groups, or `None` if a newer search replaced this one.
+/// Emits `identical-progress` while reading whole files.
+#[tauri::command]
+async fn find_identical(app: AppHandle) -> Result<Option<Vec<Vec<PathBuf>>>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let run = state.identical_run.fetch_add(1, Ordering::SeqCst) + 1;
+        let files = state.session.lock().unwrap().files.clone();
+        let stale = || state.identical_run.load(Ordering::SeqCst) != run;
+        let mut hashes = state.hashes.lock().unwrap();
+        let mut last = Instant::now();
+        let groups = renome_core::find_identical(
+            &files,
+            &mut hashes,
+            &mut |done, total| {
+                if last.elapsed() > Duration::from_millis(150) || done == total {
+                    last = Instant::now();
+                    let _ = app.emit("identical-progress", IdenticalProgress { done, total });
+                }
+            },
+            &stale,
+        )?;
+        if stale() {
+            return None;
+        }
+        state.session.lock().unwrap().identical = groups
+            .iter()
+            .enumerate()
+            .flat_map(|(i, g)| g.iter().map(move |p| (p.clone(), i)))
+            .collect();
+        Some(groups)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// Updates the session entries after renaming. Renames run in order, and a
@@ -155,9 +209,10 @@ fn apply(
     state: State<AppState>,
     steps: Vec<Step>,
     overrides: Overrides,
-    view: View,
+    mut view: View,
 ) -> ApplyReport {
     let mut s = state.session.lock().unwrap();
+    view.identical = s.identical.clone();
     // Recompute the preview here to apply exactly what is visible and valid right now.
     let ops = renome_core::preview(&s.files, &steps, &overrides, &view).operations();
     let report = state.history.apply(&ops);
@@ -302,6 +357,8 @@ pub fn run() {
         .manage(AppState {
             session: Mutex::new(session),
             history: History::new(history_dir),
+            hashes: Mutex::default(),
+            identical_run: AtomicU64::new(0),
         })
         .invoke_handler(tauri::generate_handler![
             checkpoint,
@@ -313,6 +370,7 @@ pub fn run() {
             move_files,
             sort_files,
             preview,
+            find_identical,
             apply,
             history,
             undo,

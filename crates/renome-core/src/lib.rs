@@ -5,10 +5,12 @@
 //! - [`rules`]: name transformation rules, applied in sequence.
 //! - [`plan`]: computes the preview and checks for conflicts.
 //! - [`apply`]: renames in two phases, with a history for undo.
+//! - [`identical`]: finds files with identical content.
 
 pub mod apply;
 pub mod files;
 pub mod filter;
+pub mod identical;
 pub mod plan;
 pub mod rules;
 pub mod scan;
@@ -17,6 +19,7 @@ pub mod text;
 pub use apply::{ApplyReport, History, HistoryEntry, Operation};
 pub use files::{FileEntry, SortKey, sort_files};
 pub use filter::Filter;
+pub use identical::{HashCache, find_identical};
 pub use plan::{Preview, PreviewItem, Problem, Status, View, preview};
 pub use rules::{Pipeline, Rule, Step};
 pub use scan::{ScanOptions, ScanResult, scan};
