@@ -29,6 +29,7 @@ function segments(chars: string[], kept: boolean[]): Seg[] {
 }
 
 const isDigit = (c: string | undefined) => c !== undefined && c >= "0" && c <= "9";
+const isWord = (c: string | undefined) => c !== undefined && /[\p{L}\p{N}]/u.test(c);
 
 /** Longest common subsequence: marks which characters of each side are
  *  kept. Returns the segments of `a` (removed) and of `b` (added). */
@@ -82,8 +83,12 @@ export function diff(a: string, b: string): [Seg[], Seg[]] {
       len--;
     }
     while (len && isDigit(x[ri + len - 1]) && (isDigit(x[ri + len]) || isDigit(y[rj + len]))) len--;
-    // Short runs in the middle are usually coincidences.
-    if (middle && len < MIN_RUN) continue;
+    // Short runs in the middle are usually coincidences ("ia" in "praia" and
+    // "Viagem"), unless they are a whole word on both sides ("of" in
+    // "a.of.b" → "a of b").
+    const wholeWord =
+      !isWord(x[ri - 1]) && !isWord(x[ri + len]) && !isWord(y[rj - 1]) && !isWord(y[rj + len]);
+    if (middle && len < MIN_RUN && !wholeWord) continue;
     for (let k = 0; k < len; k++) keptX[ri + k] = keptY[rj + k] = true;
   }
   return [segments(x, keptX), segments(y, keptY)];

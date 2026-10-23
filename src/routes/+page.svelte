@@ -6,6 +6,7 @@
   import Dialog from "$lib/Dialog.svelte";
   import { closeDialog, confirm, dialog, notify } from "$lib/dialogs.svelte";
   import FileTable from "$lib/FileTable.svelte";
+  import Help from "$lib/Help.svelte";
   import Options from "$lib/Options.svelte";
   import RuleCard from "$lib/RuleCard.svelte";
   import { LOCALES, MOD, t, tError } from "$lib/i18n";
@@ -26,6 +27,7 @@
   let dragging = $state(false);
   let history = $state<HistoryEntry[] | null>(null);
   let showOptions = $state(false);
+  let help = $state<"manual" | "about" | null>(null);
   let addMenu = $state(false);
   let ruleMenu = $state(false);
   let table = $state<FileTable>();
@@ -317,8 +319,14 @@
       addMenu = ruleMenu = false;
       history = null;
       showOptions = false;
+      help = null;
     }
-    if (history || showOptions || busy) return;
+    if (e.key === "F1") {
+      e.preventDefault();
+      help ??= "manual";
+      return;
+    }
+    if (history || showOptions || help || busy) return;
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
     // These work even while typing in a rule.
@@ -405,6 +413,7 @@
     <div class="spacer"></div>
     <div class="group">
       <button onclick={openHistory}>{t("history")}</button>
+      <button class="icon help-btn" title="{t("help")} (F1)" aria-label={t("help")} onclick={() => (help = "manual")}>?</button>
       <button class="icon" title={t("options")} aria-label={t("options")} onclick={() => (showOptions = true)}>
         <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
           <path fill="currentColor" fill-rule="evenodd" stroke="currentColor" stroke-width="1" stroke-linejoin="round" d="M12.15 3.76L11.96 1.50L8.04 1.50L7.85 3.76L5.67 5.02L3.62 4.05L1.66 7.45L3.52 8.74L3.52 11.26L1.66 12.55L3.62 15.95L5.67 14.98L7.85 16.24L8.04 18.50L11.96 18.50L12.15 16.24L14.33 14.98L16.38 15.95L18.34 12.55L16.48 11.26L16.48 8.74L18.34 7.45L16.38 4.05L14.33 5.02ZM13 10a3 3 0 1 0-6 0a3 3 0 1 0 6 0Z" />
@@ -520,6 +529,10 @@
   </div>
 {/if}
 
+{#if help}
+  <Help bind:tab={help} onclose={() => (help = null)} />
+{/if}
+
 {#if showOptions}
   <Options onclose={() => (showOptions = false)} />
 {/if}
@@ -594,5 +607,6 @@
   .modal li { display: flex; align-items: center; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--row-line); }
   .modal li > :first-child { flex: 1; }
   .muted { color: var(--muted); }
+  .help-btn { font-size: 16px; font-weight: 700; }
   .failed { color: var(--danger); font-size: 13px; }
 </style>

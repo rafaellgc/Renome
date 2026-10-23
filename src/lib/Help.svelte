@@ -1,0 +1,206 @@
+<script lang="ts">
+  import { onMount } from "svelte";
+  import { getVersion } from "@tauri-apps/api/app";
+  import { openUrl } from "@tauri-apps/plugin-opener";
+  import { en } from "./help/en";
+  import { es } from "./help/es";
+  import { pt } from "./help/pt";
+  import { t } from "./i18n";
+  import { settings } from "./settings.svelte";
+
+  let { onclose, tab = $bindable("manual") }: { onclose: () => void; tab?: "manual" | "about" } = $props();
+
+  const AUTHOR = "Rafael Luciano Gonçalves Correia";
+  const EMAIL = "rafaellgcorreia@gmail.com";
+  const REPO = "https://github.com/rafaellgc/Renome";
+
+  const sections = $derived({ pt, en, es }[settings.lang]);
+  let current = $state("start");
+  let content = $state<HTMLElement>();
+  let version = $state("");
+
+  onMount(() => {
+    getVersion().then((v) => (version = v));
+  });
+
+  function go(id: string) {
+    current = id;
+    content?.querySelector(`#help-${id}`)?.scrollIntoView({ block: "start" });
+  }
+
+  /** Highlights in the index the section being read. */
+  function onscroll() {
+    if (!content) return;
+    const top = content.getBoundingClientRect().top + 24;
+    let id = sections[0].id;
+    for (const el of content.querySelectorAll<HTMLElement>("section[data-id]")) {
+      if (el.getBoundingClientRect().top <= top) id = el.dataset.id!;
+    }
+    current = id;
+  }
+</script>
+
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+<div class="overlay" onclick={onclose}>
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+  <div class="modal help" onclick={(e) => e.stopPropagation()}>
+    <header>
+      <div class="tabs" role="tablist">
+        <button role="tab" aria-selected={tab === "manual"} class:on={tab === "manual"} onclick={() => (tab = "manual")}>{t("helpManual")}</button>
+        <button role="tab" aria-selected={tab === "about"} class:on={tab === "about"} onclick={() => (tab = "about")}>{t("helpAbout")}</button>
+      </div>
+      <button class="icon" title={t("close")} aria-label={t("close")} onclick={onclose}>✕</button>
+    </header>
+
+    {#if tab === "manual"}
+      <div class="manual">
+        <nav aria-label={t("helpContents")}>
+          {#each sections as s (s.id)}
+            <button class:sub={s.sub} class:on={current === s.id} onclick={() => go(s.id)}>{s.title}</button>
+          {/each}
+        </nav>
+        <div class="content" bind:this={content} {onscroll}>
+          {#each sections as s (s.id)}
+            <section id="help-{s.id}" data-id={s.id}>
+              <h3>{s.title}</h3>
+              {@html s.html}
+            </section>
+          {/each}
+        </div>
+      </div>
+    {:else}
+      <div class="about">
+        <img src="/app-icon.png" alt="" width="96" height="96" />
+        <h2>Renome</h2>
+        {#if version}<p class="muted">{t("version", { v: version })}</p>{/if}
+        <p>{t("aboutDesc")}</p>
+        <p>
+          {t("aboutAuthor", { name: AUTHOR })}<br />
+          <button class="link" onclick={() => openUrl(`mailto:${EMAIL}`)}>{EMAIL}</button><br />
+          {t("aboutClaude")}
+        </p>
+        <p class="muted">{t("aboutBuilt")}<br />{t("aboutLicense")}<br />© 2026 {AUTHOR}</p>
+        <button class="primary-soft" onclick={() => openUrl(REPO)}>{t("aboutRepo")}</button>
+      </div>
+    {/if}
+  </div>
+</div>
+
+<style>
+  .help {
+    width: min(920px, 94vw);
+    height: 84vh;
+    max-height: 84vh;
+    padding: 0;
+    gap: 0;
+    overflow: hidden;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .tabs { display: flex; gap: 4px; }
+  .tabs button { border: none; background: none; font-weight: 600; color: var(--muted); }
+  .tabs button.on { background: var(--accent-soft); color: var(--accent); }
+  .manual { flex: 1; display: flex; min-height: 0; }
+  nav {
+    flex: none;
+    width: 220px;
+    overflow-y: auto;
+    padding: 10px 8px;
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  nav button {
+    border: none;
+    background: none;
+    text-align: left;
+    height: auto;
+    min-height: 28px;
+    padding: 4px 8px;
+    font-size: 13px;
+    white-space: normal;
+  }
+  nav button.sub { padding-left: 22px; color: var(--muted); }
+  nav button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 24px 40vh;
+    user-select: text;
+    line-height: 1.55;
+  }
+  section { padding-top: 14px; }
+  section + section { border-top: 1px solid var(--row-line); margin-top: 14px; }
+  .content h3 { margin: 0 0 6px; font-size: 17px; }
+  .content :global(h4) { margin: 14px 0 4px; font-size: 14px; }
+  .content :global(p) { margin: 6px 0; }
+  .content :global(ul), .content :global(ol) { margin: 6px 0; padding-left: 22px; }
+  .content :global(li) { margin: 3px 0; }
+  .content :global(code) {
+    font: 12.5px ui-monospace, monospace;
+    background: var(--surface-2);
+    border: 1px solid var(--row-line);
+    border-radius: 4px;
+    padding: 0 4px;
+    white-space: pre-wrap;
+  }
+  .content :global(kbd) {
+    font: 12px ui-monospace, monospace;
+    padding: 0 5px;
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--surface-2);
+  }
+  .content :global(table) { border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+  .content :global(td) { padding: 4px 12px 4px 0; border-bottom: 1px solid var(--row-line); vertical-align: top; }
+  .content :global(td:first-child) { white-space: nowrap; }
+  .content :global(.ex) {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 8px 0;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: var(--surface-2);
+  }
+  .content :global(.ex span) { color: var(--accent); font-weight: 700; }
+  .content :global(.tip) {
+    padding: 8px 10px;
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    border-radius: 0 6px 6px 0;
+  }
+  .content :global(.ins) { color: var(--accent); background: var(--accent-soft); font-weight: 600; border-radius: 3px; padding: 0 2px; }
+  .content :global(.del) { color: var(--danger); text-decoration: line-through; }
+  .content :global(.bad) { color: white; background: var(--danger); border-radius: 50%; padding: 0 5px; font-weight: 700; }
+  .content :global(.warn) { color: black; background: var(--warn); border-radius: 50%; padding: 0 5px; font-weight: 700; }
+  .about {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 24px;
+    gap: 4px;
+    user-select: text;
+  }
+  .about h2 { margin: 8px 0 0; font-size: 24px; }
+  .about p { margin: 6px 0; line-height: 1.5; }
+  .about .primary-soft { margin-top: 10px; }
+  .link { border: none; background: none; height: auto; padding: 0; color: var(--accent); }
+  .link:hover:not(:disabled) { background: none; text-decoration: underline; }
+  .muted { color: var(--muted); }
+  @media (max-width: 640px) {
+    nav { display: none; }
+  }
+</style>

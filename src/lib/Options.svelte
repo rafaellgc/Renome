@@ -11,6 +11,7 @@
     ["F2", "kEdit"],
     ["Delete", "kRemove"],
     [`${MOD}+A`, "kSelectAll"],
+    ["F1", "kHelp"],
     ["Esc", "kClose"],
   ];
 </script>

@@ -112,7 +112,9 @@
   const fmt = $derived(new Intl.DateTimeFormat(LOCALES[settings.lang], { dateStyle: "short", timeStyle: "short" }));
   const date = (s: number | null) => (s === null ? "" : fmt.format(new Date(s * 1000)));
   const home = /^\/(var\/)?home\/[^/]+/;
-  const dir = (d: string) => d.replace(home, "~");
+  // The column is right-to-left so long paths are cut at the start; the
+  // left-to-right marks keep "~" and the slashes where they belong.
+  const dir = (d: string) => `\u200e${d.replace(home, "~")}\u200e`;
 
   function note(item: PreviewItem) {
     if (item.problem) return t(`problem.${item.problem}`);

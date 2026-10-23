@@ -95,11 +95,22 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
 | F2 | Edit the new name of the selected file |
 | Delete | Remove the selected files from the list |
 | Ctrl+A | Select all |
+| F1 | Open the help |
 | Esc | Close the open dialog or menu |
 
 On macOS, ⌘ replaces Ctrl. The list is also shown in Options.
 
-## 6. Options
+## 6. Help
+
+A "?" button (or F1) opens a window with two tabs:
+
+- **Manual**: a detailed guide in the interface language, with an index:
+  getting started, file list, how rules work, each rule with examples,
+  preview and conflicts, renaming and undoing, recipes, shortcuts, options.
+- **About**: icon, version, description, author, credits (developed with
+  the help of Claude, by Anthropic), license and a link to the repository.
+
+## 7. Options
 
 Saved in the user's config folder (e.g. `~/.config/renome/settings.json`).
 
