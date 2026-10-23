@@ -3,13 +3,17 @@
 //! show and building the new name.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::text;
-use crate::tmdb::{self, Guess, SearchResult, TAGS, clean, safe_title, similarity, year_of};
+use crate::tmdb::{
+    self, Cast, Crew, Guess, IMAGE_BASE, Images, Named, SearchResult, TAGS, Videos, clean, crew,
+    number, person, rating_for, safe_title, similarity, tag, trailer_url, xml, year_of,
+};
 
 /// Season, episode and title read from a file name.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -626,6 +630,410 @@ pub fn episode_name(template: &str, m: &EpisodeMatch, colon: &str) -> String {
         .to_string()
 }
 
+/// The season's folder, as Jellyfin and Kodi expect it: `Season 01`.
+pub fn season_folder(season: u16) -> String {
+    format!("Season {season:02}")
+}
+
+/// Whether a folder is named after the show: its TMDB id, or (almost) its
+/// name or original name, with or without the year.
+fn names_show(folder: &Path, m: &EpisodeMatch) -> bool {
+    let name = folder.file_name().unwrap_or_default().to_string_lossy();
+    if name.contains(&format!("tmdbid-{}", m.id)) {
+        return true;
+    }
+    let title = tmdb::guess(&name).title;
+    let w = words(&title);
+    [&m.show, &m.original_show].iter().any(|show| {
+        let s = words(show);
+        !s.is_empty() && (similarity(&title, show) >= 0.8 || w.starts_with(&s))
+    })
+}
+
+/// The show's folder a file is already in: its own folder, or the one
+/// above a season folder.
+pub fn show_dir(dir: &Path, m: &EpisodeMatch) -> Option<PathBuf> {
+    let name = dir.file_name().unwrap_or_default().to_string_lossy();
+    if folder_season(&name).is_some() {
+        dir.parent()
+            .filter(|up| names_show(up, m))
+            .map(Path::to_path_buf)
+    } else {
+        names_show(dir, m).then(|| dir.to_path_buf())
+    }
+}
+
+/// Where the show's folder goes: next to the show's current folder (so
+/// `Show/Season 1/x.mkv` becomes `Show (2008)/Season 01/…`, not a folder
+/// inside it), next to a loose season folder, or else in the file's folder.
+pub fn library_root(dir: &Path, m: &EpisodeMatch) -> PathBuf {
+    let name = dir.file_name().unwrap_or_default().to_string_lossy();
+    let up = match show_dir(dir, m) {
+        Some(show) => show.parent().map(Path::to_path_buf),
+        None if folder_season(&name).is_some() => dir.parent().map(Path::to_path_buf),
+        None => None,
+    };
+    up.unwrap_or_else(|| dir.to_path_buf())
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct Role {
+    #[serde(default)]
+    pub character: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ShowCast {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub roles: Vec<Role>,
+    #[serde(default)]
+    pub profile_path: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ShowCredits {
+    #[serde(default)]
+    pub cast: Vec<ShowCast>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ContentRating {
+    #[serde(default)]
+    pub iso_3166_1: String,
+    #[serde(default)]
+    pub rating: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ContentRatings {
+    #[serde(default)]
+    pub results: Vec<ContentRating>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ShowKeywords {
+    #[serde(default)]
+    pub results: Vec<Named>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ExternalIds {
+    #[serde(default)]
+    pub imdb_id: Option<String>,
+    #[serde(default)]
+    pub tvdb_id: Option<u64>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct SeasonSummary {
+    pub season_number: u16,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub overview: Option<String>,
+    #[serde(default)]
+    pub air_date: Option<String>,
+    #[serde(default)]
+    pub poster_path: Option<String>,
+}
+
+/// Show details for the metadata (`/tv/{id}` with aggregate credits,
+/// content ratings, keywords, external ids, videos and images).
+#[derive(Debug, Default, Deserialize)]
+pub struct ShowDetails {
+    pub id: u64,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub original_name: String,
+    #[serde(default)]
+    pub first_air_date: Option<String>,
+    #[serde(default)]
+    pub overview: Option<String>,
+    #[serde(default)]
+    pub tagline: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub genres: Vec<Named>,
+    #[serde(default)]
+    pub networks: Vec<Named>,
+    #[serde(default)]
+    pub production_companies: Vec<Named>,
+    #[serde(default)]
+    pub vote_average: Option<f64>,
+    #[serde(default)]
+    pub vote_count: Option<u64>,
+    #[serde(default)]
+    pub episode_run_time: Vec<u32>,
+    #[serde(default)]
+    pub poster_path: Option<String>,
+    #[serde(default)]
+    pub backdrop_path: Option<String>,
+    #[serde(default)]
+    pub created_by: Vec<Named>,
+    #[serde(default)]
+    pub external_ids: ExternalIds,
+    #[serde(default)]
+    pub content_ratings: ContentRatings,
+    #[serde(default)]
+    pub keywords: ShowKeywords,
+    #[serde(default)]
+    pub aggregate_credits: ShowCredits,
+    #[serde(default)]
+    pub videos: Videos,
+    #[serde(default)]
+    pub images: Images,
+    #[serde(default)]
+    pub seasons: Vec<SeasonSummary>,
+}
+
+/// An episode with what its `.nfo` needs (`/tv/{id}/season/{n}`).
+#[derive(Debug, Default, Deserialize)]
+pub struct EpisodeDetails {
+    #[serde(default)]
+    pub id: u64,
+    pub season_number: u16,
+    pub episode_number: u16,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub overview: Option<String>,
+    #[serde(default)]
+    pub air_date: Option<String>,
+    #[serde(default)]
+    pub runtime: Option<u32>,
+    #[serde(default)]
+    pub vote_average: Option<f64>,
+    #[serde(default)]
+    pub vote_count: Option<u64>,
+    #[serde(default)]
+    pub still_path: Option<String>,
+    #[serde(default)]
+    pub crew: Vec<Crew>,
+    #[serde(default)]
+    pub guest_stars: Vec<Cast>,
+}
+
+/// A season with its episodes (`/tv/{id}/season/{n}`).
+#[derive(Debug, Default, Deserialize)]
+pub struct SeasonFull {
+    pub season_number: u16,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub overview: Option<String>,
+    #[serde(default)]
+    pub air_date: Option<String>,
+    #[serde(default)]
+    pub poster_path: Option<String>,
+    #[serde(default)]
+    pub episodes: Vec<EpisodeDetails>,
+}
+
+const XML_HEAD: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n";
+
+/// `tvshow.nfo` (Kodi format, read by Jellyfin, Kodi and Emby), with the
+/// fields Jellyfin's reader takes that TMDB has. `lang` (`pt-BR`): its
+/// country picks the age rating, its language the trailer.
+pub fn show_nfo(d: &ShowDetails, lang: &str) -> String {
+    let (lang2, region) = lang.split_once('-').unwrap_or((lang, "US"));
+    let mut o = format!("{XML_HEAD}<tvshow>\n");
+    let premiered = d.first_air_date.as_deref().unwrap_or_default();
+    tag(&mut o, "title", &d.name);
+    tag(&mut o, "originaltitle", &d.original_name);
+    tag(&mut o, "showtitle", &d.name);
+    tag(
+        &mut o,
+        "year",
+        &year_of(&d.first_air_date)
+            .map(|y| y.to_string())
+            .unwrap_or_default(),
+    );
+    tag(&mut o, "premiered", premiered);
+    tag(&mut o, "plot", d.overview.as_deref().unwrap_or_default());
+    tag(&mut o, "tagline", d.tagline.as_deref().unwrap_or_default());
+    tag(
+        &mut o,
+        "runtime",
+        &number(d.episode_run_time.first().copied()),
+    );
+    tag(
+        &mut o,
+        "rating",
+        &d.vote_average
+            .filter(|&v| v > 0.0)
+            .map(|v| format!("{v:.1}"))
+            .unwrap_or_default(),
+    );
+    tag(&mut o, "votes", &number(d.vote_count));
+    let cert = d
+        .content_ratings
+        .results
+        .iter()
+        .find(|c| c.iso_3166_1.eq_ignore_ascii_case(region))
+        .map(|c| rating_for(region, &c.rating))
+        .unwrap_or_default();
+    tag(&mut o, "mpaa", &cert);
+    // Jellyfin's series states.
+    let status = match d.status.as_deref() {
+        Some("Ended" | "Canceled") => "Ended",
+        Some("Returning Series" | "In Production") => "Continuing",
+        Some("Planned") => "Unreleased",
+        _ => "",
+    };
+    tag(&mut o, "status", status);
+    for g in &d.genres {
+        tag(&mut o, "genre", &g.name);
+    }
+    for k in &d.keywords.results {
+        tag(&mut o, "tag", &k.name);
+    }
+    for s in d.networks.iter().chain(&d.production_companies) {
+        tag(&mut o, "studio", &s.name);
+    }
+    for c in &d.created_by {
+        tag(&mut o, "credits", &c.name);
+    }
+    if let Some(key) = d.videos.trailer(lang2) {
+        tag(&mut o, "trailer", &trailer_url(key));
+    }
+    let imdb = d.external_ids.imdb_id.as_deref().unwrap_or_default();
+    let tvdb = d
+        .external_ids
+        .tvdb_id
+        .map(|i| i.to_string())
+        .unwrap_or_default();
+    tag(&mut o, "tmdbid", &d.id.to_string());
+    tag(&mut o, "imdb_id", imdb);
+    tag(&mut o, "tvdbid", &tvdb);
+    o.push_str(&format!(
+        "  <uniqueid type=\"tmdb\" default=\"true\">{}</uniqueid>\n",
+        d.id
+    ));
+    if !imdb.is_empty() {
+        o.push_str(&format!(
+            "  <uniqueid type=\"imdb\">{}</uniqueid>\n",
+            xml(imdb)
+        ));
+    }
+    if !tvdb.is_empty() {
+        o.push_str(&format!("  <uniqueid type=\"tvdb\">{tvdb}</uniqueid>\n"));
+    }
+    // Kodi 20's form, which Jellyfin also reads.
+    let mut guide = format!("{{\"tmdb\":\"{}\"", d.id);
+    if !imdb.is_empty() {
+        guide.push_str(&format!(",\"imdb\":\"{imdb}\""));
+    }
+    if !tvdb.is_empty() {
+        guide.push_str(&format!(",\"tvdb\":\"{tvdb}\""));
+    }
+    guide.push('}');
+    tag(&mut o, "episodeguide", &guide);
+    for (i, a) in d.aggregate_credits.cast.iter().take(20).enumerate() {
+        let role = a
+            .roles
+            .first()
+            .map(|r| r.character.as_str())
+            .unwrap_or_default();
+        person(&mut o, &a.name, role, "Actor", i, &a.profile_path);
+    }
+    o.push_str("</tvshow>\n");
+    o
+}
+
+/// `season.nfo`, inside the season's folder.
+pub fn season_nfo(s: &SeasonSummary) -> String {
+    let mut o = format!("{XML_HEAD}<season>\n");
+    tag(&mut o, "title", &s.name);
+    tag(&mut o, "plot", s.overview.as_deref().unwrap_or_default());
+    tag(
+        &mut o,
+        "premiered",
+        s.air_date.as_deref().unwrap_or_default(),
+    );
+    tag(
+        &mut o,
+        "releasedate",
+        s.air_date.as_deref().unwrap_or_default(),
+    );
+    tag(&mut o, "seasonnumber", &s.season_number.to_string());
+    o.push_str("</season>\n");
+    o
+}
+
+/// The episode's `.nfo`: one `<episodedetails>` per episode in the file.
+/// `titles` are the names used for the file (with the fallback language
+/// for untranslated ones).
+pub fn episode_nfo(show: &str, episodes: &[&EpisodeDetails], titles: &[String]) -> String {
+    let mut o = String::from(XML_HEAD);
+    for (i, e) in episodes.iter().enumerate() {
+        o.push_str("<episodedetails>\n");
+        let title = titles
+            .get(i)
+            .filter(|t| !t.is_empty())
+            .cloned()
+            .or_else(|| e.name.clone())
+            .unwrap_or_default();
+        let aired = e.air_date.as_deref().unwrap_or_default();
+        tag(&mut o, "title", &title);
+        tag(&mut o, "showtitle", show);
+        tag(&mut o, "season", &e.season_number.to_string());
+        tag(&mut o, "episode", &e.episode_number.to_string());
+        tag(&mut o, "aired", aired);
+        tag(&mut o, "premiered", aired);
+        tag(&mut o, "plot", e.overview.as_deref().unwrap_or_default());
+        tag(&mut o, "runtime", &number(e.runtime));
+        tag(
+            &mut o,
+            "rating",
+            &e.vote_average
+                .filter(|&v| v > 0.0)
+                .map(|v| format!("{v:.1}"))
+                .unwrap_or_default(),
+        );
+        tag(&mut o, "votes", &number(e.vote_count));
+        if e.id > 0 {
+            o.push_str(&format!(
+                "  <uniqueid type=\"tmdb\" default=\"true\">{}</uniqueid>\n",
+                e.id
+            ));
+        }
+        for c in crew(&e.crew, |c| c.job == "Director") {
+            tag(&mut o, "director", &c.name);
+        }
+        for c in crew(&e.crew, |c| c.department == "Writing") {
+            tag(&mut o, "writer", &c.name);
+        }
+        if let Some(p) = &e.still_path {
+            tag(&mut o, "thumb", &format!("{IMAGE_BASE}{p}"));
+        }
+        for (i, a) in e.guest_stars.iter().take(20).enumerate() {
+            person(
+                &mut o,
+                &a.name,
+                &a.character,
+                "GuestStar",
+                i,
+                &a.profile_path,
+            );
+        }
+        o.push_str("</episodedetails>\n");
+    }
+    o
+}
+
+/// The season's poster in the show's folder, as Jellyfin and Kodi name it.
+pub fn season_poster(season: u16) -> String {
+    if season == 0 {
+        "season-specials-poster.jpg".into()
+    } else {
+        format!("season{season:02}-poster.jpg")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -799,6 +1207,70 @@ mod tests {
             episode_name("{show} ({year}) - S{season}E{episode} - {title}", &m, " - "),
             "Breaking Bad - S01E03"
         );
+    }
+
+    #[test]
+    fn folders() {
+        let m = EpisodeMatch {
+            id: 1396,
+            show: "Breaking Bad: A Química do Mal".into(),
+            original_show: "Breaking Bad".into(),
+            year: Some(2008),
+            season: 1,
+            episodes: vec![1],
+            titles: vec![],
+        };
+        let root = |d: &str| library_root(Path::new(d), &m);
+        assert_eq!(root("/tv/Breaking Bad/Season 1"), Path::new("/tv"));
+        assert_eq!(root("/tv/Breaking.Bad.2008"), Path::new("/tv"));
+        assert_eq!(
+            root("/tv/Breaking Bad (2008) [tmdbid-1396]/Season 01"),
+            Path::new("/tv")
+        );
+        assert_eq!(root("/dl/Season 1"), Path::new("/dl"));
+        assert_eq!(root("/dl/stuff"), Path::new("/dl/stuff"));
+        assert_eq!(show_dir(Path::new("/dl/Season 1"), &m), None);
+        assert_eq!(season_folder(0), "Season 00");
+    }
+
+    #[test]
+    fn nfo_files() {
+        let d: ShowDetails = serde_json::from_str(
+            r#"{"id":1396,"name":"Breaking Bad & Co","original_name":"Breaking Bad","first_air_date":"2008-01-20",
+                "status":"Ended","episode_run_time":[47],"genres":[{"name":"Drama"}],"networks":[{"name":"AMC"}],
+                "external_ids":{"imdb_id":"tt0903747","tvdb_id":81189},
+                "content_ratings":{"results":[{"iso_3166_1":"BR","rating":"16"}]},
+                "aggregate_credits":{"cast":[{"name":"Bryan Cranston","roles":[{"character":"Walter White"}]}]}}"#,
+        )
+        .unwrap();
+        let x = show_nfo(&d, "pt-BR");
+        for want in [
+            "<tvshow>",
+            "<title>Breaking Bad &amp; Co</title>",
+            "<year>2008</year>",
+            "<status>Ended</status>",
+            "<mpaa>BR-16</mpaa>",
+            "<studio>AMC</studio>",
+            "<runtime>47</runtime>",
+            "<uniqueid type=\"tvdb\">81189</uniqueid>",
+            "<episodeguide>{&quot;tmdb&quot;:&quot;1396&quot;,&quot;imdb&quot;:&quot;tt0903747&quot;,&quot;tvdb&quot;:&quot;81189&quot;}</episodeguide>",
+            "<role>Walter White</role>",
+        ] {
+            assert!(x.contains(want), "missing {want} in\n{x}");
+        }
+        let e: EpisodeDetails = serde_json::from_str(
+            r#"{"id":62085,"season_number":1,"episode_number":1,"name":"Episódio 1","air_date":"2008-01-20",
+                "crew":[{"name":"Vince Gilligan","job":"Director","department":"Directing"}],
+                "guest_stars":[{"name":"X","character":"Y"}]}"#,
+        )
+        .unwrap();
+        let x = episode_nfo("Breaking Bad", &[&e, &e], &["Piloto".into()]);
+        assert_eq!(x.matches("<episodedetails>").count(), 2);
+        assert!(x.contains("<title>Piloto</title>"));
+        assert!(x.contains("<title>Episódio 1</title>"));
+        assert!(x.contains("<director>Vince Gilligan</director>"));
+        assert!(x.contains("<type>GuestStar</type>"));
+        assert_eq!(season_poster(2), "season02-poster.jpg");
     }
 
     #[test]

@@ -53,7 +53,7 @@ optionally act only on the extension or on the full name.
 | Character at position | position N; optionally only if the current character is X (case-insensitive unless asked); replace with Y or delete |
 | Extension | set a new one; lowercase/uppercase; remove |
 | Movie (TMDB) | template with `{title}`, `{original}`, `{year}`, `{id}` (default `{title} ({year}) [tmdbid-{id}]`); what `:` becomes (default ` - `); a folder for each movie; save `.nfo` and poster (optionally fanart and logo) next to renamed videos. See 2.1 |
-| TV show (TMDB) | the show (name, TMDB id or link; empty: from the files); template with `{show}`, `{original}`, `{year}`, `{season}`, `{episode}`, `{title}`, `{id}` (default `{show} ({year}) - S{season}E{episode} - {title}`); what `:` becomes. See 2.2 |
+| TV show (TMDB) | the show (name, TMDB id or link; empty: from the files); template with `{show}`, `{original}`, `{year}`, `{season}`, `{episode}`, `{title}`, `{id}` (default `{show} ({year}) - S{season}E{episode} - {title}`); what `:` becomes; show and season folders (show folder template, default `{show} ({year}) [tmdbid-{id}]`); save `.nfo` files and images (optionally fanart and logo). See 2.2 |
 
 Positions count **visible characters** (Unicode graphemes), starting at 1.
 
@@ -168,6 +168,42 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
 - Names: two-digit season and episode; several episodes give `01-E02`;
   titles are joined with ` & `; titles are made safe like movie titles;
   a missing title or year leaves no dangling ` - ` or `()`.
+- "Show and season folders" moves each file with an episode (not
+  folders added as items) into `<root>/<show folder>/Season NN` (`Season
+  00` for specials). The root: the parent of the show's current folder,
+  when the file is in it or in a season folder inside it (a folder names
+  the show when it holds `tmdbid-<id>`, or its title, without year and
+  tags, has similarity ≥ 0.8 with the show's name or original name, or
+  starts with its words); else the parent of a loose season folder; else
+  the file's own folder. A file already there stays. The preview shows
+  `<show folder>/Season NN` before the new name; each folder name is
+  checked like a file name.
+- After any rename, the folders files were moved out of are deleted when
+  left empty, up to the folder the move happened within. Undo makes them
+  again when moving the files back.
+- With "save .nfo and images", renaming also writes, for renamed episode
+  videos and for unchanged ones with an episode (counted by the Rename
+  button and the confirmation, like movies):
+  - next to the video: `<name>.nfo` with one `<episodedetails>` per
+    episode in the file (title as in the name, showtitle, season,
+    episode, aired, premiered, plot, runtime, rating, votes, uniqueid
+    tmdb, director, writer, thumb, guest stars as `GuestStar`), and
+    `<name>-thumb.jpg` (the first episode's still);
+  - in the show's folder (the one the folders option made, or the
+    current show folder as above; none for loose files): `tvshow.nfo`
+    (title, originaltitle, showtitle, year, premiered, plot, tagline,
+    runtime, rating, votes, mpaa as for movies, status Continuing/Ended/
+    Unreleased, genre, tag, studio (networks, then companies), credits
+    (creators), trailer, tmdbid, imdb_id, tvdbid, uniqueid tmdb/imdb/tvdb,
+    episodeguide in Kodi 20's JSON form, 20 actors from the aggregate
+    credits), `poster.jpg`, `seasonNN-poster.jpg`
+    (`season-specials-poster.jpg`), and optionally `fanart.jpg` and
+    `logo.png`;
+  - in a season folder of the same season: `season.nfo` (title, plot,
+    premiered, releasedate, seasonnumber).
+  Show details and seasons are fetched once per batch. Existing files are
+  skipped; created ones are recorded in the rename's history entry (or an
+  entry of their own) and deleted by undo.
 - Only the show's name (or id) is sent to TMDB.
 
 ## 3. Preview

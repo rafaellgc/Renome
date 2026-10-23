@@ -407,25 +407,21 @@ pub struct Details {
     pub images: Images,
 }
 
-impl Details {
+impl Videos {
     /// The YouTube trailer, preferring the given language and official ones.
     pub fn trailer(&self, lang: &str) -> Option<&str> {
-        self.videos
-            .results
+        self.results
             .iter()
             .filter(|v| v.site == "YouTube" && v.kind == "Trailer" && !v.key.is_empty())
             .max_by_key(|v| (v.iso_639_1.as_deref() == Some(lang), v.official))
             .map(|v| v.key.as_str())
     }
+}
 
+impl Images {
     /// The title logo (PNG), in the given language, else English, else any.
     pub fn logo(&self, lang: &str) -> Option<&str> {
-        let png = || {
-            self.images
-                .logos
-                .iter()
-                .filter(|i| i.file_path.ends_with(".png"))
-        };
+        let png = || self.logos.iter().filter(|i| i.file_path.ends_with(".png"));
         png()
             .find(|i| i.iso_639_1.as_deref() == Some(lang))
             .or_else(|| png().find(|i| i.iso_639_1.as_deref() == Some("en")))
@@ -434,11 +430,81 @@ impl Details {
     }
 }
 
-fn xml(s: &str) -> String {
+impl Details {
+    pub fn trailer(&self, lang: &str) -> Option<&str> {
+        self.videos.trailer(lang)
+    }
+
+    pub fn logo(&self, lang: &str) -> Option<&str> {
+        self.images.logo(lang)
+    }
+}
+
+/// A trailer in the form Kodi and Jellyfin play.
+pub(crate) fn trailer_url(key: &str) -> String {
+    format!("plugin://plugin.video.youtube/play/?video_id={key}")
+}
+
+pub(crate) fn xml(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+/// Writes `<name>value</name>`, skipping empty values.
+pub(crate) fn tag(o: &mut String, name: &str, value: &str) {
+    if !value.is_empty() {
+        o.push_str(&format!("  <{name}>{}</{name}>\n", xml(value)));
+    }
+}
+
+/// A person (`<actor>`): Jellyfin reads each one's kind from `<type>`.
+pub(crate) fn person(
+    o: &mut String,
+    name: &str,
+    role: &str,
+    kind: &str,
+    order: usize,
+    photo: &Option<String>,
+) {
+    o.push_str(&format!("  <actor>\n    <name>{}</name>\n", xml(name)));
+    if !role.is_empty() {
+        o.push_str(&format!("    <role>{}</role>\n", xml(role)));
+    }
+    o.push_str(&format!(
+        "    <type>{kind}</type>\n    <order>{order}</order>\n"
+    ));
+    if let Some(p) = photo {
+        o.push_str(&format!("    <thumb>{IMAGE_BASE}{}</thumb>\n", xml(p)));
+    }
+    o.push_str("  </actor>\n");
+}
+
+/// Crew members with a job, once each.
+pub(crate) fn crew(all: &[Crew], pred: impl Fn(&Crew) -> bool) -> Vec<&Crew> {
+    let mut seen = HashSet::new();
+    all.iter()
+        .filter(|c| pred(c) && seen.insert(c.name.as_str()))
+        .collect()
+}
+
+/// The age rating in Jellyfin's TMDB form: `PG-13` in the US, `BR-12`
+/// elsewhere.
+pub(crate) fn rating_for(region: &str, cert: &str) -> String {
+    if cert.is_empty() {
+        String::new()
+    } else if region.eq_ignore_ascii_case("US") {
+        cert.to_string()
+    } else {
+        format!("{}-{cert}", region.to_uppercase())
+    }
+}
+
+pub(crate) fn number<T: PartialOrd + Default + ToString>(v: Option<T>) -> String {
+    v.filter(|x| *x > T::default())
+        .map(|x| x.to_string())
+        .unwrap_or_default()
 }
 
 /// The `.nfo` file (Kodi format, read by Jellyfin, Kodi and Emby), with
@@ -449,11 +515,6 @@ pub fn nfo(d: &Details, lang: &str) -> String {
     let (lang2, region) = lang.split_once('-').unwrap_or((lang, "US"));
     let mut o =
         String::from("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<movie>\n");
-    let tag = |o: &mut String, name: &str, value: &str| {
-        if !value.is_empty() {
-            o.push_str(&format!("  <{name}>{}</{name}>\n", xml(value)));
-        }
-    };
     let release = d.release_date.as_deref().unwrap_or_default();
     tag(&mut o, "title", &d.title);
     tag(&mut o, "originaltitle", &d.original_title);
@@ -468,14 +529,7 @@ pub fn nfo(d: &Details, lang: &str) -> String {
     tag(&mut o, "releasedate", release);
     tag(&mut o, "plot", d.overview.as_deref().unwrap_or_default());
     tag(&mut o, "tagline", d.tagline.as_deref().unwrap_or_default());
-    tag(
-        &mut o,
-        "runtime",
-        &d.runtime
-            .filter(|&r| r > 0)
-            .map(|r| r.to_string())
-            .unwrap_or_default(),
-    );
+    tag(&mut o, "runtime", &number(d.runtime));
     tag(
         &mut o,
         "rating",
@@ -484,28 +538,14 @@ pub fn nfo(d: &Details, lang: &str) -> String {
             .map(|v| format!("{v:.1}"))
             .unwrap_or_default(),
     );
-    tag(
-        &mut o,
-        "votes",
-        &d.vote_count
-            .filter(|&v| v > 0)
-            .map(|v| v.to_string())
-            .unwrap_or_default(),
-    );
-    // Same form as Jellyfin's own TMDB provider: "PG-13" in the US, "BR-12" elsewhere.
+    tag(&mut o, "votes", &number(d.vote_count));
     let cert = d
         .release_dates
         .results
         .iter()
         .find(|c| c.iso_3166_1.eq_ignore_ascii_case(region))
         .and_then(|c| c.release_dates.iter().find(|r| !r.certification.is_empty()))
-        .map(|r| {
-            if region.eq_ignore_ascii_case("US") {
-                r.certification.clone()
-            } else {
-                format!("{}-{}", region.to_uppercase(), r.certification)
-            }
-        })
+        .map(|r| rating_for(region, &r.certification))
         .unwrap_or_default();
     tag(&mut o, "mpaa", &cert);
     for g in &d.genres {
@@ -521,11 +561,7 @@ pub fn nfo(d: &Details, lang: &str) -> String {
         tag(&mut o, "studio", &s.name);
     }
     if let Some(key) = d.trailer(lang2) {
-        tag(
-            &mut o,
-            "trailer",
-            &format!("plugin://plugin.video.youtube/play/?video_id={key}"),
-        );
+        tag(&mut o, "trailer", &trailer_url(key));
     }
     if let Some(set) = &d.belongs_to_collection {
         o.push_str(&format!(
@@ -534,18 +570,10 @@ pub fn nfo(d: &Details, lang: &str) -> String {
             xml(&set.name)
         ));
     }
-    let crew = |pred: &dyn Fn(&Crew) -> bool| {
-        let mut seen = HashSet::new();
-        d.credits
-            .crew
-            .iter()
-            .filter(|c| pred(c) && seen.insert(c.name.as_str()))
-            .collect::<Vec<_>>()
-    };
-    for c in crew(&|c| c.job == "Director") {
+    for c in crew(&d.credits.crew, |c| c.job == "Director") {
         tag(&mut o, "director", &c.name);
     }
-    for c in crew(&|c| c.department == "Writing") {
+    for c in crew(&d.credits.crew, |c| c.department == "Writing") {
         tag(&mut o, "writer", &c.name);
     }
     tag(&mut o, "tmdbid", &d.id.to_string());
@@ -560,32 +588,17 @@ pub fn nfo(d: &Details, lang: &str) -> String {
             xml(imdb)
         ));
     }
-    // People: Jellyfin reads each one's kind from <type>.
-    let person = |o: &mut String,
-                  name: &str,
-                  role: &str,
-                  kind: &str,
-                  order: usize,
-                  photo: &Option<String>| {
-        o.push_str(&format!("  <actor>\n    <name>{}</name>\n", xml(name)));
-        if !role.is_empty() {
-            o.push_str(&format!("    <role>{}</role>\n", xml(role)));
-        }
-        o.push_str(&format!(
-            "    <type>{kind}</type>\n    <order>{order}</order>\n"
-        ));
-        if let Some(p) = photo {
-            o.push_str(&format!("    <thumb>{IMAGE_BASE}{}</thumb>\n", xml(p)));
-        }
-        o.push_str("  </actor>\n");
-    };
     for (i, a) in d.credits.cast.iter().take(20).enumerate() {
         person(&mut o, &a.name, &a.character, "Actor", i, &a.profile_path);
     }
-    for (i, c) in crew(&|c| c.job == "Producer").iter().take(5).enumerate() {
+    for (i, c) in crew(&d.credits.crew, |c| c.job == "Producer")
+        .iter()
+        .take(5)
+        .enumerate()
+    {
         person(&mut o, &c.name, "", "Producer", i, &c.profile_path);
     }
-    for (i, c) in crew(&|c| c.job == "Original Music Composer")
+    for (i, c) in crew(&d.credits.crew, |c| c.job == "Original Music Composer")
         .iter()
         .enumerate()
     {

@@ -27,7 +27,10 @@ export type Rule =
   | { type: "extension"; mode: "set" | "lower" | "upper" | "remove"; value: string }
   | { type: "rearrange"; separator: string; order: string; target: Target }
   | { type: "movie"; template: string; colon: string; sidecar: boolean; fanart: boolean; folder: boolean }
-  | { type: "series"; template: string; colon: string; show: string };
+  | {
+      type: "series"; template: string; colon: string; show: string;
+      folders: boolean; folderTemplate: string; sidecar: boolean; fanart: boolean;
+    };
 
 export type RuleType = Rule["type"];
 

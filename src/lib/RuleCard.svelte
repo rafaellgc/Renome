@@ -239,6 +239,14 @@
         <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
         <p class="hint mono">{t("seriesTemplateHint")}</p>
         <label class="colon">{t("colonLabel")} <input class="mono sep" bind:value={r.colon} spellcheck="false" /></label>
+        <label class="check"><input type="checkbox" bind:checked={r.folders} /> <span>{t("seriesFoldersLabel")}<small>{t("seriesFoldersHint")}</small></span></label>
+        {#if r.folders}
+          <label class="sub">{t("seriesFolderName")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
+        {/if}
+        <label class="check"><input type="checkbox" bind:checked={r.sidecar} /> <span>{t("seriesSidecarLabel")}<small>{t("seriesSidecarHint")}</small></span></label>
+        {#if r.sidecar}
+          <label class="check sub"><input type="checkbox" bind:checked={r.fanart} /> {t("fanartLabel")}</label>
+        {/if}
         {#if lookup?.show}<p class="hint">{t("seriesCurrent", { show: lookup.show })}</p>{/if}
         {@render actions(t("tvSearch"), "seriesSummary")}
       {/if}
@@ -342,7 +350,7 @@
   label.colon input { width: 90px; }
   label.check span { display: flex; flex-direction: column; }
   label.check small { color: var(--muted); font-size: 11px; }
-  label.check.sub { margin-left: 22px; }
+  label.sub { margin-left: 22px; }
   .movie-actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .parts { display: flex; flex-direction: column; gap: 3px; }
   .parts .hint { margin: 0 0 2px; }

@@ -1,6 +1,8 @@
 //! Renaming rules. Each [`Step`] is a rule that can be turned on or off;
 //! the [`Pipeline`] compiles the list and applies the rules in order.
 
+use std::path::PathBuf;
+
 use chrono::format::{Item, StrftimeItems};
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use regex::{NoExpand, Regex, RegexBuilder};
@@ -226,11 +228,36 @@ pub enum Rule {
         /// The show to look for, as typed (used by the app, not here).
         #[serde(default)]
         show: String,
+        /// Moves each file into `<show folder>/Season NN`.
+        #[serde(default)]
+        folders: bool,
+        /// Name of the show's folder, with the same keys as `template`.
+        #[serde(default = "show_folder")]
+        folder_template: String,
+        /// Write `.nfo` files and images (used by the app, not here).
+        #[serde(default)]
+        sidecar: bool,
+        /// Also backdrop and logo (used by the app, not here).
+        #[serde(default)]
+        fanart: bool,
     },
 }
 
 fn colon() -> String {
     " - ".into()
+}
+
+fn show_folder() -> String {
+    "{show} ({year}) [tmdbid-{id}]".into()
+}
+
+/// Where a rule moves a renamed file.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Move {
+    /// Into a folder named after its new name, in its current folder.
+    OwnFolder,
+    /// Into `root/folders…` (a show's folder and season folder).
+    Into { root: PathBuf, folders: Vec<String> },
 }
 
 /// A rule configuration error: index in the list, code
@@ -300,10 +327,10 @@ impl Pipeline {
         (stem, ext)
     }
 
-    /// Like [`run`](Self::run), plus whether the file goes into a folder
-    /// named after its new name (movie rule with "folder").
-    pub fn run_full(&self, ctx: &Ctx) -> (String, String, bool) {
-        let mut into_folder = false;
+    /// Like [`run`](Self::run), plus where a rule moves the file (movie
+    /// rule with "folder", series rule with "folders").
+    pub fn run_full(&self, ctx: &Ctx) -> (String, String, Option<Move>) {
+        let mut moved = None;
         let mut stem = ctx.file.stem.clone();
         let mut ext = ctx.file.ext.clone();
         for step in &self.steps {
@@ -325,8 +352,28 @@ impl Pipeline {
                     });
                 }
                 Compiled::Plain(rule) => {
-                    if let Rule::Movie { folder: true, .. } = rule {
-                        into_folder |= ctx.movie.is_some() && !ctx.file.is_dir;
+                    // Folders themselves are renamed in place.
+                    if !ctx.file.is_dir
+                        && let Rule::Movie { folder: true, .. } = rule
+                        && ctx.movie.is_some()
+                    {
+                        moved = Some(Move::OwnFolder);
+                    } else if !ctx.file.is_dir
+                        && let Rule::Series {
+                            folders: true,
+                            folder_template,
+                            colon,
+                            ..
+                        } = rule
+                        && let Some(m) = ctx.episode
+                    {
+                        moved = Some(Move::Into {
+                            root: tv::library_root(&ctx.file.dir, m),
+                            folders: vec![
+                                tv::episode_name(folder_template, m, colon),
+                                tv::season_folder(m.season),
+                            ],
+                        });
                     }
                     apply_plain(rule, &mut stem, &mut ext, ctx)
                 }
@@ -338,7 +385,7 @@ impl Pipeline {
                 ext.clear();
             }
         }
-        (stem, ext, into_folder)
+        (stem, ext, moved)
     }
 }
 

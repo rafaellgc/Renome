@@ -46,7 +46,7 @@
   let movies = $state<Record<string, MovieState>>({});
   /** Files in the movie review window; null when closed. */
   let review = $state<string[] | null>(null);
-  let tmdbProgress = $state<{ done: number; total: number; kind: "search" | "save" } | null>(null);
+  let tmdbProgress = $state<{ done: number; total: number; kind: "search" | "save" | "saveTv" } | null>(null);
   const movieRule = $derived(steps.find((s) => s.enabled && s.rule.type === "movie"));
   const movieMatches = $derived(
     Object.fromEntries(
@@ -99,6 +99,18 @@
     ),
   );
   const seriesCounts = $derived(counts(series));
+  /** Episodes whose names are already right but that still get metadata. */
+  const episodeMetaOnly = $derived(
+    seriesRule?.rule.type === "series" && seriesRule.rule.sidecar
+      ? preview.items.filter((i) => i.status === "unchanged" && episodeMatches[i.path] && isVideo(i.original))
+      : [],
+  );
+
+  /** What the metadata of an episode needs; `key` is the path before renaming. */
+  function tvSidecarItem(key: string, path: string) {
+    const m = episodeMatches[key];
+    return { path, id: m.id, season: m.season, episodes: m.episodes, titles: m.titles };
+  }
 
   /** The ✓ ? ✕ marks next to the new names. */
   const matches = $derived.by(() => {
@@ -305,11 +317,12 @@
     clearTimeout(timer);
     await refresh();
     const meta = metaOnly.map((i) => ({ path: i.path, id: movies[i.path].choice!.id }));
-    if (!preview.changed && !meta.length) return;
+    const tvMeta = episodeMetaOnly.map((i) => tvSidecarItem(i.path, i.path));
+    if (!preview.changed && !meta.length && !tvMeta.length) return;
     if (settings.confirmApply) {
       const lines = [
         preview.changed ? t("confirmText", { n: preview.changed }) : "",
-        meta.length ? t("confirmMeta", { n: meta.length }) : "",
+        meta.length + tvMeta.length ? t("confirmMeta", { n: meta.length + tvMeta.length }) : "",
         preview.conflicts ? t("confirmConflicts", { n: preview.conflicts }) : "",
       ].filter(Boolean);
       const ok = await confirm({
@@ -332,7 +345,23 @@
           .filter((op) => movies[op.from]?.choice && isVideo(op.to))
           .map((op) => ({ path: op.to, id: movies[op.from].choice!.id }))
           .concat(meta);
-        if (items.length) saved = await saveSidecars(r.historyId, items, rule.fanart, rule.folder);
+        if (items.length) {
+          tmdbProgress = { done: 0, total: items.length, kind: "save" };
+          saved += await writeMeta(() => api.writeSidecars(settings.tmdbKey, tmdbLang(), r.historyId, items, rule.fanart, rule.folder));
+        }
+      }
+      const srule = seriesRule?.rule;
+      if (srule?.type === "series" && srule.sidecar) {
+        const items = r.done
+          .filter((op) => episodeMatches[op.from] && isVideo(op.to))
+          .map((op) => tvSidecarItem(op.from, op.to))
+          .concat(tvMeta);
+        if (items.length) {
+          tmdbProgress = { done: 0, total: items.length, kind: "saveTv" };
+          saved += await writeMeta(() =>
+            api.writeTvSidecars(settings.tmdbKey, tmdbLang(), r.historyId, items, srule.fanart, srule.folders),
+          );
+        }
       }
       followMatches(r);
       if (settings.disableRulesAfterApply) for (const s of steps) s.enabled = false;
@@ -559,16 +588,11 @@
     }
   }
 
-  /** Writes .nfo and images next to renamed movies (undone with the rename). */
-  async function saveSidecars(
-    historyId: string | null,
-    items: { path: string; id: number }[],
-    fanart: boolean,
-    inFolder: boolean,
-  ): Promise<number> {
-    tmdbProgress = { done: 0, total: items.length, kind: "save" };
+  /** Writes .nfo files and images (undone with the rename); tmdbProgress
+   *  must be set. Returns how many files were created. */
+  async function writeMeta(write: () => Promise<{ created: string[]; errors: [string, string][] }>): Promise<number> {
     try {
-      const res = await api.writeSidecars(settings.tmdbKey, tmdbLang(), historyId, items, fanart, inFolder);
+      const res = await write();
       if (res.errors.length) {
         await notify({
           title: t("sidecarsTitle"),
@@ -769,8 +793,8 @@
           <path fill="currentColor" fill-rule="evenodd" stroke="currentColor" stroke-width="1" stroke-linejoin="round" d="M12.15 3.76L11.96 1.50L8.04 1.50L7.85 3.76L5.67 5.02L3.62 4.05L1.66 7.45L3.52 8.74L3.52 11.26L1.66 12.55L3.62 15.95L5.67 14.98L7.85 16.24L8.04 18.50L11.96 18.50L12.15 16.24L14.33 14.98L16.38 15.95L18.34 12.55L16.48 11.26L16.48 8.74L18.34 7.45L16.38 4.05L14.33 5.02ZM13 10a3 3 0 1 0-6 0a3 3 0 1 0 6 0Z" />
         </svg>
       </button>
-      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !metaOnly.length) || busy} onclick={applyAll}>
-        {t("rename")} {preview.changed + metaOnly.length || ""}
+      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !metaOnly.length && !episodeMetaOnly.length) || busy} onclick={applyAll}>
+        {t("rename")} {preview.changed + metaOnly.length + episodeMetaOnly.length || ""}
       </button>
     </div>
   </header>
@@ -805,7 +829,7 @@
             lookup={step.rule.type === "movie"
               ? {
                   ...movieCounts,
-                  progress: tmdbProgress
+                  progress: tmdbProgress && tmdbProgress.kind !== "saveTv"
                     ? t(tmdbProgress.kind === "search" ? "tmdbSearching" : "sidecarsWriting", tmdbProgress)
                     : null,
                   onsearch: searchMovies,
@@ -815,7 +839,7 @@
                 ? {
                     ...seriesCounts,
                     show: pickedShow ? `${pickedShow.show.title}${pickedShow.show.year ? ` (${pickedShow.show.year})` : ""}` : null,
-                    progress: tvProgress,
+                    progress: tvProgress ?? (tmdbProgress?.kind === "saveTv" ? t("sidecarsWriting", tmdbProgress) : null),
                     onsearch: () => searchSeries(step.rule as Extract<Rule, { type: "series" }>),
                     onreview: () => openEpisodeReview(),
                   }

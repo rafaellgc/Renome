@@ -11,6 +11,11 @@ const MOVIE_TEMPLATE = {
   en: "{title} ({year}) [tmdbid-{id}]",
   es: "{título} ({año}) [tmdbid-{id}]",
 } as const;
+const SHOW_FOLDER = {
+  pt: "{série} ({ano}) [tmdbid-{id}]",
+  en: "{show} ({year}) [tmdbid-{id}]",
+  es: "{serie} ({año}) [tmdbid-{id}]",
+} as const;
 const SERIES_TEMPLATE = {
   pt: "{série} ({ano}) - S{temporada}E{episódio} - {título}",
   en: "{show} ({year}) - S{season}E{episode} - {title}",
@@ -46,7 +51,10 @@ export function newRule(type: RuleType): Rule {
     case "movie":
       return { type, template: MOVIE_TEMPLATE[settings.lang], colon: " - ", sidecar: false, fanart: false, folder: false };
     case "series":
-      return { type, template: SERIES_TEMPLATE[settings.lang], colon: " - ", show: "" };
+      return {
+        type, template: SERIES_TEMPLATE[settings.lang], colon: " - ", show: "",
+        folders: false, folderTemplate: SHOW_FOLDER[settings.lang], sidecar: false, fanart: false,
+      };
   }
 }
 

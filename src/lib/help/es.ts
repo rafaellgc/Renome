@@ -286,6 +286,16 @@ ${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...Y
   <li>Los subtítulos conservan el idioma al final del nombre: <code>….pt-BR.srt</code>.</li>
   <li>Los archivos que no están en la serie elegida quedan como están. Para varias series, filtre la lista y busque una por vez: cada archivo guarda la suya.</li>
 </ul>
+<h4>Carpetas de la serie y la temporada</h4>
+<p>Con <b>Organizar en carpetas de la serie y la temporada</b>, cada episodio va a la estructura que recomienda Jellyfin: <code>Series/Breaking Bad (2008) [tmdbid-1396]/Season 01/…</code>. La carpeta de la serie se crea junto a la carpeta donde ya está la serie (si los archivos están en <code>Breaking Bad/Season 1</code>, la nueva carpeta queda junto a <code>Breaking Bad</code>, no dentro); con archivos sueltos, dentro de su carpeta. El nombre de la carpeta de la serie tiene su propia plantilla, con las mismas variables (predeterminada <code>{serie} ({año}) [tmdbid-{id}]</code>; use <code>{original}</code> para el nombre original). Las carpetas antiguas que quedan vacías se borran; las que aún tienen otros archivos se quedan. <b>Deshacer</b> lo devuelve todo a su sitio y vuelve a crear las carpetas antiguas.</p>
+<h4>Metadatos (.nfo e imágenes)</h4>
+<p>Con <b>Guardar .nfo e imágenes para Jellyfin</b>, al renombrar el programa crea:</p>
+<ul>
+  <li>en la <b>carpeta de la serie</b>: <code>tvshow.nfo</code> (título, título original, año, sinopsis, estado, duración, nota, clasificación por edad, géneros, palabras clave, cadenas y estudios, creadores, tráiler, reparto con personajes y los ID de TMDB, IMDb y TVDB), <code>poster.jpg</code> y el póster de cada temporada (<code>season01-poster.jpg</code>); opcionalmente <code>fanart.jpg</code> y <code>logo.png</code>;</li>
+  <li>en la <b>carpeta de la temporada</b>: <code>season.nfo</code>, con el nombre y la sinopsis de la temporada;</li>
+  <li>junto a <b>cada episodio</b>: <code>….nfo</code> (título, temporada y número, fecha de emisión, sinopsis, duración, nota, dirección, guion y actores invitados) y la miniatura <code>…-thumb.jpg</code>.</li>
+</ul>
+<p>Los archivos de la serie y la temporada solo se crean cuando los episodios están en una carpeta de la serie (con su nombre o con <code>[tmdbid-…]</code>), la de antes o la que crea la opción de carpetas. Los episodios que ya tienen el nombre correcto también reciben los metadatos. Los archivos que ya existen no se reemplazan, y deshacer borra lo creado.</p>
 <p class="tip">Solo se envía a TMDB el nombre de la serie, nunca los nombres de los archivos ni las carpetas.</p>`,
   },
   {

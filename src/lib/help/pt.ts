@@ -286,6 +286,16 @@ ${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...E
   <li>Legendas mantêm o idioma no fim do nome: <code>….pt-BR.srt</code>.</li>
   <li>Os arquivos que não estão na série escolhida ficam como estão. Para várias séries, filtre a lista e busque uma de cada vez: cada arquivo guarda a sua.</li>
 </ul>
+<h4>Pastas da série e da temporada</h4>
+<p>Com <b>Organizar em pastas da série e da temporada</b>, cada episódio vai para a estrutura que o Jellyfin recomenda: <code>Séries/Breaking Bad (2008) [tmdbid-1396]/Season 01/…</code>. A pasta da série é criada ao lado da pasta onde a série já está (se os arquivos estão em <code>Breaking Bad/Season 1</code>, a nova pasta fica ao lado de <code>Breaking Bad</code>, não dentro dela); com os arquivos soltos, dentro da pasta deles. O nome da pasta da série tem o próprio modelo, com as mesmas variáveis (padrão <code>{série} ({ano}) [tmdbid-{id}]</code>; use <code>{original}</code> para o nome original). As pastas antigas que ficarem vazias são apagadas; as que ainda têm outros arquivos ficam. <b>Desfazer</b> devolve tudo ao lugar, recriando as pastas antigas.</p>
+<h4>Metadados (.nfo e imagens)</h4>
+<p>Com <b>Salvar .nfo e imagens para o Jellyfin</b>, ao renomear o programa cria:</p>
+<ul>
+  <li>na <b>pasta da série</b>: <code>tvshow.nfo</code> (título, título original, ano, sinopse, situação, duração, nota, classificação indicativa, gêneros, palavras-chave, emissoras e estúdios, criadores, trailer, elenco com personagens e os IDs do TMDB, IMDb e TVDB), <code>poster.jpg</code> e o pôster de cada temporada (<code>season01-poster.jpg</code>); opcionalmente <code>fanart.jpg</code> e <code>logo.png</code>;</li>
+  <li>na <b>pasta da temporada</b>: <code>season.nfo</code>, com o nome e a sinopse da temporada;</li>
+  <li>ao lado de <b>cada episódio</b>: <code>….nfo</code> (título, temporada e número, data de exibição, sinopse, duração, nota, direção, roteiro e atores convidados) e a miniatura <code>…-thumb.jpg</code>.</li>
+</ul>
+<p>Os arquivos da série e da temporada só são criados quando os episódios estão numa pasta da série (com o nome dela, ou com <code>[tmdbid-…]</code>), seja a de antes, seja a criada pela opção de pastas. Episódios que já têm o nome certo também recebem os metadados. Arquivos que já existem não são substituídos, e desfazer apaga o que foi criado.</p>
 <p class="tip">Só o nome da série é enviado ao TMDB, nunca o nome dos arquivos nem as pastas.</p>`,
   },
   {

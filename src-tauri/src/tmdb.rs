@@ -8,7 +8,10 @@ use std::path::{Path, PathBuf};
 use futures_util::{StreamExt, stream};
 use renome_core::files::split_name;
 use renome_core::tmdb::{self, Candidate, Details, Guess, SearchResult};
-use renome_core::tv::{self, ApiEpisode, EpisodeLookup, Show, ShowQuery, TvDetails, TvResult};
+use renome_core::tv::{
+    self, ApiEpisode, EpisodeDetails, EpisodeLookup, EpisodeMatch, SeasonFull, Show, ShowDetails,
+    ShowQuery, TvDetails, TvResult,
+};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
@@ -230,6 +233,30 @@ impl Client {
             }
         }
         Ok(tv::build_show(&base, &by_lang))
+    }
+
+    /// A show's details for its `.nfo`.
+    pub async fn show_details(&self, id: u64) -> Result<ShowDetails, String> {
+        self.get(
+            &format!("/tv/{id}"),
+            &[
+                (
+                    "append_to_response",
+                    "aggregate_credits,content_ratings,keywords,external_ids,videos,images",
+                ),
+                ("include_video_language", &format!("{},en", self.lang2())),
+                (
+                    "include_image_language",
+                    &format!("{},en,null", self.lang2()),
+                ),
+            ],
+        )
+        .await
+    }
+
+    /// A season with its episodes' details.
+    pub async fn season(&self, id: u64, season: u16) -> Result<SeasonFull, String> {
+        self.get(&format!("/tv/{id}/season/{season}"), &[]).await
     }
 
     async fn image(&self, path: &str) -> Result<Vec<u8>, String> {
@@ -525,6 +552,178 @@ pub async fn sidecars(
     while let Some((created, errors)) = tasks.next().await {
         report.created.extend(created);
         report.errors.extend(errors);
+        done += 1;
+        let _ = app.emit("tmdb-progress", Progress { done, total });
+    }
+    report
+}
+
+#[derive(Deserialize)]
+pub struct TvSidecarItem {
+    /// The renamed video.
+    path: PathBuf,
+    /// The show.
+    id: u64,
+    season: u16,
+    episodes: Vec<u16>,
+    /// The titles used in the name.
+    titles: Vec<String>,
+}
+
+/// What goes into a metadata file.
+enum Source {
+    Text(String),
+    Image(String),
+}
+
+/// Writes, for each renamed episode, its `.nfo` and thumbnail; and in the
+/// show's folder (when there is one), `tvshow.nfo`, poster, the season's
+/// poster and optionally backdrop and logo; `season.nfo` in a season
+/// folder. `folders`: the files were just moved into `Show/Season NN`.
+/// Existing files are never overwritten.
+pub async fn tv_sidecars(
+    app: &AppHandle,
+    client: &Client,
+    items: Vec<TvSidecarItem>,
+    fanart: bool,
+    folders: bool,
+) -> SidecarReport {
+    let mut report = SidecarReport::default();
+    let name = |p: &Path| {
+        p.file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned()
+    };
+
+    // Everything to fetch, once.
+    let mut ids: Vec<u64> = items.iter().map(|i| i.id).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let mut seasons: Vec<(u64, u16)> = items.iter().map(|i| (i.id, i.season)).collect();
+    seasons.sort_unstable();
+    seasons.dedup();
+    let _ = app.emit(
+        "tmdb-progress",
+        Progress {
+            done: 0,
+            total: items.len(),
+        },
+    );
+    let shows: HashMap<u64, Result<ShowDetails, String>> = stream::iter(ids)
+        .map(|id| async move { (id, client.show_details(id).await) })
+        .buffer_unordered(4)
+        .collect()
+        .await;
+    let fetched: HashMap<(u64, u16), Result<SeasonFull, String>> = stream::iter(seasons)
+        .map(|(id, n)| async move { ((id, n), client.season(id, n).await) })
+        .buffer_unordered(4)
+        .collect()
+        .await;
+
+    let mut jobs: Vec<(PathBuf, Source)> = Vec::new();
+    let mut add = |path: PathBuf, source: Source| {
+        if std::fs::symlink_metadata(&path).is_err() && !jobs.iter().any(|(p, _)| *p == path) {
+            jobs.push((path, source));
+        }
+    };
+    for item in &items {
+        let show = match shows.get(&item.id) {
+            Some(Ok(d)) => d,
+            Some(Err(e)) => {
+                report.errors.push((name(&item.path), e.clone()));
+                continue;
+            }
+            None => continue,
+        };
+        let season = match fetched.get(&(item.id, item.season)) {
+            Some(Ok(s)) => s,
+            Some(Err(e)) => {
+                report.errors.push((name(&item.path), e.clone()));
+                continue;
+            }
+            None => continue,
+        };
+        let episodes: Vec<&EpisodeDetails> = item
+            .episodes
+            .iter()
+            .filter_map(|&n| season.episodes.iter().find(|e| e.episode_number == n))
+            .collect();
+        if !episodes.is_empty() {
+            add(
+                sibling(&item.path, ".nfo"),
+                Source::Text(tv::episode_nfo(&show.name, &episodes, &item.titles)),
+            );
+            if let Some(p) = &episodes[0].still_path {
+                add(sibling(&item.path, "-thumb.jpg"), Source::Image(p.clone()));
+            }
+        }
+
+        let dir = item.path.parent().unwrap_or(Path::new(""));
+        let in_season = tv::folder_season(&name(dir)) == Some(item.season);
+        let m = EpisodeMatch {
+            id: show.id,
+            show: show.name.clone(),
+            original_show: show.original_name.clone(),
+            year: None,
+            season: item.season,
+            episodes: item.episodes.clone(),
+            titles: Vec::new(),
+        };
+        let show_dir = if folders {
+            dir.parent().map(Path::to_path_buf)
+        } else {
+            tv::show_dir(dir, &m)
+        };
+        let summary = show.seasons.iter().find(|s| s.season_number == item.season);
+        if in_season && let Some(s) = summary {
+            add(dir.join("season.nfo"), Source::Text(tv::season_nfo(s)));
+        }
+        let Some(show_dir) = show_dir else { continue };
+        add(
+            show_dir.join("tvshow.nfo"),
+            Source::Text(tv::show_nfo(show, &client.lang)),
+        );
+        if let Some(p) = &show.poster_path {
+            add(show_dir.join("poster.jpg"), Source::Image(p.clone()));
+        }
+        if let Some(p) = summary
+            .and_then(|s| s.poster_path.clone())
+            .or(season.poster_path.clone())
+        {
+            add(
+                show_dir.join(tv::season_poster(item.season)),
+                Source::Image(p),
+            );
+        }
+        if fanart {
+            if let Some(p) = &show.backdrop_path {
+                add(show_dir.join("fanart.jpg"), Source::Image(p.clone()));
+            }
+            if let Some(p) = show.images.logo(client.lang2()) {
+                add(show_dir.join("logo.png"), Source::Image(p.to_string()));
+            }
+        }
+    }
+
+    let total = jobs.len();
+    let _ = app.emit("tmdb-progress", Progress { done: 0, total });
+    let mut tasks = stream::iter(jobs)
+        .map(|(path, source)| async move {
+            let data = match source {
+                Source::Text(t) => Ok(t.into_bytes()),
+                Source::Image(p) => client.image(&p).await,
+            };
+            let r = data.and_then(|bytes| write_new(&path, &bytes));
+            (path, r)
+        })
+        .buffer_unordered(4);
+    let mut done = 0;
+    while let Some((path, r)) = tasks.next().await {
+        match r {
+            Ok(()) => report.created.push(path),
+            Err(e) => report.errors.push((name(&path), e)),
+        }
         done += 1;
         let _ = app.emit("tmdb-progress", Progress { done, total });
     }

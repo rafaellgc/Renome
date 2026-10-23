@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::apply::Operation;
 use crate::files::{FileEntry, join_name, natural_cmp};
 use crate::filter::Filter;
-use crate::rules::{Ctx, Pipeline, RuleError, Step};
+use crate::rules::{Ctx, Move, Pipeline, RuleError, Step};
 use crate::tmdb::MovieMatch;
 use crate::tv::EpisodeMatch;
 
@@ -68,8 +68,12 @@ pub struct PreviewItem {
     pub is_dir: bool,
     pub original: String,
     pub new_name: String,
-    /// Folder (inside `dir`) the file moves into, named after its new name.
+    /// Folder the file moves into (`Show (2008)/Season 01`), shown to the
+    /// user; it is inside `dest`'s root, not always inside `dir`.
     pub folder: Option<String>,
+    /// The folder the file ends up in, when it moves.
+    #[serde(skip)]
+    pub dest: Option<PathBuf>,
     pub status: Status,
     pub problem: Option<Problem>,
     /// Non-blocking warning: contains characters Windows does not accept.
@@ -92,10 +96,7 @@ pub struct Preview {
 impl PreviewItem {
     /// Where the file ends up.
     pub fn target(&self) -> PathBuf {
-        match &self.folder {
-            Some(f) => self.dir.join(f).join(&self.new_name),
-            None => self.dir.join(&self.new_name),
-        }
+        self.dest.as_ref().unwrap_or(&self.dir).join(&self.new_name)
     }
 }
 
@@ -190,7 +191,8 @@ pub fn preview(
             // The rules emptied the name but left the extension: `.txt` would
             // be a hidden file with no name.
             let mut empty_stem = false;
-            let mut folder = None;
+            let mut folders: Vec<String> = Vec::new();
+            let mut dest = None;
             let (new_name, manual) = match overrides.get(&file.path) {
                 Some(name) => (name.clone(), true),
                 None => {
@@ -202,15 +204,23 @@ pub fn preview(
                         movie: view.movies.get(&file.path),
                         episode: view.episodes.get(&file.path),
                     };
-                    let (stem, ext, into_folder) = pipeline.run_full(&ctx);
+                    let (stem, ext, moved) = pipeline.run_full(&ctx);
                     empty_stem = stem.is_empty() && !file.stem.is_empty();
-                    // Already in a folder with that name: stay there.
+                    // A movie already in a folder with its name stays there.
                     let inside = file
                         .dir
                         .file_name()
                         .is_some_and(|d| d.to_string_lossy() == stem);
-                    if into_folder && !inside {
-                        folder = Some(stem.clone());
+                    let (root, names) = match moved {
+                        Some(Move::OwnFolder) if !inside => (file.dir.clone(), vec![stem.clone()]),
+                        Some(Move::Into { root, folders }) => (root, folders),
+                        _ => (file.dir.clone(), Vec::new()),
+                    };
+                    let to = names.iter().fold(root, |p, n| p.join(n));
+                    // Already in that folder: stay there.
+                    if to != file.dir {
+                        folders = names;
+                        dest = Some(to);
                     }
                     (join_name(&stem, &ext), false)
                 }
@@ -218,11 +228,12 @@ pub fn preview(
             let problem = if empty_stem {
                 Some(Problem::Empty)
             } else {
-                validate(&new_name).or_else(|| folder.as_deref().and_then(validate))
+                validate(&new_name).or_else(|| folders.iter().find_map(|f| validate(f)))
             };
+            let folder = (!folders.is_empty()).then(|| folders.join("/"));
             let status = if problem.is_some() {
                 Status::Conflict
-            } else if new_name == original && folder.is_none() {
+            } else if new_name == original && dest.is_none() {
                 Status::Unchanged
             } else {
                 Status::Ok
@@ -237,6 +248,7 @@ pub fn preview(
                 original,
                 new_name,
                 folder,
+                dest,
                 status,
                 problem,
                 windows_unsafe,
@@ -537,6 +549,10 @@ mod tests {
                 template: "{show} - S{season}E{episode} - {title}".into(),
                 colon: " - ".into(),
                 show: String::new(),
+                folders: false,
+                folder_template: String::new(),
+                sidecar: false,
+                fanart: false,
             },
         }];
         let files = entries(d.path(), &["show.s01e02.mkv", "show.s01e02.pt-BR.srt"]);
@@ -552,6 +568,47 @@ mod tests {
                 "Show - S01E02 - Title.mkv",
                 "Show - S01E02 - Title.pt-BR.srt"
             ]
+        );
+    }
+
+    #[test]
+    fn episodes_into_show_folders() {
+        let d = tempfile::tempdir().unwrap();
+        let old = d.path().join("Show/Season 1");
+        fs::create_dir_all(&old).unwrap();
+        let m = EpisodeMatch {
+            id: 7,
+            show: "Show".into(),
+            original_show: String::new(),
+            year: Some(2010),
+            season: 1,
+            episodes: vec![2],
+            titles: vec!["Title".into()],
+        };
+        let steps = vec![Step {
+            enabled: true,
+            rule: Rule::Series {
+                template: "{show} - S{season}E{episode}".into(),
+                colon: " - ".into(),
+                show: String::new(),
+                folders: true,
+                folder_template: "{show} ({year}) [tmdbid-{id}]".into(),
+                sidecar: false,
+                fanart: false,
+            },
+        }];
+        let files = entries(&old, &["show.s01e02.mkv"]);
+        let mut view = View::default();
+        view.episodes.insert(files[0].path.clone(), m);
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        assert_eq!(
+            p.items[0].folder.as_deref(),
+            Some("Show (2010) [tmdbid-7]/Season 01")
+        );
+        assert_eq!(
+            p.operations()[0].to,
+            d.path()
+                .join("Show (2010) [tmdbid-7]/Season 01/Show - S01E02.mkv")
         );
     }
 

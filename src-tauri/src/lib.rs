@@ -280,6 +280,25 @@ async fn tv_lookup(
     tmdb::lookup_episodes(&tmdb::Client::new(&key, &lang), id, items).await
 }
 
+/// Records created metadata files in the rename's history entry, so undo
+/// deletes them; without a rename (names already right), in an entry of
+/// their own.
+fn record_created(app: &AppHandle, history_id: Option<String>, report: &mut tmdb::SidecarReport) {
+    if report.created.is_empty() {
+        return;
+    }
+    let history = &app.state::<AppState>().history;
+    let saved = match history_id {
+        Some(id) => history.add_created(&id, &report.created),
+        None => history.record_files(&report.created).map(|_| ()),
+    };
+    if let Err(e) = saved {
+        report
+            .errors
+            .push((String::new(), format!("err.history: {e}")));
+    }
+}
+
 /// Writes `.nfo` and images next to renamed movies and records them in the
 /// rename's history entry, so undo deletes them.
 #[tauri::command]
@@ -294,19 +313,25 @@ async fn write_sidecars(
 ) -> Result<tmdb::SidecarReport, String> {
     let client = tmdb::Client::new(&key, &lang);
     let mut report = tmdb::sidecars(&app, &client, items, fanart, in_folder).await;
-    if !report.created.is_empty() {
-        let history = &app.state::<AppState>().history;
-        // Without a rename (names already right), a history entry of its own.
-        let saved = match history_id {
-            Some(id) => history.add_created(&id, &report.created),
-            None => history.record_files(&report.created).map(|_| ()),
-        };
-        if let Err(e) = saved {
-            report
-                .errors
-                .push((String::new(), format!("err.history: {e}")));
-        }
-    }
+    record_created(&app, history_id, &mut report);
+    Ok(report)
+}
+
+/// Writes `.nfo` files and images for renamed episodes and their show, and
+/// records them like `write_sidecars`.
+#[tauri::command]
+async fn write_tv_sidecars(
+    app: AppHandle,
+    key: String,
+    lang: String,
+    history_id: Option<String>,
+    items: Vec<tmdb::TvSidecarItem>,
+    fanart: bool,
+    folders: bool,
+) -> Result<tmdb::SidecarReport, String> {
+    let client = tmdb::Client::new(&key, &lang);
+    let mut report = tmdb::tv_sidecars(&app, &client, items, fanart, folders).await;
+    record_created(&app, history_id, &mut report);
     Ok(report)
 }
 
@@ -465,6 +490,7 @@ pub fn run() {
             tv_search,
             tv_lookup,
             write_sidecars,
+            write_tv_sidecars,
             apply,
             history,
             undo,

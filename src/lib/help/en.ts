@@ -286,6 +286,16 @@ ${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...A
   <li>Subtitles keep their language at the end of the name: <code>….pt-BR.srt</code>.</li>
   <li>Files not in the chosen show are left as they are. For several shows, filter the list and search one at a time: each file keeps its own.</li>
 </ul>
+<h4>Show and season folders</h4>
+<p>With <b>Organize into show and season folders</b>, each episode goes into the structure Jellyfin recommends: <code>Shows/Breaking Bad (2008) [tmdbid-1396]/Season 01/…</code>. The show's folder is created next to the folder the show is already in (if the files are in <code>Breaking Bad/Season 1</code>, the new folder goes next to <code>Breaking Bad</code>, not inside it); with loose files, inside their folder. The show folder's name has its own template, with the same keys (default <code>{show} ({year}) [tmdbid-{id}]</code>; use <code>{original}</code> for the original name). Old folders left empty are deleted; those that still hold other files stay. <b>Undo</b> puts everything back, making the old folders again.</p>
+<h4>Metadata (.nfo and images)</h4>
+<p>With <b>Save .nfo and images for Jellyfin</b>, renaming also creates:</p>
+<ul>
+  <li>in the <b>show's folder</b>: <code>tvshow.nfo</code> (title, original title, year, overview, status, runtime, rating, age rating, genres, keywords, networks and studios, creators, trailer, cast with characters, and the TMDB, IMDb and TVDB ids), <code>poster.jpg</code> and each season's poster (<code>season01-poster.jpg</code>); optionally <code>fanart.jpg</code> and <code>logo.png</code>;</li>
+  <li>in the <b>season's folder</b>: <code>season.nfo</code>, with the season's name and overview;</li>
+  <li>next to <b>each episode</b>: <code>….nfo</code> (title, season and number, air date, overview, runtime, rating, directors, writers and guest stars) and the thumbnail <code>…-thumb.jpg</code>.</li>
+</ul>
+<p>The show and season files are only created when the episodes are in a show folder (named after it, or with <code>[tmdbid-…]</code>), the one from before or the one the folders option makes. Episodes whose names are already right get the metadata too. Existing files are never replaced, and undo deletes what was created.</p>
 <p class="tip">Only the show's name is sent to TMDB, never file names or folders.</p>`,
   },
   {

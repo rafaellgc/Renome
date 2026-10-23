@@ -170,6 +170,22 @@ fn make_parent(to: &Path, report: &mut ApplyReport) -> std::io::Result<Vec<PathB
     Ok(made)
 }
 
+/// Removes the folders files were moved out of when nothing is left in
+/// them (`Show/Season 1` after the episodes went to `Show (2008)/Season
+/// 01`), up to the folder the move happened within. Undo makes them again
+/// when moving the files back.
+fn remove_emptied(done: &[Operation]) {
+    for op in done {
+        let mut dir = op.from.parent();
+        while let Some(d) = dir {
+            if d.as_os_str().is_empty() || op.to.starts_with(d) || fs::remove_dir(d).is_err() {
+                break;
+            }
+            dir = d.parent();
+        }
+    }
+}
+
 /// Maps an OS error to a kind the UI can translate; only unknown errors keep
 /// the OS message (without the "(os error N)" suffix).
 fn io_kind(e: &std::io::Error) -> (ErrorKind, String) {
@@ -259,6 +275,7 @@ impl History {
     /// Runs and records in the history.
     pub fn apply(&self, ops: &[Operation]) -> ApplyReport {
         let mut report = execute(ops, Depth::DeepestFirst);
+        remove_emptied(&report.done);
         if !report.done.is_empty() {
             let created = Local::now();
             let id = format!(
@@ -507,6 +524,29 @@ mod tests {
         h.undo(&id).unwrap();
         assert_eq!(read(p.join("m.mkv")), "M");
         assert!(!p.join("Movie").exists());
+    }
+
+    #[test]
+    fn emptied_folders_go_and_come_back() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        fs::create_dir_all(p.join("Show/Season 1")).unwrap();
+        fs::create_dir_all(p.join("Other")).unwrap();
+        fs::write(p.join("Show/Season 1/e1.mkv"), "1").unwrap();
+        fs::write(p.join("Other/keep.txt"), "k").unwrap();
+        fs::write(p.join("Other/e2.mkv"), "2").unwrap();
+        let h = History::new(p.join("h"));
+        let r = h.apply(&[
+            op(p, "Show/Season 1/e1.mkv", "New/Season 01/e1.mkv"),
+            op(p, "Other/e2.mkv", "New/Season 01/e2.mkv"),
+        ]);
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        assert!(!p.join("Show").exists());
+        assert!(p.join("Other/keep.txt").exists());
+        h.undo(&r.history_id.unwrap()).unwrap();
+        assert_eq!(read(p.join("Show/Season 1/e1.mkv")), "1");
+        assert_eq!(read(p.join("Other/e2.mkv")), "2");
+        assert!(!p.join("New").exists());
     }
 
     #[test]
