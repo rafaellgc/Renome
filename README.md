@@ -130,9 +130,8 @@ The given paths go into the initial list.
 
 ## Credits
 
-Created by Rafael Luciano Gonçalves Correia
-([rafaellgcorreia@gmail.com](mailto:rafaellgcorreia@gmail.com)), developed
-with the help of Claude (Anthropic).
+Created by Rafael Luciano Gonçalves Correia, developed with the help of
+Claude (Anthropic).
 
 ## License
 
