@@ -7,8 +7,33 @@
   import { pt } from "./help/pt";
   import { t } from "./i18n";
   import { settings } from "./settings.svelte";
+  import appLicense from "../../LICENSE?raw";
 
-  let { onclose, tab = $bindable("manual") }: { onclose: () => void; tab?: "manual" | "about" } = $props();
+  type Tab = "manual" | "about" | "licenses";
+  let { onclose, tab = $bindable("manual") }: { onclose: () => void; tab?: Tab } = $props();
+
+  /** Written by scripts/licenses.js when building. */
+  interface Licenses {
+    packages: { name: string; version: string; license: string; url: string; kind: "rust" | "npm"; texts: number[] }[];
+    texts: string[];
+  }
+  /** null: loading; false: not there (development build). */
+  let licenses = $state<Licenses | null | false>(null);
+  let licenseQuery = $state("");
+  let expanded = $state<string | null>(null);
+  const shownPackages = $derived.by(() => {
+    if (!licenses) return [];
+    const q = licenseQuery.trim().toLowerCase();
+    return q ? licenses.packages.filter((p) => `${p.name} ${p.license}`.toLowerCase().includes(q)) : licenses.packages;
+  });
+
+  $effect(() => {
+    if (tab !== "licenses" || licenses !== null) return;
+    fetch("/licenses.json")
+      .then((r) => (r.ok ? r.json() : false))
+      .then((data) => (licenses = data))
+      .catch(() => (licenses = false));
+  });
 
   const AUTHOR = "Rafael Luciano Gonçalves Correia";
   const EMAIL = "rafaellgcorreia@gmail.com";
@@ -48,6 +73,7 @@
       <div class="tabs" role="tablist">
         <button role="tab" aria-selected={tab === "manual"} class:on={tab === "manual"} onclick={() => (tab = "manual")}>{t("helpManual")}</button>
         <button role="tab" aria-selected={tab === "about"} class:on={tab === "about"} onclick={() => (tab = "about")}>{t("helpAbout")}</button>
+        <button role="tab" aria-selected={tab === "licenses"} class:on={tab === "licenses"} onclick={() => (tab = "licenses")}>{t("helpLicenses")}</button>
       </div>
       <button class="icon" title={t("close")} aria-label={t("close")} onclick={onclose}>✕</button>
     </header>
@@ -68,6 +94,42 @@
           {/each}
         </div>
       </div>
+    {:else if tab === "licenses"}
+      <div class="licenses">
+        <h3>{t("licAppTitle")}</h3>
+        <p>{t("licAppIntro")}</p>
+        <pre>{appLicense.trim()}</pre>
+        <h3>{t("licThirdTitle")}</h3>
+        {#if licenses === null}
+          <p class="muted">…</p>
+        {:else if licenses === false}
+          <p class="muted">{t("licMissing")}</p>
+        {:else}
+          <p>{t("licThirdIntro", { n: licenses.packages.length })}</p>
+          <input class="filter" bind:value={licenseQuery} placeholder={t("licFilter")} spellcheck="false" />
+          <ul>
+            {#each shownPackages as p (`${p.kind}:${p.name}@${p.version}`)}
+              {@const key = `${p.kind}:${p.name}@${p.version}`}
+              <li>
+                <button class="pkg" aria-expanded={expanded === key} onclick={() => (expanded = expanded === key ? null : key)}>
+                  <span class="chev" class:open={expanded === key}>▸</span>
+                  <b>{p.name}</b>
+                  <span class="muted">{p.version}</span>
+                  <span class="spacer"></span>
+                  <span class="lic">{p.license}</span>
+                  <span class="kind">{p.kind === "rust" ? "Rust" : "npm"}</span>
+                </button>
+                {#if expanded === key}
+                  <div class="detail">
+                    <button class="link" onclick={() => openUrl(p.url)}>{p.url}</button>
+                    {#each p.texts as i (i)}<pre>{licenses.texts[i]}</pre>{/each}
+                  </div>
+                {/if}
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
     {:else}
       <div class="about">
         <img src="/app-icon.png" alt="" width="96" height="96" />
@@ -79,7 +141,11 @@
           <button class="link" onclick={() => openUrl(`mailto:${EMAIL}`)}>{EMAIL}</button><br />
           {t("aboutClaude")}
         </p>
-        <p class="muted">{t("aboutBuilt")}<br />{t("aboutLicense")}<br />© 2026 {AUTHOR}</p>
+        <p class="muted">
+          {t("aboutBuilt")}<br />
+          <button class="link" onclick={() => (tab = "licenses")}>{t("aboutLicense")}</button><br />
+          © 2026 {AUTHOR}
+        </p>
         <button class="primary-soft" onclick={() => openUrl(REPO)}>{t("aboutRepo")}</button>
         <div class="tmdb">
           <button class="logo" title="themoviedb.org" onclick={() => openUrl("https://www.themoviedb.org")}>
@@ -210,6 +276,53 @@
   .tmdb { margin-top: 18px; display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: 420px; }
   .tmdb .logo { border: none; background: none; height: auto; padding: 4px; }
   .tmdb p { font-size: 12px; margin: 0; }
+  .licenses {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 24px 24px;
+    user-select: text;
+    line-height: 1.5;
+  }
+  .licenses h3 { margin: 16px 0 6px; font-size: 17px; }
+  .licenses p { margin: 6px 0; }
+  .licenses pre {
+    margin: 8px 0;
+    padding: 10px 12px;
+    border-radius: 6px;
+    background: var(--surface-2);
+    font: 12px/1.45 ui-monospace, monospace;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .licenses .filter { width: min(320px, 100%); margin: 4px 0 8px; }
+  .licenses ul { list-style: none; margin: 0; padding: 0; }
+  .licenses li { border-bottom: 1px solid var(--row-line); }
+  .pkg {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    height: auto;
+    min-height: 30px;
+    padding: 4px 6px;
+    border: none;
+    background: none;
+    text-align: left;
+    font-size: 13px;
+  }
+  .pkg .chev { color: var(--muted); transition: transform 0.15s; }
+  .pkg .chev.open { transform: rotate(90deg); }
+  .pkg .spacer { flex: 1; }
+  .pkg .lic { color: var(--muted); font-size: 12px; text-align: right; }
+  .pkg .kind {
+    flex: none;
+    font-size: 11px;
+    padding: 0 6px;
+    border-radius: 8px;
+    background: var(--surface-2);
+    color: var(--muted);
+  }
+  .detail { padding: 0 6px 8px 26px; font-size: 13px; }
   @media (max-width: 640px) {
     nav { display: none; }
   }

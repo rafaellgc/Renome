@@ -147,4 +147,6 @@ Claude (Anthropic).
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). The licenses of the open source components built into the
+app are listed in its Licenses tab (Help → Licenses), generated when
+building.

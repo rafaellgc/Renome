@@ -34,7 +34,7 @@
   let dragging = $state(false);
   let history = $state<HistoryEntry[] | null>(null);
   let showOptions = $state(false);
-  let help = $state<"manual" | "about" | null>(null);
+  let help = $state<"manual" | "about" | "licenses" | null>(null);
   /** Identical copies of each file in the list. */
   let copies = $state<Record<string, Copies>>({});
   let identicalOnly = $state(false);

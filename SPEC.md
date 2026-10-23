@@ -278,13 +278,24 @@ On macOS, ⌘ replaces Ctrl. The list is also shown in Options.
 
 ## 6. Help
 
-A "?" button (or F1) opens a window with two tabs:
+A "?" button (or F1) opens a window with three tabs:
 
 - **Manual**: a detailed guide in the interface language, with an index:
   getting started, file list, how rules work, each rule with examples,
   preview and conflicts, renaming and undoing, recipes, shortcuts, options.
 - **About**: icon, version, description, author, credits (developed with
-  the help of Claude, by Anthropic), license and a link to the repository.
+  the help of Claude, by Anthropic), license (a link to the Licenses tab)
+  and a link to the repository.
+- **Licenses**: Renome's MIT license in full, and the open source
+  components built into the app, with a filter by name or license; each
+  one opens to its link and license texts. The list is made when building
+  (`scripts/licenses.js`, a Vite plugin): the Rust crates linked into the
+  program (normal dependencies in `cargo metadata` for the target being
+  built) and the npm packages whose code is in the interface bundle, with
+  the license and notice files from each package. For "MIT OR …" only the
+  MIT text is kept; packages without files get the standard text of their
+  license from another package; identical texts are stored once
+  (`licenses.json`, loaded when the tab opens).
 
 ## 7. Options
 
