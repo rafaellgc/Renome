@@ -1,6 +1,6 @@
 {
   "name": "renome",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Batch file renamer: stackable rules, live preview and undo",
   "type": "module",
   "scripts": {
