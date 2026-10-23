@@ -163,6 +163,9 @@ pub fn preview(
                 *n += 1;
                 *n - 1
             };
+            // The rules emptied the name but left the extension: `.txt` would
+            // be a hidden file with no name.
+            let mut empty_stem = false;
             let (new_name, manual) = match overrides.get(&file.path) {
                 Some(name) => (name.clone(), true),
                 None => {
@@ -173,10 +176,15 @@ pub fn preview(
                         now,
                     };
                     let (stem, ext) = pipeline.run(&ctx);
+                    empty_stem = stem.is_empty() && !file.stem.is_empty();
                     (join_name(&stem, &ext), false)
                 }
             };
-            let problem = validate(&new_name);
+            let problem = if empty_stem {
+                Some(Problem::Empty)
+            } else {
+                validate(&new_name)
+            };
             let status = if problem.is_some() {
                 Status::Conflict
             } else if new_name == original {
@@ -370,6 +378,20 @@ mod tests {
         );
         assert_eq!(p.items[0].status, Status::Ok);
         assert!(p.items[0].windows_unsafe);
+    }
+
+    #[test]
+    fn emptied_name_is_a_conflict() {
+        let d = tempfile::tempdir().unwrap();
+        let files = entries(d.path(), &["abc.txt"]);
+        let p = preview(
+            &files,
+            &replace("abc", ""),
+            &HashMap::new(),
+            &View::default(),
+        );
+        assert_eq!(p.items[0].new_name, ".txt");
+        assert_eq!(p.items[0].problem, Some(Problem::Empty));
     }
 
     #[test]

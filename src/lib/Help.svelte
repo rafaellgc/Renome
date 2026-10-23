@@ -148,7 +148,8 @@
     border: 1px solid var(--row-line);
     border-radius: 4px;
     padding: 0 4px;
-    white-space: pre-wrap;
+    /* Keep short snippets like "1 - 3 - 2" on one line. */
+    white-space: pre;
   }
   .content :global(kbd) {
     font: 12px ui-monospace, monospace;

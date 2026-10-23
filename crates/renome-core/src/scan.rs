@@ -73,7 +73,8 @@ pub fn scan(paths: &[PathBuf], opts: &ScanOptions, known: &HashSet<PathBuf>) -> 
     };
 
     for path in paths {
-        let meta = match std::fs::metadata(path) {
+        // A broken symlink is still a file that can be renamed.
+        let meta = match std::fs::metadata(path).or_else(|_| std::fs::symlink_metadata(path)) {
             Ok(m) => m,
             Err(e) => {
                 out.skipped.push(Skipped {

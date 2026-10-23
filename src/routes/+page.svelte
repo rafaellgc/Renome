@@ -558,10 +558,10 @@
   .filter { width: 100%; }
   .filter.invalid { border-color: var(--danger); outline-color: var(--danger); }
   main { flex: 1; display: flex; min-height: 0; gap: 10px; padding: 10px; }
-  .rules { width: 340px; flex: none; display: flex; flex-direction: column; min-height: 0; }
+  .rules { width: clamp(280px, 30vw, 340px); flex: none; display: flex; flex-direction: column; min-height: 0; }
   .rules-head { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 8px; }
   h2 { margin: 0; font-size: 15px; }
-  .rule-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 2px; }
+  .rule-list { flex: 1; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 8px; padding-right: 2px; }
   .empty { color: var(--muted); font-size: 13px; margin: 4px 2px; }
   .menu {
     position: absolute;

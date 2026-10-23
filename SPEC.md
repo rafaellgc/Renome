@@ -20,7 +20,8 @@ This document describes **what** the program does, not **how**.
   `[`, `{` and the like are literal. Only visible files are renamed, and
   numbering only counts them.
 - Files can be passed on the command line (`renome file1 file2 folder/`).
-- Columns: current name, new name, folder, size, modification date.
+- Columns: current name, new name, folder, size, modification date (size
+  and date are hidden in narrow windows).
   Folders are marked with an icon. In changed rows, what was removed from
   the current name and what was added to the new one are highlighted.
 - Sort by clicking a header (click again to reverse): **new name**
@@ -59,7 +60,9 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
 - Table: original name → new name, with a status per row:
   unchanged, ok, conflict (with the reason).
 - The new name can be edited by hand in the table (overrides the rules for that row).
-- Checks: empty name, `/` or null character, longer than 255 bytes,
+- Checks: empty name (including a name the rules emptied, leaving only
+  the extension, which would make a hidden file), `/` or null character,
+  longer than 255 bytes,
   two files with the same target, target already exists outside the batch.
   On Windows, `\ : * ? " < > |` and a trailing dot or space are errors;
   elsewhere they are a non-blocking warning. On Windows and macOS, names

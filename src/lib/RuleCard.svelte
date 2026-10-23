@@ -252,6 +252,11 @@
     font-weight: 600;
     padding: 2px 4px;
     color: var(--text);
+    /* Long titles shrink so the buttons stay visible in a narrow panel. */
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .title:hover:not(:disabled) { background: none; }
   .chev { display: inline-block; transition: transform 0.15s; color: var(--muted); }

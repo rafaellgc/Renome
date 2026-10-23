@@ -232,6 +232,11 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  /* Narrow windows: size and date give way to the names. */
+  @media (max-width: 1000px) {
+    .head, .row { grid-template-columns: 28px minmax(120px, 1fr) minmax(140px, 1.2fr) minmax(80px, 0.6fr); }
+    .c-size, .c-date { display: none; }
+  }
   .th:hover:not(:disabled) { background: var(--hover); color: var(--text); }
   .th.active { color: var(--accent); }
   .th.c-size, .th.c-date { text-align: right; }

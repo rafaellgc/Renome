@@ -4,16 +4,16 @@
 
   let { onclose }: { onclose: () => void } = $props();
 
-  const shortcuts: [string, Key][] = [
+  const shortcuts: [string, Key][] = $derived([
     [`${MOD}+Enter`, "kRename"],
     [`${MOD}+Z`, "kUndo"],
     [`${MOD}+O`, "kAddFiles"],
     ["F2", "kEdit"],
-    ["Delete", "kRemove"],
+    [t("keyDelete"), "kRemove"],
     [`${MOD}+A`, "kSelectAll"],
     ["F1", "kHelp"],
     ["Esc", "kClose"],
-  ];
+  ]);
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->

@@ -211,6 +211,7 @@ const pt = {
   kEdit: "Editar o novo nome do arquivo selecionado",
   kRemove: "Remover os selecionados da lista",
   kSelectAll: "Selecionar todos",
+  keyDelete: "Delete",
   kHelp: "Abrir a ajuda",
   kClose: "Fechar janela ou menu",
 };
@@ -422,6 +423,7 @@ const en: Dict = {
   kEdit: "Edit the new name of the selected file",
   kRemove: "Remove the selected files from the list",
   kSelectAll: "Select all",
+  keyDelete: "Delete",
   kHelp: "Open the help",
   kClose: "Close window or menu",
 };
@@ -630,6 +632,7 @@ const es: Dict = {
   kEdit: "Editar el nuevo nombre del archivo seleccionado",
   kRemove: "Quitar los seleccionados de la lista",
   kSelectAll: "Seleccionar todos",
+  keyDelete: "Supr",
   kHelp: "Abrir la ayuda",
   kClose: "Cerrar ventana o menú",
 };
