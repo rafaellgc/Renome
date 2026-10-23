@@ -28,7 +28,7 @@ pub(crate) static BRACKETS: LazyLock<Regex> =
 /// Release tags: whatever follows them is not part of the title.
 pub(crate) static TAGS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)\b(2160p|1080p|720p|576p|480p|4k|uhd|blu ?ray|brrip|bdrip|bdremux|remux|webrip|web-?dl|hdtv|hdrip|dvdrip|dvdscr|x26[45]|h ?26[45]|hevc|xvid|divx|hdr10|10bit|aac|e?ac3|dts|ddp?5|atmos|truehd|dual|dublado|legendado|nacional|extended|unrated|uncut|remastered|proper|repack|imax|multi|subbed|dubbed)\b",
+        r"(?i)\b(2160p|1080p|720p|576p|480p|4k|uhd|blu ?ray|brrip|bdrip|bdremux|remux|webrip|web-?dl|hdtv|hdrip|dvdrip|dvdscr|x26[45]|h ?26[45]|hevc|xvid|divx|hdr|hdr10\+?|dovi|10bit|aac|e?ac3|dts|ddp?5|atmos|truehd|amzn|dsnp|hmax|atvp|dual|dublado|legendado|nacional|extended|unrated|uncut|remastered|proper|repack|imax|multi|subbed|dubbed)\b",
     )
     .unwrap()
 });
@@ -53,24 +53,28 @@ pub fn guess(name: &str) -> Guess {
         })
         .last();
     match year {
+        // Tags before the year (`Movie EXTENDED 2003`) are not the title either.
         Some((_, y, title)) => Guess {
-            title,
+            title: clean(&before_tags(&title)),
             year: Some(y),
             id,
         },
-        None => {
-            let cut = TAGS
-                .find_iter(&spaced)
-                .map(|m| m.start())
-                .find(|&i| !clean(&spaced[..i]).is_empty())
-                .unwrap_or(spaced.len());
-            Guess {
-                title: clean(&spaced[..cut]),
-                year: None,
-                id,
-            }
-        }
+        None => Guess {
+            title: clean(&before_tags(&spaced)),
+            year: None,
+            id,
+        },
     }
+}
+
+/// The text before the first release tag that has something before it.
+pub(crate) fn before_tags(s: &str) -> String {
+    let cut = TAGS
+        .find_iter(s)
+        .map(|m| m.start())
+        .find(|&i| !clean(&s[..i]).is_empty())
+        .unwrap_or(s.len());
+    s[..cut].to_string()
 }
 
 /// Drops bracketed parts and stray separators.
@@ -693,6 +697,10 @@ mod tests {
         );
         assert_eq!(g("1917"), s("1917", None));
         assert_eq!(g("Amelie"), s("Amelie", None));
+        assert_eq!(
+            g("The.Lord.of.the.Rings.The.Return.of.the.King.EXTENDED.2003"),
+            s("The Lord of the Rings The Return of the King", Some(2003))
+        );
         let x = guess("Matrix (1999) [tmdbid-603]");
         assert_eq!(
             (x.title.as_str(), x.year, x.id),

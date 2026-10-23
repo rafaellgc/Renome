@@ -35,6 +35,18 @@ pub struct Client {
     lang: String,
 }
 
+/// A network error for the user: no connection, too slow, or the
+/// reason, never the address (it holds the API key).
+fn net_error(e: reqwest::Error) -> String {
+    if e.is_connect() {
+        "tmdbOffline".into()
+    } else if e.is_timeout() {
+        "tmdbTimeout".into()
+    } else {
+        format!("tmdbNetwork: {}", e.without_url())
+    }
+}
+
 #[derive(Deserialize)]
 struct Page<T> {
     results: Vec<T>,
@@ -45,6 +57,8 @@ impl Client {
         Self {
             http: reqwest::Client::builder()
                 .user_agent(concat!("Renome/", env!("CARGO_PKG_VERSION")))
+                .connect_timeout(std::time::Duration::from_secs(10))
+                .timeout(std::time::Duration::from_secs(30))
                 .build()
                 .unwrap_or_default(),
             key: key.trim().to_string(),
@@ -78,9 +92,9 @@ impl Client {
         } else {
             req.query(&[("api_key", &self.key)])
         };
-        let res = req.send().await.map_err(|e| format!("tmdbNetwork: {e}"))?;
+        let res = req.send().await.map_err(net_error)?;
         match res.status().as_u16() {
-            200 => res.json().await.map_err(|e| format!("tmdbNetwork: {e}")),
+            200 => res.json().await.map_err(net_error),
             401 => Err("tmdbInvalidKey".into()),
             404 => Err("tmdbNotFound".into()),
             429 => Err("tmdbBusy".into()),
@@ -266,12 +280,8 @@ impl Client {
             .send()
             .await
             .and_then(|r| r.error_for_status())
-            .map_err(|e| format!("tmdbNetwork: {e}"))?;
-        Ok(res
-            .bytes()
-            .await
-            .map_err(|e| format!("tmdbNetwork: {e}"))?
-            .to_vec())
+            .map_err(net_error)?;
+        Ok(res.bytes().await.map_err(net_error)?.to_vec())
     }
 
     /// `BR` from `pt-BR`, for the age rating.

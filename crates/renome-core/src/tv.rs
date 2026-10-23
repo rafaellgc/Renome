@@ -11,8 +11,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::text;
 use crate::tmdb::{
-    self, Cast, Crew, Guess, IMAGE_BASE, Images, Named, SearchResult, TAGS, Videos, clean, crew,
-    number, person, rating_for, safe_title, similarity, tag, trailer_url, xml, year_of,
+    self, Cast, Crew, Guess, IMAGE_BASE, Images, Named, SearchResult, TAGS, Videos, before_tags,
+    clean, crew, number, person, rating_for, safe_title, similarity, tag, trailer_url, xml,
+    year_of,
 };
 
 /// Season, episode and title read from a file name.
@@ -33,10 +34,17 @@ pub struct EpisodeGuess {
     pub title: String,
 }
 
-/// S01E02, s1e2, S01 E02, T1E2, S01E01E02, S01E01-02.
+/// S01E02, s1e2, S01 E02, T1E2, S01E01E02, S01E01-02, S2015E05.
 static SXE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b[st](\d{1,2}) ?-? ?ep? ?(\d{1,3})((?: ?-? ?e\d{1,3}\b|-\d{1,3}\b)*)")
+    Regex::new(r"(?i)\b[st](\d{1,4}) ?-? ?ep? ?(\d{1,4})((?: ?-? ?e\d{1,4}\b|-\d{1,4}\b)*)")
         .unwrap()
+});
+/// 6ª Temporada Ep. 2, 2a temporada episódio 3.
+static ORDINAL: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)\b(\d{1,2})[ªºa°]? ?temporada\W{1,4}(?:episódio|episodio|ep|e|capítulo|capitulo|cap)[. ]{0,2}(\d{1,4})\b",
+    )
+    .unwrap()
 });
 /// 1x02.
 static NXN: LazyLock<Regex> =
@@ -44,7 +52,7 @@ static NXN: LazyLock<Regex> =
 /// Temporada 1 Episódio 2, Season 1, Episode 2, Temp. 1 Ep. 2.
 static LONG: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)\b(?:season|temporada|temp|saison|staffel)\.? ?(\d{1,2})\W{1,4}(?:episode|episódio|episodio|épisode|ep|e|capítulo|capitulo|cap|folge)\.? ?(\d{1,3})\b",
+        r"(?i)\b(?:season|temporada|temp|saison|staffel)[. ]{0,2}(\d{1,2})\W{1,4}(?:episode|episódio|episodio|épisode|ep|e|capítulo|capitulo|cap|folge)[. ]{0,2}(\d{1,3})\b",
     )
     .unwrap()
 });
@@ -54,7 +62,7 @@ static DATE: LazyLock<Regex> =
 /// Episódio 5, Ep 05, E05 (season from the folder).
 static EP_ONLY: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)\b(?:(?:episode|episódio|episodio|épisode|ep|capítulo|capitulo|cap|chapter|folge)\.? ?|e)(\d{1,4})\b",
+        r"(?i)\b(?:(?:episode|episódio|episodio|épisode|ep|capítulo|capitulo|cap|chapter|folge|part|parte)[. ]{0,2}|e)(\d{1,4})\b",
     )
     .unwrap()
 });
@@ -98,7 +106,7 @@ pub fn parse(name: &str, folder: &str) -> EpisodeGuess {
         g.season = num(&c[1]);
         g.episodes = num(&c[2]).into_iter().chain(extra(&c[3])).collect();
         c.get(0).map(|m| m.range())
-    } else if let Some(c) = LONG.captures(&spaced) {
+    } else if let Some(c) = LONG.captures(&spaced).or_else(|| ORDINAL.captures(&spaced)) {
         g.season = num(&c[1]);
         g.episodes = num(&c[2]).into_iter().collect();
         c.get(0).map(|m| m.range())
@@ -131,9 +139,14 @@ pub fn parse(name: &str, folder: &str) -> EpisodeGuess {
     g.title = clean(&after[..TAGS.find(after).map_or(after.len(), |m| m.start())]);
     if g.season.is_none() {
         let season = folder_season(folder);
-        match g.number {
+        match (g.number, season) {
+            // `Season 2/205.mkv`: season and episode run together.
+            (Some(n), Some(s)) if n >= 100 && n / 100 == u32::from(s) => {
+                g.episodes = vec![(n % 100) as u16];
+                g.number = None;
+            }
             // `Season 2/05.mkv`: episode 5 of season 2.
-            Some(n) if season.is_some() && n < 1000 => {
+            (Some(n), Some(_)) if n < 1000 => {
                 g.episodes = vec![n as u16];
                 g.number = None;
             }
@@ -144,16 +157,6 @@ pub fn parse(name: &str, folder: &str) -> EpisodeGuess {
         }
     }
     g
-}
-
-/// The text before the first release tag that has something before it.
-fn before_tags(s: &str) -> String {
-    let cut = TAGS
-        .find_iter(s)
-        .map(|m| m.start())
-        .find(|&i| !clean(&s[..i]).is_empty())
-        .unwrap_or(s.len());
-    s[..cut].to_string()
 }
 
 /// The show to search for when the user typed nothing: the name most of
@@ -478,8 +481,10 @@ pub fn find(show: &Show, g: &EpisodeGuess) -> EpisodeLookup {
         // Long seasons (anime) count episodes straight through.
         let long = show.episodes.iter().any(|e| e.number > 99);
         if long {
-            push(absolute(n).map(|k| vec![k]));
-            push(run_together);
+            match absolute(n) {
+                Some(k) => push(Some(vec![k])),
+                None => push(run_together),
+            }
         } else {
             push(run_together);
             push(absolute(n).map(|k| vec![k]));
@@ -1078,6 +1083,14 @@ mod tests {
         assert_eq!(p("01 - Pilot").2, Some(1));
         assert_eq!(p("01 - Pilot").4, "Pilot");
         assert_eq!(p("Show S01E05-720p").1, vec![5]);
+        assert_eq!(p("Pokemon.S01E1000").1, vec![1000]);
+        assert_eq!(p("Show.S2015E05").0, Some(2015));
+        assert_eq!(p("Peaky Blinders 6ª Temporada Ep. 2").0, Some(6));
+        assert_eq!(p("Peaky Blinders 6ª Temporada Ep. 2").3, "Peaky Blinders");
+        assert_eq!(p("Chernobyl.Part.2").3, "Chernobyl");
+        assert_eq!(p("House.of.the.Dragon.S02E01.HDR.2160p").4, "");
+        assert_eq!(parse("Show 205", "Season 2").episodes, vec![5]);
+        assert_eq!(p("Show Temp. 2 Ep. 3").1, vec![3]);
         let g = parse("The Daily Show 2024.03.15 Guest", "");
         assert_eq!(g.date.as_deref(), Some("2024-03-15"));
         // Season from the folder.

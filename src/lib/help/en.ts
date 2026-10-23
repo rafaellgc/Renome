@@ -33,6 +33,9 @@ export const en: Section[] = [
 <ul>
   <li>Terms separated by commas or spaces: <code>jpg, holiday</code> shows names containing "jpg" <i>or</i> "holiday".</li>
   <li><code>*</code> and <code>?</code> are wildcards: <code>*.png</code> (ends in .png), <code>IMG_????.jpg</code> (any four characters).</li>
+  <li>In quotes, looks for the whole phrase: <code>"breaking bad"</code>.</li>
+  <li>With <code>-</code> in front, hides what matches: <code>-*.srt</code> hides subtitles; <code>*.mkv -sample</code> shows the .mkv files except samples.</li>
+  <li>Case and accents do not matter: <code>cafe</code> finds "Café".</li>
 </ul>
 
 <h4>Sorting and arranging</h4>
@@ -127,8 +130,9 @@ ${ex("Show - Episode - S01E02.mkv", "Show - S01E02 - Episode.mkv")}
   <li><b>UPPERCASE</b>: → <code>THE LORD OF THE RINGS</code></li>
   <li><b>Sentence case</b>: → <code>The lord of the rings</code></li>
   <li><b>Title Case Every Word</b>: → <code>The Lord Of The Rings</code></li>
-  <li><b>Title Case, except of/the/and…</b>: → <code>The Lord of the Rings</code>. Short linking words (of, the, and, to, in, de, da, del, la, y…) stay lowercase, except at the start of the name.</li>
+  <li><b>Title Case, except of/the/and…</b>: → <code>The Lord of the Rings</code>. Short linking words (of, the, and, to, in, de, da, del, la, y…) stay lowercase, except at the start of the name or of a part (after <code> - </code>, <code>:</code> or <code>(</code>).</li>
 </ul>
+<p>In both Title Case modes, Roman numerals stay in capitals (<code>Rocky III</code>, <code>Part II</code>) and words with capitals inside stay as they are (<code>iPhone</code>, <code>McDonald's</code>).</p>
 <p>Use "Apply to: Extension" to change only the extension.</p>`,
   },
   {

@@ -9,6 +9,7 @@
 //! its contents), shallowest first when undoing (so the folder is back in
 //! place before its contents are restored).
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -388,12 +389,13 @@ impl History {
             .collect();
         let report = execute(&reverse, Depth::ShallowestFirst);
         j.reverted += report.done.len();
-        j.ops.retain(|op| {
-            !report
-                .done
-                .iter()
-                .any(|d| d.from == op.to && d.to == op.from)
-        });
+        let back: HashSet<(&Path, &Path)> = report
+            .done
+            .iter()
+            .map(|d| (d.to.as_path(), d.from.as_path()))
+            .collect();
+        j.ops
+            .retain(|op| !back.contains(&(op.from.as_path(), op.to.as_path())));
         j.failed = report.errors.len();
         if j.ops.is_empty() {
             // Innermost first; a folder that is not empty (the user put

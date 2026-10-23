@@ -33,6 +33,9 @@ export const pt: Section[] = [
 <ul>
   <li>Termos separados por vírgula ou espaço: <code>jpg, férias</code> mostra os nomes que contêm "jpg" <i>ou</i> "férias".</li>
   <li><code>*</code> e <code>?</code> são curingas: <code>*.png</code> (termina em .png), <code>IMG_????.jpg</code> (quatro caracteres quaisquer).</li>
+  <li>Entre aspas, procura a frase inteira: <code>"breaking bad"</code>.</li>
+  <li>Com <code>-</code> na frente, esconde o que combina: <code>-*.srt</code> esconde as legendas; <code>*.mkv -sample</code> mostra os .mkv, menos as amostras.</li>
+  <li>Maiúsculas e acentos não importam: <code>ferias</code> encontra "Férias".</li>
 </ul>
 
 <h4>Ordenar e organizar</h4>
@@ -127,8 +130,9 @@ ${ex("Série - Episódio - S01E02.mkv", "Série - S01E02 - Episódio.mkv")}
   <li><b>MAIÚSCULAS</b>: → <code>FOTO DE FÉRIAS</code></li>
   <li><b>Primeira letra maiúscula</b>: → <code>Foto de férias</code></li>
   <li><b>Cada Palavra Maiúscula</b>: → <code>Foto De Férias</code></li>
-  <li><b>Cada Palavra, exceto de/da/e/of…</b>: → <code>Foto de Férias</code>. Palavras curtas de ligação (de, da, do, e, em, para, of, the, and, del, la, y…) ficam em minúsculas, a não ser no início do nome.</li>
+  <li><b>Cada Palavra, exceto de/da/e/of…</b>: → <code>Foto de Férias</code>. Palavras curtas de ligação (de, da, do, e, em, para, of, the, and, del, la, y…) ficam em minúsculas, a não ser no início do nome ou de uma parte (depois de <code> - </code>, <code>:</code> ou <code>(</code>).</li>
 </ul>
+<p>Nos dois modos "Cada Palavra", algarismos romanos ficam em maiúsculas (<code>Rocky III</code>, <code>Parte II</code>) e palavras com maiúsculas no meio ficam como estão (<code>iPhone</code>, <code>McDonald's</code>).</p>
 <p>Use "Aplicar em: Extensão" para mudar só a extensão.</p>`,
   },
   {

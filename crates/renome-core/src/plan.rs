@@ -257,10 +257,11 @@ pub fn preview(
         })
         .collect();
 
-    // Repeated targets within the batch.
+    // Repeated targets within the batch. A file that keeps its name is not
+    // flagged: the one moving onto it is, as "exists", below.
     let mut targets: HashMap<PathBuf, Vec<usize>> = HashMap::new();
     for (i, item) in items.iter().enumerate() {
-        if item.status != Status::Conflict {
+        if item.status == Status::Ok {
             targets.entry(path_key(&item.target())).or_default().push(i);
         }
     }
@@ -407,6 +408,18 @@ mod tests {
             "{:?}",
             p.items
         );
+    }
+
+    #[test]
+    fn unchanged_file_is_not_the_conflict() {
+        let d = tempfile::tempdir().unwrap();
+        let files = entries(d.path(), &["a.txt", "b.txt"]);
+        let mut ov = HashMap::new();
+        ov.insert(files[0].path.clone(), "b.txt".to_string());
+        let p = preview(&files, &[], &ov, &View::default());
+        assert_eq!(p.items[0].problem, Some(Problem::Exists));
+        assert_eq!(p.items[1].status, Status::Unchanged);
+        assert_eq!(p.conflicts, 1);
     }
 
     #[test]

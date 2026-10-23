@@ -17,7 +17,9 @@ This document describes **what** the program does, not **how**.
 - Newly added files are selected and the list scrolls to them.
 - **List filter**: terms separated by commas/spaces; terms with `*`/`?` are
   patterns (`*.jpg`), the rest look for the text in the name (`holiday`);
-  `[`, `{` and the like are literal. Only visible files are renamed, and
+  `"quoted words"` look for the phrase; a term starting with `-` hides
+  the names it matches (`-*.srt`); case and accents are ignored; `[`,
+  `{` and the like are literal. Only visible files are renamed, and
   numbering only counts them.
 - Files can be passed on the command line (`renome file1 file2 folder/`).
 - Columns: current name, new name, folder, size, modification date (size
@@ -45,7 +47,7 @@ optionally act only on the extension or on the full name.
 | Replace text | find, replace with, case-sensitive, first occurrence only |
 | Regular expression | pattern, replacement (`$1`, `${name}`), case-sensitive, first occurrence only |
 | Rearrange parts | separator; new order using part numbers and text (`1 - 3 - 2`); the parts of a sample file are shown and can be clicked to build the order. Parts are trimmed; parts left out are removed; names with fewer parts are unchanged |
-| Case | lowercase; UPPERCASE; Sentence case; Title Case; Title Case except connectives (of, the, de, da…) |
+| Case | lowercase; UPPERCASE; Sentence case; Title Case; Title Case except connectives (of, the, de, da…; a part after ` - `, `:`, `(`, `.` starts capitalized). Title Case keeps Roman numerals II–XXXIX in capitals (lowercase `vi`/`xi` are words) and leaves words with inner capitals (`iPhone`, `McDonald`) as they are |
 | Insert | text, current date, file modification date, date the photo was taken (EXIF; optionally the modification date when missing, otherwise the name is unchanged) or the name of the folder the file is in; configurable date format; at the start, at the end or at a position (from the start or the end) |
 | Number | template with `{n}` (number), `{name}` (current name) and `{folder}` (folder name); start, step, minimum digits (zero padding); optionally restart in each folder |
 | Remove | spaces; repeated/leading/trailing spaces; accents; digits; custom characters |
@@ -132,19 +134,22 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   real title (TMDB fills untranslated ones with "Episode N"); all titles
   are kept for matching.
 - Numbers read from each name (dots and underscores as spaces), first
-  match wins: `S01E02`/`T1 E2` (with `E02`/`-02` for more episodes),
-  `1x02`, `Season 1 Episode 2` (also Portuguese, Spanish, French and
-  German words), an air date `2024.03.15`, `Episode 5`/`Ep 05`/`E05`,
+  match wins: `S01E02`/`T1 E2` (up to four digits each, so `S2015E05`;
+  with `E02`/`-02` for more episodes), `1x02`, `Season 1 Episode 2`
+  (also Portuguese, Spanish, French and German words, and `6ª Temporada
+  Ep. 2`), an air date `2024.03.15`, `Episode 5`/`Ep 05`/`E05`/`Part 2`,
   else a bare number before any release tag that is not a year. Without a
   season, the folder gives it (`Season 2`, `Temporada 02`, `S02`,
-  `Specials` = 0); a bare number in a season folder is the episode. The
+  `Specials` = 0); a bare number in a season folder is the episode (or,
+  from 100 up with the folder's season in front, `205` = episode 5). The
   text after the numbers, up to the first release tag and without
   bracketed parts, is the title; the text before, the show.
 - Matching: the numbers give candidate episodes that exist in the show:
   season and episode; an episode without season is from the only season,
   else counted straight through the regular seasons; a bare number is
   counted straight through and also read as season and episode (`201` =
-  S02E01), the former first for shows with seasons over 99 episodes; an
+  S02E01); for shows with seasons over 99 episodes, only counted straight
+  through when that episode exists; an
   air date gives the episodes aired that day. The title is compared with
   every episode's titles (same similarity as movies; the show's name in
   front is ignored).

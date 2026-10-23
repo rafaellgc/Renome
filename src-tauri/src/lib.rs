@@ -1,13 +1,13 @@
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use renome_core::scan::Skipped;
 use renome_core::{
-    ApplyReport, FileEntry, HashCache, History, HistoryEntry, Preview, ScanOptions, SortKey, Step,
-    View,
+    ApplyReport, FileEntry, HashCache, History, HistoryEntry, Operation, Preview, ScanOptions,
+    SortKey, Step, View,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -182,19 +182,48 @@ async fn find_identical(app: AppHandle) -> Result<Option<Vec<Vec<PathBuf>>>, Str
     .map_err(|e| e.to_string())
 }
 
+/// Renames as they happened, in order: plain renames are looked up at
+/// once; a renamed folder also moves whatever was under it.
+enum Renamed<'a> {
+    Exact(HashMap<&'a Path, &'a Path>),
+    Folder(&'a Operation),
+}
+
 /// Updates the session entries after renaming. Renames run in order, and a
 /// renamed folder also moves the entries inside it.
 fn refresh_renamed(files: &mut [FileEntry], report: &ApplyReport) {
     if report.done.is_empty() {
         return;
     }
+    let mut renames: Vec<Renamed> = Vec::new();
+    for op in &report.done {
+        if op.to.is_dir() {
+            renames.push(Renamed::Folder(op));
+        } else {
+            if !matches!(renames.last(), Some(Renamed::Exact(_))) {
+                renames.push(Renamed::Exact(HashMap::new()));
+            }
+            if let Some(Renamed::Exact(map)) = renames.last_mut() {
+                map.insert(&op.from, &op.to);
+            }
+        }
+    }
     for f in files.iter_mut() {
         let mut path = f.path.clone();
-        for op in &report.done {
-            if path == op.from {
-                path = op.to.clone();
-            } else if let Ok(rest) = path.strip_prefix(&op.from) {
-                path = op.to.join(rest);
+        for step in &renames {
+            match step {
+                Renamed::Exact(map) => {
+                    if let Some(to) = map.get(path.as_path()) {
+                        path = to.to_path_buf();
+                    }
+                }
+                Renamed::Folder(op) => {
+                    if path == op.from {
+                        path = op.to.clone();
+                    } else if let Ok(rest) = path.strip_prefix(&op.from) {
+                        path = op.to.join(rest);
+                    }
+                }
             }
         }
         if path != f.path

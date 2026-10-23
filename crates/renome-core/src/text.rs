@@ -1,6 +1,9 @@
 //! Unicode-aware text helpers. Positions are counted in graphemes (what the
 //! user sees as one character).
 
+use std::sync::LazyLock;
+
+use regex::Regex;
 use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -74,16 +77,46 @@ pub fn sentence_case(s: &str) -> String {
     capitalize(s)
 }
 
+/// A Roman numeral from II to XXXIX (`IV`, `xii`), but not the words
+/// "vi" and "xi" unless written in capitals.
+fn is_roman(word: &str) -> bool {
+    static ROMAN: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^X{0,3}(?:IX|IV|VI{0,3}|I{0,3})$").unwrap());
+    let upper = word.to_uppercase();
+    let word_like = matches!(word, "vi" | "xi" | "Vi" | "Xi");
+    word.len() > 1 && ROMAN.is_match(&upper) && !word_like
+}
+
+/// Words with capitals inside on purpose: `iPhone`, `McDonald`, `YouTube`.
+fn is_mixed_case(word: &str) -> bool {
+    let mut chars = word.chars();
+    let first_upper = chars.next().is_some_and(char::is_uppercase);
+    let rest: Vec<char> = chars.collect();
+    let upper_inside = rest.iter().any(|c| c.is_uppercase());
+    let lower_any = word.chars().any(char::is_lowercase);
+    upper_inside && lower_any && (first_upper || word.starts_with(char::is_lowercase))
+}
+
 pub fn title_case(s: &str, keep_connectives: bool) -> String {
     let mut out = String::with_capacity(s.len());
     let mut first_word = true;
     for (is_word, tok) in tokens(s) {
         if !is_word {
             out.push_str(tok);
+            // A new part starts after " - ", ":", "(" and the like.
+            if tok.contains([':', '(', '[', '.', '!', '?', '–', '—'])
+                || (tok.contains('-') && tok.contains(char::is_whitespace))
+            {
+                first_word = true;
+            }
             continue;
         }
         let lower = tok.to_lowercase();
-        if keep_connectives && !first_word && CONNECTIVES.contains(&lower.as_str()) {
+        if is_roman(tok) {
+            out.push_str(&tok.to_uppercase());
+        } else if is_mixed_case(tok) {
+            out.push_str(tok);
+        } else if keep_connectives && !first_word && CONNECTIVES.contains(&lower.as_str()) {
             out.push_str(&lower);
         } else {
             out.push_str(&capitalize(tok));
@@ -115,6 +148,20 @@ mod tests {
         );
         assert_eq!(title_case("don't stop", false), "Don't Stop");
         assert_eq!(sentence_case("éRA uma VEZ"), "Éra uma vez");
+        assert_eq!(
+            title_case("o senhor dos anéis - a sociedade do anel", true),
+            "O Senhor dos Anéis - A Sociedade do Anel"
+        );
+        assert_eq!(
+            title_case("STAR WARS IV: a new hope", true),
+            "Star Wars IV: A New Hope"
+        );
+        assert_eq!(
+            title_case("meu iPhone no McDonald's", true),
+            "Meu iPhone no McDonald's"
+        );
+        assert_eq!(title_case("LIVRO VIVO", false), "Livro Vivo");
+        assert_eq!(title_case("parte ii, eu vi", true), "Parte II, Eu Vi");
     }
 
     #[test]

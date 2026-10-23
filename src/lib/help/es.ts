@@ -33,6 +33,9 @@ export const es: Section[] = [
 <ul>
   <li>Términos separados por comas o espacios: <code>jpg, vacaciones</code> muestra los nombres que contienen "jpg" <i>o</i> "vacaciones".</li>
   <li><code>*</code> y <code>?</code> son comodines: <code>*.png</code> (termina en .png), <code>IMG_????.jpg</code> (cuatro caracteres cualesquiera).</li>
+  <li>Entre comillas, busca la frase completa: <code>"breaking bad"</code>.</li>
+  <li>Con <code>-</code> delante, oculta lo que coincide: <code>-*.srt</code> oculta los subtítulos; <code>*.mkv -sample</code> muestra los .mkv, salvo las muestras.</li>
+  <li>Mayúsculas y acentos no importan: <code>cancion</code> encuentra "Canción".</li>
 </ul>
 
 <h4>Ordenar y organizar</h4>
@@ -127,8 +130,9 @@ ${ex("Serie - Episodio - S01E02.mkv", "Serie - S01E02 - Episodio.mkv")}
   <li><b>MAYÚSCULAS</b>: → <code>FOTO DE LA PLAYA</code></li>
   <li><b>Primera letra mayúscula</b>: → <code>Foto de la playa</code></li>
   <li><b>Cada Palabra En Mayúscula</b>: → <code>Foto De La Playa</code></li>
-  <li><b>Cada Palabra, excepto de/la/y/of…</b>: → <code>Foto de la Playa</code>. Las palabras cortas de enlace (de, del, la, los, y, con, of, the, and, da, do…) quedan en minúsculas, salvo al inicio del nombre.</li>
+  <li><b>Cada Palabra, excepto de/la/y/of…</b>: → <code>Foto de la Playa</code>. Las palabras cortas de enlace (de, del, la, los, y, con, of, the, and, da, do…) quedan en minúsculas, salvo al inicio del nombre o de una parte (después de <code> - </code>, <code>:</code> o <code>(</code>).</li>
 </ul>
+<p>En los dos modos "Cada Palabra", los números romanos quedan en mayúsculas (<code>Rocky III</code>, <code>Parte II</code>) y las palabras con mayúsculas en medio quedan como están (<code>iPhone</code>, <code>McDonald's</code>).</p>
 <p>Use "Aplicar a: Extensión" para cambiar solo la extensión.</p>`,
   },
   {
