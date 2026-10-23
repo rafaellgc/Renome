@@ -23,10 +23,10 @@ pub struct Guess {
 
 static YEAR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b((?:19|20)[0-9]{2})\b").unwrap());
 static TMDB_ID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)tmdbid[-=](\d+)").unwrap());
-static BRACKETS: LazyLock<Regex> =
+pub(crate) static BRACKETS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\[[^\]]*\]|\([^)]*\)|\{[^}]*\}").unwrap());
 /// Release tags: whatever follows them is not part of the title.
-static TAGS: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static TAGS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)\b(2160p|1080p|720p|576p|480p|4k|uhd|blu ?ray|brrip|bdrip|bdremux|remux|webrip|web-?dl|hdtv|hdrip|dvdrip|dvdscr|x26[45]|h ?26[45]|hevc|xvid|divx|hdr10|10bit|aac|e?ac3|dts|ddp?5|atmos|truehd|dual|dublado|legendado|nacional|extended|unrated|uncut|remastered|proper|repack|imax|multi|subbed|dubbed)\b",
     )
@@ -74,7 +74,7 @@ pub fn guess(name: &str) -> Guess {
 }
 
 /// Drops bracketed parts and stray separators.
-fn clean(s: &str) -> String {
+pub(crate) fn clean(s: &str) -> String {
     let s = BRACKETS.replace_all(s, " ");
     text::collapse_spaces(&s)
         .trim_matches(|c: char| c.is_whitespace() || "-–:,;([{".contains(c))
@@ -112,7 +112,7 @@ pub struct Candidate {
     pub score: f64,
 }
 
-fn year_of(date: &Option<String>) -> Option<u16> {
+pub fn year_of(date: &Option<String>) -> Option<u16> {
     date.as_deref()?.get(..4)?.parse().ok()
 }
 
@@ -595,6 +595,42 @@ pub fn nfo(d: &Details, lang: &str) -> String {
     o
 }
 
+/// The language and flags at the end of a subtitle's name (`.pt-BR`,
+/// `.eng.forced`), kept when the movie or episode name replaces the rest.
+/// Codes must be lowercase, so a title such as `It` is not taken for one.
+pub fn subtitle_suffix<'a>(stem: &'a str, ext: &str) -> &'a str {
+    const SUBTITLES: &[&str] = &["srt", "ass", "ssa", "sub", "idx", "vtt", "sup", "smi"];
+    if !SUBTITLES.contains(&ext.to_lowercase().as_str()) {
+        return "";
+    }
+    let mut start = stem.len();
+    for _ in 0..3 {
+        match stem[..start].rfind('.') {
+            Some(dot) if dot > 0 && is_subtitle_tag(&stem[dot + 1..start]) => start = dot,
+            _ => break,
+        }
+    }
+    &stem[start..]
+}
+
+fn is_subtitle_tag(s: &str) -> bool {
+    const FLAGS: &[&str] = &["forced", "sdh", "cc", "default", "full"];
+    const LANGS: &[&str] = &[
+        "pt", "en", "es", "fr", "de", "it", "ja", "ko", "zh", "ru", "nl", "sv", "no", "nb", "da",
+        "fi", "pl", "tr", "ar", "he", "hi", "el", "cs", "hu", "ro", "uk", "th", "vi", "id", "ms",
+        "ca", "eu", "gl", "hr", "sr", "bg", "sk", "sl", "lt", "lv", "et", "fa", "por", "pob",
+        "eng", "spa", "fre", "fra", "ger", "deu", "ita", "jpn", "kor", "chi", "zho", "rus", "dut",
+        "nld", "swe", "nor", "dan", "fin", "pol", "tur", "ara", "heb", "gre", "ell", "cze", "ces",
+        "hun", "rum", "ron", "ukr", "tha", "vie", "ind", "cat",
+    ];
+    let (lang, region) = s.split_once(['-', '_']).unwrap_or((s, ""));
+    FLAGS.contains(&s)
+        || (LANGS.contains(&lang)
+            && (region.is_empty()
+                || ((2..=4).contains(&region.len())
+                    && region.chars().all(|c| c.is_ascii_alphanumeric()))))
+}
+
 pub const IMAGE_BASE: &str = "https://image.tmdb.org/t/p/original";
 
 /// Video extensions that get `.nfo` and images (subtitles and other files
@@ -722,6 +758,18 @@ mod tests {
             movie_name("{title} ({year})", &m, " - "),
             "What About Bob - AC-DC"
         );
+    }
+
+    #[test]
+    fn subtitle_suffixes() {
+        assert_eq!(subtitle_suffix("Matrix.1999.pt-BR", "srt"), ".pt-BR");
+        assert_eq!(
+            subtitle_suffix("Matrix.1999.eng.forced", "srt"),
+            ".eng.forced"
+        );
+        assert_eq!(subtitle_suffix("Matrix.1999.pt", "mkv"), "");
+        assert_eq!(subtitle_suffix("Movie.It", "srt"), "");
+        assert_eq!(subtitle_suffix("pt", "srt"), "");
     }
 
     #[test]

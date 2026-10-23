@@ -7,6 +7,7 @@
 //! - [`apply`]: renames in two phases, with a history for undo.
 //! - [`identical`]: finds files with identical content.
 //! - [`tmdb`]: movie title guessing, ranking and `.nfo` files for TMDB.
+//! - [`tv`]: season and episode numbers, and matching files to a show.
 
 pub mod apply;
 pub mod files;
@@ -17,6 +18,7 @@ pub mod rules;
 pub mod scan;
 pub mod text;
 pub mod tmdb;
+pub mod tv;
 
 pub use apply::{ApplyReport, History, HistoryEntry, Operation};
 pub use files::{FileEntry, SortKey, sort_files};

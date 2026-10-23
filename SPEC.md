@@ -53,6 +53,7 @@ optionally act only on the extension or on the full name.
 | Character at position | position N; optionally only if the current character is X (case-insensitive unless asked); replace with Y or delete |
 | Extension | set a new one; lowercase/uppercase; remove |
 | Movie (TMDB) | template with `{title}`, `{original}`, `{year}`, `{id}` (default `{title} ({year}) [tmdbid-{id}]`); what `:` becomes (default ` - `); a folder for each movie; save `.nfo` and poster (optionally fanart and logo) next to renamed videos. See 2.1 |
+| TV show (TMDB) | the show (name, TMDB id or link; empty: from the files); template with `{show}`, `{original}`, `{year}`, `{season}`, `{episode}`, `{title}`, `{id}` (default `{show} ({year}) - S{season}E{episode} - {title}`); what `:` becomes. See 2.2 |
 
 Positions count **visible characters** (Unicode graphemes), starting at 1.
 
@@ -111,6 +112,63 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
 - A name with `tmdbid-N` (as in `[tmdbid-603]`) is looked up by that id
   directly, and picked automatically.
 - The About tab shows the TMDB logo and notice required by its terms.
+- Subtitles (srt, ass, ssa, sub, idx, vtt, sup, smi) keep the language
+  and flags at the end of their names (`.pt-BR`, `.eng.forced`: lowercase
+  ISO codes, optionally with a region) after the movie or episode name.
+
+### 2.2 TV shows (TMDB)
+
+- Same key and language as movies. "Find episodes" first finds the show:
+  by id (digits, a `themoviedb.org/tv/N` link or `tmdbid-N`), else by name
+  (with an optional year) on TMDB's show search, ranked like movies. With
+  the field empty, the name is the text before the episode number most
+  file names share, else the folder's name (the one above, for a season
+  folder). An exact, unambiguous match is picked automatically; otherwise
+  a window lists the shows (poster, name, original name, year, overview)
+  with a search field. The same typed text reuses the show picked last.
+- The show is fetched with all its seasons (`append_to_response`, 20
+  seasons per request) in the user's language, in English and in the
+  original language. Each episode is named in the first of those with a
+  real title (TMDB fills untranslated ones with "Episode N"); all titles
+  are kept for matching.
+- Numbers read from each name (dots and underscores as spaces), first
+  match wins: `S01E02`/`T1 E2` (with `E02`/`-02` for more episodes),
+  `1x02`, `Season 1 Episode 2` (also Portuguese, Spanish, French and
+  German words), an air date `2024.03.15`, `Episode 5`/`Ep 05`/`E05`,
+  else a bare number before any release tag that is not a year. Without a
+  season, the folder gives it (`Season 2`, `Temporada 02`, `S02`,
+  `Specials` = 0); a bare number in a season folder is the episode. The
+  text after the numbers, up to the first release tag and without
+  bracketed parts, is the title; the text before, the show.
+- Matching: the numbers give candidate episodes that exist in the show:
+  season and episode; an episode without season is from the only season,
+  else counted straight through the regular seasons; a bare number is
+  counted straight through and also read as season and episode (`201` =
+  S02E01), the former first for shows with seasons over 99 episodes; an
+  air date gives the episodes aired that day. The title is compared with
+  every episode's titles (same similarity as movies; the show's name in
+  front is ignored).
+  - Numbers, no title: one candidate is picked; several wait for the user.
+  - Numbers and title: when the title's best episode scores ≥ 0.7, is not
+    among the number's candidates and beats them by over 0.2, the file
+    waits for the user (a conflict), suggesting the title's episode first.
+    Otherwise one candidate is picked, or the best of several when it
+    scores ≥ 0.6 and leads by 0.1.
+  - Title only: picked when it scores ≥ 0.85 and leads by 0.1; otherwise
+    the episodes scoring ≥ 0.4 are suggested.
+- Marks and review as for movies (✓, ?, ✕). The review shows what was
+  read from the name, the conflict, up to 9 suggestions (still image,
+  code, title, air date, overview; 1–9 or Enter for the first) and every
+  episode by season (specials last) with a filter by title or code.
+  Ctrl+click marks several episodes of one season for a multi-episode
+  file. Undecided files read the same way get the same choice.
+- Each file keeps its show, so several shows can be done one at a time
+  (filter, search). Searching again skips files already settled for the
+  same show.
+- Names: two-digit season and episode; several episodes give `01-E02`;
+  titles are joined with ` & `; titles are made safe like movie titles;
+  a missing title or year leaves no dangling ` - ` or `()`.
+- Only the show's name (or id) is sent to TMDB.
 
 ## 3. Preview
 

@@ -47,6 +47,10 @@ A built-in manual (F1) explains every rule with examples.
   Jellyfin recognizes), picking the movie automatically when sure and
   letting you choose when not; optionally saves `.nfo` and poster next
   to each movie for Jellyfin, Kodi and Emby.
+- TV shows: names episodes from TMDB (`Show (Year) - S01E02 - Title`),
+  reading the number in many forms (`S01E02`, `1x02`, `T1 E2`,
+  `Season 1 Episode 2`, absolute numbering) and checking it against the
+  title in the name; when they disagree, you choose.
 - Edit any new name by hand right in the preview (double-click or F2).
 - List filter: only the visible files are renamed.
 - Sort by new name (default) or by any column.

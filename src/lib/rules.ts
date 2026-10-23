@@ -2,7 +2,7 @@ import { settings } from "./settings.svelte";
 import type { Rule, RuleType, Step } from "./types";
 
 export const RULE_TYPES: RuleType[] = [
-  "replace", "regex", "rearrange", "case", "insert", "number", "remove", "removeRange", "charAt", "extension", "movie",
+  "replace", "regex", "rearrange", "case", "insert", "number", "remove", "removeRange", "charAt", "extension", "movie", "series",
 ];
 
 const NAME_VAR = { pt: "{nome}", en: "{name}", es: "{nombre}" } as const;
@@ -10,6 +10,11 @@ const MOVIE_TEMPLATE = {
   pt: "{título} ({ano}) [tmdbid-{id}]",
   en: "{title} ({year}) [tmdbid-{id}]",
   es: "{título} ({año}) [tmdbid-{id}]",
+} as const;
+const SERIES_TEMPLATE = {
+  pt: "{série} ({ano}) - S{temporada}E{episódio} - {título}",
+  en: "{show} ({year}) - S{season}E{episode} - {title}",
+  es: "{serie} ({año}) - S{temporada}E{episodio} - {título}",
 } as const;
 
 /** Extensions that get .nfo and images (subtitles share the movie's name but not those). */
@@ -40,6 +45,8 @@ export function newRule(type: RuleType): Rule {
       return { type, separator: " - ", order: "", target: "name" };
     case "movie":
       return { type, template: MOVIE_TEMPLATE[settings.lang], colon: " - ", sidecar: false, fanart: false, folder: false };
+    case "series":
+      return { type, template: SERIES_TEMPLATE[settings.lang], colon: " - ", show: "" };
   }
 }
 

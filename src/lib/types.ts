@@ -26,7 +26,8 @@ export type Rule =
   | { type: "charAt"; position: number; fromEnd: boolean; onlyIf: string; caseSensitive: boolean; replace: string }
   | { type: "extension"; mode: "set" | "lower" | "upper" | "remove"; value: string }
   | { type: "rearrange"; separator: string; order: string; target: Target }
-  | { type: "movie"; template: string; colon: string; sidecar: boolean; fanart: boolean; folder: boolean };
+  | { type: "movie"; template: string; colon: string; sidecar: boolean; fanart: boolean; folder: boolean }
+  | { type: "series"; template: string; colon: string; show: string };
 
 export type RuleType = Rule["type"];
 
@@ -78,6 +79,8 @@ export interface View {
   identicalOnly: boolean;
   /** The movie chosen for each file, for the movie rule. */
   movies: Record<string, MovieMatch>;
+  /** The episode chosen for each file, for the series rule. */
+  episodes: Record<string, EpisodeMatch>;
 }
 
 /** A TMDB movie offered for a file, best first. */
@@ -116,6 +119,69 @@ export interface Lookup {
   candidates: Candidate[];
   auto: boolean;
   error: string | null;
+}
+
+/** Season and episode. */
+export type EpKey = [number, number];
+
+export interface Episode {
+  season: number;
+  number: number;
+  name: string;
+  /** The title in other languages (for matching). */
+  names: string[];
+  airDate: string | null;
+  overview: string;
+  stillPath: string | null;
+}
+
+export interface Show {
+  id: number;
+  name: string;
+  originalName: string;
+  year: number | null;
+  overview: string;
+  posterPath: string | null;
+  episodes: Episode[];
+}
+
+export interface EpisodeGuess {
+  show: string;
+  season: number | null;
+  episodes: number[];
+  number: number | null;
+  date: string | null;
+  title: string;
+}
+
+export interface EpisodeLookup {
+  path: string;
+  guess: EpisodeGuess;
+  /** Picked with confidence; empty when the user has to choose. */
+  choice: EpKey[];
+  /** The numbers in the name point to another episode than its title. */
+  conflict: boolean;
+  /** Likely episodes, best first. */
+  alternatives: EpKey[][];
+}
+
+export interface EpisodeState {
+  showId: number;
+  guess: EpisodeGuess;
+  alternatives: EpKey[][];
+  conflict: boolean;
+  choice: EpKey[] | null;
+  status: MovieStatus;
+}
+
+export interface EpisodeMatch {
+  id: number;
+  show: string;
+  originalShow: string;
+  year: number | null;
+  season: number;
+  episodes: number[];
+  titles: string[];
 }
 
 export type ErrorKind = "tempExists" | "targetExists" | "notFound" | "permissionDenied" | "io" | "restoreFailed" | "history";

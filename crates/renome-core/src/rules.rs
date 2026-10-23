@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::files::{FileEntry, join_name, split_name};
 use crate::text;
 use crate::tmdb::{self, MovieMatch};
+use crate::tv::{self, EpisodeMatch};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -215,6 +216,17 @@ pub enum Rule {
         #[serde(default)]
         folder: bool,
     },
+    /// Names each file after the episode chosen for it on TMDB (files
+    /// without one are left alone). The search happens outside the rules.
+    Series {
+        /// `{show}`, `{year}`, `{season}`, `{episode}`, `{title}`…
+        template: String,
+        #[serde(default = "colon")]
+        colon: String,
+        /// The show to look for, as typed (used by the app, not here).
+        #[serde(default)]
+        show: String,
+    },
 }
 
 fn colon() -> String {
@@ -239,6 +251,8 @@ pub struct Ctx<'a> {
     pub now: DateTime<Local>,
     /// The movie chosen for this file, for the movie rule.
     pub movie: Option<&'a MovieMatch>,
+    /// The episode chosen for this file, for the series rule.
+    pub episode: Option<&'a EpisodeMatch>,
 }
 
 enum Compiled {
@@ -595,7 +609,18 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             if let Some(m) = ctx.movie {
                 let name = tmdb::movie_name(template, m, colon);
                 if !name.is_empty() {
-                    *stem = name;
+                    *stem = name + tmdb::subtitle_suffix(stem, ext);
+                }
+            }
+        }
+
+        Rule::Series {
+            template, colon, ..
+        } => {
+            if let Some(m) = ctx.episode {
+                let name = tv::episode_name(template, m, colon);
+                if !name.is_empty() {
+                    *stem = name + tmdb::subtitle_suffix(stem, ext);
                 }
             }
         }
@@ -787,6 +812,7 @@ mod tests {
             file: f,
             now: Local::now(),
             movie: None,
+            episode: None,
         });
         join_name(&s, &e)
     }
@@ -1207,6 +1233,7 @@ mod tests {
             file: &f,
             now: Local::now(),
             movie: None,
+            episode: None,
         });
         assert_eq!(s, "a");
     }

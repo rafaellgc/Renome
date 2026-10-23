@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ApplyReport, Candidate, HistoryEntry, Lookup, Preview, ScanOptions, SortKey, Step, View } from "./types";
+import type { ApplyReport, Candidate, EpisodeLookup, HistoryEntry, Lookup, Preview, ScanOptions, Show, SortKey, Step, View } from "./types";
 
 type Overrides = Record<string, string>;
+type TvItem = { path: string; name: string; isDir: boolean };
 
 export const api = {
   checkpoint: (overrides: Overrides) => invoke<void>("checkpoint", { overrides }),
@@ -24,6 +25,10 @@ export const api = {
     invoke<Lookup[]>("tmdb_lookup", { key, lang, items }),
   tmdbSearch: (key: string, lang: string, title: string, year: number | null) =>
     invoke<Candidate[]>("tmdb_search", { key, lang, title, year }),
+  tvSearch: (key: string, lang: string, query: string, items: TvItem[]) =>
+    invoke<{ query: string; candidates: Candidate[]; auto: boolean }>("tv_search", { key, lang, query, items }),
+  tvLookup: (key: string, lang: string, id: number, items: TvItem[]) =>
+    invoke<{ show: Show; files: EpisodeLookup[] }>("tv_lookup", { key, lang, id, items }),
   writeSidecars: (
     key: string,
     lang: string,

@@ -250,7 +250,7 @@ ${ex("El.Senor.de.los.Anillos.2001.1080p.BluRay.x264.mkv", "El Señor de los Ani
 <ul>
   <li><b>Plantilla</b>: <code>{título}</code>, <code>{original}</code> (título original), <code>{año}</code> e <code>{id}</code>. La predeterminada es <code>{título} ({año}) [tmdbid-{id}]</code>.</li>
   <li><b>Cambiar ":" por</b>: Windows no acepta dos puntos; por defecto pasan a <code> - </code>. Las barras pasan a guiones y se quitan <code>? * &lt; &gt; |</code>.</li>
-  <li>Los subtítulos y otros archivos con el mismo nombre que la película reciben la misma elección.</li>
+  <li>Los subtítulos y otros archivos con el mismo nombre que la película reciben la misma elección. Los subtítulos conservan el idioma al final del nombre: <code>Matrix (1999) [tmdbid-603].pt-BR.srt</code>.</li>
   <li><b>Crear una carpeta para cada película</b>: la película y sus subtítulos van a una carpeta con el nuevo nombre, como recomienda Jellyfin: <code>Películas/Matrix (1999) [tmdbid-603]/Matrix (1999) [tmdbid-603].mkv</code>. Una película que ya está en la carpeta correcta no se mueve de nuevo. Deshacer devuelve los archivos y borra la carpeta si queda vacía.</li>
   <li>Para quitar las tildes, añada la regla <b>Quitar caracteres → Acentos</b> después de esta.</li>
 </ul>
@@ -259,6 +259,34 @@ ${ex("El.Senor.de.los.Anillos.2001.1080p.BluRay.x264.mkv", "El Señor de los Ani
 <p>El <code>.nfo</code> incluye todo lo que TMDB tiene y Jellyfin lee: título y título original, año y fecha de estreno, sinopsis y eslogan, duración, nota y votos, la clasificación por edades del país del idioma elegido (ej.: ES-12), géneros, palabras clave (como etiquetas), países, estudios, colección (ej.: "El Señor de los Anillos - Colección"), tráiler de YouTube, dirección, guion, reparto con personajes y fotos, productores, compositor y los ids de TMDB e IMDb. El archivo de la película no cambia, los archivos que ya existen no se reemplazan y <b>deshacer</b> el renombrado borra lo creado.</p>
 <p>Las películas que <b>ya tienen el nombre correcto</b> también reciben los metadatos: el botón Renombrar las cuenta y la confirmación lo avisa. Si el nombre ya trae <code>[tmdbid-…]</code>, la película se reconoce directamente por ese id, sin buscar. Así una biblioteca ya organizada puede recibir solo los .nfo y las imágenes.</p>
 <p class="tip">Solo se envían a TMDB el título y el año buscados, nunca el nombre completo del archivo ni las carpetas.</p>`,
+  },
+  {
+    id: "r-series",
+    title: "Serie (TMDB)",
+    sub: true,
+    html: `
+<p>Da a cada episodio el nombre oficial de <b>TMDB</b>, con temporada, número y título, en el formato que Jellyfin reconoce. Usa la misma clave de la API que la regla de películas.</p>
+${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...Y la bolsa está en el río.mkv")}
+<ol>
+  <li>En el campo <b>Serie</b>, escriba el nombre o el ID de TMDB, o pegue el enlace de la página de la serie (<code>themoviedb.org/tv/1396-…</code>). Vacío, el programa usa el nombre que los archivos tienen en común, o el de la carpeta.</li>
+  <li>Haga clic en <b>Buscar episodios</b>. Si hay más de una serie parecida, elija la correcta. El programa descarga la lista completa de episodios y busca el de cada archivo visible.</li>
+  <li>Los episodios encontrados con seguridad reciben <b>✓</b>. Los dudosos (<b>?</b>) y los no encontrados (<b>✕</b>) van a la ventana de revisión.</li>
+</ol>
+<h4>Cómo se encuentra cada episodio</h4>
+<ul>
+  <li><b>Por el número</b>, en varios formatos: <code>S01E02</code>, <code>s1e2</code>, <code>1x02</code>, <code>T1 E2</code>, <code>Temporada 1 Episodio 2</code>, <code>Ep 02</code> (la temporada viene de la carpeta, como <code>Season 2</code> o <code>Temporada 2</code>), numeración absoluta (<code>Naruto - 125</code>), <code>201</code> (temporada 2, episodio 1) y fecha de emisión (<code>2024.03.15</code>). Los archivos con dos episodios (<code>S01E01E02</code>, <code>S01E01-02</code>) quedan como <code>S01E01-E02</code>.</li>
+  <li><b>Por el título</b>: el texto después del número se compara con los títulos de todos los episodios, en su idioma, en inglés y en el idioma original, sin tener en cuenta acentos, mayúsculas ni pequeños errores. Sin número, basta el título si está claro.</li>
+  <li><b>Cuando el número y el título no coinciden</b> (el nombre dice S02E08, pero el título es el de S01E03), el archivo queda con <b>?</b>, y la revisión muestra las dos opciones, sugiriendo la del título.</li>
+</ul>
+<h4>Revisión</h4>
+<p>Muestra lo que se leyó en el nombre, las sugerencias (clic, 1–9, o <b>Enter</b> para la primera) y todos los episodios de la serie por temporada, con un filtro por título o número (<code>s01e03</code>). <b>Ctrl+clic</b> marca más de un episodio de la misma temporada, para un archivo con varios episodios. Los subtítulos leídos igual reciben la misma elección.</p>
+<ul>
+  <li><b>Plantilla</b>: <code>{serie}</code>, <code>{original}</code> (nombre original), <code>{año}</code> (estreno), <code>{temporada}</code>, <code>{episodio}</code> (dos dígitos), <code>{título}</code> e <code>{id}</code>. La predeterminada es <code>{serie} ({año}) - S{temporada}E{episodio} - {título}</code>.</li>
+  <li>Los episodios sin traducción reciben el título en inglés (o en el idioma original), en lugar de "Episodio 4".</li>
+  <li>Los subtítulos conservan el idioma al final del nombre: <code>….pt-BR.srt</code>.</li>
+  <li>Los archivos que no están en la serie elegida quedan como están. Para varias series, filtre la lista y busque una por vez: cada archivo guarda la suya.</li>
+</ul>
+<p class="tip">Solo se envía a TMDB el nombre de la serie, nunca los nombres de los archivos ni las carpetas.</p>`,
   },
   {
     id: "preview",

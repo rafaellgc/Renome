@@ -11,6 +11,7 @@ use crate::files::{FileEntry, join_name, natural_cmp};
 use crate::filter::Filter;
 use crate::rules::{Ctx, Pipeline, RuleError, Step};
 use crate::tmdb::MovieMatch;
+use crate::tv::EpisodeMatch;
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -53,6 +54,8 @@ pub struct View {
     pub identical: HashMap<PathBuf, usize>,
     /// The movie chosen for each file (TMDB), for the movie rule.
     pub movies: HashMap<PathBuf, MovieMatch>,
+    /// The episode chosen for each file (TMDB), for the series rule.
+    pub episodes: HashMap<PathBuf, EpisodeMatch>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -197,6 +200,7 @@ pub fn preview(
                         file,
                         now,
                         movie: view.movies.get(&file.path),
+                        episode: view.episodes.get(&file.path),
                     };
                     let (stem, ext, into_folder) = pipeline.run_full(&ctx);
                     empty_stem = stem.is_empty() && !file.stem.is_empty();
@@ -513,6 +517,42 @@ mod tests {
         let p = preview(&files, &steps, &HashMap::new(), &view);
         assert_eq!(p.items[0].folder, None);
         assert_eq!(p.items[0].status, Status::Unchanged);
+    }
+
+    #[test]
+    fn episode_keeps_subtitle_language() {
+        let d = tempfile::tempdir().unwrap();
+        let m = EpisodeMatch {
+            id: 1,
+            show: "Show".into(),
+            original_show: String::new(),
+            year: None,
+            season: 1,
+            episodes: vec![2],
+            titles: vec!["Title".into()],
+        };
+        let steps = vec![Step {
+            enabled: true,
+            rule: Rule::Series {
+                template: "{show} - S{season}E{episode} - {title}".into(),
+                colon: " - ".into(),
+                show: String::new(),
+            },
+        }];
+        let files = entries(d.path(), &["show.s01e02.mkv", "show.s01e02.pt-BR.srt"]);
+        let mut view = View::default();
+        for f in &files {
+            view.episodes.insert(f.path.clone(), m.clone());
+        }
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        let names: Vec<_> = p.items.iter().map(|i| i.new_name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "Show - S01E02 - Title.mkv",
+                "Show - S01E02 - Title.pt-BR.srt"
+            ]
+        );
     }
 
     #[test]

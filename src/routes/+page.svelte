@@ -8,13 +8,18 @@
   import { closeDialog, confirm, dialog, notify } from "$lib/dialogs.svelte";
   import FileTable from "$lib/FileTable.svelte";
   import Help from "$lib/Help.svelte";
+  import EpisodeReview from "$lib/EpisodeReview.svelte";
   import MovieReview from "$lib/MovieReview.svelte";
   import Options from "$lib/Options.svelte";
   import RuleCard from "$lib/RuleCard.svelte";
+  import ShowPicker from "$lib/ShowPicker.svelte";
   import { LOCALES, MOD, t, tError } from "$lib/i18n";
   import { RULE_TYPES, isVideo, newRule, newStep, splitExt } from "$lib/rules";
   import { loadSettings, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
-  import type { ApplyReport, Candidate, Copies, MovieMatch, MovieState, HistoryEntry, OpError, Preview, RuleType, Step, View, ViewSort } from "$lib/types";
+  import type {
+    ApplyReport, Candidate, Copies, EpKey, EpisodeMatch, EpisodeState, MovieMatch, MovieState, MovieStatus, HistoryEntry,
+    OpError, Preview, Rule, RuleType, Show, Step, View, ViewSort,
+  } from "$lib/types";
 
   let ready = $state(false);
   let steps = $state<Step[]>([]);
@@ -60,22 +65,69 @@
       ? preview.items.filter((i) => i.status === "unchanged" && movies[i.path]?.choice && isVideo(i.original))
       : [],
   );
-  const movieStatus = $derived(movieRule ? Object.fromEntries(Object.entries(movies).map(([p, m]) => [p, m.status])) : {});
-  const movieCounts = $derived.by(() => {
+  const movieCounts = $derived(counts(movies));
+
+  /** TMDB episodes per file, for the series rule. */
+  let series = $state<Record<string, EpisodeState>>({});
+  /** Shows fetched, by id. */
+  let shows = $state<Record<number, Show>>({});
+  /** The show picked last, and the text it was found by. */
+  let pickedShow = $state<{ query: string; show: Candidate } | null>(null);
+  /** Files in the episode review window; null when closed. */
+  let episodeReview = $state<string[] | null>(null);
+  /** The show picker, while open. */
+  let showPick = $state<{ query: string; candidates: Candidate[]; resolve: (c: Candidate | null) => void } | null>(null);
+  let tvProgress = $state<string | null>(null);
+  const seriesRule = $derived(steps.find((s) => s.enabled && s.rule.type === "series"));
+  const episodeMatches = $derived(
+    Object.fromEntries(
+      Object.entries(series)
+        .filter(([, e]) => e.choice && shows[e.showId])
+        .map(([p, e]): [string, EpisodeMatch] => {
+          const show = shows[e.showId];
+          const keys = e.choice!;
+          return [p, {
+            id: show.id,
+            show: show.name,
+            originalShow: show.originalName,
+            year: show.year,
+            season: keys[0][0],
+            episodes: keys.map((k) => k[1]),
+            titles: keys.map((k) => show.episodes.find((x) => x.season === k[0] && x.number === k[1])?.name ?? ""),
+          }];
+        }),
+    ),
+  );
+  const seriesCounts = $derived(counts(series));
+
+  /** The ✓ ? ✕ marks next to the new names. */
+  const matches = $derived.by(() => {
+    const out: Record<string, { status: MovieStatus; tip: string }> = {};
+    const tips = {
+      movie: { auto: "movieAuto", chosen: "movieChosen", choose: "movieChoose", none: "movieNone" },
+      episode: { auto: "episodeAuto", chosen: "episodeChosen", choose: "episodeChoose", none: "episodeNone" },
+    } as const;
+    if (movieRule) for (const [p, m] of Object.entries(movies)) out[p] = { status: m.status, tip: t(tips.movie[m.status]) };
+    if (seriesRule) for (const [p, e] of Object.entries(series)) out[p] = { status: e.status, tip: t(tips.episode[e.status]) };
+    return out;
+  });
+
+  /** Found, waiting and without a match, among the visible files. */
+  function counts(state: Record<string, { status: MovieStatus }>) {
     let found = 0, choose = 0, none = 0;
     for (const i of preview.items) {
-      const st = movies[i.path]?.status;
+      const st = state[i.path]?.status;
       if (st === "auto" || st === "chosen") found++;
       else if (st === "choose") choose++;
       else if (st === "none") none++;
     }
     return { found, choose, none };
-  });
+  }
   let addMenu = $state(false);
   let ruleMenu = $state(false);
   let table = $state<FileTable>();
 
-  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, movies: movieMatches });
+  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, movies: movieMatches, episodes: episodeMatches });
   /** Example name for rule cards: the first file in natural name order, so
    *  it does not jump around while the preview re-sorts. */
   const collator = new Intl.Collator(undefined, { numeric: true });
@@ -282,7 +334,7 @@
           .concat(meta);
         if (items.length) saved = await saveSidecars(r.historyId, items, rule.fanart, rule.folder);
       }
-      followMovies(r);
+      followMatches(r);
       if (settings.disableRulesAfterApply) for (const s of steps) s.enabled = false;
       overrides = {};
       notice = [
@@ -308,7 +360,7 @@
     busy = true;
     try {
       const r = await api.undo(id);
-      followMovies(r);
+      followMatches(r);
       notice = t("restoredN", { n: r.done.length });
       if (history) history = await api.history();
       await refresh();
@@ -386,12 +438,96 @@
     }
   }
 
-  /** Movie choices follow their files when renamed or restored. */
-  function followMovies(r: ApplyReport) {
+  /** Movie and episode choices follow their files when renamed or restored. */
+  function followMatches(r: ApplyReport) {
     for (const op of r.done) {
       if (movies[op.from]) {
         movies[op.to] = movies[op.from];
         delete movies[op.from];
+      }
+      if (series[op.from]) {
+        series[op.to] = series[op.from];
+        delete series[op.from];
+      }
+    }
+  }
+
+  /** Finds the show (asking when unsure), then each visible file's episode;
+   *  doubtful files go to the review window. */
+  async function searchSeries(rule: Extract<Rule, { type: "series" }>) {
+    if (!settings.tmdbKey.trim()) {
+      const ok = await confirm({ title: t("rule.series"), text: t("tmdbNeedsKey"), ok: t("options"), cancel: t("cancel") });
+      if (ok) showOptions = true;
+      return;
+    }
+    const all = preview.items.map((i) => ({ path: i.path, name: i.original, isDir: i.isDir }));
+    if (!all.length) return;
+    const key = settings.tmdbKey;
+    const lang = tmdbLang();
+    tvProgress = t("tvFinding");
+    try {
+      // The same text as last time: the same show, no need to ask again.
+      let show = pickedShow && pickedShow.query === rule.show.trim() && rule.show.trim() ? pickedShow.show : null;
+      if (!show) {
+        const found = await api.tvSearch(key, lang, rule.show, all);
+        show = found.auto
+          ? found.candidates[0]
+          : await new Promise<Candidate | null>((resolve) => (showPick = { query: found.query, candidates: found.candidates, resolve }));
+        showPick = null;
+        if (!show) return;
+        pickedShow = { query: rule.show.trim(), show };
+      }
+      // Files already settled for this show keep their episode.
+      const items = all.filter((i) => {
+        const e = series[i.path];
+        return !(e && e.showId === show.id && (e.status === "auto" || e.status === "chosen"));
+      });
+      if (!items.length) {
+        notice = t("tvNoFiles");
+        return;
+      }
+      tvProgress = t("tvLoading", { show: show.title });
+      const res = await api.tvLookup(key, lang, show.id, items);
+      shows[show.id] = res.show;
+      for (const f of res.files) {
+        series[f.path] = {
+          showId: show.id,
+          guess: f.guess,
+          alternatives: f.alternatives,
+          conflict: f.conflict,
+          choice: f.choice.length ? f.choice : null,
+          status: f.choice.length ? "auto" : f.alternatives.length ? "choose" : "none",
+        };
+      }
+      if (res.files.some((f) => !f.choice.length)) openEpisodeReview();
+    } catch (e) {
+      await notify({ title: t("rule.series"), text: tError(e) });
+    } finally {
+      tvProgress = null;
+    }
+  }
+
+  /** Opens the review on the files still without an episode (or on one). */
+  function openEpisodeReview(start?: string) {
+    const paths = preview.items.map((i) => i.path);
+    const pending = [
+      ...paths.filter((p) => series[p]?.status === "choose"),
+      ...paths.filter((p) => series[p]?.status === "none"),
+    ];
+    const queue = start ? [start, ...pending.filter((p) => p !== start)] : pending;
+    episodeReview = queue.length ? queue : null;
+  }
+
+  /** The user's pick for a file; undecided files read the same way (its
+   *  subtitles, say) get it too. */
+  function chooseEpisode(path: string, choice: EpKey[] | null) {
+    const e = series[path];
+    if (!e) return;
+    const guess = JSON.stringify(e.guess);
+    for (const [p, o] of Object.entries(series)) {
+      const undecided = o.status === "choose" || o.status === "none";
+      if (p === path || (undecided && o.showId === e.showId && JSON.stringify(o.guess) === guess)) {
+        series[p] = { ...o, choice, status: choice ? "chosen" : "none" };
       }
     }
   }
@@ -517,13 +653,15 @@
       showOptions = false;
       help = null;
       review = null;
+      episodeReview = null;
+      showPick?.resolve(null);
     }
     if (e.key === "F1") {
       e.preventDefault();
       help ??= "manual";
       return;
     }
-    if (history || showOptions || help || review || busy) return;
+    if (history || showOptions || help || review || episodeReview || showPick || busy) return;
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
     // These work even while typing in a rule.
@@ -664,7 +802,7 @@
             last={i === steps.length - 1}
             onmove={(d) => moveStep(i, d)}
             onremove={() => steps.splice(i, 1)}
-            movie={step.rule.type === "movie"
+            lookup={step.rule.type === "movie"
               ? {
                   ...movieCounts,
                   progress: tmdbProgress
@@ -673,7 +811,15 @@
                   onsearch: searchMovies,
                   onreview: () => openReview(),
                 }
-              : undefined}
+              : step.rule.type === "series"
+                ? {
+                    ...seriesCounts,
+                    show: pickedShow ? `${pickedShow.show.title}${pickedShow.show.year ? ` (${pickedShow.show.year})` : ""}` : null,
+                    progress: tvProgress,
+                    onsearch: () => searchSeries(step.rule as Extract<Rule, { type: "series" }>),
+                    onreview: () => openEpisodeReview(),
+                  }
+                : undefined}
           />
         {:else}
           <p class="empty">{t("emptyRules")}</p>
@@ -692,8 +838,8 @@
           onsort={sortBy}
           onoverride={setOverride}
           {copies}
-          {movieStatus}
-          onmovie={(p) => openReview(p)}
+          {matches}
+          onmatch={(p) => (seriesRule && series[p] ? openEpisodeReview(p) : openReview(p))}
         />
         {#if !preview.items.length}<p class="no-match">{t("noMatch")}</p>{/if}
       {:else}
@@ -776,6 +922,21 @@
     onchoose={chooseMovie}
     onclose={() => (review = null)}
   />
+{/if}
+
+{#if episodeReview}
+  <EpisodeReview
+    queue={episodeReview}
+    {series}
+    {shows}
+    names={Object.fromEntries(preview.items.map((i) => [i.path, i.original]))}
+    onchoose={chooseEpisode}
+    onclose={() => (episodeReview = null)}
+  />
+{/if}
+
+{#if showPick}
+  <ShowPicker query={showPick.query} candidates={showPick.candidates} onpick={(c) => showPick?.resolve(c)} />
 {/if}
 
 {#if help}

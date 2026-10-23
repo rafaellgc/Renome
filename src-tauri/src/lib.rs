@@ -257,6 +257,29 @@ async fn tmdb_search(
     Ok(tmdb::Client::new(&key, &lang).search(&guess).await?.0)
 }
 
+/// Finds a show by what the user typed (a name, a TMDB id or link), or by
+/// the files' names when nothing was typed.
+#[tauri::command]
+async fn tv_search(
+    key: String,
+    lang: String,
+    query: String,
+    items: Vec<tmdb::TvItem>,
+) -> Result<tmdb::ShowSearch, String> {
+    tmdb::search_show(&tmdb::Client::new(&key, &lang), &query, &items).await
+}
+
+/// Fetches a show's episodes and finds each file's episode.
+#[tauri::command]
+async fn tv_lookup(
+    key: String,
+    lang: String,
+    id: u64,
+    items: Vec<tmdb::TvItem>,
+) -> Result<tmdb::TvLookup, String> {
+    tmdb::lookup_episodes(&tmdb::Client::new(&key, &lang), id, items).await
+}
+
 /// Writes `.nfo` and images next to renamed movies and records them in the
 /// rename's history entry, so undo deletes them.
 #[tauri::command]
@@ -439,6 +462,8 @@ pub fn run() {
             tmdb_check,
             tmdb_lookup,
             tmdb_search,
+            tv_search,
+            tv_lookup,
             write_sidecars,
             apply,
             history,

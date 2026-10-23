@@ -1,4 +1,4 @@
-//! TMDB client: movie search, details and images. The key is either a v3
+//! TMDB client: movie and show search, details and images. The key is either a v3
 //! API key (sent as `api_key`) or a v4 read access token (sent as a bearer
 //! token); TMDB gives both on the same settings page.
 
@@ -6,7 +6,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use futures_util::{StreamExt, stream};
+use renome_core::files::split_name;
 use renome_core::tmdb::{self, Candidate, Details, Guess, SearchResult};
+use renome_core::tv::{self, ApiEpisode, EpisodeLookup, Show, ShowQuery, TvDetails, TvResult};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
@@ -52,11 +54,21 @@ impl Client {
         path: &str,
         query: &[(&str, &str)],
     ) -> Result<T, String> {
+        self.get_in(&self.lang, path, query).await
+    }
+
+    /// Like `get`, with titles in another language.
+    async fn get_in<T: for<'de> Deserialize<'de>>(
+        &self,
+        lang: &str,
+        path: &str,
+        query: &[(&str, &str)],
+    ) -> Result<T, String> {
         let mut req = self
             .http
             .get(format!("{}{path}", api_base()))
             .query(query)
-            .query(&[("language", &self.lang)]);
+            .query(&[("language", lang)]);
         // v4 tokens are JWTs; v3 keys are short hex strings.
         req = if self.key.starts_with("eyJ") {
             req.bearer_auth(&self.key)
@@ -137,6 +149,87 @@ impl Client {
             ],
         )
         .await
+    }
+
+    /// Finds a show by id, link or name; the flag says the first one is a
+    /// safe automatic choice.
+    pub async fn search_tv(&self, query: &ShowQuery) -> Result<(Vec<Candidate>, bool), String> {
+        let guess = match query {
+            ShowQuery::Id(id) => {
+                let d: TvDetails = self.get(&format!("/tv/{id}"), &[]).await?;
+                let c = Candidate {
+                    id: d.id,
+                    year: tmdb::year_of(&d.first_air_date),
+                    title: d.name,
+                    original_title: d.original_name,
+                    overview: d.overview.unwrap_or_default(),
+                    poster_path: d.poster_path,
+                    score: 1.0,
+                };
+                return Ok((vec![c], true));
+            }
+            ShowQuery::Name(g) => g,
+        };
+        let base = [("query", guess.title.as_str()), ("include_adult", "false")];
+        let mut results: Vec<SearchResult> = Vec::new();
+        if let Some(y) = guess.year {
+            let y = y.to_string();
+            let mut q = base.to_vec();
+            q.push(("first_air_date_year", &y));
+            let page: Page<TvResult> = self.get("/search/tv", &q).await?;
+            results.extend(page.results.into_iter().map(Into::into));
+        }
+        let page: Page<TvResult> = self.get("/search/tv", &base).await?;
+        results.extend(page.results.into_iter().map(Into::into));
+        Ok(tmdb::rank(guess, results))
+    }
+
+    /// A show with all its episodes. Titles come in the user's language,
+    /// with English and the original language for untranslated ones (and
+    /// for matching file names in those languages).
+    pub async fn show(&self, id: u64) -> Result<Show, String> {
+        let path = format!("/tv/{id}");
+        let base: TvDetails = self.get(&path, &[]).await?;
+        let mut langs = vec![self.lang.clone()];
+        if self.lang2() != "en" {
+            langs.push("en-US".into());
+        }
+        let original = base.original_language.as_str();
+        if !original.is_empty() && original != self.lang2() && original != "en" {
+            langs.push(original.into());
+        }
+        // Up to 20 seasons per request.
+        let seasons: Vec<String> = base
+            .seasons
+            .iter()
+            .map(|s| format!("season/{}", s.season_number))
+            .collect();
+        let requests: Vec<(usize, String)> = langs
+            .iter()
+            .enumerate()
+            .flat_map(|(i, _)| seasons.chunks(20).map(move |c| (i, c.join(","))))
+            .collect();
+        let mut by_lang: Vec<Vec<ApiEpisode>> = vec![Vec::new(); langs.len()];
+        let mut tasks = stream::iter(requests)
+            .map(|(i, append)| {
+                let (path, lang) = (&path, &langs[i]);
+                async move {
+                    let d: Result<TvDetails, String> = self
+                        .get_in(lang, path, &[("append_to_response", &append)])
+                        .await;
+                    (i, d)
+                }
+            })
+            .buffer_unordered(4);
+        while let Some((i, d)) = tasks.next().await {
+            match d {
+                Ok(d) => by_lang[i].extend(d.appended_episodes()),
+                // The fallback languages are a bonus.
+                Err(e) if i == 0 => return Err(e),
+                Err(_) => {}
+            }
+        }
+        Ok(tv::build_show(&base, &by_lang))
     }
 
     async fn image(&self, path: &str) -> Result<Vec<u8>, String> {
@@ -234,6 +327,108 @@ pub async fn lookup(app: &AppHandle, client: &Client, items: Vec<LookupItem>) ->
             }
         })
         .collect()
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TvItem {
+    path: PathBuf,
+    /// File name, with extension.
+    name: String,
+    is_dir: bool,
+}
+
+impl TvItem {
+    /// The name to read numbers from: no extension, no subtitle language.
+    fn stem(&self) -> &str {
+        if self.is_dir {
+            return &self.name;
+        }
+        let (stem, ext) = split_name(&self.name);
+        &stem[..stem.len() - tmdb::subtitle_suffix(stem, ext).len()]
+    }
+
+    fn folder(&self) -> PathBuf {
+        self.path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default()
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShowSearch {
+    /// What was searched for (guessed from the files when nothing was typed).
+    query: String,
+    candidates: Vec<Candidate>,
+    auto: bool,
+}
+
+/// Searches for the show typed, or for the one the files are named after.
+pub async fn search_show(
+    client: &Client,
+    query: &str,
+    items: &[TvItem],
+) -> Result<ShowSearch, String> {
+    let q = if query.trim().is_empty() {
+        let names: Vec<(String, PathBuf)> = items
+            .iter()
+            .map(|i| (i.stem().to_string(), i.folder()))
+            .collect();
+        ShowQuery::Name(tv::guess_show(&names))
+    } else {
+        tv::show_query(query)
+    };
+    let text = match &q {
+        ShowQuery::Id(id) => id.to_string(),
+        ShowQuery::Name(g) if g.title.is_empty() => return Err("tvNoShow".into()),
+        ShowQuery::Name(g) => match g.year {
+            Some(y) => format!("{} ({y})", g.title),
+            None => g.title.clone(),
+        },
+    };
+    let (candidates, auto) = client.search_tv(&q).await?;
+    Ok(ShowSearch {
+        query: text,
+        candidates,
+        auto,
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TvFile {
+    path: PathBuf,
+    #[serde(flatten)]
+    found: EpisodeLookup,
+}
+
+#[derive(Serialize)]
+pub struct TvLookup {
+    show: Show,
+    files: Vec<TvFile>,
+}
+
+/// Fetches the show and finds each file's episode.
+pub async fn lookup_episodes(
+    client: &Client,
+    id: u64,
+    items: Vec<TvItem>,
+) -> Result<TvLookup, String> {
+    let show = client.show(id).await?;
+    let files = items
+        .iter()
+        .map(|i| {
+            let folder = i.folder();
+            let folder = folder.file_name().unwrap_or_default().to_string_lossy();
+            TvFile {
+                path: i.path.clone(),
+                found: tv::find(&show, &tv::parse(i.stem(), &folder)),
+            }
+        })
+        .collect();
+    Ok(TvLookup { show, files })
 }
 
 #[derive(Deserialize)]

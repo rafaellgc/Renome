@@ -250,7 +250,7 @@ ${ex("The.Lord.of.the.Rings.2001.1080p.BluRay.x264.mkv", "The Lord of the Rings 
 <ul>
   <li><b>Template</b>: <code>{title}</code>, <code>{original}</code> (original title), <code>{year}</code> and <code>{id}</code>. The default is <code>{title} ({year}) [tmdbid-{id}]</code>.</li>
   <li><b>Replace ":" with</b>: Windows does not accept colons; by default they become <code> - </code>. Slashes become dashes and <code>? * &lt; &gt; |</code> are removed.</li>
-  <li>Subtitles and other files with the same name as the movie get the same choice.</li>
+  <li>Subtitles and other files with the same name as the movie get the same choice. Subtitles keep their language at the end of the name: <code>The Matrix (1999) [tmdbid-603].pt-BR.srt</code>.</li>
   <li><b>Create a folder for each movie</b>: the movie and its subtitles go into a folder with the new name, as Jellyfin recommends: <code>Movies/The Matrix (1999) [tmdbid-603]/The Matrix (1999) [tmdbid-603].mkv</code>. A movie already in the right folder is not moved again. Undo puts the files back and deletes the folder if it is left empty.</li>
   <li>To remove accents, add the <b>Remove characters → Accents</b> rule after this one.</li>
 </ul>
@@ -259,6 +259,34 @@ ${ex("The.Lord.of.the.Rings.2001.1080p.BluRay.x264.mkv", "The Lord of the Rings 
 <p>The <code>.nfo</code> holds everything TMDB has that Jellyfin reads: title and original title, year and release date, overview and tagline, runtime, rating and votes, the age rating of the chosen language's country (e.g. PG-13), genres, keywords (as tags), countries, studios, collection (e.g. "The Lord of the Rings Collection"), YouTube trailer, director, writers, cast with characters and photos, producers, composer and the TMDB and IMDb ids. The movie file is not changed, existing files are not replaced, and <b>undoing</b> the rename deletes what was created.</p>
 <p>Movies whose <b>names are already right</b> get the metadata too: the Rename button counts them and the confirmation says so. If the name already has <code>[tmdbid-…]</code>, the movie is recognized by that id, without searching. That way an organized library can get just the .nfo files and images.</p>
 <p class="tip">Only the searched title and year are sent to TMDB, never the full file name or the folders.</p>`,
+  },
+  {
+    id: "r-series",
+    title: "TV show (TMDB)",
+    sub: true,
+    html: `
+<p>Gives each episode its official <b>TMDB</b> name, with season, number and title, in the format Jellyfin recognizes. It uses the same API key as the movie rule.</p>
+${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...And the Bag's in the River.mkv")}
+<ol>
+  <li>In the <b>Show</b> field, type the name or the TMDB id, or paste the link to the show's page (<code>themoviedb.org/tv/1396-…</code>). Left empty, the program uses the name the files share, or the folder's name.</li>
+  <li>Click <b>Find episodes</b>. If more than one show looks alike, choose the right one. The program downloads the whole episode list and looks for each visible file's episode.</li>
+  <li>Episodes found with certainty get <b>✓</b>. Doubtful ones (<b>?</b>) and those not found (<b>✕</b>) go to the review window.</li>
+</ol>
+<h4>How each episode is found</h4>
+<ul>
+  <li><b>By number</b>, in many forms: <code>S01E02</code>, <code>s1e2</code>, <code>1x02</code>, <code>Season 1 Episode 2</code>, <code>Ep 02</code> (the season comes from the folder, such as <code>Season 2</code>), absolute numbering (<code>Naruto - 125</code>), <code>201</code> (season 2, episode 1) and air date (<code>2024.03.15</code>). Files with two episodes (<code>S01E01E02</code>, <code>S01E01-02</code>) become <code>S01E01-E02</code>.</li>
+  <li><b>By title</b>: the text after the number is compared with the titles of every episode, in your language, in English and in the original language, ignoring accents, case and small misspellings. With no number at all, the title alone is enough when it is clear.</li>
+  <li><b>When the number and the title disagree</b> (the name says S02E08, but the title is S01E03's), the file gets <b>?</b>, and the review shows both, suggesting the title's.</li>
+</ul>
+<h4>Review</h4>
+<p>Shows what was read from the name, the suggestions (click, press 1–9, or <b>Enter</b> for the first) and every episode of the show by season, with a filter by title or number (<code>s01e03</code>). <b>Ctrl+click</b> marks more than one episode of the same season, for a file with several episodes. Subtitles read the same way get the same choice.</p>
+<ul>
+  <li><b>Template</b>: <code>{show}</code>, <code>{original}</code> (original name), <code>{year}</code> (first aired), <code>{season}</code>, <code>{episode}</code> (two digits), <code>{title}</code> and <code>{id}</code>. The default is <code>{show} ({year}) - S{season}E{episode} - {title}</code>.</li>
+  <li>Untranslated episodes get the English (or original) title instead of "Episode 4".</li>
+  <li>Subtitles keep their language at the end of the name: <code>….pt-BR.srt</code>.</li>
+  <li>Files not in the chosen show are left as they are. For several shows, filter the list and search one at a time: each file keeps its own.</li>
+</ul>
+<p class="tip">Only the show's name is sent to TMDB, never file names or folders.</p>`,
   },
   {
     id: "preview",

@@ -13,8 +13,8 @@
     onsort,
     onoverride,
     copies = {},
-    movieStatus = {},
-    onmovie,
+    matches = {},
+    onmatch,
   }: {
     items: PreviewItem[];
     selected: Set<string>;
@@ -24,13 +24,13 @@
     onoverride: (path: string, name: string | null) => void;
     /** Identical copies of each file in the list. */
     copies?: Record<string, Copies>;
-    /** TMDB state of each file, while a movie rule is on. */
-    movieStatus?: Record<string, MovieStatus>;
-    onmovie?: (path: string) => void;
+    /** TMDB state of each file (and its tooltip), while a movie or
+     *  series rule is on. */
+    matches?: Record<string, { status: MovieStatus; tip: string }>;
+    onmatch?: (path: string) => void;
   } = $props();
 
   const MOVIE_MARK: Record<MovieStatus, string> = { auto: "✓", chosen: "✓", choose: "?", none: "✕" };
-  const MOVIE_TIP = { auto: "movieAuto", chosen: "movieChosen", choose: "movieChoose", none: "movieNone" } as const;
 
   const ROW = 30;
   const OVERSCAN = 10;
@@ -200,14 +200,14 @@
                 onblur={() => commit(item)}
               />
             {:else}
-              {#if movieStatus[item.path]}
-                {@const ms = movieStatus[item.path]}
+              {#if matches[item.path]}
+                {@const m = matches[item.path]}
                 <button
-                  class="movie {ms}"
-                  title={t(MOVIE_TIP[ms])}
-                  aria-label={t(MOVIE_TIP[ms])}
-                  onclick={(e) => { e.stopPropagation(); onmovie?.(item.path); }}
-                >{MOVIE_MARK[ms]}</button>
+                  class="movie {m.status}"
+                  title={m.tip}
+                  aria-label={m.tip}
+                  onclick={(e) => { e.stopPropagation(); onmatch?.(item.path); }}
+                >{MOVIE_MARK[m.status]}</button>
               {/if}
               {#if item.folder}<span class="into" title={t("intoFolder", { folder: item.folder })}><svg class="folder" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M1.5 3.5A1 1 0 0 1 2.5 2.5h3.6l1.5 1.5h5.9a1 1 0 0 1 1 1v7.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" /></svg>/</span>{/if}
               <span class="name" class:same={item.status === "unchanged"}>{#if d}{@render segs(d[1], "ins")}{:else}{item.newName}{/if}</span>

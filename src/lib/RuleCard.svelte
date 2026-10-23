@@ -11,7 +11,7 @@
     last = false,
     onmove,
     onremove,
-    movie,
+    lookup,
   }: {
     step: Step;
     error?: string | null;
@@ -21,8 +21,10 @@
     last?: boolean;
     onmove: (delta: -1 | 1) => void;
     onremove: () => void;
-    /** Movie rule: search state and actions. */
-    movie?: {
+    /** Movie and series rules: search state and actions. */
+    lookup?: {
+      /** The show found last (series rule). */
+      show?: string | null;
       progress: string | null;
       found: number;
       choose: number;
@@ -230,25 +232,37 @@
         {#if r.sidecar}
           <label class="check sub"><input type="checkbox" bind:checked={r.fanart} /> {t("fanartLabel")}</label>
         {/if}
-        {#if movie}
-          <div class="movie-actions">
-            <button class="primary-soft" disabled={!!movie.progress} onclick={movie.onsearch}>{t("tmdbSearch")}</button>
-            {#if movie.choose || movie.none}
-              <button onclick={movie.onreview}>{t("movieReview")} ({movie.choose + movie.none})</button>
-            {/if}
-          </div>
-          {#if movie.progress}
-            <p class="hint">{movie.progress}</p>
-          {:else if movie.found || movie.choose || movie.none}
-            <p class="hint">{t("movieSummary", { found: movie.found, choose: movie.choose, none: movie.none })}</p>
-          {/if}
-        {/if}
+        {@render actions(t("tmdbSearch"), "movieSummary")}
+      {:else if r.type === "series"}
+        <p class="hint top">{t("seriesHint")}</p>
+        <label>{t("seriesShow")} <input bind:value={r.show} placeholder={t("seriesShowPlaceholder")} spellcheck="false" /></label>
+        <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
+        <p class="hint mono">{t("seriesTemplateHint")}</p>
+        <label class="colon">{t("colonLabel")} <input class="mono sep" bind:value={r.colon} spellcheck="false" /></label>
+        {#if lookup?.show}<p class="hint">{t("seriesCurrent", { show: lookup.show })}</p>{/if}
+        {@render actions(t("tvSearch"), "seriesSummary")}
       {/if}
 
       {#if error}<p class="error">{error}</p>{/if}
     </div>
   {/if}
 </article>
+
+{#snippet actions(label: string, summary: "movieSummary" | "seriesSummary")}
+  {#if lookup}
+    <div class="movie-actions">
+      <button class="primary-soft" disabled={!!lookup.progress} onclick={lookup.onsearch}>{label}</button>
+      {#if lookup.choose || lookup.none}
+        <button onclick={lookup.onreview}>{t("movieReview")} ({lookup.choose + lookup.none})</button>
+      {/if}
+    </div>
+    {#if lookup.progress}
+      <p class="hint">{lookup.progress}</p>
+    {:else if lookup.found || lookup.choose || lookup.none}
+      <p class="hint">{t(summary, { found: lookup.found, choose: lookup.choose, none: lookup.none })}</p>
+    {/if}
+  {/if}
+{/snippet}
 
 {#snippet target()}
   {#if "target" in r}
