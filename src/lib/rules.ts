@@ -30,6 +30,12 @@ const SERIES_TEMPLATE = {
 /** Extensions that get .nfo and images (subtitles share the movie's name but not those). */
 const VIDEO = new Set(["mkv", "mp4", "m4v", "avi", "mov", "wmv", "ts", "m2ts", "mts", "webm", "mpg", "mpeg", "flv", "ogv", "iso", "vob", "divx", "rmvb"]);
 export const isVideo = (name: string) => VIDEO.has(splitExt(name)[1].toLowerCase());
+/** Audio formats the music rule reads tags from (as the Rust core). */
+const AUDIO = new Set([
+  "mp3", "mp2", "mp1", "flac", "ogg", "opus", "spx", "m4a", "m4b", "m4p", "m4r", "aac",
+  "aiff", "aif", "afc", "aifc", "wav", "wave", "wv", "ape", "mpc", "mp+", "mpp",
+]);
+export const isAudio = (name: string) => AUDIO.has(splitExt(name)[1].toLowerCase());
 
 export function newRule(type: RuleType): Rule {
   switch (type) {
@@ -62,7 +68,7 @@ export function newRule(type: RuleType): Rule {
       };
     case "music": {
       const [template, folderTemplate] = MUSIC_TEMPLATE[settings.lang];
-      return { type, template, colon: " - ", discPrefix: true, fromName: false, folders: false, folderTemplate };
+      return { type, template, colon: " - ", discPrefix: true, fromName: false, folders: false, folderTemplate, cover: false };
     }
   }
 }

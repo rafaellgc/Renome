@@ -260,6 +260,9 @@ pub enum Rule {
         /// Folder levels separated by `/`.
         #[serde(default = "music_folder")]
         folder_template: String,
+        /// Save the album's cover from MusicBrainz (used by the app).
+        #[serde(default)]
+        cover: bool,
     },
 }
 
@@ -273,7 +276,7 @@ fn music_folder() -> String {
 
 /// A song's tags for the music rule: `None` for other files and songs
 /// without a title (even from the name, with `from_name`).
-pub(crate) fn song_tags(file: &FileEntry, from_name: bool) -> Option<AudioTags> {
+pub fn song_tags(file: &FileEntry, from_name: bool) -> Option<AudioTags> {
     if file.is_dir || !music::is_audio(&file.ext) {
         return None;
     }

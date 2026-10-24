@@ -8,16 +8,17 @@
   import { closeDialog, confirm, dialog, notify } from "$lib/dialogs.svelte";
   import FileTable from "$lib/FileTable.svelte";
   import Help from "$lib/Help.svelte";
+  import AlbumReview from "$lib/AlbumReview.svelte";
   import EpisodeReview from "$lib/EpisodeReview.svelte";
   import MovieReview from "$lib/MovieReview.svelte";
   import Options from "$lib/Options.svelte";
   import RuleCard from "$lib/RuleCard.svelte";
   import ShowPicker from "$lib/ShowPicker.svelte";
   import { LOCALES, MOD, t, tError } from "$lib/i18n";
-  import { RULE_TYPES, isVideo, newRule, newStep, splitExt } from "$lib/rules";
+  import { RULE_TYPES, isAudio, isVideo, newRule, newStep, splitExt } from "$lib/rules";
   import { loadSettings, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
-    ApplyReport, Candidate, Copies, EpKey, EpisodeMatch, EpisodeState, MovieMatch, MovieState, MovieStatus, HistoryEntry,
+    AlbumState, ApplyReport, Candidate, Copies, MbCandidate, SongMatch, EpKey, EpisodeMatch, EpisodeState, MovieMatch, MovieState, MovieStatus, HistoryEntry,
     OpError, Preview, Rule, RuleType, Show, Step, View, ViewSort,
   } from "$lib/types";
 
@@ -81,6 +82,34 @@
   const seriesRule = $derived(steps.find((s) => s.enabled && s.rule.type === "series"));
   const musicRule = $derived(steps.find((s) => s.enabled && s.rule.type === "music"));
   const untaggedCount = $derived(musicRule ? preview.items.filter((i) => i.untagged).length : 0);
+
+  /** Albums looked up on MusicBrainz, for the music rule. */
+  let albums = $state<AlbumState[]>([]);
+  /** Albums in the review window (indexes); null when closed. */
+  let albumReview = $state<number[] | null>(null);
+  let mbProgress = $state<{ done: number; total: number; kind: "search" | "save" } | null>(null);
+  /** Each song's details from its chosen release. */
+  const songMatches = $derived(
+    Object.fromEntries(albums.flatMap((a) => (a.choice ? Object.entries(a.matches) : []))) as Record<string, SongMatch>,
+  );
+  /** The album each song is in. */
+  const albumOf = $derived(new Map(albums.flatMap((a, i) => a.files.map((p): [string, number] => [p, i]))));
+  /** Albums whose songs keep their names but still get a cover (an
+   *  existing cover is kept when writing). */
+  const coverOnly = $derived.by(() => {
+    if (musicRule?.rule.type !== "music" || !musicRule.rule.cover) return 0;
+    const status = new Map(preview.items.map((i) => [i.path, i.status]));
+    return albums.filter((a) => a.choice && a.files.every((p) => status.get(p) === "unchanged")).length;
+  });
+  const albumCounts = $derived.by(() => {
+    let found = 0, choose = 0, none = 0;
+    for (const a of albums) {
+      if (a.status === "auto" || a.status === "chosen") found++;
+      else if (a.status === "choose") choose++;
+      else none++;
+    }
+    return { found, choose, none };
+  });
   const episodeMatches = $derived(
     Object.fromEntries(
       Object.entries(series)
@@ -123,7 +152,11 @@
     } as const;
     if (movieRule) for (const [p, m] of Object.entries(movies)) out[p] = { status: m.status, tip: t(tips.movie[m.status]) };
     if (seriesRule) for (const [p, e] of Object.entries(series)) out[p] = { status: e.status, tip: t(tips.episode[e.status]) };
-    if (musicRule) for (const i of preview.items) if (i.untagged) out[i.path] = { status: "none", tip: t("musicUntaggedTip") };
+    if (musicRule) {
+      const tip = { auto: "albumAuto", chosen: "albumChosen", choose: "albumChoose", none: "albumNone" } as const;
+      for (const a of albums) for (const p of a.files) out[p] = { status: a.status, tip: t(tip[a.status]) };
+      for (const i of preview.items) if (i.untagged) out[i.path] = { status: "none", tip: t("musicUntaggedTip") };
+    }
     return out;
   });
 
@@ -142,7 +175,7 @@
   let ruleMenu = $state(false);
   let table = $state<FileTable>();
 
-  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, movies: movieMatches, episodes: episodeMatches });
+  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, movies: movieMatches, episodes: episodeMatches, songs: songMatches });
   /** Example name for rule cards: the first file in natural name order, so
    *  it does not jump around while the preview re-sorts. */
   const collator = new Intl.Collator(undefined, { numeric: true });
@@ -321,11 +354,12 @@
     await refresh();
     const meta = metaOnly.map((i) => ({ path: i.path, id: movies[i.path].choice!.id }));
     const tvMeta = episodeMetaOnly.map((i) => tvSidecarItem(i.path, i.path));
-    if (!preview.changed && !meta.length && !tvMeta.length) return;
+    if (!preview.changed && !meta.length && !tvMeta.length && !coverOnly) return;
     if (settings.confirmApply) {
       const lines = [
         preview.changed ? t("confirmText", { n: preview.changed }) : "",
         meta.length + tvMeta.length ? t("confirmMeta", { n: meta.length + tvMeta.length }) : "",
+        coverOnly ? t("confirmCovers", { n: coverOnly }) : "",
         preview.conflicts ? t("confirmConflicts", { n: preview.conflicts }) : "",
       ].filter(Boolean);
       const ok = await confirm({
@@ -351,6 +385,18 @@
         if (items.length) {
           tmdbProgress = { done: 0, total: items.length, kind: "save" };
           saved += await writeMeta(() => api.writeSidecars(settings.tmdbKey, tmdbLang(), r.historyId, items, rule.fanart, rule.folder));
+        }
+      }
+      const mrule = musicRule?.rule;
+      if (mrule?.type === "music" && mrule.cover) {
+        const items = coverItems(r);
+        if (items.length) {
+          mbProgress = { done: 0, total: items.length, kind: "save" };
+          try {
+            saved += await writeMeta(() => api.writeCovers(r.historyId, items));
+          } finally {
+            mbProgress = null;
+          }
         }
       }
       const srule = seriesRule?.rule;
@@ -484,6 +530,99 @@
         delete series[op.from];
       }
     }
+    const moved = new Map(r.done.map((op) => [op.from, op.to]));
+    for (const a of albums) {
+      a.files = a.files.map((p) => moved.get(p) ?? p);
+      a.matches = Object.fromEntries(Object.entries(a.matches).map(([p, m]) => [moved.get(p) ?? p, m]));
+    }
+  }
+
+  /** Looks up the visible songs' albums on MusicBrainz; albums already
+   *  settled keep their release, doubtful ones go to the review window. */
+  async function searchAlbums(rule: Extract<Rule, { type: "music" }>) {
+    const settled = new Set(
+      albums.filter((a) => a.status === "auto" || a.status === "chosen").flatMap((a) => a.files),
+    );
+    const paths = preview.items
+      .filter((i) => !i.isDir && !i.untagged && isAudio(i.original) && !settled.has(i.path))
+      .map((i) => i.path);
+    if (!paths.length) {
+      notice = t("mbNoFiles");
+      return;
+    }
+    mbProgress = { done: 0, total: 0, kind: "search" };
+    try {
+      const found = await api.mbLookup(paths, rule.fromName);
+      if (!found.length) {
+        notice = t("mbNoFiles");
+        return;
+      }
+      const failed = found.find((f) => f.error);
+      if (failed && found.every((f) => f.error)) {
+        await notify({ title: t("rule.music"), text: tError(failed.error) });
+        return;
+      }
+      const looked = new Set(found.flatMap((f) => f.files));
+      albums = [
+        ...albums.filter((a) => !a.files.some((p) => looked.has(p))),
+        ...found.map((f): AlbumState => ({
+          files: f.files,
+          dir: f.dir,
+          query: f.query,
+          candidates: f.candidates,
+          choice: f.choice,
+          matches: Object.fromEntries(f.matches),
+          status: f.choice ? "auto" : f.candidates.length ? "choose" : "none",
+          error: f.error,
+        })),
+      ];
+      openAlbumReview();
+    } catch (e) {
+      await notify({ title: t("rule.music"), text: tError(e) });
+    } finally {
+      mbProgress = null;
+    }
+  }
+
+  /** Opens the review on the albums without a release (or on one). */
+  function openAlbumReview(start?: number) {
+    const pending = [
+      ...albums.flatMap((a, i) => (a.status === "choose" ? [i] : [])),
+      ...albums.flatMap((a, i) => (a.status === "none" ? [i] : [])),
+    ];
+    const queue = start === undefined ? pending : [start, ...pending.filter((i) => i !== start)];
+    albumReview = queue.length ? queue : null;
+  }
+
+  /** The release the user chose for an album: its songs are matched to
+   *  the tracks; `null` keeps the tags. */
+  async function chooseAlbum(index: number, choice: MbCandidate | null, candidates?: MbCandidate[]) {
+    const a = albums[index];
+    const rule = musicRule?.rule;
+    if (!choice || rule?.type !== "music") {
+      albums[index] = { ...a, choice: null, matches: {}, status: "none" };
+      return;
+    }
+    const res = await api.mbChoose(choice.id, a.files, rule.fromName);
+    albums[index] = {
+      ...a,
+      choice,
+      candidates: candidates ?? a.candidates,
+      matches: Object.fromEntries(res.matches),
+      status: "chosen",
+    };
+  }
+
+  /** Where each album with a release ends up after renaming, for its cover. */
+  function coverItems(r: ApplyReport): { dir: string; release: string }[] {
+    const moved = new Map(r.done.map((op) => [op.from, op.to]));
+    const parent = (p: string) => p.slice(0, Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\")));
+    const items = new Map<string, string>();
+    for (const a of albums) {
+      if (!a.choice || !a.files.some((p) => preview.items.some((i) => i.path === p) || moved.has(p))) continue;
+      items.set(parent(moved.get(a.files[0]) ?? a.files[0]), a.choice.id);
+    }
+    return [...items].map(([dir, release]) => ({ dir, release }));
   }
 
   /** Finds the show (asking when unsure), then each visible file's episode;
@@ -683,6 +822,7 @@
       help = null;
       review = null;
       episodeReview = null;
+      albumReview = null;
       showPick?.resolve(null);
     }
     if (e.key === "F1") {
@@ -690,7 +830,7 @@
       help ??= "manual";
       return;
     }
-    if (history || showOptions || help || review || episodeReview || showPick || busy) return;
+    if (history || showOptions || help || review || episodeReview || albumReview || showPick || busy) return;
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
     // These work even while typing in a rule.
@@ -739,6 +879,9 @@
     const unlistenTmdb = listen<{ done: number; total: number }>("tmdb-progress", (e) => {
       if (tmdbProgress) tmdbProgress = { ...tmdbProgress, ...e.payload };
     });
+    const unlistenMb = listen<{ done: number; total: number }>("mb-progress", (e) => {
+      if (mbProgress) mbProgress = { ...mbProgress, ...e.payload };
+    });
     const unlistenProgress = listen<{ done: number; total: number }>("identical-progress", (e) => {
       identicalProgress = e.payload.done < e.payload.total ? e.payload.done / e.payload.total : null;
     });
@@ -753,6 +896,7 @@
       unlisten.then((f) => f());
       unlistenProgress.then((f) => f());
       unlistenTmdb.then((f) => f());
+      unlistenMb.then((f) => f());
     };
   });
 </script>
@@ -798,8 +942,8 @@
           <path fill="currentColor" fill-rule="evenodd" stroke="currentColor" stroke-width="1" stroke-linejoin="round" d="M12.15 3.76L11.96 1.50L8.04 1.50L7.85 3.76L5.67 5.02L3.62 4.05L1.66 7.45L3.52 8.74L3.52 11.26L1.66 12.55L3.62 15.95L5.67 14.98L7.85 16.24L8.04 18.50L11.96 18.50L12.15 16.24L14.33 14.98L16.38 15.95L18.34 12.55L16.48 11.26L16.48 8.74L18.34 7.45L16.38 4.05L14.33 5.02ZM13 10a3 3 0 1 0-6 0a3 3 0 1 0 6 0Z" />
         </svg>
       </button>
-      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !metaOnly.length && !episodeMetaOnly.length) || busy} onclick={applyAll}>
-        {t("rename")} {preview.changed + metaOnly.length + episodeMetaOnly.length || ""}
+      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !metaOnly.length && !episodeMetaOnly.length && !coverOnly) || busy} onclick={applyAll}>
+        {t("rename")} {preview.changed + metaOnly.length + episodeMetaOnly.length + coverOnly || ""}
       </button>
     </div>
   </header>
@@ -848,7 +992,16 @@
                     onsearch: () => searchSeries(step.rule as Extract<Rule, { type: "series" }>),
                     onreview: () => openEpisodeReview(),
                   }
-                : undefined}
+                : step.rule.type === "music"
+                  ? {
+                      ...albumCounts,
+                      progress: mbProgress
+                        ? t(mbProgress.kind === "search" ? "mbSearching" : "coversWriting", mbProgress)
+                        : null,
+                      onsearch: () => searchAlbums(step.rule as Extract<Rule, { type: "music" }>),
+                      onreview: () => openAlbumReview(),
+                    }
+                  : undefined}
             summary={step.rule.type === "music" && step.enabled && untaggedCount ? t("musicUntaggedN", { n: untaggedCount }) : null}
           />
         {:else}
@@ -872,6 +1025,7 @@
           onmatch={(p) => {
             if (seriesRule && series[p]) openEpisodeReview(p);
             else if (movieRule && movies[p]) openReview(p);
+            else if (musicRule && albumOf.has(p)) openAlbumReview(albumOf.get(p));
           }}
         />
         {#if !preview.items.length}<p class="no-match">{t("noMatch")}</p>{/if}
@@ -966,6 +1120,10 @@
     onchoose={chooseEpisode}
     onclose={() => (episodeReview = null)}
   />
+{/if}
+
+{#if albumReview}
+  <AlbumReview queue={albumReview} {albums} onchoose={chooseAlbum} onclose={() => (albumReview = null)} />
 {/if}
 
 {#if showPick}

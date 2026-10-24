@@ -263,6 +263,9 @@
         {#if r.folders}
           <label class="sub">{t("musicFolderName")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
         {/if}
+        <p class="hint top">{t("mbHint")}</p>
+        <label class="check"><input type="checkbox" bind:checked={r.cover} /> <span>{t("musicCover")}<small>{t("musicCoverHint")}</small></span></label>
+        {@render actions(t("mbSearch"), "albumSummary")}
       {/if}
 
       {#if summary}<p class="hint">{summary}</p>{/if}
@@ -271,7 +274,7 @@
   {/if}
 </article>
 
-{#snippet actions(label: string, summary: "movieSummary" | "seriesSummary")}
+{#snippet actions(label: string, summary: "movieSummary" | "seriesSummary" | "albumSummary")}
   {#if lookup}
     <div class="movie-actions">
       <button class="primary-soft" disabled={!!lookup.progress} onclick={lookup.onsearch}>{label}</button>

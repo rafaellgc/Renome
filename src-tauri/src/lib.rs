@@ -4,6 +4,8 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use renome_core::music::AudioTags;
+use renome_core::rules::song_tags;
 use renome_core::scan::Skipped;
 use renome_core::{
     ApplyReport, FileEntry, HashCache, History, HistoryEntry, Operation, Preview, ScanOptions,
@@ -13,6 +15,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+mod musicbrainz;
 mod tmdb;
 
 /// The session's file list. It lives on the Rust side so the whole list
@@ -36,6 +39,8 @@ struct AppState {
     /// Bumped by each search for identical files; an older search that sees
     /// a newer number stops.
     identical_run: AtomicU64,
+    /// MusicBrainz, paced for all lookups together.
+    mb: musicbrainz::Client,
 }
 
 type Overrides = HashMap<PathBuf, String>;
@@ -364,6 +369,77 @@ async fn write_tv_sidecars(
     Ok(report)
 }
 
+/// The tags of the given songs in the list (with the name filled in, as
+/// the music rule does).
+fn songs_of(app: &AppHandle, paths: &[PathBuf], from_name: bool) -> Vec<(PathBuf, AudioTags)> {
+    let wanted: HashSet<&PathBuf> = paths.iter().collect();
+    let files: Vec<FileEntry> = app
+        .state::<AppState>()
+        .session
+        .lock()
+        .unwrap()
+        .files
+        .iter()
+        .filter(|f| wanted.contains(&f.path))
+        .cloned()
+        .collect();
+    files
+        .iter()
+        .filter_map(|f| Some((f.path.clone(), song_tags(f, from_name)?)))
+        .collect()
+}
+
+/// Groups the songs in albums and looks each one up on MusicBrainz.
+#[tauri::command]
+async fn mb_lookup(
+    app: AppHandle,
+    paths: Vec<PathBuf>,
+    from_name: bool,
+) -> Result<Vec<musicbrainz::AlbumLookup>, String> {
+    let songs = tauri::async_runtime::spawn_blocking({
+        let app = app.clone();
+        move || songs_of(&app, &paths, from_name)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let albums = musicbrainz::albums(&songs);
+    Ok(musicbrainz::lookup(&app, &app.state::<AppState>().mb, albums).await)
+}
+
+/// A search typed in the album review.
+#[tauri::command]
+async fn mb_search(
+    app: AppHandle,
+    query: renome_core::musicbrainz::AlbumQuery,
+) -> Result<Vec<renome_core::musicbrainz::Candidate>, String> {
+    app.state::<AppState>().mb.search(&query).await
+}
+
+/// Matches an album's songs to the release the user chose.
+#[tauri::command]
+async fn mb_choose(
+    app: AppHandle,
+    id: String,
+    paths: Vec<PathBuf>,
+    from_name: bool,
+) -> Result<musicbrainz::Chosen, String> {
+    let songs = songs_of(&app, &paths, from_name);
+    let songs: Vec<_> = musicbrainz::albums(&songs).concat();
+    musicbrainz::choose(&app.state::<AppState>().mb, &id, &songs).await
+}
+
+/// Saves the albums' covers and records them like `write_sidecars`.
+#[tauri::command]
+async fn write_covers(
+    app: AppHandle,
+    history_id: Option<String>,
+    items: Vec<musicbrainz::CoverItem>,
+) -> Result<tmdb::SidecarReport, String> {
+    let mut report = musicbrainz::covers(&app, &app.state::<AppState>().mb, items).await;
+    record_created(&app, history_id, &mut report);
+    Ok(report)
+}
+
 #[tauri::command]
 fn history(state: State<AppState>) -> Vec<HistoryEntry> {
     state.history.list()
@@ -501,6 +577,7 @@ pub fn run() {
             history: History::new(history_dir),
             hashes: Mutex::default(),
             identical_run: AtomicU64::new(0),
+            mb: musicbrainz::Client::default(),
         })
         .invoke_handler(tauri::generate_handler![
             checkpoint,
@@ -520,6 +597,10 @@ pub fn run() {
             tv_lookup,
             write_sidecars,
             write_tv_sidecars,
+            mb_lookup,
+            mb_search,
+            mb_choose,
+            write_covers,
             apply,
             history,
             undo,

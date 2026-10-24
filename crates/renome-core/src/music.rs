@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use lofty::config::ParseOptions;
-use lofty::file::{FileType, TaggedFileExt};
+use lofty::file::{AudioFile, FileType, TaggedFileExt};
 use lofty::probe::Probe;
 use lofty::tag::{Accessor, ItemKey, Tag};
 use regex::Regex;
@@ -30,6 +30,14 @@ pub struct AudioTags {
     pub disc_total: Option<u32>,
     pub genre: String,
     pub composer: String,
+    /// Length in seconds.
+    pub duration: Option<u32>,
+    /// The MusicBrainz release, when the files were tagged with it.
+    pub mb_release: String,
+    /// The album's songs are by several artists (set by [`fill_albums`]):
+    /// file names then show each song's artist.
+    #[serde(skip)]
+    pub compilation: bool,
 }
 
 /// Audio formats whose tags can be read (video containers left out).
@@ -52,17 +60,14 @@ fn number_of(tags: &[&Tag], get: impl Fn(&Tag) -> Option<u32>) -> Option<u32> {
     tags.iter().find_map(|t| get(t).filter(|&n| n > 0))
 }
 
-/// Reads the tags (none of the audio itself); `None` when there are none.
+/// Reads the tags and the length (no audio is decoded); `None` when the
+/// file cannot be read.
 /// With several tags (ID3v2 and ID3v1), each field comes from the first
 /// that has it, the main one first.
 pub fn read(path: &Path) -> Option<AudioTags> {
     let file = Probe::open(path)
         .ok()?
-        .options(
-            ParseOptions::new()
-                .read_properties(false)
-                .read_cover_art(false),
-        )
+        .options(ParseOptions::new().read_cover_art(false))
         .read()
         .ok()?;
     let mut tags: Vec<&Tag> = file.primary_tag().into_iter().collect();
@@ -89,6 +94,12 @@ pub fn read(path: &Path) -> Option<AudioTags> {
         composer: text_of(&tags, |t| {
             t.get_string(ItemKey::Composer).map(str::to_string)
         }),
+        duration: Some(file.properties().duration().as_secs() as u32).filter(|&s| s > 0),
+        mb_release: text_of(&tags, |t| {
+            t.get_string(ItemKey::MusicBrainzReleaseId)
+                .map(str::to_string)
+        }),
+        compilation: false,
     };
     (t != AudioTags::default()).then_some(t)
 }
@@ -183,14 +194,12 @@ fn main_artist(artist: &str) -> String {
     FEATURING.replace(artist, "").trim().to_string()
 }
 
-/// Makes the album-wide fields agree across an album's songs (same album
-/// tag, same folder or disc folders of one folder): a song without a year
-/// gets the album's; without an album artist, the others'. When none has
-/// one, the artist of most songs (guests left out) is the album's; with
-/// no such majority, the album is a compilation ("Various Artists").
-/// `songs` holds each song's folder.
-pub fn fill_albums(songs: &mut [(PathBuf, AudioTags)]) {
-    let mut groups: HashMap<(PathBuf, String), Vec<usize>> = HashMap::new();
+/// The songs of each album (indexes into `songs`, in order): same album
+/// tag, in one folder or in disc folders of one folder. `songs` holds each
+/// song's folder. Songs without an album tag are left out.
+pub fn album_groups(songs: &[(PathBuf, AudioTags)]) -> Vec<Vec<usize>> {
+    let mut keys: Vec<(PathBuf, String)> = Vec::new();
+    let mut groups: Vec<Vec<usize>> = Vec::new();
     for (i, (dir, t)) in songs.iter().enumerate() {
         if t.album.is_empty() {
             continue;
@@ -200,12 +209,105 @@ pub fn fill_albums(songs: &mut [(PathBuf, AudioTags)]) {
             Some(up) if disc_folder(&name).is_some() => up.to_path_buf(),
             _ => dir.clone(),
         };
-        groups
-            .entry((base, t.album.to_lowercase()))
+        let key = (base, t.album.to_lowercase());
+        match keys.iter().position(|k| *k == key) {
+            Some(g) => groups[g].push(i),
+            None => {
+                keys.push(key);
+                groups.push(vec![i]);
+            }
+        }
+    }
+    groups
+}
+
+/// The folder a song's album is in: its own, or the one above a disc
+/// folder (`CD 01`).
+fn album_dir(dir: &Path) -> &Path {
+    let name = dir.file_name().unwrap_or_default().to_string_lossy();
+    match dir.parent() {
+        Some(up) if disc_folder(&name).is_some() => up,
+        _ => dir,
+    }
+}
+
+/// "Single" is a kind of release, not an album's name: such a song is its
+/// own album.
+fn name_singles(songs: &mut [(PathBuf, AudioTags)]) {
+    for (_, t) in songs.iter_mut() {
+        if matches!(t.album.trim().to_lowercase().as_str(), "single" | "singles")
+            && !t.title.is_empty()
+        {
+            t.album = t.title.clone();
+        }
+    }
+}
+
+/// Bonus tracks tagged with other albums (a single, a soundtrack) in a
+/// folder where most songs are one album's join that album, when their
+/// numbers come after the album's own (`15`, `16` after `01`–`14`).
+fn join_bonus_tracks(songs: &mut [(PathBuf, AudioTags)]) {
+    let mut by_dir: HashMap<PathBuf, Vec<usize>> = HashMap::new();
+    for (i, (dir, _)) in songs.iter().enumerate() {
+        by_dir
+            .entry(album_dir(dir).to_path_buf())
             .or_default()
             .push(i);
     }
-    for idx in groups.values().filter(|g| g.len() > 1) {
+    for idx in by_dir.into_values().filter(|v| v.len() > 2) {
+        let Some(album) = most_common(
+            idx.iter()
+                .map(|&i| songs[i].1.album.to_lowercase())
+                .filter(|a| !a.is_empty()),
+        ) else {
+            continue;
+        };
+        let (own, others): (Vec<usize>, Vec<usize>) = idx
+            .iter()
+            .partition(|&&i| songs[i].1.album.to_lowercase() == album);
+        if own.len() * 2 <= idx.len() || others.is_empty() {
+            continue;
+        }
+        let last = |disc: Option<u32>| {
+            own.iter()
+                .filter(|&&i| songs[i].1.disc.unwrap_or(1) == disc.unwrap_or(1))
+                .filter_map(|&i| songs[i].1.track)
+                .max()
+        };
+        let bonus: Vec<usize> = others
+            .into_iter()
+            .filter(|&i| {
+                let t = &songs[i].1;
+                matches!((t.track, last(t.disc)), (Some(n), Some(max)) if n > max)
+            })
+            .collect();
+        let first = songs[own[0]].1.clone();
+        for i in bonus {
+            let t = &mut songs[i].1;
+            t.album = first.album.clone();
+            t.album_artist = first.album_artist.clone();
+            t.year = first.year;
+            t.mb_release = first.mb_release.clone();
+        }
+    }
+}
+
+/// Makes the album-wide fields agree across an album's songs (same album
+/// tag, same folder or disc folders of one folder): a song without a year
+/// gets the album's; without an album artist, the others'. When none has
+/// one, the artist of most songs (guests left out) is the album's; with
+/// no such majority, the album is a compilation ("Various Artists").
+/// Albums where most songs are by others than the album's artist are
+/// marked compilations. Songs tagged "Single" become their own albums, and
+/// bonus tracks tagged with other albums join their folder's album.
+/// `songs` holds each song's folder.
+pub fn fill_albums(songs: &mut [(PathBuf, AudioTags)]) {
+    name_singles(songs);
+    join_bonus_tracks(songs);
+    for idx in album_groups(songs) {
+        mark_compilation(songs, &idx);
+    }
+    for idx in album_groups(songs).iter().filter(|g| g.len() > 1) {
         let year = most_common(idx.iter().filter_map(|&i| songs[i].1.year));
         let artist = most_common(
             idx.iter()
@@ -236,6 +338,23 @@ pub fn fill_albums(songs: &mut [(PathBuf, AudioTags)]) {
                 t.album_artist = a.clone();
             }
         }
+        mark_compilation(songs, idx);
+    }
+}
+
+/// Marks an album a compilation when fewer than four in five of its songs
+/// are by its artist (guests left out).
+fn mark_compilation(songs: &mut [(PathBuf, AudioTags)], idx: &[usize]) {
+    let by_album_artist = idx
+        .iter()
+        .filter(|&&i| {
+            let t = &songs[i].1;
+            main_artist(&t.artist).to_lowercase() == main_artist(t.album_artist()).to_lowercase()
+        })
+        .count();
+    let compilation = by_album_artist * 5 < idx.len() * 4;
+    for &i in idx {
+        songs[i].1.compilation = compilation;
     }
 }
 
@@ -268,6 +387,9 @@ impl AudioTags {
     }
 }
 
+/// A year in an album's name (`Show 12 (2025-05-04)`).
+static YEAR_IN_NAME: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(?:19|20)\d{2}\b").unwrap());
+
 static REPEATED_DASH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r" [-–](?: [-–])+ ").unwrap());
 
 /// Expands a template with the tags: `{title}`, `{artist}`,
@@ -275,7 +397,19 @@ static REPEATED_DASH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r" [-–](?:
 /// albums over 99 tracks; `1-01` with `disc_prefix` on albums with more
 /// than one disc), `{disc}`, `{genre}`, `{composer}` (also in Portuguese
 /// and Spanish). Parts left empty by missing tags are removed.
+/// In a compilation, a template without the artist gets it before the
+/// title.
 pub fn expand(template: &str, t: &AudioTags, colon: &str, disc_prefix: bool) -> String {
+    const ARTIST: [&str; 2] = ["{artist}", "{artista}"];
+    const TITLE: [&str; 3] = ["{title}", "{título}", "{titulo}"];
+    if t.compilation
+        && !t.artist.is_empty()
+        && !ARTIST.iter().any(|k| template.contains(k))
+        && let Some(at) = TITLE.iter().find_map(|k| template.find(k))
+    {
+        let template = format!("{}{{artist}} - {}", &template[..at], &template[at..]);
+        return expand_as(&template, t, colon, disc_prefix, false);
+    }
     expand_as(template, t, colon, disc_prefix, false)
 }
 
@@ -306,7 +440,7 @@ fn expand_as(
     // again beside it.
     let mut year = t.year.map(|y| y.to_string()).unwrap_or_default();
     let names_album = ["{album}", "{álbum}"].iter().any(|k| template.contains(k));
-    if names_album && !year.is_empty() && t.album.contains(&year) {
+    if names_album && !year.is_empty() && YEAR_IN_NAME.is_match(&t.album) {
         year.clear();
     }
     let disc = t.disc.map(|d| d.to_string()).unwrap_or_default();
@@ -368,22 +502,55 @@ fn words(s: &str) -> Vec<String> {
         .collect()
 }
 
+/// A bracketed part, or a year or date.
+static ASIDE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\([^()]*\)|\[[^\[\]]*\]|\b(?:19|20)\d{2}(?:-\d{2}){0,2}\b").unwrap()
+});
+
+/// The words of a name without its bracketed parts, years and dates
+/// (`1012 - Samhain 2024` gives "1012 samhain").
+fn plain_words(s: &str) -> Vec<String> {
+    words(&ASIDE.replace_all(s, " "))
+}
+
 /// Whether a folder is named after one of `names`, ignoring years and
 /// bracketed parts on both sides (`A-Ha - Analogue (Deluxe) (2026) [FLAC]`
 /// is named after "A-Ha - Analogue (Deluxe)"), or starts with one.
 fn names_any(folder: &str, names: &[&str]) -> bool {
     let bare = tmdb::guess(folder).title;
     let folder_words = words(&bare);
+    let folder_plain = plain_words(folder);
     names.iter().filter(|n| !n.is_empty()).any(|n| {
+        let plain = plain_words(n);
+        // Years inside the name (`Samhain 2024`, `(Live …, 2025)`) cut the
+        // guessed title short; without them the words may still agree.
+        if !plain.is_empty()
+            && (folder_plain.starts_with(&plain)
+                || (folder_plain.len() > 1 && plain.ends_with(&folder_plain)))
+        {
+            return true;
+        }
         let name = tmdb::guess(n).title;
         let name_words = words(&name);
         similarity(&bare, &name) >= 0.8
             || similarity(folder, n) >= 0.8
             || (!name_words.is_empty() && folder_words.starts_with(&name_words))
-            // A short form of the name: `1037 - Title` for "Show 1037 - Title".
+            // A short form of the name, even with a typo on either side:
+            // `1053 - Сага об Иннокентии` for "Show 1053 - Сага о Иннокентии".
             || (folder_words.len() > 1
-                && name_words.windows(folder_words.len()).any(|w| w == folder_words))
+                && name_words.len() >= folder_words.len()
+                && (0..=name_words.len() - folder_words.len()).any(|k| {
+                    similarity(&folder_words.join(" "), &name_words[k..].join(" ")) >= 0.85
+                }))
     })
+}
+
+/// Whether a folder is a collection named like its albums: `Аэростат
+/// (1000 - ..)` for "Аэростат 1037 - То да се 42" (the album's name starts
+/// with the folder's, without years and brackets).
+pub fn names_collection(folder: &str, album: &str) -> bool {
+    let folder = words(&tmdb::guess(folder).title);
+    !folder.is_empty() && words(album).starts_with(&folder)
 }
 
 /// Where the artist's folder goes: above the folders already named after
@@ -392,12 +559,15 @@ fn names_any(folder: &str, names: &[&str]) -> bool {
 /// folder.
 pub fn library_root(dir: &Path, t: &AudioTags, levels: &[String]) -> PathBuf {
     let combined = format!("{} - {}", t.album_artist(), t.album);
+    // `Album - Artist (2026) [24-192]`, as classical downloads come.
+    let reversed = format!("{} - {}", t.album, t.album_artist());
     let mut names: Vec<&str> = levels.iter().map(String::as_str).collect();
     names.extend([
         t.album.as_str(),
         t.album_artist(),
         t.artist.as_str(),
         combined.as_str(),
+        reversed.as_str(),
     ]);
     let artists = [t.album_artist(), t.artist.as_str()];
     let name_of = |p: &Path| {
@@ -661,6 +831,198 @@ mod tests {
         let mut songs = vec![(dir.clone(), song("Korn", None)), (dir, song("Korn", None))];
         fill_albums(&mut songs);
         assert_eq!(songs[0].1.album_artist(), "Korn");
+    }
+
+    #[test]
+    fn bonus_singles_compilations() {
+        let song = |title: &str, artist: &str, album: &str, track: u32| AudioTags {
+            title: title.into(),
+            artist: artist.into(),
+            album: album.into(),
+            track: Some(track),
+            ..Default::default()
+        };
+        let dir = PathBuf::from("/m/Jonathan Davis/2018 - Black Labyrinth");
+        let mut songs = vec![
+            (
+                dir.clone(),
+                song("Underneath My Skin", "Jonathan Davis", "Black Labyrinth", 1),
+            ),
+            (
+                dir.clone(),
+                song("Final Days", "Jonathan Davis", "Black Labyrinth", 2),
+            ),
+            (
+                dir.clone(),
+                song("Everyone", "Jonathan Davis", "Black Labyrinth", 3),
+            ),
+            (
+                dir.clone(),
+                song("Got Money", "Jonathan Davis & The SFA", "Single", 4),
+            ),
+            (
+                dir.clone(),
+                song("Silent Hill", "Jonathan Davis", "Silent Hill Downpour", 5),
+            ),
+        ];
+        fill_albums(&mut songs);
+        // Bonus tracks join the album.
+        assert!(songs.iter().all(|(_, t)| t.album == "Black Labyrinth"));
+        assert_eq!(songs[3].1.album_artist(), "Jonathan Davis");
+        let mut songs = vec![
+            (
+                dir.clone(),
+                song("Underneath My Skin", "Jonathan Davis", "Black Labyrinth", 1),
+            ),
+            (
+                dir.clone(),
+                song("Final Days", "Jonathan Davis", "Black Labyrinth", 2),
+            ),
+            (
+                dir.clone(),
+                song("Everyone", "Jonathan Davis", "Black Labyrinth", 3),
+            ),
+            (
+                dir.clone(),
+                song("Got Money", "Jonathan Davis & The SFA", "Single", 2),
+            ),
+        ];
+        fill_albums(&mut songs);
+        // "Single" is no album's name; a song numbered among the album's
+        // own is no bonus track.
+        assert_eq!(songs[3].1.album, "Got Money");
+        // No majority (a folder of loose songs): each keeps its album.
+        let misc = PathBuf::from("/m/Korn/Misc");
+        let mut songs = vec![
+            (misc.clone(), song("Camel Song", "Korn", "End of Days", 10)),
+            (misc.clone(), song("Haze", "Korn", "Haze", 11)),
+            (misc.clone(), song("Appears", "Korn", "Single", 7)),
+        ];
+        fill_albums(&mut songs);
+        assert_eq!(songs[0].1.album, "End of Days");
+        assert_eq!(songs[2].1.album, "Appears");
+
+        // Songs by several artists: the artist goes into the file name.
+        let show = PathBuf::from("/m/Аэростат (1000 - ..)/1000 - Творчество");
+        let ep = "Аэростат 1000 - Творчество (2024-08-04)";
+        let mut songs = vec![
+            (
+                show.clone(),
+                AudioTags {
+                    album_artist: "BG".into(),
+                    ..song("Intro", "BG", ep, 1)
+                },
+            ),
+            (
+                show.clone(),
+                AudioTags {
+                    album_artist: "BG".into(),
+                    ..song("Orange and Red Beams", "Eric Burdon", ep, 3)
+                },
+            ),
+            (
+                show.clone(),
+                AudioTags {
+                    album_artist: "BG".into(),
+                    ..song("I Want You", "Bob Dylan", ep, 5)
+                },
+            ),
+        ];
+        fill_albums(&mut songs);
+        assert_eq!(
+            expand("{faixa} - {título}", &songs[1].1, " - ", true),
+            "03 - Eric Burdon - Orange and Red Beams"
+        );
+        assert_eq!(
+            expand("{faixa} - {artista} - {título}", &songs[1].1, " - ", true),
+            "03 - Eric Burdon - Orange and Red Beams"
+        );
+        // One artist with a guest: no compilation.
+        let mut songs = vec![
+            (dir.clone(), song("Right Now", "Korn", "Mirror", 1)),
+            (dir.clone(), song("Break Some Off", "Korn", "Mirror", 2)),
+            (dir.clone(), song("Counting on Me", "Korn", "Mirror", 3)),
+            (
+                dir.clone(),
+                song("Here It Comes Again", "Korn", "Mirror", 4),
+            ),
+            (dir.clone(), song("Play Me", "Korn feat. Nas", "Mirror", 5)),
+        ];
+        fill_albums(&mut songs);
+        assert_eq!(
+            expand("{faixa} - {título}", &songs[4].1, " - ", true),
+            "05 - Play Me"
+        );
+    }
+
+    #[test]
+    fn collections() {
+        assert!(names_collection(
+            "Аэростат (1000 - ..)",
+            "Аэростат 1037 - То да се 42 (2025-05-04)"
+        ));
+        assert!(!names_collection("Músicas", "Untouchables"));
+        assert!(!names_collection("Korn", "Untouchables"));
+        // A typo in the tag or in the folder name.
+        let t = AudioTags {
+            album: "Аэростат 1053 - Сага о Иннокентии".into(),
+            album_artist: "BG".into(),
+            ..Default::default()
+        };
+        let levels = folders("{album artist}/{album}", &t, " - ");
+        assert_eq!(
+            library_root(
+                Path::new("/m/Аэростат (1000 - ..)/1053 - Сага об Иннокентии"),
+                &t,
+                &levels
+            ),
+            Path::new("/m/Аэростат (1000 - ..)")
+        );
+        // A year in the folder's and the album's names.
+        let t = AudioTags {
+            album: "Аэростат 1012 - Samhain 2024 (2024-10-27)".into(),
+            album_artist: "BG".into(),
+            ..Default::default()
+        };
+        let levels = folders("{album artist}/{album}", &t, " - ");
+        assert_eq!(
+            library_root(
+                Path::new("/m/Аэростат (1000 - ..)/1012 - Samhain 2024"),
+                &t,
+                &levels
+            ),
+            Path::new("/m/Аэростат (1000 - ..)")
+        );
+        // The artist after the album, a year inside the album's name.
+        let t = AudioTags {
+            album:
+                "Beethoven - Piano Sonatas, Opp. 109, 110 & 111 (Live at Suntory Hall, Tokyo, 2025)"
+                    .into(),
+            album_artist: "Mitsuko Uchida".into(),
+            year: Some(2026),
+            ..Default::default()
+        };
+        let levels = folders("{album artist}/{album} ({year})", &t, " - ");
+        assert_eq!(
+            library_root(
+                Path::new(
+                    "/m/Beethoven - Piano Sonatas, Opp. 109, 110 & 111 - Mitsuko Uchida (2026) [24-192]"
+                ),
+                &t,
+                &levels
+            ),
+            Path::new("/m")
+        );
+        // A date in the album's name: no year again.
+        let t = AudioTags {
+            album: "Show 1096 (2025-06-21)".into(),
+            year: Some(2026),
+            ..Default::default()
+        };
+        assert_eq!(
+            folders("{album} ({year})", &t, " - "),
+            ["Show 1096 (2025-06-21)"]
+        );
     }
 
     #[test]

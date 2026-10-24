@@ -314,19 +314,32 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li>Empty tags leave nothing behind: with <code>{track} - {artist} - {title}</code>, a song without an artist becomes <code>01 - Title</code>.</li>
   <li><b>Disc number in the track</b>: on albums with more than one disc, the track becomes <code>1-01</code>, <code>2-01</code>…, so the discs do not mix.</li>
   <li><b>The album as a whole</b>: the tracks of one album (same folder, or <code>CD 01</code>/<code>CD 02</code> discs, and same album name) share the album's details. A track without a year gets the others'. Without an album artist in the tags, the artist of most tracks counts (guests such as <code>feat.</code> left out); with no majority, the album is a compilation: <code>Various Artists</code>, as Jellyfin knows it. So an album's tracks never scatter into different folders.</li>
-  <li>If the album name already has the year (<code>Show 12 (2025-05-04)</code>), the template's <code>({year})</code> is left out.</li>
+  <li><b>Bonus tracks</b>: in a folder where most songs are one album's, tracks tagged with another album (a single, a soundtrack) and numbered after the album's (<code>15</code>, <code>16</code> after <code>01</code>–<code>14</code>) take that album.</li>
+  <li><b>Singles</b>: a song tagged with the album <code>Single</code> gets its own title as album.</li>
+  <li><b>Compilations</b>: on an album where most tracks are by others than the album's artist, the artist goes into the name before the title when the template lacks it: <code>03 - Eric Burdon - Orange and Red Beams</code>.</li>
+  <li>If the album name already has a year (<code>Show 12 (2025-05-04)</code>), the template's <code>({year})</code> is left out.</li>
   <li>Songs <b>without a title in their tags</b> are left as they are and get <b>✕</b>; the card shows how many. With <b>Fill in from the file name</b>, the program reads <code>01 - Artist - Title</code>, <code>01. Title</code> or <code>1-05 Title</code> from the name, and the album and year from the folder (<code>Artist - Album (1975)</code>, or just <code>Album</code>; a <code>CD2</code> folder gives the disc). Existing tags come first.</li>
 </ul>
 <h4>Artist and album folders</h4>
-<p>With <b>Organize into artist and album folders</b>, each song goes into <code>{album artist}/{album} ({year})</code> (the folder template can be changed; each <code>/</code> is a level). So <code>Music/Pink Floyd/WYWH/CD1/01.mp3</code> becomes <code>Music/Pink Floyd/Wish You Were Here (1975)/01 - Shine On….mp3</code>: folders already named after the artist, the album or a disc (or inside the artist's folder) are replaced, not filled with new folders. Loose files get the folders inside the folder they are in.</p>
+<p>With <b>Organize into artist and album folders</b>, each song goes into <code>{album artist}/{album} ({year})</code> (the folder template can be changed; each <code>/</code> is a level). So <code>Music/Pink Floyd/WYWH/CD1/01.mp3</code> becomes <code>Music/Pink Floyd/Wish You Were Here (1975)/01 - Shine On….mp3</code>: folders already named after the artist, the album or a disc (or inside the artist's folder) are replaced, not filled with new folders. Loose files get the folders inside the folder they are in. Small spelling differences between the folder and the tag do not get in the way. A folder that already gathers albums named like it (<code>Show (1000 - ..)</code> for albums "Show 1037 - …") is taken as a collection: the albums go straight into it, with no artist folders in between.</p>
+<p><b>Copies</b>: if two identical copies of an album (found by the program, as in <b>Identical copies</b>) would go to the same place, the first goes ahead and the other stays where it is, marked as a copy.</p>
 <ul>
   <li>Lyrics (<code>.lrc</code>) with a song's name get its new name and go with it.</li>
-  <li>Covers, <code>.cue</code>, <code>.log</code> and other files in the album's folder go along when every song in the folder goes to the same place (and they are in the list). Subfolders without songs (<code>Artwork</code>, <code>Scans</code>) go along with the same name; so do files in the folder above <code>CD 01</code>/<code>CD 02</code>. If two such files would get the same name (a <code>log.txt</code> on each disc), they get their folder's name: <code>log (CD 01).txt</code>.</li>
+  <li>Covers, <code>.cue</code>, <code>.log</code> and other files in the album's folder go along with most of the folder's songs (songs from other albums that are not bonus tracks follow their own). Subfolders without songs (<code>Artwork</code>, <code>Scans</code>) go along with the same name; so do files in the folder above <code>CD 01</code>/<code>CD 02</code>. If two such files would get the same name (a <code>log.txt</code> on each disc), they get their folder's name: <code>log (CD 01).txt</code>.</li>
   <li>Artist or album names that differ only in case (<code>a-ha</code> and <code>A-Ha</code>, from different albums' tags) become one folder: the one already on disk, or the most used spelling.</li>
   <li>Old folders left empty are deleted; undo puts everything back.</li>
   <li><code>.cue</code> files and <code>.m3u</code> playlists list the songs' new names (see <b>Renaming and undoing</b>).</li>
 </ul>
-<p class="tip">Renome only reads the tags; the songs themselves are not changed.</p>`,
+<h4>Fixing with MusicBrainz</h4>
+<p>For wrong or incomplete tags, <b>Search MusicBrainz</b> identifies each album on <b>MusicBrainz</b> (musicbrainz.org), an open music database. No key is needed.</p>
+<ul>
+  <li>The visible songs are grouped by album. If the tags already have the MusicBrainz id, the album is known at once (when every song is on it; otherwise it goes to the review); otherwise the program searches by artist and album name.</li>
+  <li>One album often has several editions (original, remaster, deluxe, another country's). The program checks the <b>number of tracks</b>, <b>each one's title</b> and <b>length</b> (a track with the same number but another title and length does not count): if the best edition found fits the songs, it is picked automatically (<b>✓</b>). Otherwise the review opens, with cover, date, country, format, label and track count (green when it equals the folder's), for you to choose, or <b>None</b> to keep the tags.</li>
+  <li>With the album chosen, names and folders use MusicBrainz's details: each track's title, artist, album artist, album name and year, in their official spelling. Each song is matched to its track by disc and number (or by title).</li>
+  <li><b>Save the album's cover</b>: writes <code>cover.jpg</code> (from the Cover Art Archive) in the album's folder, if it has no cover yet. Undo deletes the cover created.</li>
+  <li>Lookups are spaced out (one every 2 seconds), as MusicBrainz asks; each album takes about 4 seconds.</li>
+</ul>
+<p class="tip">Renome only reads the tags; the songs themselves are not changed. Only the artist and album name are sent to MusicBrainz.</p>`,
   },
   {
     id: "preview",

@@ -8,6 +8,7 @@
 //! - [`apply`]: renames in two phases, with a history for undo.
 //! - [`identical`]: finds files with identical content.
 //! - [`music`]: tags of audio files and the names built from them.
+//! - [`musicbrainz`]: albums from MusicBrainz (ranking, matching tracks).
 //! - [`tmdb`]: movie title guessing, ranking and `.nfo` files for TMDB.
 //! - [`tv`]: season and episode numbers, and matching files to a show.
 
@@ -16,6 +17,7 @@ pub mod files;
 pub mod filter;
 pub mod identical;
 pub mod music;
+pub mod musicbrainz;
 pub mod plan;
 pub mod playlists;
 pub mod rules;

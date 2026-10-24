@@ -33,7 +33,7 @@ export type Rule =
     }
   | {
       type: "music"; template: string; colon: string; discPrefix: boolean; fromName: boolean;
-      folders: boolean; folderTemplate: string;
+      folders: boolean; folderTemplate: string; cover: boolean;
     };
 
 export type RuleType = Rule["type"];
@@ -45,7 +45,7 @@ export interface Step {
 }
 
 export type Status = "unchanged" | "ok" | "conflict";
-export type Problem = "empty" | "slash" | "tooLong" | "windowsChars" | "duplicate" | "exists";
+export type Problem = "empty" | "slash" | "tooLong" | "windowsChars" | "duplicate" | "copy" | "exists";
 
 export interface PreviewItem {
   path: string;
@@ -90,6 +90,63 @@ export interface View {
   movies: Record<string, MovieMatch>;
   /** The episode chosen for each file, for the series rule. */
   episodes: Record<string, EpisodeMatch>;
+  /** Each song's details from its MusicBrainz release, for the music rule. */
+  songs: Record<string, SongMatch>;
+}
+
+/** A MusicBrainz release offered for an album, best first. */
+export interface MbCandidate {
+  id: string;
+  title: string;
+  artist: string;
+  date: string;
+  country: string;
+  format: string;
+  label: string;
+  tracks: number;
+  kind: string;
+  score: number;
+}
+
+export interface SongMatch {
+  release: string;
+  title: string;
+  artist: string;
+  albumArtist: string;
+  album: string;
+  year: number | null;
+  track: number;
+  trackTotal: number;
+  disc: number;
+  discTotal: number;
+}
+
+export interface AlbumQuery {
+  artist: string;
+  album: string;
+  year: number | null;
+  tracks: number;
+}
+
+export interface AlbumLookup {
+  files: string[];
+  dir: string;
+  query: AlbumQuery;
+  candidates: MbCandidate[];
+  choice: MbCandidate | null;
+  matches: [string, SongMatch][];
+  error: string | null;
+}
+
+export interface AlbumState {
+  files: string[];
+  dir: string;
+  query: AlbumQuery;
+  candidates: MbCandidate[];
+  choice: MbCandidate | null;
+  matches: Record<string, SongMatch>;
+  status: MovieStatus;
+  error: string | null;
 }
 
 /** A TMDB movie offered for a file, best first. */

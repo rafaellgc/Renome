@@ -54,8 +54,11 @@ A built-in manual (F1) explains every rule with examples.
   them into `Show (Year) [tmdbid-…]/Season 01` and saves `tvshow.nfo`,
   episode `.nfo` files and images for Jellyfin, Kodi and Emby.
 - Music: names songs from their tags (`01 - Title`, artist, album, year,
-  disc…), optionally organizing them into `Artist/Album (Year)` folders,
-  with covers and lyrics going along.
+  disc…; the artist too on compilations), optionally organizing them
+  into `Artist/Album (Year)` folders, with covers, lyrics and bonus
+  tracks going along. Optionally identifies each album
+  on MusicBrainz (by track count and lengths, choosing the edition when
+  unsure) to fix titles and names, and saves the album's cover.
 - Edit any new name by hand right in the preview (double-click or F2).
 - List filter: only the visible files are renamed.
 - Sort by new name (default) or by any column.

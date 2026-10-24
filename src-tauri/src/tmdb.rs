@@ -741,7 +741,7 @@ pub async fn tv_sidecars(
 }
 
 /// Creates the file only if it does not exist yet.
-fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
     use std::io::Write;
     let mut f = std::fs::OpenOptions::new()
         .write(true)

@@ -314,19 +314,32 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li>Tags vazias não deixam sobras: com <code>{faixa} - {artista} - {título}</code>, uma música sem artista vira <code>01 - Título</code>.</li>
   <li><b>Número do disco na faixa</b>: em álbuns com mais de um disco, a faixa vira <code>1-01</code>, <code>2-01</code>…, para os discos não se misturarem.</li>
   <li><b>O álbum como um todo</b>: as faixas de um mesmo álbum (mesma pasta, ou discos <code>CD 01</code>/<code>CD 02</code>, e mesmo nome de álbum) combinam os dados do álbum. Uma faixa sem ano recebe o das outras. Sem "artista do álbum" nas tags, vale o artista da maioria das faixas (desconsiderando participações, como <code>feat.</code>); sem maioria, o álbum é uma coletânea: <code>Various Artists</code>, como o Jellyfin reconhece. Assim, as faixas de um álbum nunca se espalham em pastas diferentes.</li>
-  <li>Se o nome do álbum já traz o ano (<code>Programa 12 (2025-05-04)</code>), o <code>({ano})</code> do modelo é omitido.</li>
+  <li><b>Faixas bônus</b>: numa pasta em que a maioria das músicas é de um álbum, as faixas com outro álbum nas tags (um single, uma trilha sonora) e numeradas depois das do álbum (<code>15</code>, <code>16</code> depois de <code>01</code>–<code>14</code>) ficam com esse álbum.</li>
+  <li><b>Singles</b>: uma música com o álbum <code>Single</code> nas tags tem o próprio título como álbum.</li>
+  <li><b>Coletâneas</b>: num álbum em que a maioria das faixas é de outros artistas que não o do álbum, o artista entra no nome antes do título quando o modelo não o tem: <code>03 - Eric Burdon - Orange and Red Beams</code>.</li>
+  <li>Se o nome do álbum já traz um ano (<code>Programa 12 (2025-05-04)</code>), o <code>({ano})</code> do modelo é omitido.</li>
   <li>Músicas <b>sem título nas tags</b> ficam como estão e ganham <b>✕</b>; o card mostra quantas são. Com <b>Completar pelo nome do arquivo</b>, o programa lê <code>01 - Artista - Título</code>, <code>01. Título</code> ou <code>1-05 Título</code> do nome, e o álbum e o ano da pasta (<code>Artista - Álbum (1975)</code>, ou só <code>Álbum</code>; uma pasta <code>CD2</code> dá o disco). As tags que existem têm preferência.</li>
 </ul>
 <h4>Pastas de artista e álbum</h4>
-<p>Com <b>Organizar em pastas de artista e álbum</b>, cada música vai para <code>{artista do álbum}/{álbum} ({ano})</code> (o modelo das pastas pode ser trocado; cada <code>/</code> é um nível). Assim, <code>Música/Pink Floyd/WYWH/CD1/01.mp3</code> vira <code>Música/Pink Floyd/Wish You Were Here (1975)/01 - Shine On….mp3</code>: as pastas que já levam o nome do artista, do álbum ou do disco (ou que estão dentro da pasta do artista) são substituídas, não ganham pastas novas dentro. Arquivos soltos ganham as pastas dentro da pasta onde estão.</p>
+<p>Com <b>Organizar em pastas de artista e álbum</b>, cada música vai para <code>{artista do álbum}/{álbum} ({ano})</code> (o modelo das pastas pode ser trocado; cada <code>/</code> é um nível). Assim, <code>Música/Pink Floyd/WYWH/CD1/01.mp3</code> vira <code>Música/Pink Floyd/Wish You Were Here (1975)/01 - Shine On….mp3</code>: as pastas que já levam o nome do artista, do álbum ou do disco (ou que estão dentro da pasta do artista) são substituídas, não ganham pastas novas dentro. Arquivos soltos ganham as pastas dentro da pasta onde estão. Pequenas diferenças de grafia entre a pasta e a tag (<code>Сага об</code> e <code>Сага о</code>) não atrapalham. Uma pasta que já reúne álbuns com o nome dela (<code>Programa (1000 - ..)</code> para os álbuns "Programa 1037 - …") é tratada como coleção: os álbuns ficam direto nela, sem pastas de artista no meio.</p>
+<p><b>Cópias</b>: se duas cópias idênticas de um álbum (encontradas pelo programa, como em <b>Cópias idênticas</b>) iriam para o mesmo lugar, a primeira segue e a outra fica onde está, marcada como cópia.</p>
 <ul>
   <li>Letras (<code>.lrc</code>) com o mesmo nome de uma música recebem o novo nome dela e vão junto.</li>
-  <li>Capas, <code>.cue</code>, <code>.log</code> e outros arquivos da pasta do álbum vão junto quando todas as músicas da pasta vão para o mesmo lugar (e estão na lista). Subpastas sem músicas (<code>Artwork</code>, <code>Scans</code>) vão junto, com o mesmo nome; arquivos da pasta acima de <code>CD 01</code>/<code>CD 02</code> também. Se dois desses arquivos tiverem o mesmo nome (um <code>log.txt</code> em cada disco), ganham o nome da pasta de origem: <code>log (CD 01).txt</code>.</li>
+  <li>Capas, <code>.cue</code>, <code>.log</code> e outros arquivos da pasta do álbum vão junto com a maioria das músicas da pasta (músicas de outros álbuns que não sejam faixas bônus seguem o álbum delas). Subpastas sem músicas (<code>Artwork</code>, <code>Scans</code>) vão junto, com o mesmo nome; arquivos da pasta acima de <code>CD 01</code>/<code>CD 02</code> também. Se dois desses arquivos tiverem o mesmo nome (um <code>log.txt</code> em cada disco), ganham o nome da pasta de origem: <code>log (CD 01).txt</code>.</li>
   <li>Nomes de artista ou álbum que só diferem em maiúsculas (<code>a-ha</code> e <code>A-Ha</code>, de tags de álbuns diferentes) viram uma pasta só: a que já existe no disco ou a grafia mais usada.</li>
   <li>Pastas antigas que ficarem vazias são apagadas; desfazer devolve tudo ao lugar.</li>
   <li>Arquivos <code>.cue</code> e listas <code>.m3u</code> passam a citar os novos nomes das músicas (veja <b>Renomear e desfazer</b>).</li>
 </ul>
-<p class="tip">O Renome só lê as tags; o conteúdo das músicas não é alterado.</p>`,
+<h4>Corrigir pelo MusicBrainz</h4>
+<p>Para tags erradas ou incompletas, <b>Buscar no MusicBrainz</b> identifica cada álbum no <b>MusicBrainz</b> (musicbrainz.org), um banco de dados aberto de música. Não precisa de chave.</p>
+<ul>
+  <li>As músicas visíveis são agrupadas por álbum. Se as tags já trazem o ID do MusicBrainz, o álbum é reconhecido direto (quando todas as músicas estão nele; senão, vai para a conferência); senão, o programa busca pelo artista e pelo nome do álbum.</li>
+  <li>Um mesmo álbum costuma ter várias edições (original, remasterizada, de luxo, de outro país). O programa confere o <b>número de faixas</b>, o <b>título</b> e a <b>duração de cada uma</b> (uma faixa com o mesmo número mas outro título e outra duração não conta): se a melhor edição encontrada bate com as músicas, ela é escolhida sozinha (<b>✓</b>). Senão, abre a revisão, com capa, data, país, formato, gravadora e número de faixas (em verde quando é igual ao da pasta), para você escolher, ou <b>Nenhum</b> para manter as tags.</li>
+  <li>Com o álbum escolhido, os nomes e as pastas usam os dados do MusicBrainz: título de cada faixa, artista, artista do álbum, nome do álbum e ano, com a grafia oficial. Cada música é casada com a sua faixa pelo disco e número (ou pelo título).</li>
+  <li><b>Salvar a capa do álbum</b>: grava <code>cover.jpg</code> (do Cover Art Archive) na pasta do álbum, se ela ainda não tiver capa. Desfazer apaga a capa criada.</li>
+  <li>As consultas são espaçadas (uma a cada 2 segundos), como o MusicBrainz pede; cada álbum leva uns 4 segundos.</li>
+</ul>
+<p class="tip">O Renome só lê as tags; o conteúdo das músicas não é alterado. Ao MusicBrainz vão só o artista e o nome do álbum.</p>`,
   },
   {
     id: "preview",

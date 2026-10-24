@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ApplyReport, Candidate, EpisodeLookup, HistoryEntry, Lookup, Preview, ScanOptions, Show, SortKey, Step, View } from "./types";
+import type { AlbumLookup, AlbumQuery, ApplyReport, Candidate, EpisodeLookup, MbCandidate, SongMatch, HistoryEntry, Lookup, Preview, ScanOptions, Show, SortKey, Step, View } from "./types";
 
 type Overrides = Record<string, string>;
 type TvItem = { path: string; name: string; isDir: boolean };
@@ -29,6 +29,12 @@ export const api = {
     invoke<{ query: string; candidates: Candidate[]; auto: boolean }>("tv_search", { key, lang, query, items }),
   tvLookup: (key: string, lang: string, id: number, items: TvItem[]) =>
     invoke<{ show: Show; files: EpisodeLookup[] }>("tv_lookup", { key, lang, id, items }),
+  mbLookup: (paths: string[], fromName: boolean) => invoke<AlbumLookup[]>("mb_lookup", { paths, fromName }),
+  mbSearch: (query: AlbumQuery) => invoke<MbCandidate[]>("mb_search", { query }),
+  mbChoose: (id: string, paths: string[], fromName: boolean) =>
+    invoke<{ matches: [string, SongMatch][]; agree: number }>("mb_choose", { id, paths, fromName }),
+  writeCovers: (historyId: string | null, items: { dir: string; release: string }[]) =>
+    invoke<{ created: string[]; errors: [string, string][] }>("write_covers", { historyId, items }),
   writeSidecars: (
     key: string,
     lang: string,

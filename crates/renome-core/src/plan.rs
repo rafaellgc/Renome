@@ -10,6 +10,7 @@ use crate::apply::Operation;
 use crate::files::{FileEntry, join_name, natural_cmp, split_name};
 use crate::filter::Filter;
 use crate::music::{self, AudioTags};
+use crate::musicbrainz::SongMatch;
 use crate::rules::{Ctx, Move, Pipeline, RuleError, Step, song_tags};
 use crate::tmdb::MovieMatch;
 use crate::tv::EpisodeMatch;
@@ -36,6 +37,8 @@ pub enum Problem {
     WindowsChars,
     /// Another file in the batch would get the same name.
     Duplicate,
+    /// An identical copy of a file that gets that name: it stays put.
+    Copy,
     /// A file with that name already exists outside the batch.
     Exists,
 }
@@ -57,6 +60,9 @@ pub struct View {
     pub movies: HashMap<PathBuf, MovieMatch>,
     /// The episode chosen for each file (TMDB), for the series rule.
     pub episodes: HashMap<PathBuf, EpisodeMatch>,
+    /// Each song's details from the release chosen on MusicBrainz, for the
+    /// music rule (they replace the tags').
+    pub songs: HashMap<PathBuf, SongMatch>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -234,6 +240,117 @@ fn unify_folders(items: &mut [PreviewItem]) {
     }
 }
 
+/// Folders some songs are moved out of as old artist or album folders
+/// (`Korn [restored]` for Korn's albums) are not where other songs in them
+/// should get their new folders either (`Korn [restored]/Jonathan Davis`):
+/// those go up past them too.
+fn climb_shared_roots(items: &mut [PreviewItem]) {
+    let levels_of = |i: &PreviewItem| -> Option<(PathBuf, usize)> {
+        let n = i.folder.as_ref()?.split('/').count();
+        Some((i.dest.as_ref()?.ancestors().nth(n)?.to_path_buf(), n))
+    };
+    let mut left: HashSet<PathBuf> = HashSet::new();
+    for i in items.iter() {
+        let Some((root, _)) = levels_of(i) else {
+            continue;
+        };
+        for dir in i
+            .dir
+            .ancestors()
+            .take_while(|d| *d != root && d.starts_with(&root))
+        {
+            left.insert(dir.to_path_buf());
+        }
+    }
+    if left.is_empty() {
+        return;
+    }
+    for i in items.iter_mut() {
+        let Some((root, n)) = levels_of(i) else {
+            continue;
+        };
+        if !left.contains(&root) {
+            continue;
+        }
+        let mut up = root.clone();
+        while left.contains(&up) {
+            match up.parent() {
+                Some(p) => up = p.to_path_buf(),
+                None => break,
+            }
+        }
+        let dest = i.dest.as_ref().unwrap();
+        let tail: Vec<_> = dest
+            .components()
+            .skip(dest.components().count() - n)
+            .collect();
+        let new_dest = tail.iter().fold(up, |p, c| p.join(c));
+        i.dest = Some(new_dest);
+    }
+}
+
+/// A folder that already gathers a collection (a show's folder,
+/// `Аэростат (1000 - ..)` for "Аэростат 1037 - …") needs no artist folders
+/// inside it: when most songs going into it have albums named after the
+/// folder, the artist level is dropped for all of them.
+fn skip_artist_level(items: &mut [PreviewItem], songs: &HashMap<&Path, AudioTags>) {
+    #[derive(Default)]
+    struct Root {
+        named: usize,
+        /// Every song has an artist level to drop.
+        deep: bool,
+        members: Vec<usize>,
+    }
+    let mut roots: HashMap<PathBuf, Root> = HashMap::new();
+    for (n, i) in items.iter().enumerate() {
+        let (Some(t), Some(folder), Some(dest)) = (songs.get(i.path.as_path()), &i.folder, &i.dest)
+        else {
+            continue;
+        };
+        let levels: Vec<&str> = folder.split('/').collect();
+        let Some(root) = dest.ancestors().nth(levels.len()) else {
+            continue;
+        };
+        let name = root.file_name().unwrap_or_default().to_string_lossy();
+        let named = levels.len() > 1 && music::names_collection(&name, &t.album);
+        let r = roots.entry(root.to_path_buf()).or_insert(Root {
+            deep: true,
+            ..Default::default()
+        });
+        r.named += usize::from(named);
+        r.deep &= levels.len() > 1;
+        r.members.push(n);
+    }
+    for (root, r) in roots
+        .into_iter()
+        .filter(|(_, r)| r.deep && r.named * 2 > r.members.len())
+    {
+        for n in r.members {
+            let i = &mut items[n];
+            let rest: Vec<String> = i
+                .folder
+                .as_deref()
+                .unwrap_or_default()
+                .split('/')
+                .skip(1)
+                .map(str::to_string)
+                .collect();
+            let dest = rest.iter().fold(root.clone(), |p, l| p.join(l));
+            if dest == i.dir {
+                // Already where it belongs.
+                i.dest = None;
+                i.folder = None;
+                if i.new_name == i.original && i.status == Status::Ok {
+                    i.status = Status::Unchanged;
+                }
+            } else {
+                i.folder = Some(rest.join("/"));
+                i.dest = Some(dest);
+            }
+        }
+    }
+}
+
 /// Files that go with songs, when no rule changed them:
 /// - lyrics with a song's name (`01 Song.lrc`) get its new name;
 /// - with folders, other files (covers, cue sheets, logs) go with their
@@ -242,18 +359,20 @@ fn unify_folders(items: &mut [PreviewItem]) {
 ///   folder whose songs are all in disc folders (`CD 01`, `CD 02`) going
 ///   to one place go there too. Two such files that would get the same
 ///   name (`CD 01/log.txt`, `CD 02/log.txt`) get their folder's name added.
-fn follow_songs(items: &mut [PreviewItem], folders: bool) {
-    /// Where the songs of a folder go: one place, or several.
+fn follow_songs(items: &mut [PreviewItem], folders: bool, identical: &HashMap<PathBuf, usize>) {
+    /// Where the songs of a folder go: where most of them go, or nowhere
+    /// in particular.
     #[derive(Clone, PartialEq)]
     enum Album {
         One(Option<PathBuf>, Option<String>),
         Split,
     }
+    type Place = (Option<PathBuf>, Option<String>);
     let is_song = |i: &PreviewItem| !i.is_dir && music::is_audio(split_name(&i.original).1);
     /// A song's new stem, destination and folder shown.
     type Song = (String, Option<PathBuf>, Option<String>);
     let mut by_stem: HashMap<(PathBuf, String), Song> = HashMap::new();
-    let mut albums: HashMap<PathBuf, Album> = HashMap::new();
+    let mut places: HashMap<PathBuf, Vec<(Place, usize)>> = HashMap::new();
     for i in items
         .iter()
         .filter(|i| is_song(i) && i.status != Status::Conflict)
@@ -264,16 +383,26 @@ fn follow_songs(items: &mut [PreviewItem], folders: bool) {
             (i.dir.clone(), stem),
             (new_stem, i.dest.clone(), i.folder.clone()),
         );
-        let here = Album::One(i.dest.clone(), i.folder.clone());
-        albums
-            .entry(i.dir.clone())
-            .and_modify(|a| {
-                if *a != here {
-                    *a = Album::Split;
-                }
-            })
-            .or_insert(here);
+        let here = (i.dest.clone(), i.folder.clone());
+        let counts = places.entry(i.dir.clone()).or_default();
+        match counts.iter_mut().find(|(p, _)| *p == here) {
+            Some(c) => c.1 += 1,
+            None => counts.push((here, 1)),
+        }
     }
+    // Bonus tracks tagged with other albums go their way; the folder's
+    // other files go with most of its songs.
+    let albums: HashMap<PathBuf, Album> = places
+        .into_iter()
+        .map(|(dir, counts)| {
+            let total: usize = counts.iter().map(|(_, n)| n).sum();
+            let album = match counts.into_iter().max_by_key(|(_, n)| *n) {
+                Some(((dest, folder), n)) if n * 2 > total => Album::One(dest, folder),
+                _ => Album::Split,
+            };
+            (dir, album)
+        })
+        .collect();
     // Where a song-less folder's files go, if anywhere.
     let place = |dir: &Path| -> Option<(PathBuf, String)> {
         if let Some(a) = albums.get(dir) {
@@ -331,7 +460,8 @@ fn follow_songs(items: &mut [PreviewItem], folders: bool) {
         i.windows_unsafe = i.new_name.contains(WINDOWS_UNSAFE);
         followers.push(n);
     }
-    // Same name in the same place: add the folder each came from.
+    // Same name in the same place: add the folder each came from (identical
+    // copies are left to the duplicate check, which lets one through).
     let mut by_target: HashMap<PathBuf, Vec<usize>> = HashMap::new();
     for &n in &followers {
         by_target
@@ -339,7 +469,15 @@ fn follow_songs(items: &mut [PreviewItem], folders: bool) {
             .or_default()
             .push(n);
     }
-    for group in by_target.values().filter(|g| g.len() > 1) {
+    let copies = |g: &Vec<usize>| {
+        let first = identical.get(&items[g[0]].path);
+        first.is_some() && g.iter().all(|&n| identical.get(&items[n].path) == first)
+    };
+    let clashes: Vec<Vec<usize>> = by_target
+        .into_values()
+        .filter(|g| g.len() > 1 && !copies(g))
+        .collect();
+    for group in &clashes {
         for &n in group {
             let i = &mut items[n];
             let from = i
@@ -382,7 +520,10 @@ pub fn preview(
             let mut tags: Vec<(PathBuf, AudioTags)> = Vec::new();
             let mut paths: Vec<&Path> = Vec::new();
             for f in visible {
-                if let Some(t) = song_tags(f, from_name) {
+                if let Some(mut t) = song_tags(f, from_name) {
+                    if let Some(m) = view.songs.get(&f.path) {
+                        m.apply(&mut t);
+                    }
                     tags.push((f.dir.clone(), t));
                     paths.push(&f.path);
                 }
@@ -482,9 +623,13 @@ pub fn preview(
             }
         })
         .collect();
+    climb_shared_roots(&mut items);
     unify_folders(&mut items);
     if let Some((_, folders)) = music {
-        follow_songs(&mut items, folders);
+        if folders {
+            skip_artist_level(&mut items, &songs);
+        }
+        follow_songs(&mut items, folders, &view.identical);
     }
 
     // Repeated targets within the batch. A file that keeps its name is not
@@ -496,9 +641,20 @@ pub fn preview(
         }
     }
     for idx in targets.values().filter(|v| v.len() > 1) {
-        for &i in idx {
+        // Identical copies (found in the background): the first goes
+        // ahead, the others stay where they are.
+        let first = view.identical.get(&items[idx[0]].path);
+        let copies = first.is_some()
+            && idx
+                .iter()
+                .all(|&i| view.identical.get(&items[i].path) == first);
+        for &i in idx.iter().skip(usize::from(copies)) {
             items[i].status = Status::Conflict;
-            items[i].problem = Some(Problem::Duplicate);
+            items[i].problem = Some(if copies {
+                Problem::Copy
+            } else {
+                Problem::Duplicate
+            });
         }
     }
 
@@ -650,6 +806,31 @@ mod tests {
         assert_eq!(p.items[0].problem, Some(Problem::Exists));
         assert_eq!(p.items[1].status, Status::Unchanged);
         assert_eq!(p.conflicts, 1);
+    }
+
+    #[test]
+    fn identical_copies_let_one_through() {
+        let d = tempfile::tempdir().unwrap();
+        let files = entries(d.path(), &["a.txt", "b.txt"]);
+        let mut ov = HashMap::new();
+        for f in &files {
+            ov.insert(f.path.clone(), "same.txt".to_string());
+        }
+        // Not known to be identical: both blocked.
+        let mut view = View::default();
+        let p = preview(&files, &[], &ov, &view);
+        assert!(
+            p.items
+                .iter()
+                .all(|i| i.problem == Some(Problem::Duplicate))
+        );
+        // Identical copies: the first goes ahead.
+        for f in &files {
+            view.identical.insert(f.path.clone(), 0);
+        }
+        let p = preview(&files, &[], &ov, &view);
+        assert_eq!(p.items[0].status, Status::Ok);
+        assert_eq!(p.items[1].problem, Some(Problem::Copy));
     }
 
     #[test]
@@ -900,6 +1081,7 @@ mod tests {
                 from_name: false,
                 folders: true,
                 folder_template: "{album artist}/{album} ({year})".into(),
+                cover: false,
             },
         }];
         let p = preview(&files, &steps, &HashMap::new(), &View::default());
@@ -908,10 +1090,24 @@ mod tests {
         // Next to the old folders, not inside them.
         assert_eq!(get("01.flac").target(), wywh.join("01 - Shine On.flac"));
         assert_eq!(get("01.lrc").target(), wywh.join("01 - Shine On.lrc"));
-        // The songs of x.flac's folder do not all go to one place.
-        assert_eq!(get("cover.jpg").status, Status::Unchanged);
+        // The cover goes with most of the folder's songs; the untagged one
+        // stays.
+        assert_eq!(get("cover.jpg").target(), wywh.join("cover.jpg"));
         assert!(get("x.flac").untagged);
         assert_eq!(get("x.flac").status, Status::Unchanged);
+
+        // Two songs staying, one leaving: the cover stays.
+        flac(&album.join("y.flac"), &[]);
+        let files = crate::scan(
+            std::slice::from_ref(&album),
+            &Default::default(),
+            &Default::default(),
+        )
+        .files;
+        let p = preview(&files, &steps, &HashMap::new(), &View::default());
+        let cover = p.items.iter().find(|i| i.original == "cover.jpg").unwrap();
+        assert_eq!(cover.status, Status::Unchanged);
+        fs::remove_file(album.join("y.flac")).unwrap();
 
         // Without the untagged song, the cover goes with the album.
         fs::remove_file(album.join("x.flac")).unwrap();
@@ -982,6 +1178,7 @@ mod tests {
                 from_name: false,
                 folders: true,
                 folder_template: "{album artist}/{album}".into(),
+                cover: false,
             },
         }];
         let p = preview(&files, &steps, &HashMap::new(), &View::default());

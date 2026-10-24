@@ -230,14 +230,22 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   values made safe like movie titles, keeping final dots in file names
   (the extension follows; folder names lose them); empty `()`/`[]` dropped, repeated
   ` - ` separators collapsed, separators at the ends trimmed.
-- Album-wide agreement (before naming): songs with the same album tag in
-  one folder (disc folders count as their parent) share: the most common
+- Album-wide agreement (before naming): songs tagged `Single`/`Singles`
+  as album take their title as album. In a folder (disc folders count as
+  their parent) of at least 3 songs where more than half share an album
+  tag, songs with another album tag whose track number is above that
+  album's highest on the same disc (bonus tracks: a single, a soundtrack
+  song) take its album, album artist, year and release id. Then songs
+  with the same album tag in one folder share: the most common
   year for those without one; the most common album artist for those
   without one; when none has one, the main artist (`feat.`, `ft.`,
   `featuring`, `with` guests left out) of more than half the songs, else
   `Various Artists`.
+- Compilations: an album where fewer than 4 in 5 songs have the album
+  artist as main artist is a compilation; there a file template without
+  `{artist}` gets `{artist} - ` before `{title}`.
 - `{year}` is left empty in a template that also has `{album}` when the
-  album already contains that year (`Show 12 (2025-05-04)`).
+  album already contains a year (19xx/20xx) (`Show 12 (2025-05-04)`).
 - Fill in from the name: `01 - Artist - Title`, `01. Title`, `1-05
   Title`, `Artist - Title`, `Title`; album, artist and year from the
   folder (`Artist - Album (1975)`, `Album`), the one above a disc folder
@@ -246,22 +254,72 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   out). The root: going up from the file's folder past folders that are
   a disc folder, are named (similarity ≥ 0.8, also without year and
   release tags, on both sides) after a level, the album, the album
-  artist, the artist or "artist - album" (or start with one of them, or
-  are a run of at least two of its words, like `1037 - Title` for
+  artist, the artist, "artist - album" or "album - artist" (or start
+  with one of them, also comparing the words without bracketed parts,
+  years and dates: `1012 - Samhain 2024` for "Show 1012 - Samhain 2024
+  (2024-10-27)"; or
+  are, with similarity ≥ 0.85, a run of at least two of its words, like
+  `1037 - Title` for
   "Show 1037 - Title (2025)"), or
   sit inside a folder named after the artist;
   at most one level more than the template has.
+- Folders some songs are moved out of (old artist or album folders, below
+  their root) are climbed past by other songs whose root they would be,
+  so a side project in `Korn [restored]/Jonathan Davis` ends up next to
+  `Korn`, not inside the emptied folder.
+- Collections: when every song going into a root has at least two folder
+  levels and more than half have an album name starting with the
+  root folder's name (without years and brackets: `Show (1000 - ..)` for
+  "Show 1037 - …"), that level is dropped and the albums go straight into
+  the root (a song already in its album folder there stays).
 - Companions (when the music rule is on, for files no rule changed):
   a file with a song's stem in the same folder (lyrics) gets the song's
   new stem and destination; with folders, other files in a folder whose
   songs (in the list, without conflicts) all go to one place go there
-  too, keeping their names; files in song-less subfolders of such a
+  too, keeping their names (a folder's place is where more than half
+  its songs go); files in song-less subfolders of such a
   folder (`Artwork/`, up to two levels) keep their subfolder; files in a
   folder whose song folders are all disc folders going to one place go
   there. Followers that would share a name get ` (<their folder>)`.
 - Folder levels that differ only in case across the batch (`a-ha`,
   `A-Ha`) are unified, for every rule that moves files: an existing
   folder's spelling, else the most common one (the first on a tie).
+- MusicBrainz (no key; `User-Agent: Renome/<version> ( <repo> )`; one
+  request at a time, at least 2 s apart; a 503, which it also sends when
+  shedding load whatever the pace, is retried up to 3 times after its
+  `Retry-After`, at least 3 s and at most 60 s): "Search
+  MusicBrainz" groups the visible tagged songs in albums (as above, after
+  the album-wide agreement), skipping albums already settled. An album
+  whose songs all carry the same release id (`MUSICBRAINZ_ALBUMID` and
+  its ID3/MP4 forms) is looked up by it and taken when every song
+  matches one of its tracks (else it waits for review). Otherwise it is
+  searched (`release:"<album>" AND artist:"<album artist>"`, the artist
+  left out for Various Artists, 25 results) and ranked: title similarity
+  + 0.6 × artist similarity + 0.3 for the same track count as the songs
+  (0.1 when more, −0.2 when fewer) + 0.1 for the same year + 0.05 if
+  official + MusicBrainz's score / 2000. The best one is fetched with
+  its tracks and picked when every song matches a track and at least
+  90 % of the songs with a length are within 5 s of it; otherwise the
+  album waits for the user (review: cover from the Cover Art Archive,
+  title, artist, date, country, format, label, type, track count
+  highlighted when equal to the songs'; a search with artist and album;
+  "None" keeps the tags). Songs are matched to tracks by disc (1 when
+  missing) and number when the track has the song's title (similarity ≥
+  0.6, or ≥ 0.8 without bracketed parts) or length (within 5 s), else by
+  title (≥ 0.8), each track once; a song that fits no track keeps its
+  tags. "Picked without doubt" also needs every song matched this way.
+- A matched song takes the release's title (track), artist (the track's
+  artist credit, else the release's), album artist (release credit),
+  album, year (release date), track and disc numbers and totals, in
+  place of its tags, before the album-wide agreement. Typographic
+  punctuation is made plain (U+2010/2011 hyphens, curly quotes, `…`);
+  dashes stay.
+- "Save the album's cover": after renaming, `cover.jpg` (front, 1200 px)
+  in the folder each album with a release ends up in, unless it has a
+  `cover.*`, `folder.*` or `front.*` file; albums whose songs keep their
+  names count in the Rename button too. Recorded in the history and
+  deleted by undo.
+- Only the album and artist names (and release ids) are sent.
 - The files' audio and tags are never changed (cue sheets and
   playlists that list them are updated, see 4).
 
@@ -305,6 +363,9 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   files inside it (undo runs the other way).
 - Failure midway: whatever was done for that file is reverted.
 - Report at the end: successes and errors.
+- Several files heading for one name are all blocked, except identical
+  copies (by content, as found in the background): the first in the list
+  goes ahead and the others stay, marked "copy".
 - Folders files were moved out of are deleted when left empty (up to
   the folder the move happened within); undo makes them again.
 - Cue sheets and playlists (`.cue`, `.m3u`, `.m3u8`) in the folders
