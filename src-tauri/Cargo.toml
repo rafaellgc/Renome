@@ -1,6 +1,6 @@
 [package]
 name = "renome"
-version = "0.4.0"
+version = "0.5.0"
 description = "Batch file renamer"
 authors = ["Rafael Luciano Gonçalves Correia"]
 edition = "2024"
