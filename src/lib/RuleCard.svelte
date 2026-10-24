@@ -263,6 +263,7 @@
         {#if r.folders}
           <label class="sub">{t("musicFolderName")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
         {/if}
+        <label class="check"><input type="checkbox" bind:checked={r.playlist} /> <span>{t("musicPlaylist")}<small>{t("musicPlaylistHint")}</small></span></label>
         <p class="hint top">{t("mbHint")}</p>
         <label class="check"><input type="checkbox" bind:checked={r.cover} /> <span>{t("musicCover")}<small>{t("musicCoverHint")}</small></span></label>
         {@render actions(t("mbSearch"), "albumSummary")}

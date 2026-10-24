@@ -399,6 +399,11 @@
           }
         }
       }
+      if (mrule?.type === "music" && mrule.playlist) {
+        const parent = (p: string) => p.slice(0, Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\")));
+        const dirs = [...new Set(r.done.filter((op) => isAudio(op.to)).map((op) => parent(op.to)))];
+        if (dirs.length) saved += await writeMeta(() => api.writePlaylists(r.historyId, dirs));
+      }
       const srule = seriesRule?.rule;
       if (srule?.type === "series" && srule.sidecar) {
         const items = r.done

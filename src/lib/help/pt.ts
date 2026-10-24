@@ -328,6 +328,7 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li>Capas, <code>.cue</code>, <code>.log</code> e outros arquivos da pasta do álbum vão junto com a maioria das músicas da pasta (músicas de outros álbuns que não sejam faixas bônus seguem o álbum delas). Subpastas sem músicas (<code>Artwork</code>, <code>Scans</code>) vão junto, com o mesmo nome; arquivos da pasta acima de <code>CD 01</code>/<code>CD 02</code> também. Se dois desses arquivos tiverem o mesmo nome (um <code>log.txt</code> em cada disco), ganham o nome da pasta de origem: <code>log (CD 01).txt</code>.</li>
   <li>Nomes de artista ou álbum que só diferem em maiúsculas (<code>a-ha</code> e <code>A-Ha</code>, de tags de álbuns diferentes) viram uma pasta só: a que já existe no disco ou a grafia mais usada.</li>
   <li>Pastas antigas que ficarem vazias são apagadas; desfazer devolve tudo ao lugar.</li>
+  <li><b>Criar uma playlist por álbum</b>: depois de renomear, grava <code>&lt;nome da pasta&gt;.m3u8</code> na pasta de cada álbum, com as músicas (de todos os discos) na ordem dos discos e faixas. Não é criada se o álbum já tiver um <code>.cue</code> ou uma playlist, nem para uma música sozinha. Desfazer apaga a playlist criada.</li>
   <li>Arquivos <code>.cue</code> e listas <code>.m3u</code> passam a citar os novos nomes das músicas (veja <b>Renomear e desfazer</b>).</li>
 </ul>
 <h4>Corrigir pelo MusicBrainz</h4>

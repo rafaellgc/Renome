@@ -68,7 +68,7 @@ export function newRule(type: RuleType): Rule {
       };
     case "music": {
       const [template, folderTemplate] = MUSIC_TEMPLATE[settings.lang];
-      return { type, template, colon: " - ", discPrefix: true, fromName: false, folders: false, folderTemplate, cover: false };
+      return { type, template, colon: " - ", discPrefix: true, fromName: false, folders: false, folderTemplate, cover: false, playlist: false };
     }
   }
 }

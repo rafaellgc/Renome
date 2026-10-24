@@ -440,6 +440,37 @@ async fn write_covers(
     Ok(report)
 }
 
+/// Writes a playlist for each album in `dirs` (see
+/// `playlists::album_playlist`) and records them like `write_sidecars`.
+#[tauri::command]
+async fn write_playlists(
+    app: AppHandle,
+    history_id: Option<String>,
+    dirs: Vec<PathBuf>,
+) -> Result<tmdb::SidecarReport, String> {
+    let mut report = tauri::async_runtime::spawn_blocking(move || {
+        let mut report = tmdb::SidecarReport::default();
+        let mut seen = HashSet::new();
+        for dir in dirs {
+            let Some((path, text)) = renome_core::playlists::album_playlist(&dir) else {
+                continue;
+            };
+            if !seen.insert(path.clone()) {
+                continue;
+            }
+            match tmdb::write_new(&path, text.as_bytes()) {
+                Ok(()) => report.created.push(path),
+                Err(e) => report.errors.push((path.display().to_string(), e)),
+            }
+        }
+        report
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    record_created(&app, history_id, &mut report);
+    Ok(report)
+}
+
 #[tauri::command]
 fn history(state: State<AppState>) -> Vec<HistoryEntry> {
     state.history.list()
@@ -601,6 +632,7 @@ pub fn run() {
             mb_search,
             mb_choose,
             write_covers,
+            write_playlists,
             apply,
             history,
             undo,

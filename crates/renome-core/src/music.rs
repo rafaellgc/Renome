@@ -223,7 +223,7 @@ pub fn album_groups(songs: &[(PathBuf, AudioTags)]) -> Vec<Vec<usize>> {
 
 /// The folder a song's album is in: its own, or the one above a disc
 /// folder (`CD 01`).
-fn album_dir(dir: &Path) -> &Path {
+pub fn album_dir(dir: &Path) -> &Path {
     let name = dir.file_name().unwrap_or_default().to_string_lossy();
     match dir.parent() {
         Some(up) if disc_folder(&name).is_some() => up,

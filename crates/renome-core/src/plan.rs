@@ -1082,6 +1082,7 @@ mod tests {
                 folders: true,
                 folder_template: "{album artist}/{album} ({year})".into(),
                 cover: false,
+                playlist: false,
             },
         }];
         let p = preview(&files, &steps, &HashMap::new(), &View::default());
@@ -1179,6 +1180,7 @@ mod tests {
                 folders: true,
                 folder_template: "{album artist}/{album}".into(),
                 cover: false,
+                playlist: false,
             },
         }];
         let p = preview(&files, &steps, &HashMap::new(), &View::default());

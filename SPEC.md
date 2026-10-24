@@ -284,6 +284,15 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
 - Folder levels that differ only in case across the batch (`a-ha`,
   `A-Ha`) are unified, for every rule that moves files: an existing
   folder's spelling, else the most common one (the first on a tie).
+- "Create a playlist for each album": after renaming, each folder a
+  song went to (the one above, for a disc folder) gets
+  `<folder name>.m3u8` (UTF-8, `#EXTM3U`, one
+  `#EXTINF:<seconds or -1>,<artist> - <title>` per song, paths relative
+  to it) listing its songs and those of its
+  disc folders, by disc (the disc folder's number, else the tag), track
+  number and file name; not when it has fewer than two songs or already
+  has a `.cue`, `.m3u` or `.m3u8`. Recorded in the history and deleted by
+  undo.
 - MusicBrainz (no key; `User-Agent: Renome/<version> ( <repo> )`; one
   request at a time, at least 2 s apart; a 503, which it also sends when
   shedding load whatever the pace, is retried up to 3 times after its

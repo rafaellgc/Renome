@@ -58,7 +58,8 @@ A built-in manual (F1) explains every rule with examples.
   into `Artist/Album (Year)` folders, with covers, lyrics and bonus
   tracks going along. Optionally identifies each album
   on MusicBrainz (by track count and lengths, choosing the edition when
-  unsure) to fix titles and names, and saves the album's cover.
+  unsure) to fix titles and names, and saves the album's cover. Can also
+  write a `.m3u8` playlist for each album.
 - Edit any new name by hand right in the preview (double-click or F2).
 - List filter: only the visible files are renamed.
 - Sort by new name (default) or by any column.

@@ -10,6 +10,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use crate::apply::Operation;
+use crate::music;
 
 fn is_list(path: &Path) -> bool {
     path.extension()
@@ -320,6 +321,67 @@ pub fn changes(done: &[Operation]) -> Vec<ListChange> {
     out
 }
 
+/// A playlist for the album in `dir` (the folder above a disc folder
+/// counts as the album's): its songs, those of its disc folders included,
+/// in disc and track order, with their lengths and titles. `None` when
+/// the album already has a playlist or has fewer than two songs.
+/// Written as `<folder name>.m3u8`, with relative paths.
+pub fn album_playlist(dir: &Path) -> Option<(PathBuf, String)> {
+    let dir = music::album_dir(dir);
+    let mut folders = vec![(dir.to_path_buf(), None)];
+    for e in fs::read_dir(dir).ok()?.flatten() {
+        let p = e.path();
+        if is_list(&p) {
+            return None;
+        }
+        if p.is_dir()
+            && let Some(n) = music::disc_folder(&e.file_name().to_string_lossy())
+        {
+            folders.push((p, Some(n)));
+        }
+    }
+    let mut songs = Vec::new();
+    for (folder, disc) in folders {
+        let Ok(rd) = fs::read_dir(&folder) else {
+            continue;
+        };
+        for p in rd.flatten().map(|e| e.path()) {
+            let ext = p.extension().unwrap_or_default().to_string_lossy();
+            if !p.is_file() || !music::is_audio(&ext) {
+                continue;
+            }
+            let t = music::read(&p).unwrap_or_default();
+            let key = (
+                disc.or(t.disc).unwrap_or(1),
+                t.track.unwrap_or(u32::MAX),
+                p.file_name().unwrap_or_default().to_os_string(),
+            );
+            songs.push((key, p, t));
+        }
+    }
+    if songs.len() < 2 {
+        return None;
+    }
+    songs.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut text = String::from("#EXTM3U\n");
+    for (_, p, t) in songs {
+        let title = match (t.artist.is_empty(), t.title.is_empty()) {
+            (_, true) => p
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+            (true, false) => t.title,
+            (false, false) => format!("{} - {}", t.artist, t.title),
+        };
+        let length = t.duration.map_or(-1, i64::from);
+        let path = relative(&p, dir);
+        text += &format!("#EXTINF:{length},{title}\n{}\n", path.to_string_lossy());
+    }
+    let name = dir.file_name()?.to_string_lossy();
+    Some((dir.join(format!("{name}.m3u8")), text))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -443,5 +505,33 @@ mod tests {
         // A track without its song: the cue cannot be rebuilt and goes.
         fs::write(p.join("album.cue"), image.replace("TRACK 02", "TRACK 03")).unwrap();
         assert_eq!(update(&done), (0, 1));
+    }
+
+    #[test]
+    fn album_playlists() {
+        let d = tempfile::tempdir().unwrap();
+        let album = d.path().join("Album (2001)");
+        fs::create_dir_all(album.join("CD 2")).unwrap();
+        fs::create_dir_all(album.join("CD 1")).unwrap();
+        fs::write(album.join("CD 2/01 - c.flac"), "x").unwrap();
+        fs::write(album.join("CD 1/02 - b.flac"), "x").unwrap();
+        fs::write(album.join("CD 1/01 - a.flac"), "x").unwrap();
+        fs::write(album.join("cover.jpg"), "x").unwrap();
+        // From a disc folder too: the playlist is the album's.
+        let (path, text) = album_playlist(&album.join("CD 2")).unwrap();
+        assert_eq!(path, album.join("Album (2001).m3u8"));
+        assert_eq!(
+            text,
+            "#EXTM3U\n#EXTINF:-1,01 - a\nCD 1/01 - a.flac\n#EXTINF:-1,02 - b\n\
+             CD 1/02 - b.flac\n#EXTINF:-1,01 - c\nCD 2/01 - c.flac\n"
+        );
+        // An album with a playlist keeps it.
+        fs::write(album.join("old.m3u"), "").unwrap();
+        assert!(album_playlist(&album).is_none());
+        // A single song needs none.
+        let one = d.path().join("One");
+        fs::create_dir(&one).unwrap();
+        fs::write(one.join("a.mp3"), "x").unwrap();
+        assert!(album_playlist(&one).is_none());
     }
 }

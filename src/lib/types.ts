@@ -33,7 +33,7 @@ export type Rule =
     }
   | {
       type: "music"; template: string; colon: string; discPrefix: boolean; fromName: boolean;
-      folders: boolean; folderTemplate: string; cover: boolean;
+      folders: boolean; folderTemplate: string; cover: boolean; playlist: boolean;
     };
 
 export type RuleType = Rule["type"];

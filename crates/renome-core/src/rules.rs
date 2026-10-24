@@ -263,6 +263,9 @@ pub enum Rule {
         /// Save the album's cover from MusicBrainz (used by the app).
         #[serde(default)]
         cover: bool,
+        /// Write a playlist for each album (used by the app).
+        #[serde(default)]
+        playlist: bool,
     },
 }
 
