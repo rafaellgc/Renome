@@ -56,6 +56,7 @@ optionally act only on the extension or on the full name.
 | Extension | set a new one; lowercase/uppercase; remove |
 | Movie (TMDB) | template with `{title}`, `{original}`, `{year}`, `{id}` (default `{title} ({year}) [tmdbid-{id}]`); what `:` becomes (default ` - `); a folder for each movie; save `.nfo` and poster (optionally fanart and logo) next to renamed videos. See 2.1 |
 | TV show (TMDB) | the show (name, TMDB id or link; empty: from the files); template with `{show}`, `{original}`, `{year}`, `{season}`, `{episode}`, `{title}`, `{id}` (default `{show} ({year}) - S{season}E{episode} - {title}`); what `:` becomes; show and season folders (show folder template, default `{show} ({year}) [tmdbid-{id}]`); save `.nfo` files and images (optionally fanart and logo). See 2.2 |
+| Music (tags) | template with `{track}`, `{title}`, `{artist}`, `{album artist}`, `{album}`, `{year}`, `{disc}`, `{genre}`, `{composer}` (default `{track} - {title}`); what `:` becomes; disc number in the track on multi-disc albums; fill in from the file name; artist and album folders (default `{album artist}/{album} ({year})`). See 2.3 |
 
 Positions count **visible characters** (Unicode graphemes), starting at 1.
 
@@ -211,6 +212,59 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   entry of their own) and deleted by undo.
 - Only the show's name (or id) is sent to TMDB.
 
+### 2.3 Music (tags)
+
+- Tags are read with `lofty` (no audio decoded, no cover art): MP3/MP2
+  (ID3v2, ID3v1, APE), FLAC, OGG Vorbis, Opus, Speex, M4A/M4B/M4P/M4R,
+  AAC, AIFF, WAV, WavPack, APE, Musepack. Video containers (`mp4`, `m4v`,
+  `3gp`) are left out. Each field comes from the first tag that has it,
+  the file's main tag first. Read once per file and cached.
+- Fields: title, artist, album artist (the artist's when missing),
+  album, year (from the date), track and total, disc and total, genre,
+  composer. A song without a title (after the name fallback, if on) is
+  left unchanged and flagged (`untagged`, ✕ in the table, a count in the
+  card).
+- Names: track with two digits (three when the album or track number
+  goes over 99); `disc-track` (`1-01`) when the option is on and the
+  album has more than one disc (disc total over 1, or disc over 1);
+  values made safe like movie titles, keeping final dots in file names
+  (the extension follows; folder names lose them); empty `()`/`[]` dropped, repeated
+  ` - ` separators collapsed, separators at the ends trimmed.
+- Album-wide agreement (before naming): songs with the same album tag in
+  one folder (disc folders count as their parent) share: the most common
+  year for those without one; the most common album artist for those
+  without one; when none has one, the main artist (`feat.`, `ft.`,
+  `featuring`, `with` guests left out) of more than half the songs, else
+  `Various Artists`.
+- `{year}` is left empty in a template that also has `{album}` when the
+  album already contains that year (`Show 12 (2025-05-04)`).
+- Fill in from the name: `01 - Artist - Title`, `01. Title`, `1-05
+  Title`, `Artist - Title`, `Title`; album, artist and year from the
+  folder (`Artist - Album (1975)`, `Album`), the one above a disc folder
+  (`CD2`, `Disc 2`, which gives the disc). Only empty fields are filled.
+- Folders: one level per `/` in the folder template (empty levels left
+  out). The root: going up from the file's folder past folders that are
+  a disc folder, are named (similarity ≥ 0.8, also without year and
+  release tags, on both sides) after a level, the album, the album
+  artist, the artist or "artist - album" (or start with one of them, or
+  are a run of at least two of its words, like `1037 - Title` for
+  "Show 1037 - Title (2025)"), or
+  sit inside a folder named after the artist;
+  at most one level more than the template has.
+- Companions (when the music rule is on, for files no rule changed):
+  a file with a song's stem in the same folder (lyrics) gets the song's
+  new stem and destination; with folders, other files in a folder whose
+  songs (in the list, without conflicts) all go to one place go there
+  too, keeping their names; files in song-less subfolders of such a
+  folder (`Artwork/`, up to two levels) keep their subfolder; files in a
+  folder whose song folders are all disc folders going to one place go
+  there. Followers that would share a name get ` (<their folder>)`.
+- Folder levels that differ only in case across the batch (`a-ha`,
+  `A-Ha`) are unified, for every rule that moves files: an existing
+  folder's spelling, else the most common one (the first on a tie).
+- The files' audio and tags are never changed (cue sheets and
+  playlists that list them are updated, see 4).
+
 ## 3. Preview
 
 - Table: original name → new name, with a status per row:
@@ -251,6 +305,26 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   files inside it (undo runs the other way).
 - Failure midway: whatever was done for that file is reverted.
 - Report at the end: successes and errors.
+- Folders files were moved out of are deleted when left empty (up to
+  the folder the move happened within); undo makes them again.
+- Cue sheets and playlists (`.cue`, `.m3u`, `.m3u8`) in the folders
+  renamed files left, or renamed/moved themselves, are rewritten so their
+  references (`FILE "…"` lines in cue sheets, non-comment lines in
+  playlists; relative or absolute, `/` or `\`, URLs left alone) point to
+  the new names; references to files that stayed are adjusted when the
+  list moved. UTF-8 or Latin-1 is kept (a list whose new names Latin-1
+  cannot hold is left alone), as are line endings. A cue sheet none of
+  whose `FILE`s exist (a whole-disc image later split) is rebuilt: each
+  `TRACK n` gets `FILE "<song>"` (`MP3` for .mp3, else `WAVE`) with the
+  song in its folder tagged track `n` (and the cue's `REM DISCNUMBER`, if
+  any) and `INDEX 01 00:00:00`; other `INDEX`, `PREGAP` and `POSTGAP`
+  lines are dropped, the rest kept. When a track has no song or several,
+  the cue is deleted. A playlist none of whose relative entries exist is
+  deleted (with absolute entries, a missing drive is likelier, so it is
+  only updated). The original content is saved next to the history entry
+  (`<id>.files/`) before writing or deleting, and undo restores it
+  (making its folder again if needed) before moving files back. Emptied
+  folders are removed after the lists are handled.
 - Each applied operation is recorded in a history (in the user's data
   folder, e.g. `~/.local/share/renome/history/`), allowing **undo** even
   after closing the program. If part of an undo fails (file moved or

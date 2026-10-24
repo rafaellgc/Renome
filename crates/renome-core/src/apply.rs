@@ -57,6 +57,10 @@ pub struct ApplyReport {
     /// Folders created to move files into, outermost first.
     #[serde(skip)]
     pub created_dirs: Vec<PathBuf>,
+    /// Cue sheets and playlists updated to the new names (or rebuilt).
+    pub lists: usize,
+    /// Useless cue sheets and playlists deleted (none of their files exist).
+    pub lists_removed: usize,
 }
 
 fn temp_path(from: &Path, i: usize) -> PathBuf {
@@ -228,6 +232,10 @@ struct Journal {
     /// Folders the rename created, removed by undo when empty.
     #[serde(default)]
     dirs: Vec<PathBuf>,
+    /// Cue sheets and playlists rewritten to follow the renames, with the
+    /// file (in the entry's folder) that keeps their original content.
+    #[serde(default)]
+    lists: Vec<(PathBuf, String)>,
 }
 
 #[derive(Debug, Serialize)]
@@ -262,6 +270,42 @@ impl History {
         Ok(self.dir.join(format!("{id}.json")))
     }
 
+    /// Where an entry keeps the original content of the lists it rewrote.
+    fn backups(&self, id: &str) -> Result<PathBuf, String> {
+        Ok(self.path(id)?.with_extension("files"))
+    }
+
+    /// Rewrites (or deletes, when useless) the cue sheets and playlists
+    /// that refer to renamed files, keeping each original first; a list
+    /// whose original cannot be kept is left alone. Returns the lists
+    /// touched and how many were deleted.
+    fn update_lists(&self, id: &str, done: &[Operation]) -> (Vec<(PathBuf, String)>, usize) {
+        let changes = crate::playlists::changes(done);
+        let Ok(dir) = self.backups(id) else {
+            return (Vec::new(), 0);
+        };
+        if changes.is_empty() || fs::create_dir_all(&dir).is_err() {
+            return (Vec::new(), 0);
+        }
+        let mut kept = Vec::new();
+        let mut removed = 0;
+        for (n, c) in changes.into_iter().enumerate() {
+            let name = n.to_string();
+            if fs::write(dir.join(&name), &c.old).is_err() {
+                continue;
+            }
+            let done = match &c.new {
+                Some(new) => fs::write(&c.path, new).is_ok(),
+                None => fs::remove_file(&c.path).is_ok(),
+            };
+            if done {
+                removed += usize::from(c.new.is_none());
+                kept.push((c.path, name));
+            }
+        }
+        (kept, removed)
+    }
+
     fn read(&self, id: &str) -> Result<Journal, String> {
         let text = fs::read_to_string(self.path(id)?).map_err(|e| e.to_string())?;
         serde_json::from_str(&text).map_err(|e| e.to_string())
@@ -276,7 +320,6 @@ impl History {
     /// Runs and records in the history.
     pub fn apply(&self, ops: &[Operation]) -> ApplyReport {
         let mut report = execute(ops, Depth::DeepestFirst);
-        remove_emptied(&report.done);
         if !report.done.is_empty() {
             let created = Local::now();
             let id = format!(
@@ -284,6 +327,11 @@ impl History {
                 created.format("%Y%m%d-%H%M%S-%3f"),
                 std::process::id()
             );
+            let (lists, removed) = self.update_lists(&id, &report.done);
+            report.lists = lists.len() - removed;
+            report.lists_removed = removed;
+            // After the lists: a deleted one may leave its folder empty.
+            remove_emptied(&report.done);
             let j = Journal {
                 created,
                 undone: false,
@@ -292,6 +340,7 @@ impl History {
                 failed: 0,
                 extra_files: Vec::new(),
                 dirs: report.created_dirs.clone(),
+                lists,
             };
             match self.write(&id, &j) {
                 Ok(()) => report.history_id = Some(id),
@@ -349,6 +398,7 @@ impl History {
             failed: 0,
             extra_files: paths.to_vec(),
             dirs: Vec::new(),
+            lists: Vec::new(),
         };
         self.write(&id, &j)?;
         Ok(id)
@@ -363,6 +413,7 @@ impl History {
 
     /// Deletes a history entry (the files are left as they are).
     pub fn delete(&self, id: &str) -> Result<(), String> {
+        let _ = fs::remove_dir_all(self.backups(id)?);
         fs::remove_file(self.path(id)?).map_err(|e| e.to_string())
     }
 
@@ -379,6 +430,22 @@ impl History {
             Ok(()) => false,
             Err(e) => e.kind() != std::io::ErrorKind::NotFound,
         });
+        // Rewritten lists get their content back where they are now; the
+        // renames below then take them back.
+        let backups = self.backups(id)?;
+        j.lists.retain(|(path, name)| {
+            // A deleted list's folder may be gone too.
+            let restored = fs::read(backups.join(name)).and_then(|old| {
+                if let Some(dir) = path.parent() {
+                    fs::create_dir_all(dir)?;
+                }
+                fs::write(path, old)
+            });
+            restored.is_err()
+        });
+        if j.lists.is_empty() {
+            let _ = fs::remove_dir_all(&backups);
+        }
         let reverse: Vec<Operation> = j
             .ops
             .iter()
@@ -405,7 +472,7 @@ impl History {
             }
             j.dirs.clear();
         }
-        j.undone = j.ops.is_empty() && j.extra_files.is_empty();
+        j.undone = j.ops.is_empty() && j.extra_files.is_empty() && j.lists.is_empty();
         self.write(id, &j)?;
         Ok(report)
     }
@@ -549,6 +616,39 @@ mod tests {
         assert_eq!(read(p.join("Show/Season 1/e1.mkv")), "1");
         assert_eq!(read(p.join("Other/e2.mkv")), "2");
         assert!(!p.join("New").exists());
+    }
+
+    #[test]
+    fn lists_follow_and_come_back() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        fs::write(p.join("a.flac"), "a").unwrap();
+        fs::write(p.join("album.cue"), "FILE \"a.flac\" WAVE\n").unwrap();
+        let h = History::new(p.join("h"));
+        let r = h.apply(&[op(p, "a.flac", "01 - A.flac")]);
+        assert_eq!(r.lists, 1);
+        assert_eq!(read(p.join("album.cue")), "FILE \"01 - A.flac\" WAVE\n");
+        h.undo(&r.history_id.unwrap()).unwrap();
+        assert_eq!(read(p.join("album.cue")), "FILE \"a.flac\" WAVE\n");
+        assert!(p.join("a.flac").exists());
+        assert_eq!(fs::read_dir(p.join("h")).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn useless_list_deleted_and_restored() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        fs::create_dir(p.join("old")).unwrap();
+        fs::write(p.join("old/a.flac"), "a").unwrap();
+        fs::write(p.join("old/list.m3u"), "missing.flac\n").unwrap();
+        let h = History::new(p.join("h"));
+        let r = h.apply(&[op(p, "old/a.flac", "a.flac")]);
+        assert_eq!((r.lists, r.lists_removed), (0, 1));
+        // The list was all that kept the folder.
+        assert!(!p.join("old").exists());
+        h.undo(&r.history_id.unwrap()).unwrap();
+        assert_eq!(read(p.join("old/list.m3u")), "missing.flac\n");
+        assert_eq!(read(p.join("old/a.flac")), "a");
     }
 
     #[test]

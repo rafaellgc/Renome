@@ -303,6 +303,32 @@ ${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...E
 <p class="tip">Só o nome da série é enviado ao TMDB, nunca o nome dos arquivos nem as pastas.</p>`,
   },
   {
+    id: "r-music",
+    title: "Música (tags)",
+    sub: true,
+    html: `
+<p>Dá a cada música o nome que vem das <b>tags</b> gravadas no arquivo (ID3 do MP3, Vorbis do FLAC e do OGG, MP4 do M4A e outras), sem precisar de internet.</p>
+${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
+<ul>
+  <li><b>Modelo</b>: <code>{faixa}</code>, <code>{título}</code>, <code>{artista}</code>, <code>{artista do álbum}</code>, <code>{álbum}</code>, <code>{ano}</code>, <code>{disco}</code>, <code>{gênero}</code> e <code>{compositor}</code>. O padrão é <code>{faixa} - {título}</code>. A faixa tem dois dígitos (três em álbuns com mais de 99 faixas).</li>
+  <li>Tags vazias não deixam sobras: com <code>{faixa} - {artista} - {título}</code>, uma música sem artista vira <code>01 - Título</code>.</li>
+  <li><b>Número do disco na faixa</b>: em álbuns com mais de um disco, a faixa vira <code>1-01</code>, <code>2-01</code>…, para os discos não se misturarem.</li>
+  <li><b>O álbum como um todo</b>: as faixas de um mesmo álbum (mesma pasta, ou discos <code>CD 01</code>/<code>CD 02</code>, e mesmo nome de álbum) combinam os dados do álbum. Uma faixa sem ano recebe o das outras. Sem "artista do álbum" nas tags, vale o artista da maioria das faixas (desconsiderando participações, como <code>feat.</code>); sem maioria, o álbum é uma coletânea: <code>Various Artists</code>, como o Jellyfin reconhece. Assim, as faixas de um álbum nunca se espalham em pastas diferentes.</li>
+  <li>Se o nome do álbum já traz o ano (<code>Programa 12 (2025-05-04)</code>), o <code>({ano})</code> do modelo é omitido.</li>
+  <li>Músicas <b>sem título nas tags</b> ficam como estão e ganham <b>✕</b>; o card mostra quantas são. Com <b>Completar pelo nome do arquivo</b>, o programa lê <code>01 - Artista - Título</code>, <code>01. Título</code> ou <code>1-05 Título</code> do nome, e o álbum e o ano da pasta (<code>Artista - Álbum (1975)</code>, ou só <code>Álbum</code>; uma pasta <code>CD2</code> dá o disco). As tags que existem têm preferência.</li>
+</ul>
+<h4>Pastas de artista e álbum</h4>
+<p>Com <b>Organizar em pastas de artista e álbum</b>, cada música vai para <code>{artista do álbum}/{álbum} ({ano})</code> (o modelo das pastas pode ser trocado; cada <code>/</code> é um nível). Assim, <code>Música/Pink Floyd/WYWH/CD1/01.mp3</code> vira <code>Música/Pink Floyd/Wish You Were Here (1975)/01 - Shine On….mp3</code>: as pastas que já levam o nome do artista, do álbum ou do disco (ou que estão dentro da pasta do artista) são substituídas, não ganham pastas novas dentro. Arquivos soltos ganham as pastas dentro da pasta onde estão.</p>
+<ul>
+  <li>Letras (<code>.lrc</code>) com o mesmo nome de uma música recebem o novo nome dela e vão junto.</li>
+  <li>Capas, <code>.cue</code>, <code>.log</code> e outros arquivos da pasta do álbum vão junto quando todas as músicas da pasta vão para o mesmo lugar (e estão na lista). Subpastas sem músicas (<code>Artwork</code>, <code>Scans</code>) vão junto, com o mesmo nome; arquivos da pasta acima de <code>CD 01</code>/<code>CD 02</code> também. Se dois desses arquivos tiverem o mesmo nome (um <code>log.txt</code> em cada disco), ganham o nome da pasta de origem: <code>log (CD 01).txt</code>.</li>
+  <li>Nomes de artista ou álbum que só diferem em maiúsculas (<code>a-ha</code> e <code>A-Ha</code>, de tags de álbuns diferentes) viram uma pasta só: a que já existe no disco ou a grafia mais usada.</li>
+  <li>Pastas antigas que ficarem vazias são apagadas; desfazer devolve tudo ao lugar.</li>
+  <li>Arquivos <code>.cue</code> e listas <code>.m3u</code> passam a citar os novos nomes das músicas (veja <b>Renomear e desfazer</b>).</li>
+</ul>
+<p class="tip">O Renome só lê as tags; o conteúdo das músicas não é alterado.</p>`,
+  },
+  {
     id: "preview",
     title: "Pré-visualização e conflitos",
     html: `
@@ -346,6 +372,7 @@ ${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...E
 <ul>
   <li>A renomeação é feita em duas etapas, passando por um nome temporário. Por isso dá para trocar nomes entre si (a ↔ b), e nenhum arquivo é sobrescrito.</li>
   <li>Pastas e arquivos de dentro delas podem ser renomeados juntos: primeiro o conteúdo, depois a pasta.</li>
+  <li>Folhas de faixas e listas de reprodução (<code>.cue</code>, <code>.m3u</code>, <code>.m3u8</code>) que citam arquivos renomeados ou movidos são atualizadas com os novos nomes. Um <code>.cue</code> que cita só arquivos inexistentes (o disco inteiro num arquivo que depois foi dividido em faixas) é refeito com uma faixa por arquivo, casando cada <code>TRACK</code> com a música da pasta que tem aquele número nas tags; se não der, é apagado. Listas <code>.m3u</code> em que nenhuma música existe também são apagadas. São as únicas alterações que o Renome faz em arquivos; o conteúdo original fica guardado no histórico, e desfazer o devolve.</li>
   <li>Se um arquivo falhar (sem permissão, apagado por outro programa…), os outros seguem, e no fim aparece a lista do que falhou e por quê.</li>
   <li>Depois de renomear, as regras são desligadas (desligável nas Opções), para não serem aplicadas duas vezes.</li>
 </ul>

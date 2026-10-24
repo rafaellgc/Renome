@@ -7,9 +7,10 @@ use chrono::Local;
 use serde::{Deserialize, Serialize};
 
 use crate::apply::Operation;
-use crate::files::{FileEntry, join_name, natural_cmp};
+use crate::files::{FileEntry, join_name, natural_cmp, split_name};
 use crate::filter::Filter;
-use crate::rules::{Ctx, Move, Pipeline, RuleError, Step};
+use crate::music::{self, AudioTags};
+use crate::rules::{Ctx, Move, Pipeline, RuleError, Step, song_tags};
 use crate::tmdb::MovieMatch;
 use crate::tv::EpisodeMatch;
 
@@ -79,6 +80,8 @@ pub struct PreviewItem {
     /// Non-blocking warning: contains characters Windows does not accept.
     pub windows_unsafe: bool,
     pub manual: bool,
+    /// A song the music rule cannot name (no title in its tags).
+    pub untagged: bool,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -159,6 +162,198 @@ fn same_file(a: &Path, b: &Path) -> bool {
     }
 }
 
+/// Folders spelled differently only in case (`a-ha` and `A-Ha` from
+/// different albums' tags) become one: an existing folder's spelling, else
+/// the most common in the batch (the first on a tie).
+fn unify_folders(items: &mut [PreviewItem]) {
+    let levels_of = |i: &PreviewItem| -> Option<(PathBuf, Vec<String>)> {
+        let levels: Vec<String> = i.folder.as_ref()?.split('/').map(str::to_string).collect();
+        let root = i
+            .dest
+            .as_ref()?
+            .ancestors()
+            .nth(levels.len())?
+            .to_path_buf();
+        Some((root, levels))
+    };
+    let key = |root: &Path, levels: &[String]| {
+        format!("{}\0{}", root.display(), levels.join("/").to_lowercase())
+    };
+    // Spellings of each folder, in order of appearance, with counts.
+    let mut spellings: HashMap<String, Vec<(String, usize)>> = HashMap::new();
+    for i in items.iter() {
+        let Some((root, levels)) = levels_of(i) else {
+            continue;
+        };
+        for k in 0..levels.len() {
+            let v = spellings.entry(key(&root, &levels[..=k])).or_default();
+            match v.iter_mut().find(|(s, _)| *s == levels[k]) {
+                Some(e) => e.1 += 1,
+                None => v.push((levels[k].clone(), 1)),
+            }
+        }
+    }
+    if spellings.values().all(|v| v.len() < 2) {
+        return;
+    }
+    let mut listed: HashMap<PathBuf, Vec<String>> = HashMap::new();
+    for i in items.iter_mut() {
+        let Some((root, levels)) = levels_of(i) else {
+            continue;
+        };
+        let mut dir = root.clone();
+        let mut chosen = Vec::new();
+        for k in 0..levels.len() {
+            let on_disk = listed
+                .entry(dir.clone())
+                .or_insert_with(|| {
+                    std::fs::read_dir(&dir)
+                        .map(|rd| {
+                            rd.flatten()
+                                .filter_map(|e| e.file_name().into_string().ok())
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                })
+                .iter()
+                .find(|n| n.to_lowercase() == levels[k].to_lowercase())
+                .cloned();
+            let name = on_disk.unwrap_or_else(|| {
+                let v = &spellings[&key(&root, &levels[..=k])];
+                let most = v.iter().map(|(_, n)| *n).max().unwrap_or(0);
+                v.iter()
+                    .find(|(_, n)| *n == most)
+                    .map(|(s, _)| s.clone())
+                    .unwrap_or_default()
+            });
+            dir = dir.join(&name);
+            chosen.push(name);
+        }
+        i.folder = Some(chosen.join("/"));
+        i.dest = Some(dir);
+    }
+}
+
+/// Files that go with songs, when no rule changed them:
+/// - lyrics with a song's name (`01 Song.lrc`) get its new name;
+/// - with folders, other files (covers, cue sheets, logs) go with their
+///   folder's songs when all of them go to one place; files in a subfolder
+///   of such a folder (`Artwork/`) keep their subfolder; and files in a
+///   folder whose songs are all in disc folders (`CD 01`, `CD 02`) going
+///   to one place go there too. Two such files that would get the same
+///   name (`CD 01/log.txt`, `CD 02/log.txt`) get their folder's name added.
+fn follow_songs(items: &mut [PreviewItem], folders: bool) {
+    /// Where the songs of a folder go: one place, or several.
+    #[derive(Clone, PartialEq)]
+    enum Album {
+        One(Option<PathBuf>, Option<String>),
+        Split,
+    }
+    let is_song = |i: &PreviewItem| !i.is_dir && music::is_audio(split_name(&i.original).1);
+    /// A song's new stem, destination and folder shown.
+    type Song = (String, Option<PathBuf>, Option<String>);
+    let mut by_stem: HashMap<(PathBuf, String), Song> = HashMap::new();
+    let mut albums: HashMap<PathBuf, Album> = HashMap::new();
+    for i in items
+        .iter()
+        .filter(|i| is_song(i) && i.status != Status::Conflict)
+    {
+        let stem = split_name(&i.original).0.to_string();
+        let new_stem = split_name(&i.new_name).0.to_string();
+        by_stem.insert(
+            (i.dir.clone(), stem),
+            (new_stem, i.dest.clone(), i.folder.clone()),
+        );
+        let here = Album::One(i.dest.clone(), i.folder.clone());
+        albums
+            .entry(i.dir.clone())
+            .and_modify(|a| {
+                if *a != here {
+                    *a = Album::Split;
+                }
+            })
+            .or_insert(here);
+    }
+    // Where a song-less folder's files go, if anywhere.
+    let place = |dir: &Path| -> Option<(PathBuf, String)> {
+        if let Some(a) = albums.get(dir) {
+            return match a {
+                Album::One(Some(dest), Some(folder)) => Some((dest.clone(), folder.clone())),
+                _ => None,
+            };
+        }
+        // A subfolder of an album folder (`Artwork`).
+        for up in dir.ancestors().skip(1).take(2) {
+            if let Some(a) = albums.get(up) {
+                let Album::One(Some(dest), Some(folder)) = a else {
+                    return None;
+                };
+                let rel = dir.strip_prefix(up).ok()?;
+                let rel_shown = rel.to_string_lossy().replace('\\', "/");
+                return Some((dest.join(rel), format!("{folder}/{rel_shown}")));
+            }
+        }
+        // The folder above disc folders.
+        let mut found: Option<&Album> = None;
+        for (d, a) in &albums {
+            if d.parent() == Some(dir) {
+                let name = d.file_name().unwrap_or_default().to_string_lossy();
+                if music::disc_folder(&name).is_none() || found.is_some_and(|f| f != a) {
+                    return None;
+                }
+                found = Some(a);
+            }
+        }
+        match found {
+            Some(Album::One(Some(dest), Some(folder))) => Some((dest.clone(), folder.clone())),
+            _ => None,
+        }
+    };
+    let mut followers = Vec::new();
+    for (n, i) in items.iter_mut().enumerate() {
+        if i.is_dir || i.manual || is_song(i) || i.new_name != i.original || i.dest.is_some() {
+            continue;
+        }
+        let (stem, ext) = split_name(&i.original);
+        if let Some((new_stem, dest, folder)) = by_stem.get(&(i.dir.clone(), stem.to_string())) {
+            i.new_name = join_name(new_stem, ext);
+            i.dest = dest.clone();
+            i.folder = folder.clone();
+        } else if folders && let Some((dest, folder)) = place(&i.dir) {
+            i.dest = Some(dest);
+            i.folder = Some(folder);
+        } else {
+            continue;
+        }
+        if i.status == Status::Unchanged {
+            i.status = Status::Ok;
+        }
+        i.windows_unsafe = i.new_name.contains(WINDOWS_UNSAFE);
+        followers.push(n);
+    }
+    // Same name in the same place: add the folder each came from.
+    let mut by_target: HashMap<PathBuf, Vec<usize>> = HashMap::new();
+    for &n in &followers {
+        by_target
+            .entry(path_key(&items[n].target()))
+            .or_default()
+            .push(n);
+    }
+    for group in by_target.values().filter(|g| g.len() > 1) {
+        for &n in group {
+            let i = &mut items[n];
+            let from = i
+                .dir
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            let (stem, ext) = split_name(&i.new_name);
+            i.new_name = join_name(&format!("{stem} ({from})"), ext);
+        }
+    }
+}
+
 /// Computes the preview. `overrides` maps path → hand-edited name.
 /// Files hidden by the filter are left out (and will not be renamed);
 /// numbering only counts the visible ones.
@@ -175,6 +370,30 @@ pub fn preview(
         Err(e) => (Filter::default(), Some(e)),
     };
 
+    let music = pipeline.music();
+    // Songs' tags, with the album-wide fields agreed across each album.
+    let songs: HashMap<&Path, AudioTags> = match music {
+        None => HashMap::new(),
+        Some((from_name, _)) => {
+            let visible: Vec<&FileEntry> = files
+                .iter()
+                .filter(|f| filter.matches(&f.file_name()))
+                .collect();
+            let mut tags: Vec<(PathBuf, AudioTags)> = Vec::new();
+            let mut paths: Vec<&Path> = Vec::new();
+            for f in visible {
+                if let Some(t) = song_tags(f, from_name) {
+                    tags.push((f.dir.clone(), t));
+                    paths.push(&f.path);
+                }
+            }
+            music::fill_albums(&mut tags);
+            paths
+                .into_iter()
+                .zip(tags.into_iter().map(|(_, t)| t))
+                .collect()
+        }
+    };
     let mut per_folder: HashMap<&Path, usize> = HashMap::new();
     let mut items: Vec<PreviewItem> = files
         .iter()
@@ -203,6 +422,7 @@ pub fn preview(
                         now,
                         movie: view.movies.get(&file.path),
                         episode: view.episodes.get(&file.path),
+                        song: songs.get(file.path.as_path()),
                     };
                     let (stem, ext, moved) = pipeline.run_full(&ctx);
                     empty_stem = stem.is_empty() && !file.stem.is_empty();
@@ -239,6 +459,11 @@ pub fn preview(
                 Status::Ok
             };
             let windows_unsafe = new_name.contains(WINDOWS_UNSAFE);
+            let untagged = music.is_some_and(|_| {
+                !file.is_dir
+                    && music::is_audio(&file.ext)
+                    && !songs.contains_key(file.path.as_path())
+            });
             PreviewItem {
                 path: file.path.clone(),
                 dir: file.dir.clone(),
@@ -253,9 +478,14 @@ pub fn preview(
                 problem,
                 windows_unsafe,
                 manual,
+                untagged,
             }
         })
         .collect();
+    unify_folders(&mut items);
+    if let Some((_, folders)) = music {
+        follow_songs(&mut items, folders);
+    }
 
     // Repeated targets within the batch. A file that keeps its name is not
     // flagged: the one moving onto it is, as "exists", below.
@@ -623,6 +853,154 @@ mod tests {
             d.path()
                 .join("Show (2010) [tmdbid-7]/Season 01/Show - S01E02.mkv")
         );
+    }
+
+    use crate::music::flac;
+
+    #[test]
+    fn songs_by_tags_with_their_companions() {
+        let d = tempfile::tempdir().unwrap();
+        let album = d.path().join("Pink Floyd/WYWH");
+        fs::create_dir_all(&album).unwrap();
+        flac(
+            &album.join("01.flac"),
+            &[
+                ("TITLE", "Shine On"),
+                ("ARTIST", "Pink Floyd"),
+                ("ALBUM", "Wish You Were Here"),
+                ("DATE", "1975"),
+                ("TRACKNUMBER", "1"),
+            ],
+        );
+        flac(
+            &album.join("02.flac"),
+            &[
+                ("TITLE", "Welcome"),
+                ("ARTIST", "Pink Floyd"),
+                ("ALBUM", "Wish You Were Here"),
+                ("DATE", "1975"),
+                ("TRACKNUMBER", "2"),
+            ],
+        );
+        flac(&album.join("x.flac"), &[]);
+        fs::write(album.join("01.lrc"), "[00:00]").unwrap();
+        fs::write(album.join("cover.jpg"), "img").unwrap();
+        let files = crate::scan(
+            std::slice::from_ref(&album),
+            &Default::default(),
+            &Default::default(),
+        )
+        .files;
+        let steps = vec![Step {
+            enabled: true,
+            rule: Rule::Music {
+                template: "{track} - {title}".into(),
+                colon: " - ".into(),
+                disc_prefix: true,
+                from_name: false,
+                folders: true,
+                folder_template: "{album artist}/{album} ({year})".into(),
+            },
+        }];
+        let p = preview(&files, &steps, &HashMap::new(), &View::default());
+        let get = |n: &str| p.items.iter().find(|i| i.original == n).unwrap();
+        let wywh = d.path().join("Pink Floyd/Wish You Were Here (1975)");
+        // Next to the old folders, not inside them.
+        assert_eq!(get("01.flac").target(), wywh.join("01 - Shine On.flac"));
+        assert_eq!(get("01.lrc").target(), wywh.join("01 - Shine On.lrc"));
+        // The songs of x.flac's folder do not all go to one place.
+        assert_eq!(get("cover.jpg").status, Status::Unchanged);
+        assert!(get("x.flac").untagged);
+        assert_eq!(get("x.flac").status, Status::Unchanged);
+
+        // Without the untagged song, the cover goes with the album.
+        fs::remove_file(album.join("x.flac")).unwrap();
+        let files = crate::scan(
+            std::slice::from_ref(&album),
+            &Default::default(),
+            &Default::default(),
+        )
+        .files;
+        let p = preview(&files, &steps, &HashMap::new(), &View::default());
+        let cover = p.items.iter().find(|i| i.original == "cover.jpg").unwrap();
+        assert_eq!(cover.target(), wywh.join("cover.jpg"));
+    }
+
+    #[test]
+    fn albums_with_discs_artwork_and_spellings() {
+        let d = tempfile::tempdir().unwrap();
+        let song = |dir: &Path, file: &str, artist: &str, album: &str, track: &str, disc: &str| {
+            fs::create_dir_all(dir).unwrap();
+            flac(
+                &dir.join(format!("{file}.flac")),
+                &[
+                    ("TITLE", file),
+                    ("ARTIST", artist),
+                    ("ALBUM", album),
+                    ("DATE", "2000"),
+                    ("TRACKNUMBER", track),
+                    ("DISCNUMBER", disc),
+                    ("DISCTOTAL", "2"),
+                ],
+            );
+        };
+        let deluxe = d.path().join("A-Ha - Analogue (Deluxe) (2000) [FLAC]");
+        song(
+            &deluxe.join("CD 01"),
+            "a",
+            "A-Ha",
+            "Analogue (Deluxe)",
+            "1",
+            "1",
+        );
+        song(
+            &deluxe.join("CD 02"),
+            "b",
+            "A-Ha",
+            "Analogue (Deluxe)",
+            "1",
+            "2",
+        );
+        fs::write(deluxe.join("Cover.jpg"), "c").unwrap();
+        fs::write(deluxe.join("CD 01/log.txt"), "1").unwrap();
+        fs::write(deluxe.join("CD 02/log.txt"), "2").unwrap();
+        let other = d.path().join("a-ha - Other [FLAC]");
+        song(&other, "c", "a-ha", "Other", "1", "1");
+        fs::create_dir_all(other.join("Artwork")).unwrap();
+        fs::write(other.join("Artwork/img.png"), "i").unwrap();
+        let opts = crate::ScanOptions {
+            recursive: true,
+            ..Default::default()
+        };
+        let files = crate::scan(&[d.path().to_path_buf()], &opts, &Default::default()).files;
+        let steps = vec![Step {
+            enabled: true,
+            rule: Rule::Music {
+                template: "{track} - {title}".into(),
+                colon: " - ".into(),
+                disc_prefix: true,
+                from_name: false,
+                folders: true,
+                folder_template: "{album artist}/{album}".into(),
+            },
+        }];
+        let p = preview(&files, &steps, &HashMap::new(), &View::default());
+        let targets: HashSet<PathBuf> = p.items.iter().map(|i| i.target()).collect();
+        let base = d.path().join("A-Ha");
+        for want in [
+            "Analogue (Deluxe)/1-01 - a.flac",
+            "Analogue (Deluxe)/2-01 - b.flac",
+            "Analogue (Deluxe)/Cover.jpg",
+            "Analogue (Deluxe)/log (CD 01).txt",
+            "Analogue (Deluxe)/log (CD 02).txt",
+            "Other/1-01 - c.flac",
+            "Other/Artwork/img.png",
+        ] {
+            assert!(
+                targets.contains(&base.join(want)),
+                "missing {want} in {targets:?}"
+            );
+        }
     }
 
     #[test]

@@ -303,6 +303,32 @@ ${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...A
 <p class="tip">Only the show's name is sent to TMDB, never file names or folders.</p>`,
   },
   {
+    id: "r-music",
+    title: "Music (tags)",
+    sub: true,
+    html: `
+<p>Names each song from the <b>tags</b> stored in the file (ID3 in MP3, Vorbis comments in FLAC and OGG, MP4 in M4A, and others), with no internet needed.</p>
+${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
+<ul>
+  <li><b>Template</b>: <code>{track}</code>, <code>{title}</code>, <code>{artist}</code>, <code>{album artist}</code>, <code>{album}</code>, <code>{year}</code>, <code>{disc}</code>, <code>{genre}</code> and <code>{composer}</code>. The default is <code>{track} - {title}</code>. The track has two digits (three on albums with over 99 tracks).</li>
+  <li>Empty tags leave nothing behind: with <code>{track} - {artist} - {title}</code>, a song without an artist becomes <code>01 - Title</code>.</li>
+  <li><b>Disc number in the track</b>: on albums with more than one disc, the track becomes <code>1-01</code>, <code>2-01</code>…, so the discs do not mix.</li>
+  <li><b>The album as a whole</b>: the tracks of one album (same folder, or <code>CD 01</code>/<code>CD 02</code> discs, and same album name) share the album's details. A track without a year gets the others'. Without an album artist in the tags, the artist of most tracks counts (guests such as <code>feat.</code> left out); with no majority, the album is a compilation: <code>Various Artists</code>, as Jellyfin knows it. So an album's tracks never scatter into different folders.</li>
+  <li>If the album name already has the year (<code>Show 12 (2025-05-04)</code>), the template's <code>({year})</code> is left out.</li>
+  <li>Songs <b>without a title in their tags</b> are left as they are and get <b>✕</b>; the card shows how many. With <b>Fill in from the file name</b>, the program reads <code>01 - Artist - Title</code>, <code>01. Title</code> or <code>1-05 Title</code> from the name, and the album and year from the folder (<code>Artist - Album (1975)</code>, or just <code>Album</code>; a <code>CD2</code> folder gives the disc). Existing tags come first.</li>
+</ul>
+<h4>Artist and album folders</h4>
+<p>With <b>Organize into artist and album folders</b>, each song goes into <code>{album artist}/{album} ({year})</code> (the folder template can be changed; each <code>/</code> is a level). So <code>Music/Pink Floyd/WYWH/CD1/01.mp3</code> becomes <code>Music/Pink Floyd/Wish You Were Here (1975)/01 - Shine On….mp3</code>: folders already named after the artist, the album or a disc (or inside the artist's folder) are replaced, not filled with new folders. Loose files get the folders inside the folder they are in.</p>
+<ul>
+  <li>Lyrics (<code>.lrc</code>) with a song's name get its new name and go with it.</li>
+  <li>Covers, <code>.cue</code>, <code>.log</code> and other files in the album's folder go along when every song in the folder goes to the same place (and they are in the list). Subfolders without songs (<code>Artwork</code>, <code>Scans</code>) go along with the same name; so do files in the folder above <code>CD 01</code>/<code>CD 02</code>. If two such files would get the same name (a <code>log.txt</code> on each disc), they get their folder's name: <code>log (CD 01).txt</code>.</li>
+  <li>Artist or album names that differ only in case (<code>a-ha</code> and <code>A-Ha</code>, from different albums' tags) become one folder: the one already on disk, or the most used spelling.</li>
+  <li>Old folders left empty are deleted; undo puts everything back.</li>
+  <li><code>.cue</code> files and <code>.m3u</code> playlists list the songs' new names (see <b>Renaming and undoing</b>).</li>
+</ul>
+<p class="tip">Renome only reads the tags; the songs themselves are not changed.</p>`,
+  },
+  {
     id: "preview",
     title: "Preview and conflicts",
     html: `
@@ -346,6 +372,7 @@ ${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...A
 <ul>
   <li>Renaming happens in two steps, through a temporary name. That is why names can be swapped (a ↔ b), and no file is ever overwritten.</li>
   <li>Folders and the files inside them can be renamed together: the contents first, then the folder.</li>
+  <li>Cue sheets and playlists (<code>.cue</code>, <code>.m3u</code>, <code>.m3u8</code>) that list renamed or moved files are updated with the new names. A <code>.cue</code> listing only files that do not exist (a whole-disc file later split into tracks) is rebuilt with one track per file, matching each <code>TRACK</code> with the song in the folder tagged with that number; if that is not possible, it is deleted. <code>.m3u</code> playlists in which no song exists are deleted too. These are the only changes Renome makes to files; the original content is kept in the history, and undo puts it back.</li>
   <li>If a file fails (no permission, deleted by another program…), the others still go ahead, and at the end you get a list of what failed and why.</li>
   <li>After renaming, the rules are turned off (can be changed in Options), so they are not applied twice.</li>
 </ul>

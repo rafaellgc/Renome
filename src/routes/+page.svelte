@@ -79,6 +79,8 @@
   let showPick = $state<{ query: string; candidates: Candidate[]; resolve: (c: Candidate | null) => void } | null>(null);
   let tvProgress = $state<string | null>(null);
   const seriesRule = $derived(steps.find((s) => s.enabled && s.rule.type === "series"));
+  const musicRule = $derived(steps.find((s) => s.enabled && s.rule.type === "music"));
+  const untaggedCount = $derived(musicRule ? preview.items.filter((i) => i.untagged).length : 0);
   const episodeMatches = $derived(
     Object.fromEntries(
       Object.entries(series)
@@ -121,6 +123,7 @@
     } as const;
     if (movieRule) for (const [p, m] of Object.entries(movies)) out[p] = { status: m.status, tip: t(tips.movie[m.status]) };
     if (seriesRule) for (const [p, e] of Object.entries(series)) out[p] = { status: e.status, tip: t(tips.episode[e.status]) };
+    if (musicRule) for (const i of preview.items) if (i.untagged) out[i.path] = { status: "none", tip: t("musicUntaggedTip") };
     return out;
   });
 
@@ -338,7 +341,7 @@
       const rule = movieRule?.rule;
       const r: ApplyReport = preview.changed
         ? await api.apply(payload(), $state.snapshot(overrides), $state.snapshot(view))
-        : { done: [], errors: [], historyId: null };
+        : { done: [], errors: [], historyId: null, lists: 0, listsRemoved: 0 };
       let saved = 0;
       if (rule?.type === "movie" && rule.sidecar) {
         const items = r.done
@@ -368,6 +371,8 @@
       overrides = {};
       notice = [
         preview.changed ? t("renamedN", { n: r.done.length }) : "",
+        r.lists ? t("listsN", { n: r.lists }) : "",
+        r.listsRemoved ? t("listsRemovedN", { n: r.listsRemoved }) : "",
         saved ? t("sidecarsN", { n: saved }) : "",
         r.errors.length ? t("errorsN", { n: r.errors.length }) : "",
       ].filter(Boolean).join(" · ");
@@ -844,6 +849,7 @@
                     onreview: () => openEpisodeReview(),
                   }
                 : undefined}
+            summary={step.rule.type === "music" && step.enabled && untaggedCount ? t("musicUntaggedN", { n: untaggedCount }) : null}
           />
         {:else}
           <p class="empty">{t("emptyRules")}</p>
@@ -863,7 +869,10 @@
           onoverride={setOverride}
           {copies}
           {matches}
-          onmatch={(p) => (seriesRule && series[p] ? openEpisodeReview(p) : openReview(p))}
+          onmatch={(p) => {
+            if (seriesRule && series[p]) openEpisodeReview(p);
+            else if (movieRule && movies[p]) openReview(p);
+          }}
         />
         {#if !preview.items.length}<p class="no-match">{t("noMatch")}</p>{/if}
       {:else}

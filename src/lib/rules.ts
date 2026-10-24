@@ -2,7 +2,7 @@ import { settings } from "./settings.svelte";
 import type { Rule, RuleType, Step } from "./types";
 
 export const RULE_TYPES: RuleType[] = [
-  "replace", "regex", "rearrange", "case", "insert", "number", "remove", "removeRange", "charAt", "extension", "movie", "series",
+  "replace", "regex", "rearrange", "case", "insert", "number", "remove", "removeRange", "charAt", "extension", "movie", "series", "music",
 ];
 
 const NAME_VAR = { pt: "{nome}", en: "{name}", es: "{nombre}" } as const;
@@ -15,6 +15,11 @@ const SHOW_FOLDER = {
   pt: "{série} ({ano}) [tmdbid-{id}]",
   en: "{show} ({year}) [tmdbid-{id}]",
   es: "{serie} ({año}) [tmdbid-{id}]",
+} as const;
+const MUSIC_TEMPLATE = {
+  pt: ["{faixa} - {título}", "{artista do álbum}/{álbum} ({ano})"],
+  en: ["{track} - {title}", "{album artist}/{album} ({year})"],
+  es: ["{pista} - {título}", "{artista del álbum}/{álbum} ({año})"],
 } as const;
 const SERIES_TEMPLATE = {
   pt: "{série} ({ano}) - S{temporada}E{episódio} - {título}",
@@ -55,6 +60,10 @@ export function newRule(type: RuleType): Rule {
         type, template: SERIES_TEMPLATE[settings.lang], colon: " - ", show: "",
         folders: false, folderTemplate: SHOW_FOLDER[settings.lang], sidecar: false, fanart: false,
       };
+    case "music": {
+      const [template, folderTemplate] = MUSIC_TEMPLATE[settings.lang];
+      return { type, template, colon: " - ", discPrefix: true, fromName: false, folders: false, folderTemplate };
+    }
   }
 }
 

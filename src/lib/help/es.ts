@@ -303,6 +303,32 @@ ${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...Y
 <p class="tip">Solo se envía a TMDB el nombre de la serie, nunca los nombres de los archivos ni las carpetas.</p>`,
   },
   {
+    id: "r-music",
+    title: "Música (etiquetas)",
+    sub: true,
+    html: `
+<p>Da a cada canción el nombre que viene de las <b>etiquetas</b> guardadas en el archivo (ID3 del MP3, Vorbis del FLAC y del OGG, MP4 del M4A y otras), sin necesidad de internet.</p>
+${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
+<ul>
+  <li><b>Plantilla</b>: <code>{pista}</code>, <code>{título}</code>, <code>{artista}</code>, <code>{artista del álbum}</code>, <code>{álbum}</code>, <code>{año}</code>, <code>{disco}</code>, <code>{género}</code> y <code>{compositor}</code>. La predeterminada es <code>{pista} - {título}</code>. La pista tiene dos dígitos (tres en álbumes con más de 99 pistas).</li>
+  <li>Las etiquetas vacías no dejan restos: con <code>{pista} - {artista} - {título}</code>, una canción sin artista queda <code>01 - Título</code>.</li>
+  <li><b>Número de disco en la pista</b>: en álbumes con más de un disco, la pista queda <code>1-01</code>, <code>2-01</code>…, para que los discos no se mezclen.</li>
+  <li><b>El álbum como un todo</b>: las pistas de un mismo álbum (misma carpeta, o discos <code>CD 01</code>/<code>CD 02</code>, y mismo nombre de álbum) comparten los datos del álbum. Una pista sin año recibe el de las demás. Sin "artista del álbum" en las etiquetas, vale el artista de la mayoría de las pistas (sin contar colaboraciones como <code>feat.</code>); sin mayoría, el álbum es una recopilación: <code>Various Artists</code>, como lo reconoce Jellyfin. Así, las pistas de un álbum nunca se reparten en carpetas distintas.</li>
+  <li>Si el nombre del álbum ya trae el año (<code>Programa 12 (2025-05-04)</code>), se omite el <code>({año})</code> de la plantilla.</li>
+  <li>Las canciones <b>sin título en las etiquetas</b> quedan como están y reciben <b>✕</b>; la tarjeta muestra cuántas son. Con <b>Completar con el nombre del archivo</b>, el programa lee <code>01 - Artista - Título</code>, <code>01. Título</code> o <code>1-05 Título</code> del nombre, y el álbum y el año de la carpeta (<code>Artista - Álbum (1975)</code>, o solo <code>Álbum</code>; una carpeta <code>CD2</code> da el disco). Las etiquetas existentes tienen prioridad.</li>
+</ul>
+<h4>Carpetas de artista y álbum</h4>
+<p>Con <b>Organizar en carpetas de artista y álbum</b>, cada canción va a <code>{artista del álbum}/{álbum} ({año})</code> (la plantilla de carpetas se puede cambiar; cada <code>/</code> es un nivel). Así, <code>Música/Pink Floyd/WYWH/CD1/01.mp3</code> queda <code>Música/Pink Floyd/Wish You Were Here (1975)/01 - Shine On….mp3</code>: las carpetas que ya llevan el nombre del artista, del álbum o de un disco (o que están dentro de la del artista) se reemplazan, no reciben carpetas nuevas dentro. Los archivos sueltos reciben las carpetas dentro de la carpeta donde están.</p>
+<ul>
+  <li>Las letras (<code>.lrc</code>) con el nombre de una canción reciben su nuevo nombre y van con ella.</li>
+  <li>Las portadas, <code>.cue</code>, <code>.log</code> y otros archivos de la carpeta del álbum van con él cuando todas las canciones de la carpeta van al mismo lugar (y están en la lista). Las subcarpetas sin canciones (<code>Artwork</code>, <code>Scans</code>) van con él, con el mismo nombre; también los archivos de la carpeta de encima de <code>CD 01</code>/<code>CD 02</code>. Si dos de esos archivos quedarían con el mismo nombre (un <code>log.txt</code> en cada disco), reciben el nombre de su carpeta: <code>log (CD 01).txt</code>.</li>
+  <li>Los nombres de artista o álbum que solo difieren en mayúsculas (<code>a-ha</code> y <code>A-Ha</code>, de etiquetas de álbumes distintos) quedan en una sola carpeta: la que ya existe en el disco o la grafía más usada.</li>
+  <li>Las carpetas antiguas que quedan vacías se borran; deshacer lo devuelve todo a su sitio.</li>
+  <li>Los archivos <code>.cue</code> y las listas <code>.m3u</code> pasan a citar los nuevos nombres de las canciones (vea <b>Renombrar y deshacer</b>).</li>
+</ul>
+<p class="tip">Renome solo lee las etiquetas; las canciones en sí no cambian.</p>`,
+  },
+  {
     id: "preview",
     title: "Vista previa y conflictos",
     html: `
@@ -346,6 +372,7 @@ ${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...Y
 <ul>
   <li>El renombrado se hace en dos pasos, pasando por un nombre temporal. Por eso se pueden intercambiar nombres (a ↔ b), y nunca se sobrescribe un archivo.</li>
   <li>Las carpetas y los archivos de dentro se pueden renombrar juntos: primero el contenido, después la carpeta.</li>
+  <li>Las hojas de pistas y listas de reproducción (<code>.cue</code>, <code>.m3u</code>, <code>.m3u8</code>) que citan archivos renombrados o movidos se actualizan con los nuevos nombres. Un <code>.cue</code> que solo cita archivos inexistentes (el disco entero en un archivo que luego se dividió en pistas) se rehace con una pista por archivo, emparejando cada <code>TRACK</code> con la canción de la carpeta que tiene ese número en las etiquetas; si no es posible, se borra. Las listas <code>.m3u</code> en las que no existe ninguna canción también se borran. Son los únicos cambios que Renome hace en archivos; el contenido original queda guardado en el historial, y deshacer lo devuelve.</li>
   <li>Si un archivo falla (sin permiso, borrado por otro programa…), los demás siguen, y al final aparece la lista de lo que falló y por qué.</li>
   <li>Después de renombrar, las reglas se desactivan (se puede cambiar en Opciones), para no aplicarlas dos veces.</li>
 </ul>

@@ -9,6 +9,7 @@ use regex::{NoExpand, Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
 
 use crate::files::{FileEntry, join_name, split_name};
+use crate::music::{self, AudioTags};
 use crate::text;
 use crate::tmdb::{self, MovieMatch};
 use crate::tv::{self, EpisodeMatch};
@@ -241,10 +242,53 @@ pub enum Rule {
         #[serde(default)]
         fanart: bool,
     },
+    /// Names songs after their tags; files without them are left alone.
+    Music {
+        /// `{track}`, `{title}`, `{artist}`, `{album}`…
+        template: String,
+        #[serde(default = "colon")]
+        colon: String,
+        /// `1-01` on albums with more than one disc.
+        #[serde(default = "yes")]
+        disc_prefix: bool,
+        /// Missing tags come from the file name and its folder.
+        #[serde(default)]
+        from_name: bool,
+        /// Moves each song into folders made from `folder_template`.
+        #[serde(default)]
+        folders: bool,
+        /// Folder levels separated by `/`.
+        #[serde(default = "music_folder")]
+        folder_template: String,
+    },
 }
 
 fn colon() -> String {
     " - ".into()
+}
+
+fn music_folder() -> String {
+    "{album artist}/{album} ({year})".into()
+}
+
+/// A song's tags for the music rule: `None` for other files and songs
+/// without a title (even from the name, with `from_name`).
+pub(crate) fn song_tags(file: &FileEntry, from_name: bool) -> Option<AudioTags> {
+    if file.is_dir || !music::is_audio(&file.ext) {
+        return None;
+    }
+    let mut t = file.audio_tags().cloned().unwrap_or_default();
+    if from_name {
+        t.fill_from(music::from_name(&file.stem, &file.dir));
+    }
+    (!t.title.is_empty()).then_some(t)
+}
+
+fn song_of(ctx: &Ctx, from_name: bool) -> Option<AudioTags> {
+    match ctx.song {
+        Some(t) => Some(t.clone()),
+        None => song_tags(ctx.file, from_name),
+    }
 }
 
 fn show_folder() -> String {
@@ -280,6 +324,9 @@ pub struct Ctx<'a> {
     pub movie: Option<&'a MovieMatch>,
     /// The episode chosen for this file, for the series rule.
     pub episode: Option<&'a EpisodeMatch>,
+    /// The song's tags with the album-wide fields agreed (by the preview),
+    /// for the music rule; read from the file when missing.
+    pub song: Option<&'a AudioTags>,
 }
 
 enum Compiled {
@@ -325,6 +372,16 @@ impl Pipeline {
     pub fn run(&self, ctx: &Ctx) -> (String, String) {
         let (stem, ext, _) = self.run_full(ctx);
         (stem, ext)
+    }
+
+    /// The music rule's `(from_name, folders)`, when one is on.
+    pub fn music(&self) -> Option<(bool, bool)> {
+        self.steps.iter().find_map(|s| match s {
+            Compiled::Plain(Rule::Music {
+                from_name, folders, ..
+            }) => Some((*from_name, *folders)),
+            _ => None,
+        })
     }
 
     /// Like [`run`](Self::run), plus where a rule moves the file (movie
@@ -374,6 +431,23 @@ impl Pipeline {
                                 tv::season_folder(m.season),
                             ],
                         });
+                    }
+                    if let Rule::Music {
+                        folders: true,
+                        folder_template,
+                        colon,
+                        from_name,
+                        ..
+                    } = rule
+                        && let Some(t) = song_of(ctx, *from_name)
+                    {
+                        let levels = music::folders(folder_template, &t, colon);
+                        if !levels.is_empty() {
+                            moved = Some(Move::Into {
+                                root: music::library_root(&ctx.file.dir, &t, &levels),
+                                folders: levels,
+                            });
+                        }
                     }
                     apply_plain(rule, &mut stem, &mut ext, ctx)
                 }
@@ -672,6 +746,21 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             }
         }
 
+        Rule::Music {
+            template,
+            colon,
+            disc_prefix,
+            from_name,
+            ..
+        } => {
+            if let Some(t) = song_of(ctx, *from_name) {
+                let name = music::expand(template, &t, colon, *disc_prefix);
+                if !name.is_empty() {
+                    *stem = name;
+                }
+            }
+        }
+
         Rule::Replace { .. } | Rule::Regex { .. } => unreachable!("compiled separately"),
     }
 }
@@ -836,6 +925,7 @@ mod tests {
             modified: Some(1_700_000_000),
             is_dir: false,
             taken: Default::default(),
+            tags: Default::default(),
         }
     }
 
@@ -860,6 +950,7 @@ mod tests {
             now: Local::now(),
             movie: None,
             episode: None,
+            song: None,
         });
         join_name(&s, &e)
     }
@@ -1281,6 +1372,7 @@ mod tests {
             now: Local::now(),
             movie: None,
             episode: None,
+            song: None,
         });
         assert_eq!(s, "a");
     }

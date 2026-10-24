@@ -3,9 +3,11 @@
 //! - [`scan`]: collects files from paths (files or folders).
 //! - [`filter`]: list filter (which files are shown and will be renamed).
 //! - [`rules`]: name transformation rules, applied in sequence.
+//! - [`playlists`]: cue sheets and playlists follow renamed files.
 //! - [`plan`]: computes the preview and checks for conflicts.
 //! - [`apply`]: renames in two phases, with a history for undo.
 //! - [`identical`]: finds files with identical content.
+//! - [`music`]: tags of audio files and the names built from them.
 //! - [`tmdb`]: movie title guessing, ranking and `.nfo` files for TMDB.
 //! - [`tv`]: season and episode numbers, and matching files to a show.
 
@@ -13,7 +15,9 @@ pub mod apply;
 pub mod files;
 pub mod filter;
 pub mod identical;
+pub mod music;
 pub mod plan;
+pub mod playlists;
 pub mod rules;
 pub mod scan;
 pub mod text;

@@ -12,6 +12,7 @@
     onmove,
     onremove,
     lookup,
+    summary = null,
   }: {
     step: Step;
     error?: string | null;
@@ -21,6 +22,8 @@
     last?: boolean;
     onmove: (delta: -1 | 1) => void;
     onremove: () => void;
+    /** A line about the rule's effect (songs without tags). */
+    summary?: string | null;
     /** Movie and series rules: search state and actions. */
     lookup?: {
       /** The show found last (series rule). */
@@ -249,8 +252,20 @@
         {/if}
         {#if lookup?.show}<p class="hint">{t("seriesCurrent", { show: lookup.show })}</p>{/if}
         {@render actions(t("tvSearch"), "seriesSummary")}
+      {:else if r.type === "music"}
+        <p class="hint top">{t("musicHint")}</p>
+        <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
+        <p class="hint mono">{t("musicTemplateHint")}</p>
+        <label class="colon">{t("colonLabel")} <input class="mono sep" bind:value={r.colon} spellcheck="false" /></label>
+        <label class="check"><input type="checkbox" bind:checked={r.discPrefix} /> <span>{t("musicDiscPrefix")}<small>{t("musicDiscPrefixHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.fromName} /> <span>{t("musicFromName")}<small>{t("musicFromNameHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.folders} /> <span>{t("musicFolders")}<small>{t("musicFoldersHint")}</small></span></label>
+        {#if r.folders}
+          <label class="sub">{t("musicFolderName")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
+        {/if}
       {/if}
 
+      {#if summary}<p class="hint">{summary}</p>{/if}
       {#if error}<p class="error">{error}</p>{/if}
     </div>
   {/if}

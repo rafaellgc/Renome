@@ -6,6 +6,8 @@ use std::sync::OnceLock;
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 
+use crate::music::AudioTags;
+
 /// A file (or folder) in the list, with its name already split into stem
 /// and extension.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -26,6 +28,9 @@ pub struct FileEntry {
     /// Date the photo was taken (EXIF), read on first use.
     #[serde(skip)]
     pub(crate) taken: OnceLock<Option<NaiveDateTime>>,
+    /// Tags of an audio file, read on first use.
+    #[serde(skip)]
+    pub(crate) tags: OnceLock<Option<AudioTags>>,
 }
 
 impl FileEntry {
@@ -48,6 +53,7 @@ impl FileEntry {
             modified,
             is_dir,
             taken: OnceLock::new(),
+            tags: OnceLock::new(),
         })
     }
 
@@ -58,6 +64,17 @@ impl FileEntry {
             return None;
         }
         *self.taken.get_or_init(|| read_taken(&self.path))
+    }
+
+    /// Tags of an audio file (ID3, Vorbis comments, MP4…). Read once and
+    /// cached.
+    pub fn audio_tags(&self) -> Option<&AudioTags> {
+        if self.is_dir || !crate::music::is_audio(&self.ext) {
+            return None;
+        }
+        self.tags
+            .get_or_init(|| crate::music::read(&self.path))
+            .as_ref()
     }
 
     pub fn file_name(&self) -> String {

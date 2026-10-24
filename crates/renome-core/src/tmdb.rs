@@ -228,6 +228,12 @@ pub struct MovieMatch {
 /// default), slashes become dashes, and other characters Windows refuses
 /// are dropped.
 pub fn safe_title(s: &str, colon: &str) -> String {
+    safe_text(s, colon).trim_end_matches(['.', ' ']).to_string()
+}
+
+/// Like [`safe_title`], keeping final dots: in a file name the extension
+/// follows them (`On T.V..flac`).
+pub fn safe_text(s: &str, colon: &str) -> String {
     let s = s.replace(" : ", ":").replace(": ", ":").replace(':', colon);
     let s: String = s
         .replace(['/', '\\'], "-")
@@ -235,9 +241,7 @@ pub fn safe_title(s: &str, colon: &str) -> String {
         .chars()
         .filter(|c| !"?*<>|".contains(*c))
         .collect();
-    text::collapse_spaces(&s)
-        .trim_end_matches(['.', ' '])
-        .to_string()
+    text::collapse_spaces(&s).trim_end().to_string()
 }
 
 /// The new name from the rule's template: `{title}`, `{original}`,

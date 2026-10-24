@@ -30,6 +30,10 @@ export type Rule =
   | {
       type: "series"; template: string; colon: string; show: string;
       folders: boolean; folderTemplate: string; sidecar: boolean; fanart: boolean;
+    }
+  | {
+      type: "music"; template: string; colon: string; discPrefix: boolean; fromName: boolean;
+      folders: boolean; folderTemplate: string;
     };
 
 export type RuleType = Rule["type"];
@@ -57,6 +61,8 @@ export interface PreviewItem {
   problem: Problem | null;
   windowsUnsafe: boolean;
   manual: boolean;
+  /** A song the music rule cannot name (no title in its tags). */
+  untagged: boolean;
 }
 
 export interface Preview {
@@ -194,6 +200,10 @@ export interface ApplyReport {
   done: { from: string; to: string }[];
   errors: OpError[];
   historyId: string | null;
+  /** Cue sheets and playlists updated to the new names (or rebuilt). */
+  lists: number;
+  /** Useless cue sheets and playlists deleted. */
+  listsRemoved: number;
 }
 
 export interface HistoryEntry {
