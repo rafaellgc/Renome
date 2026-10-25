@@ -125,10 +125,25 @@ impl Client {
         .await
     }
 
+    /// A release with all that goes into a song's tags besides its track:
+    /// labels, ISRCs, genres, and who wrote, produced and mixed each
+    /// recording.
+    pub async fn release_full(&self, id: &str) -> Result<Release, String> {
+        self.get(
+            &format!("/release/{id}"),
+            &[(
+                "inc",
+                "recordings artist-credits release-groups labels media isrcs genres \
+                 recording-level-rels work-rels work-level-rels artist-rels",
+            )],
+        )
+        .await
+    }
+
     /// The front cover (1200 pixels): the release's, else its release
     /// group's (an edition without artwork, a cassette say, shares the
     /// album's); `None` if neither has one.
-    async fn cover(&self, id: &str) -> Result<Option<Vec<u8>>, String> {
+    pub async fn front_cover(&self, id: &str) -> Result<Option<Vec<u8>>, String> {
         if let Some(bytes) = self.front(&format!("release/{id}")).await? {
             return Ok(Some(bytes));
         }
@@ -568,7 +583,7 @@ pub async fn covers(
             .unwrap_or(true);
         if !has_cover {
             let path = item.dir.join("cover.jpg");
-            match client.cover(&item.release).await {
+            match client.front_cover(&item.release).await {
                 Ok(Some(bytes)) => match crate::tmdb::write_new(&path, &bytes) {
                     Ok(()) => report.created.push(path),
                     Err(e) => report.errors.push(("cover.jpg".into(), e)),

@@ -95,7 +95,7 @@
   let albums = $state<AlbumState[]>([]);
   /** Albums in the review window (indexes); null when closed. */
   let albumReview = $state<number[] | null>(null);
-  let mbProgress = $state<{ done: number; total: number; kind: "search" | "listen" | "save" } | null>(null);
+  let mbProgress = $state<{ done: number; total: number; kind: "search" | "listen" | "save" | "tags" } | null>(null);
   /** Each song's details from its chosen release. */
   const songMatches = $derived(
     Object.fromEntries(albums.flatMap((a) => (a.choice ? Object.entries(a.matches) : []))) as Record<string, SongMatch>,
@@ -112,6 +112,14 @@
   /** Album folders whose songs keep their names but still get a playlist
    *  (asked of the disk: those without one and with two songs or more). */
   let playlistOnly = $state<string[]>([]);
+  /** Songs whose names are already right but whose tags get written. */
+  const tagsOnly = $derived(
+    musicRule?.rule.type === "music" && musicRule.rule.writeTags
+      ? preview.items.filter(
+          (i) => i.status === "unchanged" && (i.retag || (musicRule.rule.type === "music" && musicRule.rule.cleanTags && i.junk)) && songMatches[i.path],
+        )
+      : [],
+  );
   $effect(() => {
     const on = musicRule?.rule.type === "music" && musicRule.rule.playlist;
     const items = preview.items;
@@ -364,7 +372,8 @@
   const basename = (p: string) => p.split("/").pop() ?? p;
   const errText = (e: OpError) => {
     if (e.kind === "history") return `${t("err.history")} (${e.detail})`;
-    const why = e.kind === "io" ? e.detail || t("err.io") : t(`err.${e.kind}`);
+    const why =
+      e.kind === "io" ? e.detail || t("err.io") : e.kind === "tags" ? `${t("err.tags")}: ${tError(e.detail)}` : t(`err.${e.kind}`);
     return `${basename(e.from)} — ${why}`;
   };
 
@@ -381,13 +390,15 @@
     const meta = metaOnly.map((i) => ({ path: i.path, id: movies[i.path].choice!.id }));
     const tvMeta = episodeMetaOnly.map((i) => tvSidecarItem(i.path, i.path));
     const listOnly = playlistOnly;
-    if (!preview.changed && !meta.length && !tvMeta.length && !coverOnly && !listOnly.length) return;
+    const retagOnly = tagsOnly.map((i) => i.path);
+    if (!preview.changed && !meta.length && !tvMeta.length && !coverOnly && !listOnly.length && !retagOnly.length) return;
     if (settings.confirmApply) {
       const lines = [
         preview.changed ? t("confirmText", { n: preview.changed }) : "",
         meta.length + tvMeta.length ? t("confirmMeta", { n: meta.length + tvMeta.length }) : "",
         coverOnly ? t("confirmCovers", { n: coverOnly }) : "",
         listOnly.length ? t("confirmPlaylists", { n: listOnly.length }) : "",
+        retagOnly.length ? t("confirmTags", { n: retagOnly.length }) : "",
         preview.conflicts ? t("confirmConflicts", { n: preview.conflicts }) : "",
       ].filter(Boolean);
       const ok = await confirm({
@@ -432,6 +443,32 @@
         const dirs = [...new Set(r.done.filter((op) => isAudio(op.to)).map((op) => parent(op.to)).concat(listOnly))];
         if (dirs.length) saved += await writeMeta(() => api.writePlaylists(r.historyId, dirs));
       }
+      let tagged = 0;
+      if (mrule?.type === "music" && mrule.writeTags) {
+        // Every matched song that moved, and those that keep their names.
+        const items = r.done
+          .filter((op) => songMatches[op.from] && isAudio(op.to))
+          .map((op) => ({ path: op.to, song: songMatches[op.from] }))
+          .concat(retagOnly.map((p) => ({ path: p, song: songMatches[p] })));
+        if (items.length) {
+          mbProgress = { done: 0, total: items.length, kind: "tags" };
+          try {
+            const res = await api.writeTags(r.historyId, $state.snapshot(items), mrule.embedCover, mrule.cleanTags);
+            tagged = res.written;
+            if (res.errors.length) {
+              await notify({
+                title: t("tagsTitle"),
+                text: t("tagsN", { n: res.written }),
+                items: res.errors.map(([file, why]) => (file ? `${file} — ${tError(why)}` : tError(why))),
+              });
+            }
+          } catch (e) {
+            await notify({ title: t("tagsTitle"), text: tError(e) });
+          } finally {
+            mbProgress = null;
+          }
+        }
+      }
       const srule = seriesRule?.rule;
       if (srule?.type === "series" && srule.sidecar) {
         const items = r.done
@@ -453,6 +490,7 @@
         r.lists ? t("listsN", { n: r.lists }) : "",
         r.listsRemoved ? t("listsRemovedN", { n: r.listsRemoved }) : "",
         saved ? t("sidecarsN", { n: saved }) : "",
+        tagged ? t("tagsN", { n: tagged }) : "",
         r.errors.length ? t("errorsN", { n: r.errors.length }) : "",
       ].filter(Boolean).join(" · ");
       await refresh();
@@ -933,7 +971,7 @@
     const unlistenTmdb = listen<{ done: number; total: number }>("tmdb-progress", (e) => {
       if (tmdbProgress) tmdbProgress = { ...tmdbProgress, ...e.payload };
     });
-    const unlistenMb = listen<{ done: number; total: number; kind?: "listen" }>("mb-progress", (e) => {
+    const unlistenMb = listen<{ done: number; total: number; kind?: "listen" | "tags" }>("mb-progress", (e) => {
       // After listening, the albums heard are looked up.
       if (mbProgress)
         mbProgress = { ...e.payload, kind: e.payload.kind ?? (mbProgress.kind === "listen" ? "search" : mbProgress.kind) };
@@ -998,8 +1036,8 @@
           <path fill="currentColor" fill-rule="evenodd" stroke="currentColor" stroke-width="1" stroke-linejoin="round" d="M12.15 3.76L11.96 1.50L8.04 1.50L7.85 3.76L5.67 5.02L3.62 4.05L1.66 7.45L3.52 8.74L3.52 11.26L1.66 12.55L3.62 15.95L5.67 14.98L7.85 16.24L8.04 18.50L11.96 18.50L12.15 16.24L14.33 14.98L16.38 15.95L18.34 12.55L16.48 11.26L16.48 8.74L18.34 7.45L16.38 4.05L14.33 5.02ZM13 10a3 3 0 1 0-6 0a3 3 0 1 0 6 0Z" />
         </svg>
       </button>
-      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !metaOnly.length && !episodeMetaOnly.length && !coverOnly && !playlistOnly.length) || busy} onclick={applyAll}>
-        {t("rename")} {preview.changed + metaOnly.length + episodeMetaOnly.length + coverOnly + playlistOnly.length || ""}
+      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !metaOnly.length && !episodeMetaOnly.length && !coverOnly && !playlistOnly.length && !tagsOnly.length) || busy} onclick={applyAll}>
+        {t("rename")} {preview.changed + metaOnly.length + episodeMetaOnly.length + coverOnly + playlistOnly.length + tagsOnly.length || ""}
       </button>
     </div>
   </header>
@@ -1052,7 +1090,7 @@
                   ? {
                       ...albumCounts,
                       progress: mbProgress
-                        ? t({ search: "mbSearching", listen: "mbListening", save: "coversWriting" }[mbProgress.kind] as "mbSearching", mbProgress)
+                        ? t({ search: "mbSearching", listen: "mbListening", save: "coversWriting", tags: "tagsWriting" }[mbProgress.kind] as "mbSearching", mbProgress)
                         : null,
                       onsearch: () => searchAlbums(step.rule as Extract<Rule, { type: "music" }>),
                       onreview: () => openAlbumReview(),
@@ -1143,7 +1181,13 @@
           {#each history as h (h.id)}
             <li>
               <span>{new Date(h.created).toLocaleString(LOCALES[settings.lang])}</span>
-              <span class="muted">{h.count || !h.extra ? t("files", { n: h.count }) : t("metadataN", { n: h.extra })}</span>
+              <span class="muted">
+                {[
+                  h.count || (!h.extra && !h.tagged) ? t("files", { n: h.count }) : "",
+                  !h.count && h.extra ? t("metadataN", { n: h.extra }) : "",
+                  h.tagged ? t("taggedN", { n: h.tagged }) : "",
+                ].filter(Boolean).join(" · ")}
+              </span>
               {#if h.undone}
                 <span class="muted">{t("undone")}</span>
               {:else if h.failed || h.reverted}

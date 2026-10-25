@@ -61,7 +61,8 @@ A built-in manual (F1) explains every rule with examples.
   unsure) to fix titles and names, and saves the album's cover. Songs
   without tags, and albums the search cannot find, are identified by
   their sound (AcoustID). Can also write a `.m3u8` playlist for each
-  album.
+  album, and the release's tags and cover into the songs themselves
+  (undoable).
 - Edit any new name by hand right in the preview (double-click or F2).
 - List filter: only the visible files are renamed.
 - Sort by new name (default) or by any column.

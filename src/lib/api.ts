@@ -35,6 +35,8 @@ export const api = {
   mbChoose: (id: string, paths: string[], fromName: boolean) =>
     invoke<{ matches: [string, SongMatch][]; agree: number }>("mb_choose", { id, paths, fromName }),
   playlistDirs: (dirs: string[]) => invoke<string[]>("playlist_dirs", { dirs }),
+  writeTags: (historyId: string | null, items: { path: string; song: SongMatch }[], cover: boolean, clean: boolean) =>
+    invoke<{ written: number; errors: [string, string][] }>("write_tags", { historyId, items, cover, clean }),
   writePlaylists: (historyId: string | null, dirs: string[]) =>
     invoke<{ created: string[]; errors: [string, string][] }>("write_playlists", { historyId, dirs }),
   writeCovers: (historyId: string | null, items: { dir: string; release: string }[]) =>

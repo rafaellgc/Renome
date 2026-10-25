@@ -269,6 +269,17 @@ pub enum Rule {
         /// Identify songs by their sound on AcoustID (used by the app).
         #[serde(default = "yes")]
         listen: bool,
+        /// Write the release's details into the songs' tags (used by the app).
+        #[serde(default)]
+        write_tags: bool,
+        /// With `write_tags`, the front cover too, in place of the pictures
+        /// the songs have.
+        #[serde(default = "yes")]
+        embed_cover: bool,
+        /// With `write_tags`, the songs' other tags go (site names, ripper
+        /// notes), but for lyrics, loudness and the like.
+        #[serde(default = "yes")]
+        clean_tags: bool,
     },
 }
 

@@ -34,6 +34,14 @@ pub struct AudioTags {
     pub duration: Option<u32>,
     /// The MusicBrainz release, when the files were tagged with it.
     pub mb_release: String,
+    /// The MusicBrainz release track: songs whose tags were written from
+    /// MusicBrainz (by Renome or another tagger) have it.
+    #[serde(skip)]
+    pub mb_track: String,
+    /// The file has tags that writing with cleaning would take away
+    /// (comments, sites, an MP3's ID3v1 beside its ID3v2…).
+    #[serde(skip)]
+    pub junk: bool,
     /// The album's songs are by several artists (set by [`fill_albums`]):
     /// file names then show each song's artist.
     #[serde(skip)]
@@ -102,6 +110,14 @@ pub fn read(path: &Path) -> Option<AudioTags> {
             t.get_string(ItemKey::MusicBrainzReleaseId)
                 .map(str::to_string)
         }),
+        mb_track: text_of(&tags, |t| {
+            t.get_string(ItemKey::MusicBrainzTrackId)
+                .map(str::to_string)
+        }),
+        junk: file.tags().len() > 1
+            || tags
+                .iter()
+                .any(|t| t.items().any(|i| !crate::tagwrite::kept(i.key()))),
         compilation: false,
         recordings: Vec::new(),
     };

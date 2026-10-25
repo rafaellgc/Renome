@@ -88,6 +88,11 @@ pub struct PreviewItem {
     pub manual: bool,
     /// A song the music rule cannot name (no title in its tags).
     pub untagged: bool,
+    /// A song matched to a release whose tags say something else (the
+    /// music rule can write them).
+    pub retag: bool,
+    /// A matched song with tags that cleaning would take away.
+    pub junk: bool,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -609,6 +614,10 @@ pub fn preview(
                     && music::is_audio(&file.ext)
                     && !songs.contains_key(file.path.as_path())
             });
+            let own = file.audio_tags().cloned().unwrap_or_default();
+            let matched = view.songs.get(&file.path);
+            let retag = matched.is_some_and(|m| m.differs(&own));
+            let junk = matched.is_some() && own.junk;
             PreviewItem {
                 path: file.path.clone(),
                 dir: file.dir.clone(),
@@ -624,6 +633,8 @@ pub fn preview(
                 windows_unsafe,
                 manual,
                 untagged,
+                retag,
+                junk,
             }
         })
         .collect();
@@ -1088,6 +1099,9 @@ mod tests {
                 cover: false,
                 playlist: false,
                 listen: false,
+                write_tags: false,
+                embed_cover: false,
+                clean_tags: false,
             },
         }];
         let p = preview(&files, &steps, &HashMap::new(), &View::default());
@@ -1187,6 +1201,9 @@ mod tests {
                 cover: false,
                 playlist: false,
                 listen: false,
+                write_tags: false,
+                embed_cover: false,
+                clean_tags: false,
             },
         }];
         let p = preview(&files, &steps, &HashMap::new(), &View::default());

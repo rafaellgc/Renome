@@ -23,6 +23,63 @@ pub struct Credit {
     pub name: String,
     #[serde(default)]
     pub joinphrase: String,
+    #[serde(default)]
+    pub artist: Option<Artist>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct Artist {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default, rename = "sort-name")]
+    pub sort_name: String,
+}
+
+/// A genre with how many people gave it.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct Genre {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub count: u32,
+}
+
+/// A relationship: a person's role in a recording (producer, mix…), the
+/// work a recording performs, or a person's role in a work (composer…).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct Relation {
+    #[serde(default, rename = "type")]
+    pub kind: String,
+    #[serde(default)]
+    pub artist: Option<Artist>,
+    #[serde(default)]
+    pub work: Option<Work>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct Work {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub relations: Vec<Relation>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct TextRepresentation {
+    #[serde(default)]
+    pub language: Option<String>,
+    #[serde(default)]
+    pub script: Option<String>,
+}
+
+/// The MusicBrainz ids of a credit's artists.
+fn artist_ids(c: &[Credit]) -> Vec<String> {
+    c.iter()
+        .filter_map(|a| a.artist.as_ref().map(|x| x.id.clone()))
+        .filter(|id| !id.is_empty())
+        .collect()
 }
 
 /// MusicBrainz's typographic punctuation in its plain form, for file
@@ -52,12 +109,18 @@ pub struct ReleaseGroup {
     pub primary_type: Option<String>,
     #[serde(default, rename = "first-release-date")]
     pub first_release_date: Option<String>,
+    #[serde(default, rename = "secondary-types")]
+    pub secondary_types: Vec<String>,
+    #[serde(default)]
+    pub genres: Vec<Genre>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct LabelInfo {
     #[serde(default)]
     pub label: Option<Named>,
+    #[serde(default, rename = "catalog-number")]
+    pub catalog_number: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -68,10 +131,18 @@ pub struct Recording {
     pub title: String,
     #[serde(default)]
     pub length: Option<u64>,
+    #[serde(default)]
+    pub isrcs: Vec<String>,
+    #[serde(default)]
+    pub genres: Vec<Genre>,
+    #[serde(default)]
+    pub relations: Vec<Relation>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Track {
+    #[serde(default)]
+    pub id: String,
     #[serde(default)]
     pub position: u32,
     #[serde(default)]
@@ -91,6 +162,8 @@ pub struct Medium {
     pub position: u32,
     #[serde(default)]
     pub format: Option<String>,
+    #[serde(default)]
+    pub title: String,
     #[serde(default, rename = "track-count")]
     pub track_count: u32,
     #[serde(default)]
@@ -121,6 +194,12 @@ pub struct Release {
     pub track_count: Option<u32>,
     #[serde(default)]
     pub media: Vec<Medium>,
+    #[serde(default)]
+    pub barcode: Option<String>,
+    #[serde(default, rename = "text-representation")]
+    pub text_representation: Option<TextRepresentation>,
+    #[serde(default)]
+    pub genres: Vec<Genre>,
 }
 
 impl Release {
@@ -273,7 +352,7 @@ pub fn rank(q: &AlbumQuery, releases: &[Release]) -> Vec<Candidate> {
 }
 
 /// A song's details from its release, which replace those in its tags.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SongMatch {
     pub release: String,
@@ -286,9 +365,39 @@ pub struct SongMatch {
     pub track_total: u32,
     pub disc: u32,
     pub disc_total: u32,
+    /// The release date (`1985-06-01`, or part of it).
+    #[serde(default)]
+    pub date: String,
+    #[serde(default)]
+    pub recording: String,
+    /// The track on the release (MusicBrainz's "release track").
+    #[serde(default)]
+    pub track_id: String,
+    #[serde(default)]
+    pub release_group: String,
+    #[serde(default)]
+    pub artist_ids: Vec<String>,
+    #[serde(default)]
+    pub album_artist_ids: Vec<String>,
 }
 
 impl SongMatch {
+    /// The song's own tags say something else than the release.
+    pub fn differs(&self, t: &AudioTags) -> bool {
+        t.title != self.title
+            || t.artist != self.artist
+            || t.album_artist != self.album_artist
+            || t.album != self.album
+            || (self.year.is_some() && t.year != self.year)
+            || t.track != Some(self.track)
+            || t.track_total != Some(self.track_total)
+            || t.disc != Some(self.disc)
+            || t.disc_total != Some(self.disc_total)
+            || t.mb_release != self.release
+            // Not written from this track yet (its other tags may be junk).
+            || (!self.track_id.is_empty() && t.mb_track != self.track_id)
+    }
+
     /// The tags with the release's details in place.
     pub fn apply(&self, t: &mut AudioTags) {
         t.title = self.title.clone();
@@ -329,6 +438,7 @@ fn same_length(tr: &Track, song: &AudioTags) -> bool {
 /// its tags). Returns the matches and how many agree in length.
 pub fn match_tracks(release: &Release, songs: &[Song]) -> (Vec<(PathBuf, SongMatch)>, usize) {
     let album_artist = plain(&credit(&release.artist_credit));
+    let album_artist_ids = artist_ids(&release.artist_credit);
     let discs = release.media.len().max(1) as u32;
     let year = year_of(&release.date);
     let mut used = HashSet::new();
@@ -377,10 +487,13 @@ pub fn match_tracks(release: &Release, songs: &[Song]) -> (Vec<(PathBuf, SongMat
         if same_length(tr, t) {
             agree += 1;
         }
-        let artist = if tr.artist_credit.is_empty() {
-            album_artist.clone()
+        let (artist, artist_id) = if tr.artist_credit.is_empty() {
+            (album_artist.clone(), album_artist_ids.clone())
         } else {
-            plain(&credit(&tr.artist_credit))
+            (
+                plain(&credit(&tr.artist_credit)),
+                artist_ids(&tr.artist_credit),
+            )
         };
         out.push((
             path.clone(),
@@ -395,6 +508,20 @@ pub fn match_tracks(release: &Release, songs: &[Song]) -> (Vec<(PathBuf, SongMat
                 track_total: m.track_count.max(m.tracks.len() as u32),
                 disc: m.position.max(1),
                 disc_total: discs,
+                date: release.date.clone().unwrap_or_default(),
+                recording: tr
+                    .recording
+                    .as_ref()
+                    .map(|r| r.id.clone())
+                    .unwrap_or_default(),
+                track_id: tr.id.clone(),
+                release_group: release
+                    .release_group
+                    .as_ref()
+                    .map(|g| g.id.clone())
+                    .unwrap_or_default(),
+                artist_ids: artist_id,
+                album_artist_ids: album_artist_ids.clone(),
             },
         ));
     }

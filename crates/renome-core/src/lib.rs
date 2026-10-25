@@ -24,6 +24,7 @@ pub mod plan;
 pub mod playlists;
 pub mod rules;
 pub mod scan;
+pub mod tagwrite;
 pub mod text;
 pub mod tmdb;
 pub mod tv;

@@ -338,6 +338,10 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li>Un mismo álbum suele tener varias ediciones (original, remasterizada, de lujo, de otro país). El programa comprueba el <b>número de pistas</b>, el <b>título</b> y la <b>duración de cada una</b> (una pista con el mismo número pero otro título y otra duración no cuenta): si la mejor edición encontrada coincide con las canciones, se elige sola (<b>✓</b>). Si no, se abre la revisión, con portada, fecha, país, formato, sello y número de pistas (en verde cuando es igual al de la carpeta), para que usted elija, o <b>Ninguno</b> para mantener las etiquetas.</li>
   <li>Con el álbum elegido, los nombres y las carpetas usan los datos de MusicBrainz: título de cada pista, artista, artista del álbum, nombre del álbum y año, con la grafía oficial. Cada canción se empareja con su pista por disco y número (o por título).</li>
   <li><b>Guardar la portada del álbum</b>: graba <code>cover.jpg</code> (del Cover Art Archive) en la carpeta del álbum, si aún no tiene portada. Si la edición elegida no tiene imagen (un casete, por ejemplo), se usa la portada del álbum. Deshacer borra la portada creada.</li>
+  <li><b>Grabar las etiquetas en los archivos</b>: después de renombrar, graba en las canciones identificadas todo lo que MusicBrainz sabe de ellas: título, artistas (también cada uno por separado), artista del álbum, álbum, fecha y fecha original, pista y disco (con los totales), sello, número de catálogo, código de barras, país, tipo de lanzamiento, soporte, ISRC, géneros, idioma, compositor, letrista, productor, arreglista, mezcla y los IDs de MusicBrainz, que usan Jellyfin, Navidrome y Plex. Para eso, cada álbum se consulta una vez más (unos 2 segundos). También vale para las canciones que ya tienen el nombre correcto (cuentan en el botón <b>Renombrar</b>). Una canción que ya tiene todo esto no se vuelve a grabar. Funciona con MP3 (grabado en ID3v2.3), FLAC, OGG, Opus y M4A.</li>
+  <li><b>Borrar las demás etiquetas</b>: quita lo que no viene de MusicBrainz (comentarios, direcciones de sitios, datos de quien ripeó, "codificado por"), y en MP3 también las etiquetas secundarias (ID3v1 y APE). Quedan las letras, el ReplayGain, el BPM, la hoja de pistas incrustada (CUESHEET) y el género y el compositor cuando MusicBrainz no los tiene. Desmarcada, las demás etiquetas quedan como están.</li>
+  <li><b>Incluir la portada en los archivos</b>: quita las imágenes que ya están dentro de cada canción y pone la portada del álbum (del Cover Art Archive o, si no hay, la <code>cover.jpg</code> de la carpeta).</li>
+  <li>La grabación se hace en una copia, que solo ocupa el lugar del archivo al final; un corte a mitad no estropea la canción. Deshacer devuelve las etiquetas y las imágenes antiguas (en MP3 y M4A, los campos raros que quitó la limpieza y las etiquetas ID3v1 y APE no vuelven). La fecha de modificación cambia, para que los reproductores relean las etiquetas. Como el contenido cambia, un torrent ya no reconoce esos archivos.</li>
   <li>Las consultas se espacian (una cada 2 segundos), como pide MusicBrainz; cada álbum tarda unos 4 segundos.</li>
 </ul>
 <h4>Identificar por el sonido (AcoustID)</h4>
@@ -350,7 +354,7 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li>Cada canción tarda cerca de medio segundo en escucharse y consultarse.</li>
 </ul>
 <p class="tip">A AcoustID solo van la huella digital del sonido y la duración de cada canción, nunca el archivo.</p>
-<p class="tip">Renome solo lee las etiquetas; las canciones en sí no cambian. A MusicBrainz solo se envían el artista y el nombre del álbum.</p>`,
+<p class="tip">Sin <b>Grabar las etiquetas en los archivos</b>, Renome solo lee las etiquetas; las canciones en sí no cambian. A MusicBrainz solo se envían el artista y el nombre del álbum.</p>`,
   },
   {
     id: "preview",

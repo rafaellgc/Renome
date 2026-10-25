@@ -338,6 +338,10 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li>Um mesmo álbum costuma ter várias edições (original, remasterizada, de luxo, de outro país). O programa confere o <b>número de faixas</b>, o <b>título</b> e a <b>duração de cada uma</b> (uma faixa com o mesmo número mas outro título e outra duração não conta): se a melhor edição encontrada bate com as músicas, ela é escolhida sozinha (<b>✓</b>). Senão, abre a revisão, com capa, data, país, formato, gravadora e número de faixas (em verde quando é igual ao da pasta), para você escolher, ou <b>Nenhum</b> para manter as tags.</li>
   <li>Com o álbum escolhido, os nomes e as pastas usam os dados do MusicBrainz: título de cada faixa, artista, artista do álbum, nome do álbum e ano, com a grafia oficial. Cada música é casada com a sua faixa pelo disco e número (ou pelo título).</li>
   <li><b>Salvar a capa do álbum</b>: grava <code>cover.jpg</code> (do Cover Art Archive) na pasta do álbum, se ela ainda não tiver capa. Se a edição escolhida não tiver imagem (uma fita cassete, por exemplo), usa a capa do álbum. Desfazer apaga a capa criada.</li>
+  <li><b>Gravar as tags nos arquivos</b>: depois de renomear, grava nas músicas identificadas tudo o que o MusicBrainz sabe delas: título, artistas (também cada um em separado), artista do álbum, álbum, data e data original, faixa e disco (com os totais), gravadora, número de catálogo, código de barras, país, tipo de lançamento, mídia, ISRC, gêneros, idioma, compositor, letrista, produtor, arranjador, mixagem e os IDs do MusicBrainz, que o Jellyfin, o Navidrome e o Plex usam. Para isso, cada álbum é consultado mais uma vez (uns 2 segundos). Vale também para as músicas que já estão com o nome certo (elas contam no botão <b>Renomear</b>). Uma música que já tem tudo isso não é regravada. Funciona com MP3 (gravado em ID3v2.3), FLAC, OGG, Opus e M4A.</li>
+  <li><b>Apagar as outras tags</b>: tira o que não vem do MusicBrainz (comentários, endereços de sites, dados de quem ripou, "codificado por"), e no MP3 também as tags secundárias (ID3v1 e APE). Ficam as letras, o ReplayGain, o BPM, a folha de faixas embutida (CUESHEET) e o gênero e o compositor quando o MusicBrainz não os tiver. Desmarcada, as outras tags ficam como estão.</li>
+  <li><b>Incluir a capa nos arquivos</b>: tira as imagens que já estão dentro de cada música e coloca a capa do álbum (do Cover Art Archive ou, se não houver, a <code>cover.jpg</code> da pasta).</li>
+  <li>A gravação é feita numa cópia, que só toma o lugar do arquivo no fim; uma queda no meio não estraga a música. Desfazer devolve as tags e as imagens antigas (no MP3 e no M4A, campos raros que a limpeza tirou e as tags ID3v1 e APE não voltam). A data de modificação muda, para que os players releiam as tags. Como o conteúdo muda, um torrent não reconhece mais esses arquivos.</li>
   <li>As consultas são espaçadas (uma a cada 2 segundos), como o MusicBrainz pede; cada álbum leva uns 4 segundos.</li>
 </ul>
 <h4>Identificar pelo som (AcoustID)</h4>
@@ -350,7 +354,7 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li>Cada música leva cerca de meio segundo para ser ouvida e consultada.</li>
 </ul>
 <p class="tip">Ao AcoustID vão só a impressão digital do som e a duração de cada música, nunca o arquivo.</p>
-<p class="tip">O Renome só lê as tags; o conteúdo das músicas não é alterado. Ao MusicBrainz vão só o artista e o nome do álbum.</p>`,
+<p class="tip">Sem <b>Gravar as tags nos arquivos</b>, o Renome só lê as tags; o conteúdo das músicas não é alterado. Ao MusicBrainz vão só o artista e o nome do álbum.</p>`,
   },
   {
     id: "preview",

@@ -477,6 +477,155 @@ async fn write_covers(
     Ok(report)
 }
 
+#[derive(serde::Deserialize)]
+struct TagJob {
+    /// Where the song is now (after renaming).
+    path: PathBuf,
+    song: renome_core::musicbrainz::SongMatch,
+}
+
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct TagReport {
+    written: usize,
+    /// File name and reason.
+    errors: Vec<(String, String)>,
+}
+
+/// Writes each song's release details into its tags (and, with `cover`,
+/// the release's front cover in place of its pictures; with `clean`, the
+/// other tags go), keeping what they held in the rename's history entry (or
+/// one of its own) for undo. Each release is looked up in full once, for
+/// what its songs' tags take beyond the match (labels, genres, credits).
+#[tauri::command]
+async fn write_tags(
+    app: AppHandle,
+    history_id: Option<String>,
+    items: Vec<TagJob>,
+    cover: bool,
+    clean: bool,
+) -> Result<TagReport, String> {
+    use renome_core::tagwrite;
+    let state = app.state::<AppState>();
+    let mut report = TagReport::default();
+    let items: Vec<TagJob> = items
+        .into_iter()
+        .filter(|j| {
+            let ok = tagwrite::writable(&j.path);
+            if !ok {
+                report
+                    .errors
+                    .push((j.path.display().to_string(), "tagsUnsupported".into()));
+            }
+            ok
+        })
+        .collect();
+    if items.is_empty() {
+        return Ok(report);
+    }
+    let own_entry = history_id.is_none();
+    let id = match history_id {
+        Some(id) => id,
+        None => state.history.record_files(&[])?,
+    };
+    let store = state.history.files_dir(&id)?;
+    // One cover per release: the archive's, else the album folder's own.
+    let mut covers: HashMap<String, Option<Vec<u8>>> = HashMap::new();
+    let mut full: HashMap<String, Option<renome_core::musicbrainz::Release>> = HashMap::new();
+    let total = items.len();
+    let _ = app.emit(
+        "mb-progress",
+        serde_json::json!({ "done": 0, "total": total, "kind": "tags" }),
+    );
+    let mut backups = Vec::new();
+    let mut written = Vec::new();
+    for (done, job) in items.into_iter().enumerate() {
+        let image = if cover {
+            if !covers.contains_key(&job.song.release) {
+                let mut found = state.mb.front_cover(&job.song.release).await.ok().flatten();
+                if found.is_none() {
+                    found = job.path.parent().and_then(folder_cover);
+                }
+                covers.insert(job.song.release.clone(), found);
+            }
+            covers[&job.song.release].clone()
+        } else {
+            None
+        };
+        if !full.contains_key(&job.song.release) {
+            let r = state.mb.release_full(&job.song.release).await.ok();
+            full.insert(job.song.release.clone(), r);
+        }
+        let mut fields = tagwrite::fields_of(&job.song);
+        if let Some(r) = &full[&job.song.release] {
+            fields.extend(tagwrite::details(r, &job.song.track_id));
+        }
+        let (path, store) = (job.path.clone(), store.clone());
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            tagwrite::write(&path, &fields, image.as_deref(), clean, &store)
+        })
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|r| r);
+        match result {
+            Ok(Some(b)) => {
+                backups.push(b);
+                written.push(job.path);
+            }
+            Ok(None) => {}
+            Err(e) => report.errors.push((job.path.display().to_string(), e)),
+        }
+        let _ = app.emit(
+            "mb-progress",
+            serde_json::json!({ "done": done + 1, "total": total, "kind": "tags" }),
+        );
+    }
+    report.written = backups.len();
+    let saved = if backups.is_empty() {
+        if own_entry {
+            let _ = state.history.delete(&id);
+        }
+        Ok(())
+    } else {
+        state.history.add_tags(&id, backups)
+    };
+    if let Err(e) = saved {
+        report
+            .errors
+            .push((String::new(), format!("err.history: {e}")));
+    }
+    // The list reads the new tags.
+    let written: HashSet<PathBuf> = written.into_iter().collect();
+    for f in state.session.lock().unwrap().files.iter_mut() {
+        if written.contains(&f.path) {
+            f.forget_tags();
+        }
+    }
+    Ok(report)
+}
+
+/// An album folder's own cover image (`cover`, `folder` or `front`).
+fn folder_cover(dir: &Path) -> Option<Vec<u8>> {
+    let rd = std::fs::read_dir(dir).ok()?;
+    let mut found: Vec<PathBuf> = rd
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            let n = p
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_lowercase();
+            ["cover.", "folder.", "front."]
+                .iter()
+                .any(|s| n.starts_with(s))
+                && (n.ends_with(".jpg") || n.ends_with(".jpeg") || n.ends_with(".png"))
+        })
+        .collect();
+    found.sort();
+    std::fs::read(found.first()?).ok()
+}
+
 /// The album folders among (or above) `dirs` that would get a playlist.
 #[tauri::command]
 async fn playlist_dirs(dirs: Vec<PathBuf>) -> Vec<PathBuf> {
@@ -696,6 +845,7 @@ pub fn run() {
             mb_choose,
             write_covers,
             write_playlists,
+            write_tags,
             playlist_dirs,
             apply,
             history,

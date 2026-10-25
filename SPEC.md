@@ -369,10 +369,48 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   edition, say) takes its release group's front; albums whose songs keep their
   names count in the Rename button too. Recorded in the history and
   deleted by undo.
+- "Write the tags into the files" (off by default), after renaming:
+  each song matched to a release (moved or not; those keeping their
+  names count in the Rename button when their tags differ in title,
+  artist, album artist, album, year, track/disc numbers and totals or
+  release id) gets title, artist, album artist, album, date (release
+  date, else year), track and disc numbers and totals, and the
+  MusicBrainz release, recording, release track, release group, artist
+  and album artist ids; and, from the release looked up once more in
+  full (labels, ISRCs, genres, recording, work and artist relationships):
+  original date (release group's first release), labels, catalog
+  numbers (not `[none]`), barcode, country, release type (primary and
+  secondary, lower case), medium format, disc subtitle, ISRCs, genres
+  (the recording's, else the release's, else the group's; the 3 most
+  voted, first letter upper case), language (not `zxx`) and script,
+  the works' composers, lyricists and writers, the recording's
+  producers, arrangers, mixers and engineers, artist and album artist
+  sort names, work ids, and each credited artist (`ARTISTS`,
+  `ALBUMARTISTS`). The main tag (ID3v2, written as v2.3, for MP3;
+  Vorbis comments for FLAC, Ogg Vorbis and Opus; ilst for M4A; other
+  formats are reported as not writable) is split with `lofty` into the
+  fields it knows and the rest, edited and merged back, so other fields
+  and frames stay. A song whose fields (and cover) are already those is
+  not written. "Delete the other tags" (on by default with it) rebuilds
+  the tag from those fields and lyrics, ReplayGain, BPM, genre,
+  composer, lyricist and the encoder (plus a Vorbis `CUESHEET`), and
+  drops an MP3's ID3v1 and APE tags; the items removed are kept for
+  undo (Vorbis comments whole; ID3v2 and MP4 items lofty does not map,
+  and ID3v1/APE, are not). A matched song with anything else in its
+  tags counts as pending in the Rename button. "Include the cover in the files" (on by default with it)
+  removes every embedded picture and adds the release's front (as for
+  `cover.jpg`, else the folder's `cover`/`folder`/`front` image). The
+  file is copied beside itself (`.<name>.renome-tags`), written, synced
+  and renamed over the original; the modification date changes (media
+  servers rescan by it). The fields' old values and the pictures removed
+  (kept once each, by content hash, in the entry's `<id>.files/`) go to
+  the rename's history entry (or one of their own); undo puts them back
+  before moving files back, and keeps the entry pending if that fails.
 - Only the album and artist names (and release ids) are sent to
   MusicBrainz; to AcoustID, only each song's fingerprint and length.
-- The files' audio and tags are never changed (cue sheets and
-  playlists that list them are updated, see 4).
+- The files' audio is never changed, nor their tags unless "Write the
+  tags" is on (cue sheets and playlists that list them are updated,
+  see 4).
 
 ## 3. Preview
 

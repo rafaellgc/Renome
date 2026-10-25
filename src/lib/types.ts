@@ -33,7 +33,7 @@ export type Rule =
     }
   | {
       type: "music"; template: string; colon: string; discPrefix: boolean; fromName: boolean;
-      folders: boolean; folderTemplate: string; cover: boolean; playlist: boolean; listen: boolean;
+      folders: boolean; folderTemplate: string; cover: boolean; playlist: boolean; listen: boolean; writeTags: boolean; embedCover: boolean; cleanTags: boolean;
     };
 
 export type RuleType = Rule["type"];
@@ -63,6 +63,10 @@ export interface PreviewItem {
   manual: boolean;
   /** A song the music rule cannot name (no title in its tags). */
   untagged: boolean;
+  /** Matched to a release whose details its tags do not have yet. */
+  retag: boolean;
+  /** Matched, with tags that cleaning would take away. */
+  junk: boolean;
 }
 
 export interface Preview {
@@ -119,6 +123,12 @@ export interface SongMatch {
   trackTotal: number;
   disc: number;
   discTotal: number;
+  date?: string;
+  recording?: string;
+  trackId?: string;
+  releaseGroup?: string;
+  artistIds?: string[];
+  albumArtistIds?: string[];
 }
 
 export interface AlbumQuery {
@@ -253,7 +263,7 @@ export interface EpisodeMatch {
   titles: string[];
 }
 
-export type ErrorKind = "tempExists" | "targetExists" | "notFound" | "permissionDenied" | "io" | "restoreFailed" | "history";
+export type ErrorKind = "tempExists" | "targetExists" | "notFound" | "permissionDenied" | "io" | "restoreFailed" | "history" | "tags";
 export interface OpError { from: string; to: string; kind: ErrorKind; detail: string }
 
 export interface ApplyReport {
@@ -277,6 +287,8 @@ export interface HistoryEntry {
   failed: number;
   /** Files created with it (.nfo, images). */
   extra: number;
+  /** Songs whose tags were written. */
+  tagged: number;
 }
 
 /** A file's identical copies in the list: its group number (from 0) and

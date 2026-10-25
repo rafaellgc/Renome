@@ -77,6 +77,11 @@ impl FileEntry {
             .as_ref()
     }
 
+    /// Forgets the tags read, after they were written.
+    pub fn forget_tags(&mut self) {
+        self.tags = OnceLock::new();
+    }
+
     pub fn file_name(&self) -> String {
         join_name(&self.stem, &self.ext)
     }

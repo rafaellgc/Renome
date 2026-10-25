@@ -338,6 +338,10 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li>One album often has several editions (original, remaster, deluxe, another country's). The program checks the <b>number of tracks</b>, <b>each one's title</b> and <b>length</b> (a track with the same number but another title and length does not count): if the best edition found fits the songs, it is picked automatically (<b>✓</b>). Otherwise the review opens, with cover, date, country, format, label and track count (green when it equals the folder's), for you to choose, or <b>None</b> to keep the tags.</li>
   <li>With the album chosen, names and folders use MusicBrainz's details: each track's title, artist, album artist, album name and year, in their official spelling. Each song is matched to its track by disc and number (or by title).</li>
   <li><b>Save the album's cover</b>: writes <code>cover.jpg</code> (from the Cover Art Archive) in the album's folder, if it has no cover yet. If the chosen edition has no image (a cassette, say), the album's cover is used. Undo deletes the cover created.</li>
+  <li><b>Write the tags into the files</b>: after renaming, writes into the identified songs all MusicBrainz knows of them: title, artists (each one on its own too), album artist, album, date and original date, track and disc (with totals), label, catalog number, barcode, country, release type, medium, ISRC, genres, language, composer, lyricist, producer, arranger, mixer and the MusicBrainz ids, which Jellyfin, Navidrome and Plex use. For that, each album is looked up once more (about 2 seconds). Songs whose names are already right get them too (they count in the <b>Rename</b> button). A song that already has all of this is not written again. Works with MP3 (written as ID3v2.3), FLAC, OGG, Opus and M4A.</li>
+  <li><b>Delete the other tags</b>: takes out what does not come from MusicBrainz (comments, site addresses, ripper notes, "encoded by"), and in MP3 also the secondary tags (ID3v1 and APE). Lyrics, ReplayGain, BPM, an embedded cue sheet (CUESHEET) stay, and genre and composer when MusicBrainz does not have them. Unchecked, the other tags stay as they are.</li>
+  <li><b>Include the cover in the files</b>: takes out the pictures already inside each song and puts in the album's cover (from the Cover Art Archive or, if there is none, the folder's <code>cover.jpg</code>).</li>
+  <li>The writing is done on a copy, which only takes the file's place at the end; a crash midway does not spoil the song. Undo puts the old tags and pictures back (in MP3 and M4A, rare fields cleaning took out and the ID3v1 and APE tags do not come back). The modification date changes, so players read the tags again. Since the content changes, a torrent no longer recognises these files.</li>
   <li>Lookups are spaced out (one every 2 seconds), as MusicBrainz asks; each album takes about 4 seconds.</li>
 </ul>
 <h4>Identify by sound (AcoustID)</h4>
@@ -350,7 +354,7 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li>Each song takes about half a second to be listened to and looked up.</li>
 </ul>
 <p class="tip">Only each song's sound fingerprint and length are sent to AcoustID, never the file.</p>
-<p class="tip">Renome only reads the tags; the songs themselves are not changed. Only the artist and album name are sent to MusicBrainz.</p>`,
+<p class="tip">Without <b>Write the tags into the files</b>, Renome only reads the tags; the songs themselves are not changed. Only the artist and album name are sent to MusicBrainz.</p>`,
   },
   {
     id: "preview",

@@ -37,6 +37,8 @@ pub enum ErrorKind {
     RestoreFailed,
     /// Renamed, but the history could not be written.
     History,
+    /// A song's old tags could not be put back; `detail` says why.
+    Tags,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -236,6 +238,13 @@ struct Journal {
     /// file (in the entry's folder) that keeps their original content.
     #[serde(default)]
     lists: Vec<(PathBuf, String)>,
+    /// Songs whose tags were written, with what they held (pictures in the
+    /// entry's folder); undo puts it back.
+    #[serde(default)]
+    tags: Vec<crate::tagwrite::Backup>,
+    /// How many songs had their tags written (for the list).
+    #[serde(default)]
+    tagged: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -251,6 +260,8 @@ pub struct HistoryEntry {
     pub failed: usize,
     /// Files created along with the rename (`.nfo`, posters).
     pub extra: usize,
+    /// Songs whose tags were written.
+    pub tagged: usize,
 }
 
 /// Rename history, one JSON file per operation.
@@ -354,6 +365,8 @@ impl History {
                 extra_files: Vec::new(),
                 dirs: report.created_dirs.clone(),
                 lists,
+                tags: Vec::new(),
+                tagged: 0,
             };
             match self.write(&id, &j) {
                 Ok(()) => report.history_id = Some(id),
@@ -387,6 +400,7 @@ impl History {
                     reverted: j.reverted,
                     failed: j.failed,
                     extra: j.extra_files.len(),
+                    tagged: j.tagged,
                 })
             })
             .collect();
@@ -408,6 +422,8 @@ impl History {
             extra_files: paths.to_vec(),
             dirs: Vec::new(),
             lists: Vec::new(),
+            tags: Vec::new(),
+            tagged: 0,
         };
         self.write(&id, &j)?;
         Ok(id)
@@ -417,6 +433,21 @@ impl History {
     pub fn add_created(&self, id: &str, paths: &[PathBuf]) -> Result<(), String> {
         let mut j = self.read(id)?;
         j.extra_files.extend_from_slice(paths);
+        self.write(id, &j)
+    }
+
+    /// The folder an entry keeps originals in (lists, pictures taken out of
+    /// songs).
+    pub fn files_dir(&self, id: &str) -> Result<PathBuf, String> {
+        self.backups(id)
+    }
+
+    /// Records songs whose tags were written along with a rename, so undo
+    /// puts their old tags back.
+    pub fn add_tags(&self, id: &str, backups: Vec<crate::tagwrite::Backup>) -> Result<(), String> {
+        let mut j = self.read(id)?;
+        j.tagged += backups.len();
+        j.tags.extend(backups);
         self.write(id, &j)
     }
 
@@ -448,9 +479,25 @@ impl History {
             Ok(()) => false,
             Err(e) => e.kind() != std::io::ErrorKind::NotFound,
         });
+        let backups = self.backups(id)?;
+        // Songs get their old tags back where they are now, before the
+        // renames take them back.
+        let mut errors = Vec::new();
+        j.tags
+            .retain(|b| match crate::tagwrite::restore(b, &backups) {
+                Ok(()) => false,
+                Err(e) => {
+                    errors.push(OpError {
+                        from: b.path.clone(),
+                        to: b.path.clone(),
+                        kind: ErrorKind::Tags,
+                        detail: e,
+                    });
+                    true
+                }
+            });
         // Rewritten lists get their content back where they are now; the
         // renames below then take them back.
-        let backups = self.backups(id)?;
         j.lists.retain(|(path, name)| {
             // A deleted list's folder may be gone too.
             let restored = fs::read(backups.join(name)).and_then(|old| {
@@ -461,7 +508,7 @@ impl History {
             });
             restored.is_err()
         });
-        if j.lists.is_empty() {
+        if j.lists.is_empty() && j.tags.is_empty() {
             let _ = fs::remove_dir_all(&backups);
         }
         let reverse: Vec<Operation> = j
@@ -472,7 +519,7 @@ impl History {
                 to: op.from.clone(),
             })
             .collect();
-        let report = execute(&reverse, Depth::ShallowestFirst);
+        let mut report = execute(&reverse, Depth::ShallowestFirst);
         j.reverted += report.done.len();
         let back: HashSet<(&Path, &Path)> = report
             .done
@@ -481,6 +528,7 @@ impl History {
             .collect();
         j.ops
             .retain(|op| !back.contains(&(op.from.as_path(), op.to.as_path())));
+        report.errors.extend(errors);
         j.failed = report.errors.len();
         if j.ops.is_empty() {
             // Innermost first; a folder that is not empty (the user put
@@ -490,7 +538,8 @@ impl History {
             }
             j.dirs.clear();
         }
-        j.undone = j.ops.is_empty() && j.extra_files.is_empty() && j.lists.is_empty();
+        j.undone =
+            j.ops.is_empty() && j.extra_files.is_empty() && j.lists.is_empty() && j.tags.is_empty();
         self.write(id, &j)?;
         Ok(report)
     }
@@ -567,6 +616,44 @@ mod tests {
 
         h.delete(&id).unwrap();
         assert!(h.list().is_empty());
+    }
+
+    #[test]
+    fn undo_puts_tags_back() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        fs::copy("tests/fixtures/song.mp3", p.join("a.mp3")).unwrap();
+        let h = History::new(p.join("hist"));
+        let id = h
+            .apply(&[op(p, "a.mp3", "01 - Take On Me.mp3")])
+            .history_id
+            .unwrap();
+        let m = crate::musicbrainz::SongMatch {
+            title: "Take On Me".into(),
+            track: 1,
+            ..Default::default()
+        };
+        let song = p.join("01 - Take On Me.mp3");
+        let b = crate::tagwrite::write(
+            &song,
+            &crate::tagwrite::fields_of(&m),
+            Some(b"\xFF\xD8 cover"),
+            false,
+            &h.files_dir(&id).unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+        h.add_tags(&id, vec![b]).unwrap();
+        assert_eq!(h.list()[0].tagged, 1);
+        assert_eq!(crate::music::read(&song).unwrap().title, "Take On Me");
+
+        let u = h.undo(&id).unwrap();
+        assert!(u.errors.is_empty(), "{:?}", u.errors);
+        let t = crate::music::read(&p.join("a.mp3")).unwrap();
+        assert_eq!(t.title, "Old");
+        assert!(h.list()[0].undone);
+        // The pictures kept for undo are gone with it.
+        assert!(!h.files_dir(&id).unwrap().exists());
     }
 
     #[test]
