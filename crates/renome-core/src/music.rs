@@ -209,7 +209,7 @@ fn most_common<T: Clone + PartialEq>(values: impl Iterator<Item = T>) -> Option<
 static FEATURING: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\s+(?:feat\.?|ft\.|featuring|with)\s.*$").unwrap());
 
-/// The main artist: `Korn feat. Nas` → `Korn`.
+/// The main artist: `Banda Azul feat. Rui` → `Banda Azul`.
 fn main_artist(artist: &str) -> String {
     FEATURING.replace(artist, "").trim().to_string()
 }
@@ -528,21 +528,21 @@ static ASIDE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// The words of a name without its bracketed parts, years and dates
-/// (`1012 - Samhain 2024` gives "1012 samhain").
+/// (`1012 - Outono 2024` gives "1012 outono").
 fn plain_words(s: &str) -> Vec<String> {
     words(&ASIDE.replace_all(s, " "))
 }
 
 /// Whether a folder is named after one of `names`, ignoring years and
-/// bracketed parts on both sides (`A-Ha - Analogue (Deluxe) (2026) [FLAC]`
-/// is named after "A-Ha - Analogue (Deluxe)"), or starts with one.
-fn names_any(folder: &str, names: &[&str]) -> bool {
+/// bracketed parts on both sides (`Os Vagalumes - Maré Alta (Deluxe) (2026) [FLAC]`
+/// is named after "Os Vagalumes - Maré Alta (Deluxe)"), or starts with one.
+pub(crate) fn names_any(folder: &str, names: &[&str]) -> bool {
     let bare = tmdb::guess(folder).title;
     let folder_words = words(&bare);
     let folder_plain = plain_words(folder);
     names.iter().filter(|n| !n.is_empty()).any(|n| {
         let plain = plain_words(n);
-        // Years inside the name (`Samhain 2024`, `(Live …, 2025)`) cut the
+        // Years inside the name (`Outono 2024`, `(Live …, 2025)`) cut the
         // guessed title short; without them the words may still agree.
         if !plain.is_empty()
             && (folder_plain.starts_with(&plain)
@@ -556,7 +556,7 @@ fn names_any(folder: &str, names: &[&str]) -> bool {
             || similarity(folder, n) >= 0.8
             || (!name_words.is_empty() && folder_words.starts_with(&name_words))
             // A short form of the name, even with a typo on either side:
-            // `1053 - Сага об Иннокентии` for "Show 1053 - Сага о Иннокентии".
+            // `1053 - Сказка об Ветре` for "Show 1053 - Сказка о Ветре".
             || (folder_words.len() > 1
                 && name_words.len() >= folder_words.len()
                 && (0..=name_words.len() - folder_words.len()).any(|k| {

@@ -2,7 +2,7 @@ import { settings } from "./settings.svelte";
 import type { Rule, RuleType, Step } from "./types";
 
 export const RULE_TYPES: RuleType[] = [
-  "replace", "regex", "rearrange", "case", "insert", "number", "remove", "removeRange", "charAt", "extension", "movie", "series", "music",
+  "replace", "regex", "rearrange", "case", "insert", "number", "remove", "removeRange", "charAt", "extension", "movie", "series", "music", "book",
 ];
 
 const NAME_VAR = { pt: "{nome}", en: "{name}", es: "{nombre}" } as const;
@@ -21,6 +21,11 @@ const MUSIC_TEMPLATE = {
   en: ["{track} - {title}", "{album artist}/{album} ({year})"],
   es: ["{pista} - {título}", "{artista del álbum}/{álbum} ({año})"],
 } as const;
+const BOOK_TEMPLATE = {
+  pt: ["{autor} - {título} ({ano})", "{autor}/{título}"],
+  en: ["{author} - {title} ({year})", "{author}/{title}"],
+  es: ["{autor} - {título} ({año})", "{autor}/{título}"],
+} as const;
 const SERIES_TEMPLATE = {
   pt: "{série} ({ano}) - S{temporada}E{episódio} - {título}",
   en: "{show} ({year}) - S{season}E{episode} - {title}",
@@ -36,6 +41,9 @@ const AUDIO = new Set([
   "aiff", "aif", "afc", "aifc", "wav", "wave", "wv", "ape", "mpc", "mp+", "mpp",
 ]);
 export const isAudio = (name: string) => AUDIO.has(splitExt(name)[1].toLowerCase());
+/** Book formats (as the Rust core). */
+const BOOK = new Set(["epub", "kepub", "mobi", "azw", "azw3", "prc", "pdf", "fb2", "djvu", "djv"]);
+export const isBook = (name: string) => BOOK.has(splitExt(name)[1].toLowerCase());
 
 export function newRule(type: RuleType): Rule {
   switch (type) {
@@ -69,6 +77,10 @@ export function newRule(type: RuleType): Rule {
     case "music": {
       const [template, folderTemplate] = MUSIC_TEMPLATE[settings.lang];
       return { type, template, colon: " - ", discPrefix: true, fromName: false, folders: false, folderTemplate, cover: false, playlist: false, listen: true, writeTags: false, embedCover: true, cleanTags: true };
+    }
+    case "book": {
+      const [template, folderTemplate] = BOOK_TEMPLATE[settings.lang];
+      return { type, template, colon: " - ", folders: false, folderTemplate, cover: false, opf: false };
     }
   }
 }

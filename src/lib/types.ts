@@ -34,7 +34,8 @@ export type Rule =
   | {
       type: "music"; template: string; colon: string; discPrefix: boolean; fromName: boolean;
       folders: boolean; folderTemplate: string; cover: boolean; playlist: boolean; listen: boolean; writeTags: boolean; embedCover: boolean; cleanTags: boolean;
-    };
+    }
+  | { type: "book"; template: string; colon: string; folders: boolean; folderTemplate: string; cover: boolean; opf: boolean };
 
 export type RuleType = Rule["type"];
 
@@ -96,6 +97,8 @@ export interface View {
   episodes: Record<string, EpisodeMatch>;
   /** Each song's details from its MusicBrainz release, for the music rule. */
   songs: Record<string, SongMatch>;
+  /** The book chosen for each file, for the book rule. */
+  books: Record<string, BookMatch>;
 }
 
 /** A MusicBrainz release offered for an album, best first. */
@@ -197,6 +200,67 @@ export interface Lookup {
   guess: Guess;
   candidates: Candidate[];
   auto: boolean;
+  error: string | null;
+}
+
+/** What a book is thought to be, from its details or its name. */
+export interface BookGuess {
+  title: string;
+  author: string;
+  year: number | null;
+  isbns: string[];
+  fromFile: boolean;
+  series: string;
+  seriesIndex: string;
+  publisher: string;
+  language: string;
+}
+
+/** An Open Library book offered for a file, best first. */
+export interface BookCandidate {
+  work: string;
+  edition: string;
+  title: string;
+  originalTitle: string;
+  authors: string[];
+  year: number | null;
+  editionYear: number | null;
+  publisher: string;
+  isbn: string;
+  language: string;
+  cover: number | null;
+  editions: number;
+  /** Found by the file's ISBN: edition, publisher and ISBN are its own. */
+  exact: boolean;
+  score: number;
+}
+
+export interface BookMatch {
+  work: string;
+  title: string;
+  originalTitle: string;
+  authors: string[];
+  year: number | null;
+  editionYear: number | null;
+  publisher: string;
+  isbn: string;
+  series: string;
+  seriesIndex: string;
+}
+
+export interface BookLookup {
+  path: string;
+  guess: BookGuess;
+  candidates: BookCandidate[];
+  auto: boolean;
+  error: string | null;
+}
+
+export interface BookState {
+  guess: BookGuess;
+  candidates: BookCandidate[];
+  choice: BookCandidate | null;
+  status: MovieStatus;
   error: string | null;
 }
 

@@ -63,7 +63,7 @@ pub enum Field {
     ArtistSort,
     AlbumArtistSort,
     WorkId,
-    /// Each credited artist on its own (`a-ha`, `Nas`).
+    /// Each credited artist on its own (`os vagalumes`, `Rui`).
     Artists,
     AlbumArtists,
 }
@@ -238,7 +238,7 @@ fn unique(values: impl IntoIterator<Item = String>) -> Vec<String> {
     out
 }
 
-/// An artist credit's sort names (`Beatles, The`), joined as credited.
+/// An artist credit's sort names (`Moths, The`), joined as credited.
 fn sort_names(c: &[Credit]) -> String {
     c.iter()
         .map(|a| {

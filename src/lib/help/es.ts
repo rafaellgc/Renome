@@ -132,7 +132,7 @@ ${ex("Serie - Episodio - S01E02.mkv", "Serie - S01E02 - Episodio.mkv")}
   <li><b>Cada Palabra En Mayúscula</b>: → <code>Foto De La Playa</code></li>
   <li><b>Cada Palabra, excepto de/la/y/of…</b>: → <code>Foto de la Playa</code>. Las palabras cortas de enlace (de, del, la, los, y, con, of, the, and, da, do…) quedan en minúsculas, salvo al inicio del nombre o de una parte (después de <code> - </code>, <code>:</code> o <code>(</code>).</li>
 </ul>
-<p>En los dos modos "Cada Palabra", los números romanos quedan en mayúsculas (<code>Rocky III</code>, <code>Parte II</code>) y las palabras con mayúsculas en medio quedan como están (<code>iPhone</code>, <code>McDonald's</code>).</p>
+<p>En los dos modos "Cada Palabra", los números romanos quedan en mayúsculas (<code>Fase III</code>, <code>Parte II</code>) y las palabras con mayúsculas en medio quedan como están (<code>iPhone</code>, <code>McDonald's</code>).</p>
 <p>Use "Aplicar a: Extensión" para cambiar solo la extensión.</p>`,
   },
   {
@@ -245,7 +245,7 @@ ${ex("_foto.jpg", "foto.jpg")}
     sub: true,
     html: `
 <p>Da a cada película su nombre oficial de <b>TMDB</b> (themoviedb.org), en el formato que reconoce Jellyfin. Necesita una <b>clave de la API de TMDB</b>, gratuita, introducida en Opciones.</p>
-${ex("El.Senor.de.los.Anillos.2001.1080p.BluRay.x264.mkv", "El Señor de los Anillos - La comunidad del anillo (2001) [tmdbid-120].mkv")}
+${ex("Nombre.de.la.Pelicula.2001.1080p.BluRay.x264.mkv", "Nombre de la Película (2001) [tmdbid-12345].mkv")}
 <ol>
   <li>Añada la regla y haga clic en <b>Buscar en TMDB</b>. El programa toma el título y el año del nombre de cada archivo (los puntos pasan a espacios; se quitan corchetes, paréntesis y marcas como 1080p, BluRay, x264) y busca en TMDB.</li>
   <li>Cuando título y año coinciden sin duda, la película se elige sola (<b>✓</b> junto al nuevo nombre). Si hay dudas (<b>?</b>), se abre la ventana de revisión: haga clic en la película correcta (o pulse 1–9). El año del archivo puede diferir en uno del de TMDB; se tiene en cuenta.</li>
@@ -254,14 +254,20 @@ ${ex("El.Senor.de.los.Anillos.2001.1080p.BluRay.x264.mkv", "El Señor de los Ani
 <ul>
   <li><b>Plantilla</b>: <code>{título}</code>, <code>{original}</code> (título original), <code>{año}</code> e <code>{id}</code>. La predeterminada es <code>{título} ({año}) [tmdbid-{id}]</code>.</li>
   <li><b>Cambiar ":" por</b>: Windows no acepta dos puntos; por defecto pasan a <code> - </code>. Las barras pasan a guiones y se quitan <code>? * &lt; &gt; |</code>.</li>
-  <li>Los subtítulos y otros archivos con el mismo nombre que la película reciben la misma elección. Los subtítulos conservan el idioma al final del nombre: <code>Matrix (1999) [tmdbid-603].pt-BR.srt</code>.</li>
-  <li><b>Crear una carpeta para cada película</b>: la película y sus subtítulos van a una carpeta con el nuevo nombre, como recomienda Jellyfin: <code>Películas/Matrix (1999) [tmdbid-603]/Matrix (1999) [tmdbid-603].mkv</code>. Una película que ya está en la carpeta correcta no se mueve de nuevo. Deshacer devuelve los archivos y borra la carpeta si queda vacía.</li>
+  <li>Los subtítulos y otros archivos con el mismo nombre que la película reciben la misma elección. Los subtítulos conservan el idioma al final del nombre: <code>Nombre de la Película (1999) [tmdbid-12345].pt-BR.srt</code>.</li>
+  <li><b>Crear una carpeta para cada película</b>: la película y sus subtítulos van a una carpeta con el nuevo nombre, como recomienda Jellyfin: <code>Películas/Nombre de la Película (1999) [tmdbid-12345]/Nombre de la Película (1999) [tmdbid-12345].mkv</code>. Una película que ya está en la carpeta correcta no se mueve de nuevo. Deshacer devuelve los archivos y borra la carpeta si queda vacía.</li>
   <li>Para quitar las tildes, añada la regla <b>Quitar caracteres → Acentos</b> después de esta.</li>
 </ul>
 <h4>Metadatos (.nfo y póster)</h4>
 <p>Con <b>Guardar .nfo y póster junto a la película</b>, al renombrar se crean, junto a cada vídeo, <code>Nombre (año) [tmdbid-…].nfo</code> y el póster; opcionalmente también la imagen de fondo (fanart) y el logo de la película. Dentro de la carpeta de la película, las imágenes se llaman <code>poster.jpg</code>, <code>fanart.jpg</code> y <code>logo.png</code>; sueltas, llevan delante el nombre de la película (<code>…-poster.jpg</code>). Jellyfin, Kodi y Emby leen estos archivos.</p>
-<p>El <code>.nfo</code> incluye todo lo que TMDB tiene y Jellyfin lee: título y título original, año y fecha de estreno, sinopsis y eslogan, duración, nota y votos, la clasificación por edades del país del idioma elegido (ej.: ES-12), géneros, palabras clave (como etiquetas), países, estudios, colección (ej.: "El Señor de los Anillos - Colección"), tráiler de YouTube, dirección, guion, reparto con personajes y fotos, productores, compositor y los ids de TMDB e IMDb. El archivo de la película no cambia, los archivos que ya existen no se reemplazan y <b>deshacer</b> el renombrado borra lo creado.</p>
+<p>El <code>.nfo</code> incluye todo lo que TMDB tiene y Jellyfin lee: título y título original, año y fecha de estreno, sinopsis y eslogan, duración, nota y votos, la clasificación por edades del país del idioma elegido (ej.: ES-12), géneros, palabras clave (como etiquetas), países, estudios, colección (ej.: "Nombre de la Colección"), tráiler de YouTube, dirección, guion, reparto con personajes y fotos, productores, compositor y los ids de TMDB e IMDb. El archivo de la película no cambia, los archivos que ya existen no se reemplazan y <b>deshacer</b> el renombrado borra lo creado.</p>
 <p>Las películas que <b>ya tienen el nombre correcto</b> también reciben los metadatos: el botón Renombrar las cuenta y la confirmación lo avisa. Si el nombre ya trae <code>[tmdbid-…]</code>, la película se reconoce directamente por ese id, sin buscar. Así una biblioteca ya organizada puede recibir solo los .nfo y las imágenes.</p>
+<h4>Limitaciones</h4>
+<ul>
+  <li>La película se busca por el título y el año del nombre del archivo. Los nombres muy abreviados, solo con siglas o con el título en otro idioma pueden no encontrarse; en ese caso, corrija el título en la revisión.</li>
+  <li>Las películas con el mismo nombre (remakes, por ejemplo) solo se distinguen por el año; sin el año en el nombre, la elección suele ir a la revisión.</li>
+  <li>Las películas raras, regionales o muy recientes pueden no estar en TMDB, o estar sin traducción, sinopsis o póster.</li>
+</ul>
 <p class="tip">Solo se envían a TMDB el título y el año buscados, nunca el nombre completo del archivo ni las carpetas.</p>`,
   },
   {
@@ -270,7 +276,7 @@ ${ex("El.Senor.de.los.Anillos.2001.1080p.BluRay.x264.mkv", "El Señor de los Ani
     sub: true,
     html: `
 <p>Da a cada episodio el nombre oficial de <b>TMDB</b>, con temporada, número y título, en el formato que Jellyfin reconoce. Usa la misma clave de la API que la regla de películas.</p>
-${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...Y la bolsa está en el río.mkv")}
+${ex("Nombre.de.la.Serie.S01E03.720p.WEB-DL.mkv", "Nombre de la Serie (2008) - S01E03 - Título del Episodio.mkv")}
 <ol>
   <li>En el campo <b>Serie</b>, escriba el nombre o el ID de TMDB, o pegue el enlace de la página de la serie (<code>themoviedb.org/tv/1396-…</code>). Vacío, el programa usa el nombre que los archivos tienen en común, o el de la carpeta.</li>
   <li>Haga clic en <b>Buscar episodios</b>. Si hay más de una serie parecida, elija la correcta. El programa descarga la lista completa de episodios y busca el de cada archivo visible.</li>
@@ -278,7 +284,7 @@ ${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...Y
 </ol>
 <h4>Cómo se encuentra cada episodio</h4>
 <ul>
-  <li><b>Por el número</b>, en varios formatos: <code>S01E02</code>, <code>s1e2</code>, <code>1x02</code>, <code>T1 E2</code>, <code>Temporada 1 Episodio 2</code>, <code>Ep 02</code> (la temporada viene de la carpeta, como <code>Season 2</code> o <code>Temporada 2</code>), numeración absoluta (<code>Naruto - 125</code>), <code>201</code> (temporada 2, episodio 1) y fecha de emisión (<code>2024.03.15</code>). Los archivos con dos episodios (<code>S01E01E02</code>, <code>S01E01-02</code>) quedan como <code>S01E01-E02</code>.</li>
+  <li><b>Por el número</b>, en varios formatos: <code>S01E02</code>, <code>s1e2</code>, <code>1x02</code>, <code>T1 E2</code>, <code>Temporada 1 Episodio 2</code>, <code>Ep 02</code> (la temporada viene de la carpeta, como <code>Season 2</code> o <code>Temporada 2</code>), numeración absoluta (<code>Nombre de la Serie - 125</code>), <code>201</code> (temporada 2, episodio 1) y fecha de emisión (<code>2024.03.15</code>). Los archivos con dos episodios (<code>S01E01E02</code>, <code>S01E01-02</code>) quedan como <code>S01E01-E02</code>.</li>
   <li><b>Por el título</b>: el texto después del número se compara con los títulos de todos los episodios, en su idioma, en inglés y en el idioma original, sin tener en cuenta acentos, mayúsculas ni pequeños errores. Sin número, basta el título si está claro.</li>
   <li><b>Cuando el número y el título no coinciden</b> (el nombre dice S02E08, pero el título es el de S01E03), el archivo queda con <b>?</b>, y la revisión muestra las dos opciones, sugiriendo la del título.</li>
 </ul>
@@ -291,7 +297,7 @@ ${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...Y
   <li>Los archivos que no están en la serie elegida quedan como están. Para varias series, filtre la lista y busque una por vez: cada archivo guarda la suya.</li>
 </ul>
 <h4>Carpetas de la serie y la temporada</h4>
-<p>Con <b>Organizar en carpetas de la serie y la temporada</b>, cada episodio va a la estructura que recomienda Jellyfin: <code>Series/Breaking Bad (2008) [tmdbid-1396]/Season 01/…</code>. La carpeta de la serie se crea junto a la carpeta donde ya está la serie (si los archivos están en <code>Breaking Bad/Season 1</code>, la nueva carpeta queda junto a <code>Breaking Bad</code>, no dentro); con archivos sueltos, dentro de su carpeta. El nombre de la carpeta de la serie tiene su propia plantilla, con las mismas variables (predeterminada <code>{serie} ({año}) [tmdbid-{id}]</code>; use <code>{original}</code> para el nombre original). Las carpetas antiguas que quedan vacías se borran; las que aún tienen otros archivos se quedan. <b>Deshacer</b> lo devuelve todo a su sitio y vuelve a crear las carpetas antiguas.</p>
+<p>Con <b>Organizar en carpetas de la serie y la temporada</b>, cada episodio va a la estructura que recomienda Jellyfin: <code>Series/Nombre de la Serie (2008) [tmdbid-12345]/Season 01/…</code>. La carpeta de la serie se crea junto a la carpeta donde ya está la serie (si los archivos están en <code>Nombre de la Serie/Season 1</code>, la nueva carpeta queda junto a <code>Nombre de la Serie</code>, no dentro); con archivos sueltos, dentro de su carpeta. El nombre de la carpeta de la serie tiene su propia plantilla, con las mismas variables (predeterminada <code>{serie} ({año}) [tmdbid-{id}]</code>; use <code>{original}</code> para el nombre original). Las carpetas antiguas que quedan vacías se borran; las que aún tienen otros archivos se quedan. <b>Deshacer</b> lo devuelve todo a su sitio y vuelve a crear las carpetas antiguas.</p>
 <h4>Metadatos (.nfo e imágenes)</h4>
 <p>Con <b>Guardar .nfo e imágenes para Jellyfin</b>, al renombrar el programa crea:</p>
 <ul>
@@ -300,6 +306,13 @@ ${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...Y
   <li>junto a <b>cada episodio</b>: <code>….nfo</code> (título, temporada y número, fecha de emisión, sinopsis, duración, nota, dirección, guion y actores invitados) y la miniatura <code>…-thumb.jpg</code>.</li>
 </ul>
 <p>Los archivos de la serie y la temporada solo se crean cuando los episodios están en una carpeta de la serie (con su nombre o con <code>[tmdbid-…]</code>), la de antes o la que crea la opción de carpetas. Los episodios que ya tienen el nombre correcto también reciben los metadatos. Los archivos que ya existen no se reemplazan, y deshacer borra lo creado.</p>
+<h4>Limitaciones</h4>
+<ul>
+  <li>Una serie a la vez: para varias, filtre la lista y busque una cada vez.</li>
+  <li>La división en temporadas es la de TMDB. El anime y las series con numeración corrida a veces están divididos de otra forma allí, y los números del archivo no coinciden; revíselo en la revisión.</li>
+  <li>Los especiales (temporada 0) suelen tener una numeración distinta de la de su emisión y casi siempre necesitan revisión.</li>
+  <li>Un archivo con varios episodios solo se reconoce cuando son de la misma temporada.</li>
+</ul>
 <p class="tip">Solo se envía a TMDB el nombre de la serie, nunca los nombres de los archivos ni las carpetas.</p>`,
   },
   {
@@ -308,7 +321,7 @@ ${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...Y
     sub: true,
     html: `
 <p>Da a cada canción el nombre que viene de las <b>etiquetas</b> guardadas en el archivo (ID3 del MP3, Vorbis del FLAC y del OGG, MP4 del M4A y otras), sin necesidad de internet.</p>
-${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
+${ex("01.mp3", "01 - Título de la Canción.mp3")}
 <ul>
   <li><b>Plantilla</b>: <code>{pista}</code>, <code>{título}</code>, <code>{artista}</code>, <code>{artista del álbum}</code>, <code>{álbum}</code>, <code>{año}</code>, <code>{disco}</code>, <code>{género}</code> y <code>{compositor}</code>. La predeterminada es <code>{pista} - {título}</code>. La pista tiene dos dígitos (tres en álbumes con más de 99 pistas).</li>
   <li>Las etiquetas vacías no dejan restos: con <code>{pista} - {artista} - {título}</code>, una canción sin artista queda <code>01 - Título</code>.</li>
@@ -316,17 +329,17 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li><b>El álbum como un todo</b>: las pistas de un mismo álbum (misma carpeta, o discos <code>CD 01</code>/<code>CD 02</code>, y mismo nombre de álbum) comparten los datos del álbum. Una pista sin año recibe el de las demás. Sin "artista del álbum" en las etiquetas, vale el artista de la mayoría de las pistas (sin contar colaboraciones como <code>feat.</code>); sin mayoría, el álbum es una recopilación: <code>Various Artists</code>, como lo reconoce Jellyfin. Así, las pistas de un álbum nunca se reparten en carpetas distintas.</li>
   <li><b>Pistas extra</b>: en una carpeta donde la mayoría de las canciones son de un álbum, las pistas con otro álbum en las etiquetas (un sencillo, una banda sonora) y numeradas después de las del álbum (<code>15</code>, <code>16</code> después de <code>01</code>–<code>14</code>) quedan con ese álbum.</li>
   <li><b>Sencillos</b>: una canción con el álbum <code>Single</code> en las etiquetas toma su propio título como álbum.</li>
-  <li><b>Recopilaciones</b>: en un álbum donde la mayoría de las pistas son de otros artistas que el del álbum, el artista entra en el nombre antes del título cuando la plantilla no lo tiene: <code>03 - Eric Burdon - Orange and Red Beams</code>.</li>
+  <li><b>Recopilaciones</b>: en un álbum donde la mayoría de las pistas son de otros artistas que el del álbum, el artista entra en el nombre antes del título cuando la plantilla no lo tiene: <code>03 - Artista de la Pista - Título</code>.</li>
   <li>Si el nombre del álbum ya trae un año (<code>Programa 12 (2025-05-04)</code>), se omite el <code>({año})</code> de la plantilla.</li>
   <li>Las canciones <b>sin título en las etiquetas</b> quedan como están y reciben <b>✕</b> (salvo que la búsqueda las identifique por el sonido, vea abajo); la tarjeta muestra cuántas son. Con <b>Completar con el nombre del archivo</b>, el programa lee <code>01 - Artista - Título</code>, <code>01. Título</code> o <code>1-05 Título</code> del nombre, y el álbum y el año de la carpeta (<code>Artista - Álbum (1975)</code>, o solo <code>Álbum</code>; una carpeta <code>CD2</code> da el disco). Las etiquetas existentes tienen prioridad.</li>
 </ul>
 <h4>Carpetas de artista y álbum</h4>
-<p>Con <b>Organizar en carpetas de artista y álbum</b>, cada canción va a <code>{artista del álbum}/{álbum} ({año})</code> (la plantilla de carpetas se puede cambiar; cada <code>/</code> es un nivel). Así, <code>Música/Pink Floyd/WYWH/CD1/01.mp3</code> queda <code>Música/Pink Floyd/Wish You Were Here (1975)/01 - Shine On….mp3</code>: las carpetas que ya llevan el nombre del artista, del álbum o de un disco (o que están dentro de la del artista) se reemplazan, no reciben carpetas nuevas dentro. Los archivos sueltos reciben las carpetas dentro de la carpeta donde están. Las pequeñas diferencias de escritura entre la carpeta y la etiqueta no molestan. Una carpeta que ya reúne álbumes con su nombre (<code>Programa (1000 - ..)</code> para los álbumes "Programa 1037 - …") se trata como colección: los álbumes quedan directamente en ella, sin carpetas de artista en medio.</p>
+<p>Con <b>Organizar en carpetas de artista y álbum</b>, cada canción va a <code>{artista del álbum}/{álbum} ({año})</code> (la plantilla de carpetas se puede cambiar; cada <code>/</code> es un nivel). Así, <code>Música/Artista/Album/CD1/01.mp3</code> queda <code>Música/Artista/Álbum (1975)/01 - Título de la Canción.mp3</code>: las carpetas que ya llevan el nombre del artista, del álbum o de un disco (o que están dentro de la del artista) se reemplazan, no reciben carpetas nuevas dentro. Los archivos sueltos reciben las carpetas dentro de la carpeta donde están. Las pequeñas diferencias de escritura entre la carpeta y la etiqueta no molestan. Una carpeta que ya reúne álbumes con su nombre (<code>Programa (1000 - ..)</code> para los álbumes "Programa 1037 - …") se trata como colección: los álbumes quedan directamente en ella, sin carpetas de artista en medio.</p>
 <p><b>Copias</b>: si dos copias idénticas de un álbum (encontradas por el programa, como en <b>Copias idénticas</b>) irían al mismo lugar, la primera sigue y la otra se queda donde está, marcada como copia.</p>
 <ul>
   <li>Las letras (<code>.lrc</code>) con el nombre de una canción reciben su nuevo nombre y van con ella.</li>
   <li>Las portadas, <code>.cue</code>, <code>.log</code> y otros archivos de la carpeta del álbum van con la mayoría de las canciones de la carpeta (las canciones de otros álbumes que no son pistas extra siguen el suyo). Las subcarpetas sin canciones (<code>Artwork</code>, <code>Scans</code>) van con él, con el mismo nombre; también los archivos de la carpeta de encima de <code>CD 01</code>/<code>CD 02</code>. Si dos de esos archivos quedarían con el mismo nombre (un <code>log.txt</code> en cada disco), reciben el nombre de su carpeta: <code>log (CD 01).txt</code>.</li>
-  <li>Los nombres de artista o álbum que solo difieren en mayúsculas (<code>a-ha</code> y <code>A-Ha</code>, de etiquetas de álbumes distintos) quedan en una sola carpeta: la que ya existe en el disco o la grafía más usada.</li>
+  <li>Los nombres de artista o álbum que solo difieren en mayúsculas (<code>nombre del artista</code> y <code>Nombre del Artista</code>, de etiquetas de álbumes distintos) quedan en una sola carpeta: la que ya existe en el disco o la grafía más usada.</li>
   <li>Las carpetas antiguas que quedan vacías se borran; deshacer lo devuelve todo a su sitio.</li>
   <li><b>Crear una lista de reproducción por álbum</b>: después de renombrar, graba <code>&lt;nombre de la carpeta&gt;.m3u8</code> en la carpeta de cada álbum, con las canciones (de todos los discos) en el orden de los discos y pistas. También vale para los álbumes que ya tienen los nombres correctos (cuentan en el botón <b>Renombrar</b>). No se crea si el álbum ya tiene un <code>.cue</code> o una lista, ni para una canción sola. Deshacer borra la lista creada.</li>
   <li>Los archivos <code>.cue</code> y las listas <code>.m3u</code> pasan a citar los nuevos nombres de las canciones (vea <b>Renombrar y deshacer</b>).</li>
@@ -354,7 +367,62 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li>Cada canción tarda cerca de medio segundo en escucharse y consultarse.</li>
 </ul>
 <p class="tip">A AcoustID solo van la huella digital del sonido y la duración de cada canción, nunca el archivo.</p>
+<h4>Limitaciones</h4>
+<ul>
+  <li>Sin la búsqueda en MusicBrainz, el nombre depende solo de las etiquetas: etiquetas erróneas dan nombres erróneos.</li>
+  <li>Los lanzamientos regionales, independientes, piratas o muy recientes pueden no estar en MusicBrainz; entonces valen las etiquetas.</li>
+  <li>Por el sonido, grabaciones muy parecidas (una remasterización, una regrabación del propio artista) pueden confundirse. Cuando el álbum queda en duda, va a la revisión.</li>
+  <li>Las canciones en Opus, WMA y otros formatos no citados arriba no se escuchan.</li>
+  <li>En MP3 y M4A, deshacer la grabación de etiquetas no devuelve los campos raros ni las etiquetas ID3v1 y APE.</li>
+</ul>
 <p class="tip">Sin <b>Grabar las etiquetas en los archivos</b>, Renome solo lee las etiquetas; las canciones en sí no cambian. A MusicBrainz solo se envían el artista y el nombre del álbum.</p>`,
+  },
+  {
+    id: "r-book",
+    title: "Libro (Open Library)",
+    sub: true,
+    html: `
+<p>Da a cada libro el nombre que viene de <b>Open Library</b> (openlibrary.org), un catálogo abierto de libros mantenido por el Internet Archive. Cuando Open Library no conoce el ISBN, se busca en <b>BrasilAPI</b> (brasilapi.com.br), que reúne los registros de las editoriales brasileñas en la CBL. Ninguno de los dos necesita clave.</p>
+${ex("titulo_del_libro_autor.pdf", "Nombre del Autor - Título del Libro (1937).pdf")}
+<ol>
+  <li>Añada la regla y haga clic en <b>Buscar en Open Library</b>. Para cada libro (EPUB, MOBI, AZW3, PDF, FB2 y DjVu), el programa lee los datos grabados en el propio archivo: título, autor, ISBN, editorial y serie. Lo que falte viene del nombre del archivo.</li>
+  <li>Con el <b>ISBN</b>, el libro se encuentra directamente, en su edición exacta (<b>✓</b>), en Open Library o en BrasilAPI. Sin él, el programa busca por el título y el autor: si coinciden sin dudas, el libro se elige solo; si no (<b>?</b>), se abre la revisión, con portada, autores, título original y número de ediciones, para que usted elija (haga clic o pulse 1–9).</li>
+  <li>Si ninguno sirve, corrija el título o el autor en la ventana y busque de nuevo. También se puede buscar solo por el autor, con el título vacío, y ver sus libros. O marque <b>Ninguno de estos</b> (<b>✕</b>: el archivo queda como está).</li>
+</ol>
+<h4>De dónde vienen los datos</h4>
+<ul>
+  <li><b>EPUB</b>: título, autores, ISBN, editorial, idioma y serie (de los datos de EPUB 2 o 3). Sin ISBN en los datos, el programa lo busca en el texto de las primeras y las últimas páginas, donde está la página de créditos.</li>
+  <li><b>MOBI y AZW3</b> (Kindle): título, autor, ISBN, editorial y fecha, de la cabecera del archivo.</li>
+  <li><b>PDF</b>: título y autor de los datos del documento, y el ISBN buscado en el texto de las primeras y las últimas páginas. Los títulos que los programas ponen solos (<code>Microsoft Word - final.docx</code>, <code>Sin título</code>) se ignoran.</li>
+  <li><b>FB2</b>: título, autores, serie, editorial, año e ISBN.</li>
+  <li><b>DjVu</b>: solo el nombre del archivo.</li>
+  <li><b>Nombre del archivo</b>: entiende <code>Autor - Título</code> y <code>Título - Autor</code> (la búsqueda descubre cuál es cuál), <code>Título by Autor</code>, el año entre paréntesis (<code>(1899)</code>, <code>(2015, Editorial)</code>), el número en la serie (<code>Autor - 03 - …</code>) y el ISBN. Marcas como <code>z-lib.org</code>, <code>libgen</code>, <code>epub</code> y <code>retail</code> se ignoran, y <code>_</code> se convierte en espacio.</li>
+</ul>
+<ul>
+  <li><b>Plantilla</b>: <code>{autor}</code> (el primero), <code>{autores}</code> (todos, separados por &amp;), <code>{autor invertido}</code> (por el apellido: <i>Apellido, Nombre</i>), <code>{inicial}</code> (la primera letra del apellido), <code>{título}</code>, <code>{título original}</code>, <code>{año}</code> (de la primera publicación de la obra), <code>{año de edición}</code>, <code>{editorial}</code>, <code>{isbn}</code>, <code>{serie}</code>, <code>{volumen}</code> (el número en la serie, con dos dígitos: <code>03</code>, para que los libros queden en orden) e <code>{id}</code> (de Open Library). La predeterminada es <code>{autor} - {título} ({año})</code>. Los valores que faltan no dejan restos: sin serie, <code>{serie} {volumen} - {título}</code> queda solo con el título.</li>
+  <li><b>Intercambiar título y autor</b>: el botón ⇄ de la revisión intercambia los dos campos, para nombres leídos al revés.</li>
+  <li>El <b>título</b> es el de la edición en el idioma elegido en Opciones (<b>Idioma de los títulos</b>). Cuando el archivo trae otro título, de otra traducción, queda el del archivo. El título original aparece en la revisión y en <code>{título original}</code>.</li>
+  <li>El mismo libro en varios formatos (<code>.epub</code>, <code>.pdf</code>, <code>.mobi</code>) con los mismos datos hace una sola búsqueda y recibe la misma elección.</li>
+</ul>
+<h4>Carpetas, portada y metadata.opf</h4>
+<ul>
+  <li><b>Organizar en carpetas de autor y libro</b>: cada libro va a <code>{autor}/{título}</code> (la plantilla de las carpetas se puede cambiar; cada <code>/</code> es un nivel), como espera Audiobookshelf. En bibliotecas grandes, <code>{inicial}/{autor invertido}/{título}</code> da <code>A/Apellido, Nombre/Título del Libro</code>. Un punto al final del nombre de una carpeta (<i>Apellido, C. S.</i>) se quita, porque Windows no acepta carpetas que terminen en punto. Las carpetas que ya tienen el nombre del autor o del libro se aprovechan, sin crear carpetas nuevas dentro. Las carpetas que queden vacías se borran; deshacer lo devuelve todo a su sitio.</li>
+  <li><b>Guardar la portada</b>: guarda la portada de Open Library como <code>cover.jpg</code> en la carpeta del libro; sin la opción de carpetas, con el nombre del archivo del libro (<code>….jpg</code>).</li>
+  <li><b>Guardar los datos del libro</b>: guarda <code>metadata.opf</code> (o <code>….opf</code>, sin la opción de carpetas), en formato OPF, con título, autores, sinopsis, temas, editorial, año, idioma, ISBN y serie. Audiobookshelf y los gestores de libros electrónicos leen este archivo.</li>
+  <li>Los libros que ya tienen el nombre correcto también reciben la portada y los datos (cuentan en el botón <b>Renombrar</b>). Los archivos que ya existen no se reemplazan, y deshacer borra lo creado. El archivo del libro nunca cambia.</li>
+</ul>
+<h4>Limitaciones</h4>
+<ul>
+  <li><b>PDF</b>: muchos PDF tienen los datos del documento vacíos o erróneos (el nombre del archivo de Word, el nombre del equipo de quien lo hizo). Un PDF <b>escaneado</b> es solo una serie de imágenes, sin texto donde buscar el ISBN. En esos casos queda el nombre del archivo: un nombre claro, como <code>Autor - Título</code>, ayuda mucho; uno confuso lleva a la revisión.</li>
+  <li><b>Sin ISBN</b>, el libro se encuentra por el título y el autor, pero no se sabe qué edición es: el nombre usa la editorial y el ISBN del propio archivo, si los tiene, y <code>{año de edición}</code> queda vacío.</li>
+  <li><b>Open Library</b> lo mantienen voluntarios. Los libros recientes, de editoriales pequeñas o de algunos países pueden no estar, o estar sin portada, sin año o repetidos, con datos algo distintos en cada copia. Faltan muchas traducciones: cuando el título no aparece, la revisión muestra los otros libros del autor, donde la obra puede estar con el título original, o no estar. En ese caso, marque <b>Ninguno de estos</b> y renómbrelo a mano.</li>
+  <li><b>BrasilAPI</b> solo ayuda con libros con ISBN, casi siempre de editoriales brasileñas. Suele venir sin portada y sin año. El año de la primera publicación y la portada vienen de Open Library cuando tiene la obra; si no, <code>{año}</code> queda vacío y no hay portada. Entre los autores pueden venir el traductor o el ilustrador: cuando el archivo dice quién es el autor, solo queda él.</li>
+  <li>A veces el <b>ISBN guardado en el archivo es de otro libro</b> (el de un anuncio al final, o el de la caja de una colección), o el catálogo tiene un error. Cuando el título y el autor encontrados no coinciden con los del archivo, el libro no se elige solo: va a la revisión.</li>
+  <li><code>{año}</code> es el de la primera publicación de la obra: un libro publicado en 1937 queda con 1937, aunque la edición sea de 2019. Cuando el catálogo da un año posterior al de la edición guardada en el archivo, lo que es un error suyo, <code>{año}</code> queda vacío. El año de su edición (<code>{año de edición}</code>) solo se conoce cuando el libro se encuentra por el ISBN.</li>
+  <li>La <b>serie</b> y el <b>volumen</b> vienen solo de los datos del archivo (de EPUB o de FB2) o del número en el nombre; Open Library casi nunca los tiene.</li>
+  <li>Los cómics (CBZ, CBR) y las revistas no los trata esta regla.</li>
+</ul>
+<p class="tip">A Open Library solo se envían el título, el autor y el ISBN buscados, y a BrasilAPI solo el ISBN, nunca el nombre completo del archivo, las carpetas ni el contenido del libro.</p>`,
   },
   {
     id: "preview",
@@ -363,7 +431,8 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
 <p>La columna <b>Nuevo nombre</b> muestra el resultado de las reglas al instante. En las filas que cambian:</p>
 <ul>
   <li>en <b>Nombre actual</b>, lo que se va aparece <span class="del">en rojo, tachado</span>;</li>
-  <li>en <b>Nuevo nombre</b>, lo que entra aparece <span class="ins">en azul</span>.</li>
+  <li>en <b>Nuevo nombre</b>, lo que entra aparece <span class="ins">en azul</span>;</li>
+  <li>lo que solo cambió de lugar (el autor que pasó delante del título, por ejemplo) aparece <span class="mov">subrayado con puntos</span>, en los dos lados.</li>
 </ul>
 <p>En la primera columna, ● indica que el archivo se renombrará, un <span class="bad">!</span> rojo es un conflicto y un <span class="warn">!</span> amarillo es un aviso. Pase el ratón para ver el motivo.</p>
 <h4>Editar a mano</h4>

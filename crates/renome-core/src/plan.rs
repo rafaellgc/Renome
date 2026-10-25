@@ -7,6 +7,7 @@ use chrono::Local;
 use serde::{Deserialize, Serialize};
 
 use crate::apply::Operation;
+use crate::books::BookMatch;
 use crate::files::{FileEntry, join_name, natural_cmp, split_name};
 use crate::filter::Filter;
 use crate::music::{self, AudioTags};
@@ -63,6 +64,8 @@ pub struct View {
     /// Each song's details from the release chosen on MusicBrainz, for the
     /// music rule (they replace the tags').
     pub songs: HashMap<PathBuf, SongMatch>,
+    /// The book chosen for each file (Open Library), for the book rule.
+    pub books: HashMap<PathBuf, BookMatch>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -173,7 +176,7 @@ fn same_file(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// Folders spelled differently only in case (`a-ha` and `A-Ha` from
+/// Folders spelled differently only in case (`os vagalumes` and `Os Vagalumes` from
 /// different albums' tags) become one: an existing folder's spelling, else
 /// the most common in the batch (the first on a tie).
 fn unify_folders(items: &mut [PreviewItem]) {
@@ -246,8 +249,8 @@ fn unify_folders(items: &mut [PreviewItem]) {
 }
 
 /// Folders some songs are moved out of as old artist or album folders
-/// (`Korn [restored]` for Korn's albums) are not where other songs in them
-/// should get their new folders either (`Korn [restored]/Jonathan Davis`):
+/// (`Banda Azul [restored]` for Banda Azul's albums) are not where other songs in them
+/// should get their new folders either (`Banda Azul [restored]/Rui Prado`):
 /// those go up past them too.
 fn climb_shared_roots(items: &mut [PreviewItem]) {
     let levels_of = |i: &PreviewItem| -> Option<(PathBuf, usize)> {
@@ -573,6 +576,7 @@ pub fn preview(
                         movie: view.movies.get(&file.path),
                         episode: view.episodes.get(&file.path),
                         song: songs.get(file.path.as_path()),
+                        book: view.books.get(&file.path),
                     };
                     let (stem, ext, moved) = pipeline.run_full(&ctx);
                     empty_stem = stem.is_empty() && !file.stem.is_empty();
@@ -968,6 +972,60 @@ mod tests {
         let p = preview(&files, &steps, &HashMap::new(), &view);
         assert_eq!(p.items[0].folder, None);
         assert_eq!(p.items[0].status, Status::Unchanged);
+    }
+
+    #[test]
+    fn book_into_author_folder() {
+        let d = tempfile::tempdir().unwrap();
+        let m = crate::books::BookMatch {
+            title: "Dom Casmurro".into(),
+            authors: vec!["Machado de Assis".into()],
+            year: Some(1899),
+            ..Default::default()
+        };
+        let steps = vec![Step {
+            enabled: true,
+            rule: Rule::Book {
+                template: "{author} - {title} ({year})".into(),
+                colon: " - ".into(),
+                folders: true,
+                folder_template: "{author}/{title}".into(),
+                cover: false,
+                opf: false,
+            },
+        }];
+        // The same book in two formats, and a file the rule knows nothing of.
+        let files = entries(
+            d.path(),
+            &["dom_casmurro.epub", "dom_casmurro.pdf", "outro.pdf"],
+        );
+        let mut view = View::default();
+        view.books.insert(files[0].path.clone(), m.clone());
+        view.books.insert(files[1].path.clone(), m.clone());
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        let ops = p.operations();
+        assert_eq!(ops.len(), 2);
+        let to = d.path().join("Machado de Assis/Dom Casmurro");
+        assert_eq!(
+            ops[0].to,
+            to.join("Machado de Assis - Dom Casmurro (1899).epub")
+        );
+        assert_eq!(
+            ops[1].to,
+            to.join("Machado de Assis - Dom Casmurro (1899).pdf")
+        );
+
+        // Already in the author's folder: it is reused.
+        let inner = d.path().join("Machado de Assis");
+        fs::create_dir(&inner).unwrap();
+        let files = entries(&inner, &["dc.epub"]);
+        let mut view = View::default();
+        view.books.insert(files[0].path.clone(), m);
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        assert_eq!(
+            p.operations()[0].to,
+            to.join("Machado de Assis - Dom Casmurro (1899).epub")
+        );
     }
 
     #[test]

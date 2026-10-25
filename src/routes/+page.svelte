@@ -4,21 +4,23 @@
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { open, save } from "@tauri-apps/plugin-dialog";
   import { api } from "$lib/api";
+  import { authorSpellings } from "$lib/authors";
   import Dialog from "$lib/Dialog.svelte";
   import { closeDialog, confirm, dialog, notify } from "$lib/dialogs.svelte";
   import FileTable from "$lib/FileTable.svelte";
   import Help from "$lib/Help.svelte";
   import AlbumReview from "$lib/AlbumReview.svelte";
+  import BookReview from "$lib/BookReview.svelte";
   import EpisodeReview from "$lib/EpisodeReview.svelte";
   import MovieReview from "$lib/MovieReview.svelte";
   import Options from "$lib/Options.svelte";
   import RuleCard from "$lib/RuleCard.svelte";
   import ShowPicker from "$lib/ShowPicker.svelte";
   import { LOCALES, MOD, t, tError } from "$lib/i18n";
-  import { RULE_TYPES, isAudio, isVideo, newRule, newStep, splitExt } from "$lib/rules";
+  import { RULE_TYPES, isAudio, isBook, isVideo, newRule, newStep, splitExt } from "$lib/rules";
   import { loadSettings, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
-    AlbumState, ApplyReport, Candidate, Copies, MbCandidate, SongMatch, EpKey, EpisodeMatch, EpisodeState, MovieMatch, MovieState, MovieStatus, HistoryEntry,
+    AlbumState, ApplyReport, BookCandidate, BookMatch, BookState, Candidate, Copies, MbCandidate, SongMatch, EpKey, EpisodeMatch, EpisodeState, MovieMatch, MovieState, MovieStatus, HistoryEntry,
     OpError, Preview, Rule, RuleType, Show, Step, View, ViewSort,
   } from "$lib/types";
 
@@ -40,6 +42,8 @@
     toastTimer = setTimeout(() => (toast = null), 4000);
   }
   let busy = $state(false);
+  /** What `busy` is doing, for the indicator over the list. */
+  let task = $state<"add" | "rename" | "undo" | null>(null);
   let dragging = $state(false);
   let history = $state<HistoryEntry[] | null>(null);
   let showOptions = $state(false);
@@ -75,6 +79,62 @@
       : [],
   );
   const movieCounts = $derived(counts(movies));
+
+  /** Open Library results and choices per file, for the book rule. */
+  let books = $state<Record<string, BookState>>({});
+  /** Files in the book review window; null when closed. */
+  let bookReview = $state<string[] | null>(null);
+  let bookProgress = $state<{ done: number; total: number; kind: "search" | "save" } | null>(null);
+  /** A long operation under way: the list waits for it, with what it is
+   *  doing and how far it got (no count: still finding out). */
+  const working = $derived.by((): { label: string; done?: number; total?: number } | null => {
+    const counted = (label: string, p: { done: number; total: number }) => ({ label, done: p.done, total: p.total });
+    if (bookProgress) return counted(t(bookProgress.kind === "search" ? "olSearching" : "sidecarsWriting", bookProgress), bookProgress);
+    if (tmdbProgress) return counted(t(tmdbProgress.kind === "search" ? "tmdbSearching" : "sidecarsWriting", tmdbProgress), tmdbProgress);
+    if (mbProgress)
+      return counted(
+        t({ search: "mbSearching", listen: "mbListening", save: "coversWriting", tags: "tagsWriting" }[mbProgress.kind] as "mbSearching", mbProgress),
+        mbProgress,
+      );
+    if (tvProgress) return { label: tvProgress };
+    if (task) return { label: t({ add: "workingAdd", rename: "workingRename", undo: "workingUndo" }[task] as "workingAdd") };
+    return null;
+  });
+  const bookRule = $derived(steps.find((s) => s.enabled && s.rule.type === "book"));
+  /** What the rule uses of each chosen book: the edition's publisher and
+   *  ISBN only when it was found by the file's ISBN (otherwise they would
+   *  be another edition's), else the file's own. */
+  function bookMatch(b: BookState): BookMatch {
+    const c = b.choice!;
+    return {
+      work: c.work, title: c.title, originalTitle: c.originalTitle, authors: c.authors, year: c.year,
+      editionYear: c.exact ? c.editionYear : null,
+      publisher: c.exact ? c.publisher : b.guess.publisher,
+      isbn: c.exact ? c.isbn : (b.guess.isbns[0] ?? ""),
+      series: b.guess.series, seriesIndex: b.guess.seriesIndex,
+    };
+  }
+  const bookMatches = $derived.by(() => {
+    const raw = Object.entries(books).filter(([, b]) => b.choice).map(([p, b]): [string, BookMatch] => [p, bookMatch(b)]);
+    const spelling = authorSpellings(raw.flatMap(([, m]) => m.authors));
+    const same = (a: string) => spelling.get(a.normalize("NFC")) ?? a.normalize("NFC");
+    return Object.fromEntries(
+      raw.map(([p, m]) => [p, { ...m, title: m.title.normalize("NFC"), authors: [...new Set(m.authors.map(same))] }]),
+    );
+  });
+  const bookCounts = $derived(counts(books));
+  /** Books whose names are already right but that still get a cover or a
+   *  metadata.opf (files that already exist are skipped when writing). */
+  const bookMetaOnly = $derived(
+    bookRule?.rule.type === "book" && (bookRule.rule.cover || bookRule.rule.opf)
+      ? preview.items.filter((i) => i.status === "unchanged" && books[i.path]?.choice && isBook(i.original))
+      : [],
+  );
+  /** What the cover and metadata.opf of a book need; `key` is the path before renaming. */
+  function bookSidecarItem(key: string, path: string) {
+    const c = books[key].choice!;
+    return { path, book: bookMatches[key], cover: c.cover, language: c.exact ? c.language : books[key].guess.language };
+  }
 
   /** TMDB episodes per file, for the series rule. */
   let series = $state<Record<string, EpisodeState>>({});
@@ -186,6 +246,10 @@
     } as const;
     if (movieRule) for (const [p, m] of Object.entries(movies)) out[p] = { status: m.status, tip: t(tips.movie[m.status]) };
     if (seriesRule) for (const [p, e] of Object.entries(series)) out[p] = { status: e.status, tip: t(tips.episode[e.status]) };
+    if (bookRule) {
+      const tip = { auto: "bookAuto", chosen: "bookChosen", choose: "bookChoose", none: "bookNone" } as const;
+      for (const [p, b] of Object.entries(books)) out[p] = { status: b.status, tip: t(tip[b.status]) };
+    }
     if (musicRule) {
       const tip = { auto: "albumAuto", chosen: "albumChosen", choose: "albumChoose", none: "albumNone" } as const;
       for (const a of albums) for (const p of a.files) out[p] = { status: a.status, tip: t(tip[a.status]) };
@@ -209,7 +273,7 @@
   let ruleMenu = $state(false);
   let table = $state<FileTable>();
 
-  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, movies: movieMatches, episodes: episodeMatches, songs: songMatches });
+  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, movies: movieMatches, episodes: episodeMatches, songs: songMatches, books: bookMatches });
   /** Example name for rule cards: the first file in natural name order, so
    *  it does not jump around while the preview re-sorts. */
   const collator = new Intl.Collator(undefined, { numeric: true });
@@ -295,6 +359,7 @@
   async function addPaths(paths: string[], foldersAsItems = false) {
     if (!paths.length) return;
     busy = true;
+    task = "add";
     try {
       await remember();
       const r = await api.addPaths(paths, { recursive: true, includeHidden: settings.includeHidden, foldersAsItems });
@@ -311,6 +376,7 @@
       notice = `${t("error")}: ${tError(e)}`;
     } finally {
       busy = false;
+      task = null;
     }
   }
 
@@ -391,11 +457,13 @@
     const tvMeta = episodeMetaOnly.map((i) => tvSidecarItem(i.path, i.path));
     const listOnly = playlistOnly;
     const retagOnly = tagsOnly.map((i) => i.path);
-    if (!preview.changed && !meta.length && !tvMeta.length && !coverOnly && !listOnly.length && !retagOnly.length) return;
+    const bookMeta = bookMetaOnly.map((i) => bookSidecarItem(i.path, i.path));
+    if (!preview.changed && !meta.length && !tvMeta.length && !bookMeta.length && !coverOnly && !listOnly.length && !retagOnly.length) return;
     if (settings.confirmApply) {
       const lines = [
         preview.changed ? t("confirmText", { n: preview.changed }) : "",
         meta.length + tvMeta.length ? t("confirmMeta", { n: meta.length + tvMeta.length }) : "",
+        bookMeta.length ? t("confirmBookMeta", { n: bookMeta.length }) : "",
         coverOnly ? t("confirmCovers", { n: coverOnly }) : "",
         listOnly.length ? t("confirmPlaylists", { n: listOnly.length }) : "",
         retagOnly.length ? t("confirmTags", { n: retagOnly.length }) : "",
@@ -410,6 +478,7 @@
       if (!ok) return;
     }
     busy = true;
+    task = "rename";
     try {
       const rule = movieRule?.rule;
       const r: ApplyReport = preview.changed
@@ -469,6 +538,21 @@
           }
         }
       }
+      const brule = bookRule?.rule;
+      if (brule?.type === "book" && (brule.cover || brule.opf)) {
+        const items = r.done
+          .filter((op) => books[op.from]?.choice && isBook(op.to))
+          .map((op) => bookSidecarItem(op.from, op.to))
+          .concat(bookMeta);
+        if (items.length) {
+          bookProgress = { done: 0, total: items.length, kind: "save" };
+          try {
+            saved += await writeMeta(() => api.writeBookSidecars(r.historyId, $state.snapshot(items), brule.cover, brule.opf, brule.folders));
+          } finally {
+            bookProgress = null;
+          }
+        }
+      }
       const srule = seriesRule?.rule;
       if (srule?.type === "series" && srule.sidecar) {
         const items = r.done
@@ -501,6 +585,7 @@
       notice = `${t("error")}: ${tError(e)}`;
     } finally {
       busy = false;
+      task = null;
     }
   }
 
@@ -510,6 +595,7 @@
 
   async function undo(id: string) {
     busy = true;
+    task = "undo";
     try {
       const r = await api.undo(id);
       followMatches(r);
@@ -527,6 +613,7 @@
       await notify({ title: t("undoFailed"), text: tError(e) });
     } finally {
       busy = false;
+      task = null;
     }
   }
 
@@ -591,9 +678,75 @@
     }
   }
 
-  /** Movie and episode choices follow their files when renamed or restored. */
+  /** Looks up the visible books without a choice yet on Open Library;
+   *  books picked with confidence are done, the rest go to the review. */
+  async function searchBooks() {
+    const items = preview.items
+      .filter((i) => !i.isDir && isBook(i.original) && books[i.path]?.status !== "auto" && books[i.path]?.status !== "chosen")
+      .map((i) => ({ path: i.path, name: splitExt(i.original)[0] }));
+    if (!items.length) {
+      notice = t("bookNoFiles");
+      return;
+    }
+    bookProgress = { done: 0, total: items.length, kind: "search" };
+    try {
+      const found = await api.bookLookup(tmdbLang(), items);
+      // Nothing was really searched (no connection): mark nothing.
+      const failed = found.find((f) => f.error);
+      if (failed && found.every((f) => f.error || (!f.guess.title && !f.guess.isbns.length))) {
+        await notify({ title: t("rule.book"), text: tError(failed.error) });
+        return;
+      }
+      for (const f of found) {
+        books[f.path] = {
+          guess: f.guess,
+          candidates: f.candidates,
+          choice: f.auto ? f.candidates[0] : null,
+          status: f.auto ? "auto" : f.candidates.length ? "choose" : "none",
+          error: f.error,
+        };
+      }
+      if (found.some((f) => !f.auto && f.candidates.length)) openBookReview();
+    } catch (e) {
+      await notify({ title: t("rule.book"), text: tError(e) });
+    } finally {
+      bookProgress = null;
+    }
+  }
+
+  /** Opens the review on the books still without a choice (or on one). */
+  function openBookReview(start?: string) {
+    const paths = preview.items.map((i) => i.path);
+    const pending = [
+      ...paths.filter((p) => books[p]?.status === "choose"),
+      ...paths.filter((p) => books[p]?.status === "none"),
+    ];
+    const queue = start ? [start, ...pending.filter((p) => p !== start)] : pending;
+    bookReview = queue.length ? queue : null;
+  }
+
+  /** The user's pick for a book; undecided files with the same guess (the
+   *  same book in other formats) get it too. */
+  function chooseBook(path: string, choice: BookCandidate | null, candidates?: BookCandidate[]) {
+    const b = books[path];
+    if (!b) return;
+    const set = (p: string) => {
+      books[p] = { ...books[p], choice, status: choice ? "chosen" : "none", candidates: candidates ?? books[p].candidates };
+    };
+    set(path);
+    for (const [p, o] of Object.entries(books)) {
+      const same = o.guess.title === b.guess.title && o.guess.author === b.guess.author;
+      if (p !== path && same && (o.status === "choose" || o.status === "none")) set(p);
+    }
+  }
+
+  /** Movie, episode and book choices follow their files when renamed or restored. */
   function followMatches(r: ApplyReport) {
     for (const op of r.done) {
+      if (books[op.from]) {
+        books[op.to] = books[op.from];
+        delete books[op.from];
+      }
       if (movies[op.from]) {
         movies[op.to] = movies[op.from];
         delete movies[op.from];
@@ -915,6 +1068,7 @@
       review = null;
       episodeReview = null;
       albumReview = null;
+      bookReview = null;
       showPick?.resolve(null);
     }
     if (e.key === "F1") {
@@ -922,7 +1076,7 @@
       help ??= "manual";
       return;
     }
-    if (history || showOptions || help || review || episodeReview || albumReview || showPick || busy) return;
+    if (history || showOptions || help || review || episodeReview || albumReview || bookReview || showPick || busy || working) return;
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
     // These work even while typing in a rule.
@@ -976,6 +1130,9 @@
       if (mbProgress)
         mbProgress = { ...e.payload, kind: e.payload.kind ?? (mbProgress.kind === "listen" ? "search" : mbProgress.kind) };
     });
+    const unlistenBooks = listen<{ done: number; total: number }>("book-progress", (e) => {
+      if (bookProgress) bookProgress = { ...bookProgress, ...e.payload };
+    });
     const unlistenProgress = listen<{ done: number; total: number }>("identical-progress", (e) => {
       identicalProgress = e.payload.done < e.payload.total ? e.payload.done / e.payload.total : null;
     });
@@ -991,6 +1148,7 @@
       unlistenProgress.then((f) => f());
       unlistenTmdb.then((f) => f());
       unlistenMb.then((f) => f());
+      unlistenBooks.then((f) => f());
     };
   });
 </script>
@@ -1001,7 +1159,7 @@
 <div class="app" class:busy>
   <header class="toolbar">
     <div class="group menu-host">
-      <button class="primary-soft" onclick={() => (addMenu = !addMenu)}>{t("add")} ▾</button>
+      <button class="primary-soft" disabled={!!working} onclick={() => (addMenu = !addMenu)}>{t("add")} ▾</button>
       {#if addMenu}
         <div class="menu">
           <button onclick={pickFiles}>{t("addFiles")}</button>
@@ -1022,10 +1180,10 @@
       />
     </div>
     <div class="group">
-      <button class="icon" title={canMove || !selected.size ? t("moveUp") : t("moveDisabled")} disabled={!canMove} onclick={() => move(-1)}>⤒</button>
-      <button class="icon" title={canMove || !selected.size ? t("moveDown") : t("moveDisabled")} disabled={!canMove} onclick={() => move(1)}>⤓</button>
-      <button disabled={!selected.size} onclick={removeSelected}>{t("remove")}</button>
-      <button disabled={!preview.total} onclick={clearAll}>{t("clear")}</button>
+      <button class="icon" title={canMove || !selected.size ? t("moveUp") : t("moveDisabled")} disabled={!canMove || !!working} onclick={() => move(-1)}>⤒</button>
+      <button class="icon" title={canMove || !selected.size ? t("moveDown") : t("moveDisabled")} disabled={!canMove || !!working} onclick={() => move(1)}>⤓</button>
+      <button disabled={!selected.size || !!working} onclick={removeSelected}>{t("remove")}</button>
+      <button disabled={!preview.total || !!working} onclick={clearAll}>{t("clear")}</button>
     </div>
     <div class="spacer"></div>
     <div class="group">
@@ -1036,14 +1194,15 @@
           <path fill="currentColor" fill-rule="evenodd" stroke="currentColor" stroke-width="1" stroke-linejoin="round" d="M12.15 3.76L11.96 1.50L8.04 1.50L7.85 3.76L5.67 5.02L3.62 4.05L1.66 7.45L3.52 8.74L3.52 11.26L1.66 12.55L3.62 15.95L5.67 14.98L7.85 16.24L8.04 18.50L11.96 18.50L12.15 16.24L14.33 14.98L16.38 15.95L18.34 12.55L16.48 11.26L16.48 8.74L18.34 7.45L16.38 4.05L14.33 5.02ZM13 10a3 3 0 1 0-6 0a3 3 0 1 0 6 0Z" />
         </svg>
       </button>
-      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !metaOnly.length && !episodeMetaOnly.length && !coverOnly && !playlistOnly.length && !tagsOnly.length) || busy} onclick={applyAll}>
+      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !metaOnly.length && !episodeMetaOnly.length && !coverOnly && !playlistOnly.length && !tagsOnly.length) || busy || !!working} onclick={applyAll}>
         {t("rename")} {preview.changed + metaOnly.length + episodeMetaOnly.length + coverOnly + playlistOnly.length + tagsOnly.length || ""}
       </button>
     </div>
   </header>
 
   <main>
-    <aside class="rules">
+    <!-- The rules wait too: a change now would change the names being worked on. -->
+    <aside class="rules" inert={!!working} class:waiting={!!working}>
       <div class="rules-head">
         <h2>{t("rules")}</h2>
         <div class="group menu-host">
@@ -1095,7 +1254,14 @@
                       onsearch: () => searchAlbums(step.rule as Extract<Rule, { type: "music" }>),
                       onreview: () => openAlbumReview(),
                     }
-                  : undefined}
+                  : step.rule.type === "book"
+                    ? {
+                        ...bookCounts,
+                        progress: bookProgress ? t(bookProgress.kind === "search" ? "olSearching" : "sidecarsWriting", bookProgress) : null,
+                        onsearch: searchBooks,
+                        onreview: () => openBookReview(),
+                      }
+                    : undefined}
             summary={step.rule.type === "music" && step.enabled && untaggedCount
               ? t(step.rule.listen ? "musicUntaggedListenN" : "musicUntaggedN", { n: untaggedCount })
               : null}
@@ -1106,7 +1272,20 @@
       </div>
     </aside>
 
-    <section class="files" class:dragging>
+    <section class="files" class:dragging aria-busy={!!working}>
+      {#if working}
+        <!-- Undoing happens in the History window: over it too. -->
+        <div class="working" class:above={task === "undo"} role="status" aria-live="polite">
+          <div class="working-box">
+            <span class="working-label"><span class="spinner" aria-hidden="true"></span>{working.label}</span>
+            {#if working.total}
+              <progress max={working.total} value={working.done}></progress>
+            {:else}
+              <progress></progress>
+            {/if}
+          </div>
+        </div>
+      {/if}
       {#if preview.total}
         <FileTable
           bind:this={table}
@@ -1122,6 +1301,7 @@
             if (seriesRule && series[p]) openEpisodeReview(p);
             else if (movieRule && movies[p]) openReview(p);
             else if (musicRule && albumOf.has(p)) openAlbumReview(albumOf.get(p));
+            else if (bookRule && books[p]) openBookReview(p);
           }}
         />
         {#if !preview.items.length}<p class="no-match">{t("noMatch")}</p>{/if}
@@ -1237,6 +1417,16 @@
   />
 {/if}
 
+{#if bookReview}
+  <BookReview
+    queue={bookReview}
+    {books}
+    names={Object.fromEntries(preview.items.map((i) => [i.path, i.original]))}
+    onchoose={chooseBook}
+    onclose={() => (bookReview = null)}
+  />
+{/if}
+
 {#if albumReview}
   <AlbumReview queue={albumReview} {albums} onchoose={chooseAlbum} onclose={() => (albumReview = null)} />
 {/if}
@@ -1274,7 +1464,8 @@
   .filter { width: 100%; }
   .filter.invalid { border-color: var(--danger); outline-color: var(--danger); }
   main { flex: 1; display: flex; min-height: 0; gap: 10px; padding: 10px; }
-  .rules { width: clamp(280px, 30vw, 340px); flex: none; display: flex; flex-direction: column; min-height: 0; }
+  .rules { width: clamp(280px, 30vw, 340px); flex: none; display: flex; flex-direction: column; min-height: 0; transition: opacity 0.15s; }
+  .rules.waiting { opacity: 0.55; cursor: progress; }
   .rules-head { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 8px; }
   h2 { margin: 0; font-size: 15px; }
   .rule-list { flex: 1; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 8px; padding-right: 2px; }
@@ -1297,6 +1488,44 @@
   .menu button:hover { background: var(--hover); }
   .files { flex: 1; display: flex; min-width: 0; border-radius: 8px; position: relative; }
   .files.dragging { outline: 2px dashed var(--accent); outline-offset: 2px; }
+  .working {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--bg) 55%, transparent);
+    cursor: progress;
+  }
+  .working-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    min-width: 260px;
+    padding: 18px 24px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: 0 6px 24px rgb(0 0 0 / 0.15);
+    font-size: 14px;
+  }
+  .working progress { width: 100%; accent-color: var(--accent); }
+  .working.above { position: fixed; z-index: 15; border-radius: 0; }
+  .working-label { display: inline-flex; align-items: center; gap: 8px; }
+  /* Small and faint: it only shows that something is going on. */
+  .spinner {
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--border);
+    border-top-color: var(--muted);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+
   .no-match { position: absolute; top: 60px; left: 0; right: 0; text-align: center; color: var(--muted); margin: 0; }
   .drop {
     flex: 1;

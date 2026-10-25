@@ -25,7 +25,7 @@ pub struct EpisodeGuess {
     pub season: Option<u16>,
     /// One, or more for a file with several episodes (`S01E01E02`).
     pub episodes: Vec<u16>,
-    /// A bare number (`Naruto - 125`, `Show 101`): absolute numbering, or
+    /// A bare number (`Estrela Cadente - 125`, `Show 101`): absolute numbering, or
     /// season and episode run together.
     pub number: Option<u32>,
     /// Air date (`2024-03-15`), for daily shows.
@@ -429,7 +429,7 @@ fn words(s: &str) -> Vec<String> {
         .collect()
 }
 
-/// The title without the show's name in front ("Breaking Bad Pilot").
+/// The title without the show's name in front ("Estação Norte Pilot").
 fn without_show(title: &str, show: &Show) -> String {
     let t = words(title);
     for name in [&show.name, &show.original_name] {

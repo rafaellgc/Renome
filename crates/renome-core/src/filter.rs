@@ -61,7 +61,7 @@ fn fold(s: &str) -> String {
     strip_accents(&s.to_lowercase())
 }
 
-/// For plain text: `O.Senhor.dos.Aneis` has the words `senhor dos`.
+/// For plain text: `O.Reino.das.Mares` has the words `reino das`.
 fn as_words(folded: &str) -> String {
     folded.replace(['.', '_'], " ")
 }

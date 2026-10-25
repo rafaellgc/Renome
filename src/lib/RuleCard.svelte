@@ -273,6 +273,18 @@
           <label class="check sub"><input type="checkbox" bind:checked={r.cleanTags} /> <span>{t("musicCleanTags")}<small>{t("musicCleanTagsHint")}</small></span></label>
         {/if}
         {@render actions(t("mbSearch"), "albumSummary")}
+      {:else if r.type === "book"}
+        <p class="hint top">{t("bookHint")}</p>
+        <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
+        <p class="hint mono">{t("bookTemplateHint")}</p>
+        <label class="colon">{t("colonLabel")} <input class="mono sep" bind:value={r.colon} spellcheck="false" /></label>
+        <label class="check"><input type="checkbox" bind:checked={r.folders} /> <span>{t("bookFolders")}<small>{t("bookFoldersHint")}</small></span></label>
+        {#if r.folders}
+          <label class="sub">{t("musicFolderName")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
+        {/if}
+        <label class="check"><input type="checkbox" bind:checked={r.cover} /> <span>{t("bookCover")}<small>{t("bookCoverHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.opf} /> <span>{t("bookOpf")}<small>{t("bookOpfHint")}</small></span></label>
+        {@render actions(t("olSearch"), "bookSummary")}
       {/if}
 
       {#if summary}<p class="hint">{summary}</p>{/if}
@@ -281,7 +293,7 @@
   {/if}
 </article>
 
-{#snippet actions(label: string, summary: "movieSummary" | "seriesSummary" | "albumSummary")}
+{#snippet actions(label: string, summary: "movieSummary" | "seriesSummary" | "albumSummary" | "bookSummary")}
   {#if lookup}
     <div class="movie-actions">
       <button class="primary-soft" disabled={!!lookup.progress} onclick={lookup.onsearch}>{label}</button>

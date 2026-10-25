@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AlbumLookup, AlbumQuery, ApplyReport, Candidate, EpisodeLookup, MbCandidate, SongMatch, HistoryEntry, Lookup, Preview, ScanOptions, Show, SortKey, Step, View } from "./types";
+import type { AlbumLookup, AlbumQuery, ApplyReport, BookCandidate, BookLookup, BookMatch, Candidate, EpisodeLookup, MbCandidate, SongMatch, HistoryEntry, Lookup, Preview, ScanOptions, Show, SortKey, Step, View } from "./types";
 
 type Overrides = Record<string, string>;
 type TvItem = { path: string; name: string; isDir: boolean };
@@ -34,6 +34,17 @@ export const api = {
   mbSearch: (query: AlbumQuery) => invoke<MbCandidate[]>("mb_search", { query }),
   mbChoose: (id: string, paths: string[], fromName: boolean) =>
     invoke<{ matches: [string, SongMatch][]; agree: number }>("mb_choose", { id, paths, fromName }),
+  bookLookup: (lang: string, items: { path: string; name: string }[]) =>
+    invoke<BookLookup[]>("book_lookup", { lang, items }),
+  bookSearch: (lang: string, title: string, author: string) =>
+    invoke<BookCandidate[]>("book_search", { lang, title, author }),
+  writeBookSidecars: (
+    historyId: string | null,
+    items: { path: string; book: BookMatch; cover: number | null; language: string }[],
+    cover: boolean,
+    opf: boolean,
+    inFolder: boolean,
+  ) => invoke<{ created: string[]; errors: [string, string][] }>("write_book_sidecars", { historyId, items, cover, opf, inFolder }),
   playlistDirs: (dirs: string[]) => invoke<string[]>("playlist_dirs", { dirs }),
   writeTags: (historyId: string | null, items: { path: string; song: SongMatch }[], cover: boolean, clean: boolean) =>
     invoke<{ written: number; errors: [string, string][] }>("write_tags", { historyId, items, cover, clean }),

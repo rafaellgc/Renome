@@ -34,10 +34,10 @@ pub(crate) static TAGS: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// Guesses title and year from a file name without extension:
-/// `O.Senhor.dos.Aneis.2001.1080p.BluRay` → ("O Senhor dos Aneis", 2001).
+/// `O.Reino.das.Mares.2001.1080p.BluRay` → ("O Reino das Mares", 2001).
 ///
 /// The year is the last plausible one with something before it, so
-/// `2001 A Space Odyssey (1968)` and `1917.2019` work. Without a year,
+/// `2001 A Sea Voyage (1968)` and `1932.2020` work. Without a year,
 /// the title stops at the first release tag (1080p, BluRay…).
 pub fn guess(name: &str) -> Guess {
     let id = TMDB_ID.captures(name).and_then(|c| c[1].parse().ok());
@@ -232,7 +232,7 @@ pub fn safe_title(s: &str, colon: &str) -> String {
 }
 
 /// Like [`safe_title`], keeping final dots: in a file name the extension
-/// follows them (`On T.V..flac`).
+/// follows them (`Na T.V..flac`).
 pub fn safe_text(s: &str, colon: &str) -> String {
     let s = s.replace(" : ", ":").replace(": ", ":").replace(':', colon);
     let s: String = s
@@ -618,7 +618,7 @@ pub fn nfo(d: &Details, lang: &str) -> String {
 
 /// The language and flags at the end of a subtitle's name (`.pt-BR`,
 /// `.eng.forced`), kept when the movie or episode name replaces the rest.
-/// Codes must be lowercase, so a title such as `It` is not taken for one.
+/// Codes must be lowercase, so a title such as `No` is not taken for one.
 pub fn subtitle_suffix<'a>(stem: &'a str, ext: &str) -> &'a str {
     const SUBTITLES: &[&str] = &["srt", "ass", "ssa", "sub", "idx", "vtt", "sup", "smi"];
     if !SUBTITLES.contains(&ext.to_lowercase().as_str()) {

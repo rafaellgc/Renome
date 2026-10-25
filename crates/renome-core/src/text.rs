@@ -18,6 +18,13 @@ pub fn grapheme_index(s: &str, byte: usize) -> usize {
         .count()
 }
 
+/// Accented letters as one character each (`á`, not `a` and an accent),
+/// as names are usually written: book details sometimes keep them apart,
+/// and the two forms look the same but are different names.
+pub fn nfc(s: &str) -> String {
+    s.nfc().collect()
+}
+
 pub fn strip_accents(s: &str) -> String {
     s.nfd().filter(|c| !is_combining_mark(*c)).nfc().collect()
 }

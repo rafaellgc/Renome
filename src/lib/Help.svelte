@@ -253,6 +253,7 @@
   }
   .content :global(.ins) { color: var(--accent); background: var(--accent-soft); font-weight: 600; border-radius: 3px; padding: 0 2px; }
   .content :global(.del) { color: var(--danger); text-decoration: line-through; }
+  .content :global(.mov) { text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px; }
   .content :global(.bad) { color: white; background: var(--danger); border-radius: 50%; padding: 0 5px; font-weight: 700; }
   .content :global(.warn) { color: black; background: var(--warn); border-radius: 50%; padding: 0 5px; font-weight: 700; }
   .about {

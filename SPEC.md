@@ -25,7 +25,11 @@ This document describes **what** the program does, not **how**.
 - Columns: current name, new name, folder, size, modification date (size
   and date are hidden in narrow windows).
   Folders are marked with an icon. In changed rows, what was removed from
-  the current name and what was added to the new one are highlighted.
+  the current name and what was added to the new one are highlighted,
+  comparing whole words (letters only inside a word that barely changed,
+  `Mario` → `Mário`); words that are on both sides but moved are marked
+  apart (dotted underline), and the common start and end (the
+  extension) are never marked.
 - Sort by clicking a header (click again to reverse): **new name**
   (default; the list re-sorts as the rules change), current name (natural
   order, `2 < 10`), folder, size, date.
@@ -112,7 +116,7 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   without error (and not downloaded). Without any rename, the created
   files get a history entry of their own ("N metadata files"), undone by
   deleting them.
-- A name with `tmdbid-N` (as in `[tmdbid-603]`) is looked up by that id
+- A name with `tmdbid-N` (as in `[tmdbid-12345]`) is looked up by that id
   directly, and picked automatically.
 - The About tab shows the TMDB logo and notice required by its terms.
 - Subtitles (srt, ass, ssa, sub, idx, vtt, sup, smi) keep the language
@@ -256,7 +260,7 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   release tags, on both sides) after a level, the album, the album
   artist, the artist, "artist - album" or "album - artist" (or start
   with one of them, also comparing the words without bracketed parts,
-  years and dates: `1012 - Samhain 2024` for "Show 1012 - Samhain 2024
+  years and dates: `1012 - Concert 2024` for "Show 1012 - Concert 2024
   (2024-10-27)"; or
   are, with similarity ≥ 0.85, a run of at least two of its words, like
   `1037 - Title` for
@@ -265,8 +269,8 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   at most one level more than the template has.
 - Folders some songs are moved out of (old artist or album folders, below
   their root) are climbed past by other songs whose root they would be,
-  so a side project in `Korn [restored]/Jonathan Davis` ends up next to
-  `Korn`, not inside the emptied folder.
+  so a side project in `Artist [restored]/Side Project` ends up next to
+  `Artist`, not inside the emptied folder.
 - Collections: when every song going into a root has at least two folder
   levels and more than half have an album name starting with the
   root folder's name (without years and brackets: `Show (1000 - ..)` for
@@ -281,8 +285,8 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   folder (`Artwork/`, up to two levels) keep their subfolder; files in a
   folder whose song folders are all disc folders going to one place go
   there. Followers that would share a name get ` (<their folder>)`.
-- Folder levels that differ only in case across the batch (`a-ha`,
-  `A-Ha`) are unified, for every rule that moves files: an existing
+- Folder levels that differ only in case across the batch (`artist name`,
+  `Artist Name`) are unified, for every rule that moves files: an existing
   folder's spelling, else the most common one (the first on a tie).
 - "Create a playlist for each album": after renaming, each folder a
   song went to (the one above, for a disc folder) gets
@@ -305,8 +309,8 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   matches one of its tracks (else it waits for review). Otherwise it is
   searched (`release:"<album>" AND artist:"<album artist>"`, the artist
   left out for Various Artists, 25 results; when nothing is found, once
-  more with the album name without bracketed parts, "Analogue (20th
-  Anniversary Edition)" → "Analogue") and ranked: title similarity
+  more with the album name without bracketed parts, "Album (20th
+  Anniversary Edition)" → "Album") and ranked: title similarity
   + 0.6 × artist similarity + 0.3 for the same track count as the songs
   (0.1 when more, −0.2 when fewer) + 0.1 for the same year + 0.05 if
   official + MusicBrainz's score / 2000. The best one is fetched with
@@ -412,6 +416,57 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   tags" is on (cue sheets and playlists that list them are updated,
   see 4).
 
+### 2.4 Books (Open Library, BrasilAPI)
+
+- Applies to EPUB, KEPUB, MOBI, AZW, AZW3, PRC, PDF, FB2 and DjVu files.
+  Each file's details are read: EPUB package document (EPUB 2/3, series
+  from the `calibre:series` meta or `belongs-to-collection`), MOBI/AZW3
+  header and EXTH records, PDF Info dictionary and XMP, FB2 description.
+  Without an ISBN in the details, the text of the first and last pages
+  (EPUB spine, PDF pages) is searched for one. Titles programs put in by
+  themselves (`Microsoft Word - …`, `Untitled`) and placeholder authors
+  are dropped; several authors in one field (`A;B;translation by C`) are
+  split and roles left out; accents are composed (NFC).
+- The file name is read too: `Author - Title`, `Title - Author` (both
+  readings are tried), `Title by Author`, a year in brackets, a number in
+  a series, ISBNs; site marks (`z-lib`, `libgen`…) are ignored and `_`
+  stands for `:`.
+- Searches, in order, until one is a safe pick: each ISBN on Open
+  Library; `title:(…) author:(surname)` for the readings; plain words;
+  then the author's best-known books (the author found with Open
+  Library's author search: all name words, the same name before longer
+  ones, then most works; the surname alone as a fallback). An ISBN Open
+  Library does not know is looked up on BrasilAPI; that edition is joined
+  with the work Open Library has when the search finds it (first year,
+  original title, cover).
+- Ranking: title fit (also without subtitles), author fit (the surname
+  and the first name must match, initials too: `C. S. X` is not
+  `X Carroll`), popularity, Open Library's order. Results by someone else
+  that match only a word or two of the title are left out. An edition
+  found by ISBN is picked by itself only when its title and author are
+  plausibly the file's (an ISBN read from the text may be another
+  book's) and it has an author.
+- The title is the file's own when it names the same book (its author,
+  series and number in the series removed; a subtitle only it has goes),
+  else the catalogue's (article moved to the end put back in front, the
+  author's name in front removed); notes of the edition's language
+  (`Portuguese Edition`) are dropped. The file's spelling of the author
+  is kept, and across the batch each author gets one spelling (initial
+  of the first name and surname; the most used one, not in capitals).
+- A first-publication year after the edition stored in the file is
+  dropped. The publisher, ISBN and edition year come from the edition
+  only when it was found by ISBN.
+- Template keys (also in Portuguese and Spanish): `{author}`,
+  `{authors}`, `{author sort}` (`Surname, Name`), `{initial}`, `{title}`,
+  `{original title}`, `{year}`, `{edition year}`, `{publisher}`,
+  `{isbn}`, `{series}`, `{volume}` (two digits), `{id}`. Optional
+  folders (default `{author}/{title}`, folder names without a final dot)
+  reuse folders already named after the book or its author. Optionally
+  `cover.jpg` and an OPF `metadata.opf` (or `<name>.jpg`/`.opf` without
+  folders) are saved; existing files are kept; undo deletes them.
+- Only the searched title, author and ISBN are sent to Open Library, and
+  only the ISBN to BrasilAPI. The book files are never changed.
+
 ## 3. Preview
 
 - Table: original name → new name, with a status per row:
@@ -425,6 +480,10 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   elsewhere they are a non-blocking warning. On Windows and macOS, names
   that differ only in case count as the same name.
 - Counters: total, changed, conflicts.
+- While a long task runs (a search, reading added files, renaming and
+  writing sidecar files, undoing), a box over the list says what it is
+  doing, with a progress bar (moving when the total is not known yet);
+  the list, the rules and the list's buttons and shortcuts wait.
 
 ### Identical copies
 

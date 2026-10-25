@@ -132,7 +132,7 @@ ${ex("Série - Episódio - S01E02.mkv", "Série - S01E02 - Episódio.mkv")}
   <li><b>Cada Palavra Maiúscula</b>: → <code>Foto De Férias</code></li>
   <li><b>Cada Palavra, exceto de/da/e/of…</b>: → <code>Foto de Férias</code>. Palavras curtas de ligação (de, da, do, e, em, para, of, the, and, del, la, y…) ficam em minúsculas, a não ser no início do nome ou de uma parte (depois de <code> - </code>, <code>:</code> ou <code>(</code>).</li>
 </ul>
-<p>Nos dois modos "Cada Palavra", algarismos romanos ficam em maiúsculas (<code>Rocky III</code>, <code>Parte II</code>) e palavras com maiúsculas no meio ficam como estão (<code>iPhone</code>, <code>McDonald's</code>).</p>
+<p>Nos dois modos "Cada Palavra", algarismos romanos ficam em maiúsculas (<code>Fase III</code>, <code>Parte II</code>) e palavras com maiúsculas no meio ficam como estão (<code>iPhone</code>, <code>McDonald's</code>).</p>
 <p>Use "Aplicar em: Extensão" para mudar só a extensão.</p>`,
   },
   {
@@ -245,7 +245,7 @@ ${ex("_foto.jpg", "foto.jpg")}
     sub: true,
     html: `
 <p>Dá a cada filme o nome oficial do <b>TMDB</b> (themoviedb.org), no formato que o Jellyfin reconhece. Precisa de uma <b>chave da API do TMDB</b>, gratuita, informada nas Opções.</p>
-${ex("O.Senhor.dos.Aneis.2001.1080p.BluRay.x264.mkv", "O Senhor dos Anéis - A Sociedade do Anel (2001) [tmdbid-120].mkv")}
+${ex("Nome.do.Filme.2001.1080p.BluRay.x264.mkv", "Nome do Filme (2001) [tmdbid-12345].mkv")}
 <ol>
   <li>Adicione a regra e clique em <b>Buscar no TMDB</b>. O programa tira o título e o ano do nome de cada arquivo (pontos viram espaços; somem colchetes, parênteses e marcas como 1080p, BluRay, x264) e procura no TMDB.</li>
   <li>Quando o título e o ano batem sem dúvida, o filme é escolhido sozinho (<b>✓</b> ao lado do novo nome). Quando há dúvida (<b>?</b>), abre a janela de revisão: clique no filme certo (ou aperte 1–9). O ano do arquivo pode estar um ano antes ou depois do TMDB; isso é levado em conta.</li>
@@ -254,14 +254,20 @@ ${ex("O.Senhor.dos.Aneis.2001.1080p.BluRay.x264.mkv", "O Senhor dos Anéis - A S
 <ul>
   <li><b>Modelo</b>: <code>{título}</code>, <code>{original}</code> (título original), <code>{ano}</code> e <code>{id}</code>. O padrão é <code>{título} ({ano}) [tmdbid-{id}]</code>.</li>
   <li><b>Trocar ":" por</b>: dois-pontos não são aceitos no Windows; por padrão viram <code> - </code>. Barras viram hífens e <code>? * &lt; &gt; |</code> são removidos.</li>
-  <li>Legendas e outros arquivos com o mesmo nome do filme recebem a mesma escolha. Legendas mantêm o idioma no fim do nome: <code>Matrix (1999) [tmdbid-603].pt-BR.srt</code>.</li>
-  <li><b>Criar uma pasta para cada filme</b>: o filme e as legendas vão para uma pasta com o novo nome, como o Jellyfin recomenda: <code>Filmes/Matrix (1999) [tmdbid-603]/Matrix (1999) [tmdbid-603].mkv</code>. Um filme que já está na pasta certa não é movido de novo. Desfazer devolve os arquivos e apaga a pasta, se ela ficar vazia.</li>
+  <li>Legendas e outros arquivos com o mesmo nome do filme recebem a mesma escolha. Legendas mantêm o idioma no fim do nome: <code>Nome do Filme (1999) [tmdbid-12345].pt-BR.srt</code>.</li>
+  <li><b>Criar uma pasta para cada filme</b>: o filme e as legendas vão para uma pasta com o novo nome, como o Jellyfin recomenda: <code>Filmes/Nome do Filme (1999) [tmdbid-12345]/Nome do Filme (1999) [tmdbid-12345].mkv</code>. Um filme que já está na pasta certa não é movido de novo. Desfazer devolve os arquivos e apaga a pasta, se ela ficar vazia.</li>
   <li>Para tirar os acentos, acrescente a regra <b>Remover caracteres → Acentos</b> depois desta.</li>
 </ul>
 <h4>Metadados (.nfo e pôster)</h4>
 <p>Com <b>Salvar .nfo e pôster ao lado do filme</b>, ao renomear o programa cria, junto de cada vídeo, <code>Nome (ano) [tmdbid-…].nfo</code> e o pôster; opcionalmente também a imagem de fundo (fanart) e o logo do filme. Dentro da pasta do filme, as imagens se chamam <code>poster.jpg</code>, <code>fanart.jpg</code> e <code>logo.png</code>; soltas, levam o nome do filme na frente (<code>…-poster.jpg</code>). Jellyfin, Kodi e Emby leem esses arquivos.</p>
-<p>O <code>.nfo</code> traz tudo o que o TMDB tem e o Jellyfin lê: título e título original, ano e data de lançamento, sinopse e frase de efeito, duração, nota e votos, classificação indicativa do país do idioma escolhido (ex.: BR-12), gêneros, palavras-chave (como etiquetas), países, estúdios, coleção (ex.: "O Senhor dos Anéis – Coleção"), trailer do YouTube, direção, roteiro, elenco com personagens e fotos, produtores, compositor e os IDs do TMDB e do IMDb. O arquivo do filme não é alterado, arquivos que já existem não são substituídos, e <b>desfazer</b> a renomeação apaga o que foi criado.</p>
+<p>O <code>.nfo</code> traz tudo o que o TMDB tem e o Jellyfin lê: título e título original, ano e data de lançamento, sinopse e frase de efeito, duração, nota e votos, classificação indicativa do país do idioma escolhido (ex.: BR-12), gêneros, palavras-chave (como etiquetas), países, estúdios, coleção (ex.: "Nome da Coleção"), trailer do YouTube, direção, roteiro, elenco com personagens e fotos, produtores, compositor e os IDs do TMDB e do IMDb. O arquivo do filme não é alterado, arquivos que já existem não são substituídos, e <b>desfazer</b> a renomeação apaga o que foi criado.</p>
 <p>Filmes que <b>já têm o nome certo</b> também recebem os metadados: o botão Renomear os conta, e a confirmação avisa. Se o nome já traz <code>[tmdbid-…]</code>, o filme é reconhecido direto pelo ID, sem busca. Assim dá para completar uma biblioteca já organizada só com .nfo e imagens.</p>
+<h4>Limitações</h4>
+<ul>
+  <li>O filme é procurado pelo título e pelo ano do nome do arquivo. Nomes muito abreviados, só com siglas ou com o título em outro idioma podem não ser achados; nesse caso, corrija o título na revisão.</li>
+  <li>Filmes com o mesmo nome (refilmagens, por exemplo) só se distinguem pelo ano; sem o ano no nome, a escolha costuma ir para a revisão.</li>
+  <li>Filmes raros, regionais ou muito recentes podem não estar no TMDB, ou estar sem tradução, sinopse ou pôster.</li>
+</ul>
 <p class="tip">Só o título e o ano procurados são enviados ao TMDB, nunca o nome completo do arquivo nem as pastas.</p>`,
   },
   {
@@ -270,7 +276,7 @@ ${ex("O.Senhor.dos.Aneis.2001.1080p.BluRay.x264.mkv", "O Senhor dos Anéis - A S
     sub: true,
     html: `
 <p>Dá a cada episódio o nome oficial do <b>TMDB</b>, com temporada, número e título, no formato que o Jellyfin reconhece. Usa a mesma chave da API da regra de filmes.</p>
-${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...E o Saco Está no Rio.mkv")}
+${ex("Nome.da.Serie.S01E03.720p.WEB-DL.mkv", "Nome da Série (2008) - S01E03 - Título do Episódio.mkv")}
 <ol>
   <li>No campo <b>Série</b>, digite o nome, o ID do TMDB ou cole o link da página da série (<code>themoviedb.org/tv/1396-…</code>). Vazio, o programa usa o nome que os arquivos têm em comum, ou o nome da pasta.</li>
   <li>Clique em <b>Buscar episódios</b>. Se houver mais de uma série parecida, escolha a certa. O programa baixa a lista completa de episódios e procura o de cada arquivo visível.</li>
@@ -278,7 +284,7 @@ ${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...E
 </ol>
 <h4>Como cada episódio é encontrado</h4>
 <ul>
-  <li><b>Pelo número</b>, em vários formatos: <code>S01E02</code>, <code>s1e2</code>, <code>1x02</code>, <code>T1 E2</code>, <code>Temporada 1 Episódio 2</code>, <code>Ep 02</code> (a temporada vem da pasta, como <code>Season 2</code> ou <code>Temporada 2</code>), numeração corrida (<code>Naruto - 125</code>), <code>201</code> (temporada 2, episódio 1) e data de exibição (<code>2024.03.15</code>). Arquivos com dois episódios (<code>S01E01E02</code>, <code>S01E01-02</code>) viram <code>S01E01-E02</code>.</li>
+  <li><b>Pelo número</b>, em vários formatos: <code>S01E02</code>, <code>s1e2</code>, <code>1x02</code>, <code>T1 E2</code>, <code>Temporada 1 Episódio 2</code>, <code>Ep 02</code> (a temporada vem da pasta, como <code>Season 2</code> ou <code>Temporada 2</code>), numeração corrida (<code>Nome da Série - 125</code>), <code>201</code> (temporada 2, episódio 1) e data de exibição (<code>2024.03.15</code>). Arquivos com dois episódios (<code>S01E01E02</code>, <code>S01E01-02</code>) viram <code>S01E01-E02</code>.</li>
   <li><b>Pelo título</b>: o texto depois do número é comparado com os títulos de todos os episódios, no seu idioma, em inglês e no idioma original, ignorando acentos, maiúsculas e pequenos erros de grafia. Sem número nenhum, o título sozinho basta, se for claro.</li>
   <li><b>Quando o número e o título discordam</b> (o nome diz S02E08, mas o título é o do S01E03), o arquivo fica com <b>?</b>, e a revisão mostra as duas opções, sugerindo a do título.</li>
 </ul>
@@ -291,7 +297,7 @@ ${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...E
   <li>Os arquivos que não estão na série escolhida ficam como estão. Para várias séries, filtre a lista e busque uma de cada vez: cada arquivo guarda a sua.</li>
 </ul>
 <h4>Pastas da série e da temporada</h4>
-<p>Com <b>Organizar em pastas da série e da temporada</b>, cada episódio vai para a estrutura que o Jellyfin recomenda: <code>Séries/Breaking Bad (2008) [tmdbid-1396]/Season 01/…</code>. A pasta da série é criada ao lado da pasta onde a série já está (se os arquivos estão em <code>Breaking Bad/Season 1</code>, a nova pasta fica ao lado de <code>Breaking Bad</code>, não dentro dela); com os arquivos soltos, dentro da pasta deles. O nome da pasta da série tem o próprio modelo, com as mesmas variáveis (padrão <code>{série} ({ano}) [tmdbid-{id}]</code>; use <code>{original}</code> para o nome original). As pastas antigas que ficarem vazias são apagadas; as que ainda têm outros arquivos ficam. <b>Desfazer</b> devolve tudo ao lugar, recriando as pastas antigas.</p>
+<p>Com <b>Organizar em pastas da série e da temporada</b>, cada episódio vai para a estrutura que o Jellyfin recomenda: <code>Séries/Nome da Série (2008) [tmdbid-12345]/Season 01/…</code>. A pasta da série é criada ao lado da pasta onde a série já está (se os arquivos estão em <code>Nome da Série/Season 1</code>, a nova pasta fica ao lado de <code>Nome da Série</code>, não dentro dela); com os arquivos soltos, dentro da pasta deles. O nome da pasta da série tem o próprio modelo, com as mesmas variáveis (padrão <code>{série} ({ano}) [tmdbid-{id}]</code>; use <code>{original}</code> para o nome original). As pastas antigas que ficarem vazias são apagadas; as que ainda têm outros arquivos ficam. <b>Desfazer</b> devolve tudo ao lugar, recriando as pastas antigas.</p>
 <h4>Metadados (.nfo e imagens)</h4>
 <p>Com <b>Salvar .nfo e imagens para o Jellyfin</b>, ao renomear o programa cria:</p>
 <ul>
@@ -300,6 +306,13 @@ ${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...E
   <li>ao lado de <b>cada episódio</b>: <code>….nfo</code> (título, temporada e número, data de exibição, sinopse, duração, nota, direção, roteiro e atores convidados) e a miniatura <code>…-thumb.jpg</code>.</li>
 </ul>
 <p>Os arquivos da série e da temporada só são criados quando os episódios estão numa pasta da série (com o nome dela, ou com <code>[tmdbid-…]</code>), seja a de antes, seja a criada pela opção de pastas. Episódios que já têm o nome certo também recebem os metadados. Arquivos que já existem não são substituídos, e desfazer apaga o que foi criado.</p>
+<h4>Limitações</h4>
+<ul>
+  <li>Uma série por vez: para várias, filtre a lista e busque uma de cada vez.</li>
+  <li>A divisão em temporadas é a do TMDB. Animes e séries com numeração corrida às vezes estão divididos de outro jeito lá, e os números do arquivo não batem; confira na revisão.</li>
+  <li>Os especiais (temporada 0) costumam ter numeração diferente da usada nos lançamentos e quase sempre precisam de revisão.</li>
+  <li>Um arquivo com vários episódios só é reconhecido quando eles são da mesma temporada.</li>
+</ul>
 <p class="tip">Só o nome da série é enviado ao TMDB, nunca o nome dos arquivos nem as pastas.</p>`,
   },
   {
@@ -308,7 +321,7 @@ ${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...E
     sub: true,
     html: `
 <p>Dá a cada música o nome que vem das <b>tags</b> gravadas no arquivo (ID3 do MP3, Vorbis do FLAC e do OGG, MP4 do M4A e outras), sem precisar de internet.</p>
-${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
+${ex("01.mp3", "01 - Título da Música.mp3")}
 <ul>
   <li><b>Modelo</b>: <code>{faixa}</code>, <code>{título}</code>, <code>{artista}</code>, <code>{artista do álbum}</code>, <code>{álbum}</code>, <code>{ano}</code>, <code>{disco}</code>, <code>{gênero}</code> e <code>{compositor}</code>. O padrão é <code>{faixa} - {título}</code>. A faixa tem dois dígitos (três em álbuns com mais de 99 faixas).</li>
   <li>Tags vazias não deixam sobras: com <code>{faixa} - {artista} - {título}</code>, uma música sem artista vira <code>01 - Título</code>.</li>
@@ -316,17 +329,17 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li><b>O álbum como um todo</b>: as faixas de um mesmo álbum (mesma pasta, ou discos <code>CD 01</code>/<code>CD 02</code>, e mesmo nome de álbum) combinam os dados do álbum. Uma faixa sem ano recebe o das outras. Sem "artista do álbum" nas tags, vale o artista da maioria das faixas (desconsiderando participações, como <code>feat.</code>); sem maioria, o álbum é uma coletânea: <code>Various Artists</code>, como o Jellyfin reconhece. Assim, as faixas de um álbum nunca se espalham em pastas diferentes.</li>
   <li><b>Faixas bônus</b>: numa pasta em que a maioria das músicas é de um álbum, as faixas com outro álbum nas tags (um single, uma trilha sonora) e numeradas depois das do álbum (<code>15</code>, <code>16</code> depois de <code>01</code>–<code>14</code>) ficam com esse álbum.</li>
   <li><b>Singles</b>: uma música com o álbum <code>Single</code> nas tags tem o próprio título como álbum.</li>
-  <li><b>Coletâneas</b>: num álbum em que a maioria das faixas é de outros artistas que não o do álbum, o artista entra no nome antes do título quando o modelo não o tem: <code>03 - Eric Burdon - Orange and Red Beams</code>.</li>
+  <li><b>Coletâneas</b>: num álbum em que a maioria das faixas é de outros artistas que não o do álbum, o artista entra no nome antes do título quando o modelo não o tem: <code>03 - Artista da Faixa - Título</code>.</li>
   <li>Se o nome do álbum já traz um ano (<code>Programa 12 (2025-05-04)</code>), o <code>({ano})</code> do modelo é omitido.</li>
   <li>Músicas <b>sem título nas tags</b> ficam como estão e ganham <b>✕</b> (a não ser que a busca as identifique pelo som, veja abaixo); o card mostra quantas são. Com <b>Completar pelo nome do arquivo</b>, o programa lê <code>01 - Artista - Título</code>, <code>01. Título</code> ou <code>1-05 Título</code> do nome, e o álbum e o ano da pasta (<code>Artista - Álbum (1975)</code>, ou só <code>Álbum</code>; uma pasta <code>CD2</code> dá o disco). As tags que existem têm preferência.</li>
 </ul>
 <h4>Pastas de artista e álbum</h4>
-<p>Com <b>Organizar em pastas de artista e álbum</b>, cada música vai para <code>{artista do álbum}/{álbum} ({ano})</code> (o modelo das pastas pode ser trocado; cada <code>/</code> é um nível). Assim, <code>Música/Pink Floyd/WYWH/CD1/01.mp3</code> vira <code>Música/Pink Floyd/Wish You Were Here (1975)/01 - Shine On….mp3</code>: as pastas que já levam o nome do artista, do álbum ou do disco (ou que estão dentro da pasta do artista) são substituídas, não ganham pastas novas dentro. Arquivos soltos ganham as pastas dentro da pasta onde estão. Pequenas diferenças de grafia entre a pasta e a tag (<code>Сага об</code> e <code>Сага о</code>) não atrapalham. Uma pasta que já reúne álbuns com o nome dela (<code>Programa (1000 - ..)</code> para os álbuns "Programa 1037 - …") é tratada como coleção: os álbuns ficam direto nela, sem pastas de artista no meio.</p>
+<p>Com <b>Organizar em pastas de artista e álbum</b>, cada música vai para <code>{artista do álbum}/{álbum} ({ano})</code> (o modelo das pastas pode ser trocado; cada <code>/</code> é um nível). Assim, <code>Música/Artista/Album/CD1/01.mp3</code> vira <code>Música/Artista/Álbum (1975)/01 - Título da Música.mp3</code>: as pastas que já levam o nome do artista, do álbum ou do disco (ou que estão dentro da pasta do artista) são substituídas, não ganham pastas novas dentro. Arquivos soltos ganham as pastas dentro da pasta onde estão. Pequenas diferenças de grafia entre a pasta e a tag (<code>Сказка об</code> e <code>Сказка о</code>) não atrapalham. Uma pasta que já reúne álbuns com o nome dela (<code>Programa (1000 - ..)</code> para os álbuns "Programa 1037 - …") é tratada como coleção: os álbuns ficam direto nela, sem pastas de artista no meio.</p>
 <p><b>Cópias</b>: se duas cópias idênticas de um álbum (encontradas pelo programa, como em <b>Cópias idênticas</b>) iriam para o mesmo lugar, a primeira segue e a outra fica onde está, marcada como cópia.</p>
 <ul>
   <li>Letras (<code>.lrc</code>) com o mesmo nome de uma música recebem o novo nome dela e vão junto.</li>
   <li>Capas, <code>.cue</code>, <code>.log</code> e outros arquivos da pasta do álbum vão junto com a maioria das músicas da pasta (músicas de outros álbuns que não sejam faixas bônus seguem o álbum delas). Subpastas sem músicas (<code>Artwork</code>, <code>Scans</code>) vão junto, com o mesmo nome; arquivos da pasta acima de <code>CD 01</code>/<code>CD 02</code> também. Se dois desses arquivos tiverem o mesmo nome (um <code>log.txt</code> em cada disco), ganham o nome da pasta de origem: <code>log (CD 01).txt</code>.</li>
-  <li>Nomes de artista ou álbum que só diferem em maiúsculas (<code>a-ha</code> e <code>A-Ha</code>, de tags de álbuns diferentes) viram uma pasta só: a que já existe no disco ou a grafia mais usada.</li>
+  <li>Nomes de artista ou álbum que só diferem em maiúsculas (<code>nome do artista</code> e <code>Nome do Artista</code>, de tags de álbuns diferentes) viram uma pasta só: a que já existe no disco ou a grafia mais usada.</li>
   <li>Pastas antigas que ficarem vazias são apagadas; desfazer devolve tudo ao lugar.</li>
   <li><b>Criar uma playlist por álbum</b>: depois de renomear, grava <code>&lt;nome da pasta&gt;.m3u8</code> na pasta de cada álbum, com as músicas (de todos os discos) na ordem dos discos e faixas. Vale também para os álbuns que já estão com os nomes certos (eles contam no botão <b>Renomear</b>). Não é criada se o álbum já tiver um <code>.cue</code> ou uma playlist, nem para uma música sozinha. Desfazer apaga a playlist criada.</li>
   <li>Arquivos <code>.cue</code> e listas <code>.m3u</code> passam a citar os novos nomes das músicas (veja <b>Renomear e desfazer</b>).</li>
@@ -354,7 +367,62 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li>Cada música leva cerca de meio segundo para ser ouvida e consultada.</li>
 </ul>
 <p class="tip">Ao AcoustID vão só a impressão digital do som e a duração de cada música, nunca o arquivo.</p>
+<h4>Limitações</h4>
+<ul>
+  <li>Sem a busca no MusicBrainz, o nome depende só das tags: tags erradas geram nomes errados.</li>
+  <li>Lançamentos regionais, independentes, piratas ou muito recentes podem não estar no MusicBrainz; aí valem as tags.</li>
+  <li>Pelo som, gravações muito parecidas (uma remasterização, uma regravação do próprio artista) podem ser confundidas. Quando o álbum fica em dúvida, ele vai para a revisão.</li>
+  <li>Músicas em Opus, WMA e outros formatos não listados acima não são ouvidas.</li>
+  <li>No MP3 e no M4A, desfazer a gravação das tags não traz de volta os campos raros nem as tags ID3v1 e APE.</li>
+</ul>
 <p class="tip">Sem <b>Gravar as tags nos arquivos</b>, o Renome só lê as tags; o conteúdo das músicas não é alterado. Ao MusicBrainz vão só o artista e o nome do álbum.</p>`,
+  },
+  {
+    id: "r-book",
+    title: "Livro (Open Library)",
+    sub: true,
+    html: `
+<p>Dá a cada livro o nome que vem do <b>Open Library</b> (openlibrary.org), um catálogo aberto de livros mantido pelo Internet Archive. Quando o Open Library não conhece o ISBN, ele é procurado na <b>BrasilAPI</b> (brasilapi.com.br), que reúne os registros das editoras brasileiras na CBL. Nenhum dos dois precisa de chave.</p>
+${ex("titulo_do_livro_autor.pdf", "Nome do Autor - Título do Livro (1937).pdf")}
+<ol>
+  <li>Adicione a regra e clique em <b>Buscar no Open Library</b>. Para cada livro (EPUB, MOBI, AZW3, PDF, FB2 e DjVu), o programa lê os dados gravados no próprio arquivo: título, autor, ISBN, editora e série. O que faltar vem do nome do arquivo.</li>
+  <li>Com o <b>ISBN</b>, o livro é achado direto, na edição exata (<b>✓</b>), no Open Library ou na BrasilAPI. Sem ele, o programa busca pelo título e pelo autor: se batem sem dúvida, o livro é escolhido sozinho; senão (<b>?</b>), abre a revisão, com capa, autores, título original e número de edições, para você escolher (clique, ou aperte 1–9).</li>
+  <li>Se nenhum servir, corrija o título ou o autor na janela e busque de novo. Dá para buscar só pelo autor, com o título vazio, e ver os livros dele. Ou marque <b>Nenhum destes</b> (<b>✕</b>: o arquivo fica como está).</li>
+</ol>
+<h4>De onde vêm os dados</h4>
+<ul>
+  <li><b>EPUB</b>: título, autores, ISBN, editora, idioma e série (dos dados do EPUB 2 ou 3). Sem ISBN nos dados, o programa o procura no texto das primeiras e das últimas páginas, onde fica a ficha catalográfica.</li>
+  <li><b>MOBI e AZW3</b> (Kindle): título, autor, ISBN, editora e data, do cabeçalho do arquivo.</li>
+  <li><b>PDF</b>: título e autor dos dados do documento, e o ISBN procurado no texto das primeiras e das últimas páginas. Títulos que os programas põem sozinhos (<code>Microsoft Word - final.docx</code>, <code>Sem título</code>) são ignorados.</li>
+  <li><b>FB2</b>: título, autores, série, editora, ano e ISBN.</li>
+  <li><b>DjVu</b>: só o nome do arquivo.</li>
+  <li><b>Nome do arquivo</b>: entende <code>Autor - Título</code> e <code>Título - Autor</code> (a busca descobre qual é qual), <code>Título by Autor</code>, o ano entre parênteses (<code>(1899)</code>, <code>(2015, Editora)</code>), o número na série (<code>Autor - 03 - …</code>) e o ISBN. Marcas como <code>z-lib.org</code>, <code>libgen</code>, <code>epub</code> e <code>retail</code> são ignoradas, e <code>_</code> vira espaço.</li>
+</ul>
+<ul>
+  <li><b>Modelo</b>: <code>{autor}</code> (o primeiro), <code>{autores}</code> (todos, separados por &amp;), <code>{autor invertido}</code> (pelo sobrenome: <i>Sobrenome, Nome</i>), <code>{inicial}</code> (a primeira letra do sobrenome), <code>{título}</code>, <code>{título original}</code>, <code>{ano}</code> (da primeira publicação da obra), <code>{ano da edição}</code>, <code>{editora}</code>, <code>{isbn}</code>, <code>{série}</code>, <code>{volume}</code> (o número na série, com dois dígitos: <code>03</code>, para os livros ficarem em ordem) e <code>{id}</code> (do Open Library). O padrão é <code>{autor} - {título} ({ano})</code>. Valores que faltam não deixam sobras: sem série, <code>{série} {volume} - {título}</code> vira só o título.</li>
+  <li><b>Trocar título e autor</b>: o botão ⇄ na revisão inverte os dois campos, para nomes lidos ao contrário.</li>
+  <li>O <b>título</b> é o da edição no idioma escolhido nas Opções (<b>Idioma dos títulos</b>). Quando o arquivo traz outro título, de outra tradução, fica o do arquivo. O título original aparece na revisão e em <code>{título original}</code>.</li>
+  <li>O mesmo livro em vários formatos (<code>.epub</code>, <code>.pdf</code>, <code>.mobi</code>) com os mesmos dados faz uma busca só e recebe a mesma escolha.</li>
+</ul>
+<h4>Pastas, capa e metadata.opf</h4>
+<ul>
+  <li><b>Organizar em pastas de autor e livro</b>: cada livro vai para <code>{autor}/{título}</code> (o modelo das pastas pode ser trocado; cada <code>/</code> é um nível), como o Audiobookshelf espera. Em bibliotecas grandes, <code>{inicial}/{autor invertido}/{título}</code> dá <code>S/Sobrenome, Nome/Título do Livro</code>. Um ponto no fim do nome de uma pasta (<i>Sobrenome, C. S.</i>) sai, porque o Windows não aceita pastas terminadas em ponto. Pastas que já têm o nome do autor ou do livro são aproveitadas, sem ganhar pastas novas dentro. Pastas que ficarem vazias são apagadas; desfazer devolve tudo ao lugar.</li>
+  <li><b>Salvar a capa</b>: grava a capa do Open Library como <code>cover.jpg</code> na pasta do livro; sem a opção de pastas, com o nome do arquivo do livro (<code>….jpg</code>).</li>
+  <li><b>Salvar os dados do livro</b>: grava <code>metadata.opf</code> (ou <code>….opf</code>, sem a opção de pastas), no formato OPF, com título, autores, sinopse, assuntos, editora, ano, idioma, ISBN e série. O Audiobookshelf e os gerenciadores de e-books leem esse arquivo.</li>
+  <li>Livros que já têm o nome certo também recebem a capa e os dados (eles contam no botão <b>Renomear</b>). Arquivos que já existem não são substituídos, e desfazer apaga o que foi criado. O arquivo do livro nunca é alterado.</li>
+</ul>
+<h4>Limitações</h4>
+<ul>
+  <li><b>PDF</b>: muitos PDFs têm os dados do documento vazios ou errados (o nome do arquivo do Word, o nome do computador de quem o fez). Um PDF <b>escaneado</b> é só uma sequência de imagens, sem texto onde procurar o ISBN. Nesses casos resta o nome do arquivo: um nome claro, como <code>Autor - Título</code>, ajuda muito; um nome confuso leva à revisão.</li>
+  <li><b>Sem ISBN</b>, o livro é achado pelo título e pelo autor, mas não se sabe qual é a edição: o nome usa a editora e o ISBN do próprio arquivo, quando ele os tem, e <code>{ano da edição}</code> fica vazio.</li>
+  <li>O <b>Open Library</b> é mantido por voluntários. Livros brasileiros recentes ou de editoras pequenas podem não estar lá, ou estar sem capa, sem ano ou repetidos, com dados um pouco diferentes em cada cópia. Muitas traduções faltam: quando o título não é achado, a revisão mostra os outros livros do autor, onde a obra pode estar com o título original, ou nem estar. Nesse caso, marque <b>Nenhum destes</b> e renomeie à mão.</li>
+  <li>A <b>BrasilAPI</b> só ajuda livros com ISBN, quase sempre de editoras brasileiras. Ela costuma vir sem capa e sem ano. O ano da primeira publicação e a capa vêm do Open Library quando ele tem a obra; se não tiver, <code>{ano}</code> fica vazio e não há capa. Entre os autores podem vir o tradutor ou o ilustrador: quando o arquivo diz quem é o autor, só ele fica.</li>
+  <li>Às vezes o <b>ISBN gravado no arquivo é de outro livro</b> (o de uma propaganda no fim, ou o da caixa de uma coleção), ou o catálogo tem um erro. Quando o título e o autor achados não batem com os do arquivo, o livro não é escolhido sozinho: vai para a revisão.</li>
+  <li><code>{ano}</code> é o da primeira publicação da obra: um livro lançado em 1937 fica com 1937, mesmo numa edição de 2019. Quando o catálogo dá um ano posterior ao da edição gravada no arquivo, o que é erro dele, <code>{ano}</code> fica vazio. O ano da sua edição (<code>{ano da edição}</code>) só é conhecido quando o livro é achado pelo ISBN.</li>
+  <li>A <b>série</b> e o <b>volume</b> vêm só dos dados do arquivo (do EPUB ou do FB2) ou do número no nome; o Open Library quase nunca os informa.</li>
+  <li>Quadrinhos (CBZ, CBR) e revistas não são tratados por esta regra.</li>
+</ul>
+<p class="tip">Ao Open Library vão só o título, o autor e o ISBN procurados, e à BrasilAPI só o ISBN, nunca o nome completo do arquivo, as pastas ou o conteúdo do livro.</p>`,
   },
   {
     id: "preview",
@@ -363,7 +431,8 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
 <p>A coluna <b>Novo nome</b> mostra o resultado das regras na hora. Nas linhas que mudam:</p>
 <ul>
   <li>no <b>Nome atual</b>, o que vai sair aparece <span class="del">em vermelho, riscado</span>;</li>
-  <li>no <b>Novo nome</b>, o que entra aparece <span class="ins">em azul</span>.</li>
+  <li>no <b>Novo nome</b>, o que entra aparece <span class="ins">em azul</span>;</li>
+  <li>o que só mudou de lugar (o autor que passou para a frente do título, por exemplo) aparece <span class="mov">sublinhado com pontinhos</span>, nos dois lados.</li>
 </ul>
 <p>Na primeira coluna, ● indica que o arquivo será renomeado, <span class="bad">!</span> vermelho indica um conflito e <span class="warn">!</span> amarelo indica um aviso. Passe o mouse para ver o motivo.</p>
 <h4>Editar à mão</h4>

@@ -8,6 +8,7 @@ use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use regex::{NoExpand, Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
 
+use crate::books::{self, BookMatch};
 use crate::files::{FileEntry, join_name, split_name};
 use crate::music::{self, AudioTags};
 use crate::text;
@@ -281,10 +282,34 @@ pub enum Rule {
         #[serde(default = "yes")]
         clean_tags: bool,
     },
+    /// Names each book after the one chosen for it on Open Library (files
+    /// without one are left alone). The search happens outside the rules.
+    Book {
+        /// `{author}`, `{title}`, `{year}`, `{series}`, `{volume}`…
+        template: String,
+        #[serde(default = "colon")]
+        colon: String,
+        /// Moves each book into folders made from `folder_template`.
+        #[serde(default)]
+        folders: bool,
+        /// Folder levels separated by `/`, with the same keys as `template`.
+        #[serde(default = "book_folder")]
+        folder_template: String,
+        /// Save the cover next to the book (used by the app).
+        #[serde(default)]
+        cover: bool,
+        /// Write a `metadata.opf` file (used by the app).
+        #[serde(default)]
+        opf: bool,
+    },
 }
 
 fn colon() -> String {
     " - ".into()
+}
+
+fn book_folder() -> String {
+    "{author}/{title}".into()
 }
 
 fn music_folder() -> String {
@@ -354,6 +379,8 @@ pub struct Ctx<'a> {
     /// The song's tags with the album-wide fields agreed (by the preview),
     /// for the music rule; read from the file when missing.
     pub song: Option<&'a AudioTags>,
+    /// The book chosen for this file, for the book rule.
+    pub book: Option<&'a BookMatch>,
 }
 
 enum Compiled {
@@ -458,6 +485,23 @@ impl Pipeline {
                                 tv::season_folder(m.season),
                             ],
                         });
+                    }
+                    if !ctx.file.is_dir
+                        && let Rule::Book {
+                            folders: true,
+                            folder_template,
+                            colon,
+                            ..
+                        } = rule
+                        && let Some(m) = ctx.book
+                    {
+                        let levels = books::folders(folder_template, m, colon);
+                        if !levels.is_empty() {
+                            moved = Some(Move::Into {
+                                root: books::library_root(&ctx.file.dir, m, &levels),
+                                folders: levels,
+                            });
+                        }
                     }
                     if let Rule::Music {
                         folders: true,
@@ -788,6 +832,17 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             }
         }
 
+        Rule::Book {
+            template, colon, ..
+        } => {
+            if let Some(m) = ctx.book {
+                let name = books::book_name(template, m, colon);
+                if !name.is_empty() {
+                    *stem = name;
+                }
+            }
+        }
+
         Rule::Replace { .. } | Rule::Regex { .. } => unreachable!("compiled separately"),
     }
 }
@@ -978,6 +1033,7 @@ mod tests {
             movie: None,
             episode: None,
             song: None,
+            book: None,
         });
         join_name(&s, &e)
     }
@@ -1400,6 +1456,7 @@ mod tests {
             movie: None,
             episode: None,
             song: None,
+            book: None,
         });
         assert_eq!(s, "a");
     }

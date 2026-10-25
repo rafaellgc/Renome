@@ -126,13 +126,13 @@ ${ex("Show - Episode - S01E02.mkv", "Show - S01E02 - Episode.mkv")}
     sub: true,
     html: `
 <ul>
-  <li><b>lowercase</b>: <code>The Lord Of The Rings</code> → <code>the lord of the rings</code></li>
-  <li><b>UPPERCASE</b>: → <code>THE LORD OF THE RINGS</code></li>
-  <li><b>Sentence case</b>: → <code>The lord of the rings</code></li>
-  <li><b>Title Case Every Word</b>: → <code>The Lord Of The Rings</code></li>
-  <li><b>Title Case, except of/the/and…</b>: → <code>The Lord of the Rings</code>. Short linking words (of, the, and, to, in, de, da, del, la, y…) stay lowercase, except at the start of the name or of a part (after <code> - </code>, <code>:</code> or <code>(</code>).</li>
+  <li><b>lowercase</b>: <code>A Day at the Beach</code> → <code>a day at the beach</code></li>
+  <li><b>UPPERCASE</b>: → <code>A DAY AT THE BEACH</code></li>
+  <li><b>Sentence case</b>: → <code>A day at the beach</code></li>
+  <li><b>Title Case Every Word</b>: → <code>A Day At The Beach</code></li>
+  <li><b>Title Case, except of/the/and…</b>: → <code>A Day at the Beach</code>. Short linking words (of, the, and, to, in, de, da, del, la, y…) stay lowercase, except at the start of the name or of a part (after <code> - </code>, <code>:</code> or <code>(</code>).</li>
 </ul>
-<p>In both Title Case modes, Roman numerals stay in capitals (<code>Rocky III</code>, <code>Part II</code>) and words with capitals inside stay as they are (<code>iPhone</code>, <code>McDonald's</code>).</p>
+<p>In both Title Case modes, Roman numerals stay in capitals (<code>Fase III</code>, <code>Part II</code>) and words with capitals inside stay as they are (<code>iPhone</code>, <code>McDonald's</code>).</p>
 <p>Use "Apply to: Extension" to change only the extension.</p>`,
   },
   {
@@ -245,7 +245,7 @@ ${ex("_photo.jpg", "photo.jpg")}
     sub: true,
     html: `
 <p>Gives each movie its official name from <b>TMDB</b> (themoviedb.org), in the format Jellyfin recognizes. It needs a free <b>TMDB API key</b>, entered in Options.</p>
-${ex("The.Lord.of.the.Rings.2001.1080p.BluRay.x264.mkv", "The Lord of the Rings - The Fellowship of the Ring (2001) [tmdbid-120].mkv")}
+${ex("Movie.Name.2001.1080p.BluRay.x264.mkv", "Movie Name (2001) [tmdbid-12345].mkv")}
 <ol>
   <li>Add the rule and click <b>Search TMDB</b>. The program takes the title and year from each file name (dots become spaces; brackets, parentheses and tags like 1080p, BluRay, x264 are dropped) and searches TMDB.</li>
   <li>When title and year clearly match, the movie is picked automatically (<b>✓</b> next to the new name). When in doubt (<b>?</b>), the review window opens: click the right movie (or press 1–9). The year in the file may be one year off from TMDB; that is taken into account.</li>
@@ -254,14 +254,20 @@ ${ex("The.Lord.of.the.Rings.2001.1080p.BluRay.x264.mkv", "The Lord of the Rings 
 <ul>
   <li><b>Template</b>: <code>{title}</code>, <code>{original}</code> (original title), <code>{year}</code> and <code>{id}</code>. The default is <code>{title} ({year}) [tmdbid-{id}]</code>.</li>
   <li><b>Replace ":" with</b>: Windows does not accept colons; by default they become <code> - </code>. Slashes become dashes and <code>? * &lt; &gt; |</code> are removed.</li>
-  <li>Subtitles and other files with the same name as the movie get the same choice. Subtitles keep their language at the end of the name: <code>The Matrix (1999) [tmdbid-603].pt-BR.srt</code>.</li>
-  <li><b>Create a folder for each movie</b>: the movie and its subtitles go into a folder with the new name, as Jellyfin recommends: <code>Movies/The Matrix (1999) [tmdbid-603]/The Matrix (1999) [tmdbid-603].mkv</code>. A movie already in the right folder is not moved again. Undo puts the files back and deletes the folder if it is left empty.</li>
+  <li>Subtitles and other files with the same name as the movie get the same choice. Subtitles keep their language at the end of the name: <code>Movie Name (1999) [tmdbid-12345].pt-BR.srt</code>.</li>
+  <li><b>Create a folder for each movie</b>: the movie and its subtitles go into a folder with the new name, as Jellyfin recommends: <code>Movies/Movie Name (1999) [tmdbid-12345]/Movie Name (1999) [tmdbid-12345].mkv</code>. A movie already in the right folder is not moved again. Undo puts the files back and deletes the folder if it is left empty.</li>
   <li>To remove accents, add the <b>Remove characters → Accents</b> rule after this one.</li>
 </ul>
 <h4>Metadata (.nfo and poster)</h4>
 <p>With <b>Save .nfo and poster next to the movie</b>, renaming also creates, next to each video, <code>Name (year) [tmdbid-…].nfo</code> and the poster; optionally the background image (fanart) and the movie's logo too. Inside the movie's folder the images are named <code>poster.jpg</code>, <code>fanart.jpg</code> and <code>logo.png</code>; next to other movies they start with the movie's name (<code>…-poster.jpg</code>). Jellyfin, Kodi and Emby read these files.</p>
-<p>The <code>.nfo</code> holds everything TMDB has that Jellyfin reads: title and original title, year and release date, overview and tagline, runtime, rating and votes, the age rating of the chosen language's country (e.g. PG-13), genres, keywords (as tags), countries, studios, collection (e.g. "The Lord of the Rings Collection"), YouTube trailer, director, writers, cast with characters and photos, producers, composer and the TMDB and IMDb ids. The movie file is not changed, existing files are not replaced, and <b>undoing</b> the rename deletes what was created.</p>
+<p>The <code>.nfo</code> holds everything TMDB has that Jellyfin reads: title and original title, year and release date, overview and tagline, runtime, rating and votes, the age rating of the chosen language's country (e.g. PG-13), genres, keywords (as tags), countries, studios, collection (e.g. "Collection Name"), YouTube trailer, director, writers, cast with characters and photos, producers, composer and the TMDB and IMDb ids. The movie file is not changed, existing files are not replaced, and <b>undoing</b> the rename deletes what was created.</p>
 <p>Movies whose <b>names are already right</b> get the metadata too: the Rename button counts them and the confirmation says so. If the name already has <code>[tmdbid-…]</code>, the movie is recognized by that id, without searching. That way an organized library can get just the .nfo files and images.</p>
+<h4>Limitations</h4>
+<ul>
+  <li>The movie is looked up by the title and year in the file name. Heavily abbreviated names, names with initials only or with the title in another language may not be found; in that case, fix the title in the review.</li>
+  <li>Movies with the same name (remakes, say) can only be told apart by the year; without a year in the name, the choice usually goes to the review.</li>
+  <li>Rare, regional or very recent movies may be missing from TMDB, or lack a translation, an overview or a poster.</li>
+</ul>
 <p class="tip">Only the searched title and year are sent to TMDB, never the full file name or the folders.</p>`,
   },
   {
@@ -270,7 +276,7 @@ ${ex("The.Lord.of.the.Rings.2001.1080p.BluRay.x264.mkv", "The Lord of the Rings 
     sub: true,
     html: `
 <p>Gives each episode its official <b>TMDB</b> name, with season, number and title, in the format Jellyfin recognizes. It uses the same API key as the movie rule.</p>
-${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...And the Bag's in the River.mkv")}
+${ex("Show.Name.S01E03.720p.WEB-DL.mkv", "Show Name (2008) - S01E03 - Episode Title.mkv")}
 <ol>
   <li>In the <b>Show</b> field, type the name or the TMDB id, or paste the link to the show's page (<code>themoviedb.org/tv/1396-…</code>). Left empty, the program uses the name the files share, or the folder's name.</li>
   <li>Click <b>Find episodes</b>. If more than one show looks alike, choose the right one. The program downloads the whole episode list and looks for each visible file's episode.</li>
@@ -278,7 +284,7 @@ ${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...A
 </ol>
 <h4>How each episode is found</h4>
 <ul>
-  <li><b>By number</b>, in many forms: <code>S01E02</code>, <code>s1e2</code>, <code>1x02</code>, <code>Season 1 Episode 2</code>, <code>Ep 02</code> (the season comes from the folder, such as <code>Season 2</code>), absolute numbering (<code>Naruto - 125</code>), <code>201</code> (season 2, episode 1) and air date (<code>2024.03.15</code>). Files with two episodes (<code>S01E01E02</code>, <code>S01E01-02</code>) become <code>S01E01-E02</code>.</li>
+  <li><b>By number</b>, in many forms: <code>S01E02</code>, <code>s1e2</code>, <code>1x02</code>, <code>Season 1 Episode 2</code>, <code>Ep 02</code> (the season comes from the folder, such as <code>Season 2</code>), absolute numbering (<code>Show Name - 125</code>), <code>201</code> (season 2, episode 1) and air date (<code>2024.03.15</code>). Files with two episodes (<code>S01E01E02</code>, <code>S01E01-02</code>) become <code>S01E01-E02</code>.</li>
   <li><b>By title</b>: the text after the number is compared with the titles of every episode, in your language, in English and in the original language, ignoring accents, case and small misspellings. With no number at all, the title alone is enough when it is clear.</li>
   <li><b>When the number and the title disagree</b> (the name says S02E08, but the title is S01E03's), the file gets <b>?</b>, and the review shows both, suggesting the title's.</li>
 </ul>
@@ -291,7 +297,7 @@ ${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...A
   <li>Files not in the chosen show are left as they are. For several shows, filter the list and search one at a time: each file keeps its own.</li>
 </ul>
 <h4>Show and season folders</h4>
-<p>With <b>Organize into show and season folders</b>, each episode goes into the structure Jellyfin recommends: <code>Shows/Breaking Bad (2008) [tmdbid-1396]/Season 01/…</code>. The show's folder is created next to the folder the show is already in (if the files are in <code>Breaking Bad/Season 1</code>, the new folder goes next to <code>Breaking Bad</code>, not inside it); with loose files, inside their folder. The show folder's name has its own template, with the same keys (default <code>{show} ({year}) [tmdbid-{id}]</code>; use <code>{original}</code> for the original name). Old folders left empty are deleted; those that still hold other files stay. <b>Undo</b> puts everything back, making the old folders again.</p>
+<p>With <b>Organize into show and season folders</b>, each episode goes into the structure Jellyfin recommends: <code>Shows/Show Name (2008) [tmdbid-12345]/Season 01/…</code>. The show's folder is created next to the folder the show is already in (if the files are in <code>Show Name/Season 1</code>, the new folder goes next to <code>Show Name</code>, not inside it); with loose files, inside their folder. The show folder's name has its own template, with the same keys (default <code>{show} ({year}) [tmdbid-{id}]</code>; use <code>{original}</code> for the original name). Old folders left empty are deleted; those that still hold other files stay. <b>Undo</b> puts everything back, making the old folders again.</p>
 <h4>Metadata (.nfo and images)</h4>
 <p>With <b>Save .nfo and images for Jellyfin</b>, renaming also creates:</p>
 <ul>
@@ -300,6 +306,13 @@ ${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...A
   <li>next to <b>each episode</b>: <code>….nfo</code> (title, season and number, air date, overview, runtime, rating, directors, writers and guest stars) and the thumbnail <code>…-thumb.jpg</code>.</li>
 </ul>
 <p>The show and season files are only created when the episodes are in a show folder (named after it, or with <code>[tmdbid-…]</code>), the one from before or the one the folders option makes. Episodes whose names are already right get the metadata too. Existing files are never replaced, and undo deletes what was created.</p>
+<h4>Limitations</h4>
+<ul>
+  <li>One show at a time: for several, filter the list and look up one at a time.</li>
+  <li>Seasons are split as TMDB splits them. Anime and shows with absolute numbering are sometimes split differently there, and the numbers in the files do not match; check in the review.</li>
+  <li>Specials (season 0) are often numbered differently from their releases and nearly always need a review.</li>
+  <li>A file with several episodes is only recognized when they are in the same season.</li>
+</ul>
 <p class="tip">Only the show's name is sent to TMDB, never file names or folders.</p>`,
   },
   {
@@ -308,7 +321,7 @@ ${ex("Breaking.Bad.S01E03.720p.WEB-DL.mkv", "Breaking Bad (2008) - S01E03 - ...A
     sub: true,
     html: `
 <p>Names each song from the <b>tags</b> stored in the file (ID3 in MP3, Vorbis comments in FLAC and OGG, MP4 in M4A, and others), with no internet needed.</p>
-${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
+${ex("01.mp3", "01 - Song Title.mp3")}
 <ul>
   <li><b>Template</b>: <code>{track}</code>, <code>{title}</code>, <code>{artist}</code>, <code>{album artist}</code>, <code>{album}</code>, <code>{year}</code>, <code>{disc}</code>, <code>{genre}</code> and <code>{composer}</code>. The default is <code>{track} - {title}</code>. The track has two digits (three on albums with over 99 tracks).</li>
   <li>Empty tags leave nothing behind: with <code>{track} - {artist} - {title}</code>, a song without an artist becomes <code>01 - Title</code>.</li>
@@ -316,17 +329,17 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li><b>The album as a whole</b>: the tracks of one album (same folder, or <code>CD 01</code>/<code>CD 02</code> discs, and same album name) share the album's details. A track without a year gets the others'. Without an album artist in the tags, the artist of most tracks counts (guests such as <code>feat.</code> left out); with no majority, the album is a compilation: <code>Various Artists</code>, as Jellyfin knows it. So an album's tracks never scatter into different folders.</li>
   <li><b>Bonus tracks</b>: in a folder where most songs are one album's, tracks tagged with another album (a single, a soundtrack) and numbered after the album's (<code>15</code>, <code>16</code> after <code>01</code>–<code>14</code>) take that album.</li>
   <li><b>Singles</b>: a song tagged with the album <code>Single</code> gets its own title as album.</li>
-  <li><b>Compilations</b>: on an album where most tracks are by others than the album's artist, the artist goes into the name before the title when the template lacks it: <code>03 - Eric Burdon - Orange and Red Beams</code>.</li>
+  <li><b>Compilations</b>: on an album where most tracks are by others than the album's artist, the artist goes into the name before the title when the template lacks it: <code>03 - Track Artist - Title</code>.</li>
   <li>If the album name already has a year (<code>Show 12 (2025-05-04)</code>), the template's <code>({year})</code> is left out.</li>
   <li>Songs <b>without a title in their tags</b> are left as they are and get <b>✕</b> (unless the search identifies them by sound, see below); the card shows how many. With <b>Fill in from the file name</b>, the program reads <code>01 - Artist - Title</code>, <code>01. Title</code> or <code>1-05 Title</code> from the name, and the album and year from the folder (<code>Artist - Album (1975)</code>, or just <code>Album</code>; a <code>CD2</code> folder gives the disc). Existing tags come first.</li>
 </ul>
 <h4>Artist and album folders</h4>
-<p>With <b>Organize into artist and album folders</b>, each song goes into <code>{album artist}/{album} ({year})</code> (the folder template can be changed; each <code>/</code> is a level). So <code>Music/Pink Floyd/WYWH/CD1/01.mp3</code> becomes <code>Music/Pink Floyd/Wish You Were Here (1975)/01 - Shine On….mp3</code>: folders already named after the artist, the album or a disc (or inside the artist's folder) are replaced, not filled with new folders. Loose files get the folders inside the folder they are in. Small spelling differences between the folder and the tag do not get in the way. A folder that already gathers albums named like it (<code>Show (1000 - ..)</code> for albums "Show 1037 - …") is taken as a collection: the albums go straight into it, with no artist folders in between.</p>
+<p>With <b>Organize into artist and album folders</b>, each song goes into <code>{album artist}/{album} ({year})</code> (the folder template can be changed; each <code>/</code> is a level). So <code>Music/Artist/Album/CD1/01.mp3</code> becomes <code>Music/Artist/Album (1975)/01 - Song Title.mp3</code>: folders already named after the artist, the album or a disc (or inside the artist's folder) are replaced, not filled with new folders. Loose files get the folders inside the folder they are in. Small spelling differences between the folder and the tag do not get in the way. A folder that already gathers albums named like it (<code>Show (1000 - ..)</code> for albums "Show 1037 - …") is taken as a collection: the albums go straight into it, with no artist folders in between.</p>
 <p><b>Copies</b>: if two identical copies of an album (found by the program, as in <b>Identical copies</b>) would go to the same place, the first goes ahead and the other stays where it is, marked as a copy.</p>
 <ul>
   <li>Lyrics (<code>.lrc</code>) with a song's name get its new name and go with it.</li>
   <li>Covers, <code>.cue</code>, <code>.log</code> and other files in the album's folder go along with most of the folder's songs (songs from other albums that are not bonus tracks follow their own). Subfolders without songs (<code>Artwork</code>, <code>Scans</code>) go along with the same name; so do files in the folder above <code>CD 01</code>/<code>CD 02</code>. If two such files would get the same name (a <code>log.txt</code> on each disc), they get their folder's name: <code>log (CD 01).txt</code>.</li>
-  <li>Artist or album names that differ only in case (<code>a-ha</code> and <code>A-Ha</code>, from different albums' tags) become one folder: the one already on disk, or the most used spelling.</li>
+  <li>Artist or album names that differ only in case (<code>artist name</code> and <code>Artist Name</code>, from different albums' tags) become one folder: the one already on disk, or the most used spelling.</li>
   <li>Old folders left empty are deleted; undo puts everything back.</li>
   <li><b>Create a playlist for each album</b>: after renaming, writes <code>&lt;folder name&gt;.m3u8</code> in each album's folder, with its songs (from every disc) in disc and track order. Albums whose names are already right get one too (they count in the <b>Rename</b> button). Not created when the album already has a <code>.cue</code> or a playlist, nor for a single song. Undo deletes the playlist created.</li>
   <li><code>.cue</code> files and <code>.m3u</code> playlists list the songs' new names (see <b>Renaming and undoing</b>).</li>
@@ -354,7 +367,62 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li>Each song takes about half a second to be listened to and looked up.</li>
 </ul>
 <p class="tip">Only each song's sound fingerprint and length are sent to AcoustID, never the file.</p>
+<h4>Limitations</h4>
+<ul>
+  <li>Without the MusicBrainz search, names depend on the tags alone: wrong tags make wrong names.</li>
+  <li>Regional, independent, bootleg or very recent releases may be missing from MusicBrainz; then the tags are used.</li>
+  <li>By sound, very similar recordings (a remaster, an artist's own re-recording) may be mixed up. When the album is in doubt, it goes to the review.</li>
+  <li>Songs in Opus, WMA and other formats not listed above are not listened to.</li>
+  <li>For MP3 and M4A, undoing written tags does not bring back rare fields or ID3v1 and APE tags.</li>
+</ul>
 <p class="tip">Without <b>Write the tags into the files</b>, Renome only reads the tags; the songs themselves are not changed. Only the artist and album name are sent to MusicBrainz.</p>`,
+  },
+  {
+    id: "r-book",
+    title: "Book (Open Library)",
+    sub: true,
+    html: `
+<p>Names each book after <b>Open Library</b> (openlibrary.org), an open book catalog run by the Internet Archive. When Open Library does not know an ISBN, it is looked up on <b>BrasilAPI</b> (brasilapi.com.br), which gathers the records Brazilian publishers keep at the CBL. Neither needs a key.</p>
+${ex("book_title_author.pdf", "Author Name - Book Title (1937).pdf")}
+<ol>
+  <li>Add the rule and click <b>Search Open Library</b>. For each book (EPUB, MOBI, AZW3, PDF, FB2 and DjVu), the program reads the details stored in the file itself: title, author, ISBN, publisher and series. Whatever is missing comes from the file name.</li>
+  <li>With the <b>ISBN</b>, the book is found right away, in its exact edition (<b>✓</b>), on Open Library or BrasilAPI. Without one, the program searches by title and author: when they match with no doubt, the book is picked by itself; otherwise (<b>?</b>), the review opens, with cover, authors, original title and number of editions, for you to choose (click, or press 1–9).</li>
+  <li>If none fits, fix the title or the author in the window and search again. You can also search by author alone, with the title empty, to see their books. Or mark <b>None of these</b> (<b>✕</b>: the file is left as it is).</li>
+</ol>
+<h4>Where the details come from</h4>
+<ul>
+  <li><b>EPUB</b>: title, authors, ISBN, publisher, language and series (from EPUB 2 or 3 details). With no ISBN in the details, the program looks for it in the text of the first and last pages, where the copyright page is.</li>
+  <li><b>MOBI and AZW3</b> (Kindle): title, author, ISBN, publisher and date, from the file's header.</li>
+  <li><b>PDF</b>: title and author from the document's details, and the ISBN looked for in the text of the first and last pages. Titles that programs put in by themselves (<code>Microsoft Word - final.docx</code>, <code>Untitled</code>) are ignored.</li>
+  <li><b>FB2</b>: title, authors, series, publisher, year and ISBN.</li>
+  <li><b>DjVu</b>: the file name only.</li>
+  <li><b>File name</b>: understands <code>Author - Title</code> and <code>Title - Author</code> (the search finds out which is which), <code>Title by Author</code>, the year in brackets (<code>(1899)</code>, <code>(2015, Publisher)</code>), the number in a series (<code>Author - 03 - …</code>) and the ISBN. Marks like <code>z-lib.org</code>, <code>libgen</code>, <code>epub</code> and <code>retail</code> are ignored, and <code>_</code> becomes a space.</li>
+</ul>
+<ul>
+  <li><b>Template</b>: <code>{author}</code> (the first one), <code>{authors}</code> (all of them, separated by &amp;), <code>{author sort}</code> (by surname: <i>Surname, Name</i>), <code>{initial}</code> (the surname's first letter), <code>{title}</code>, <code>{original title}</code>, <code>{year}</code> (of the work's first publication), <code>{edition year}</code>, <code>{publisher}</code>, <code>{isbn}</code>, <code>{series}</code>, <code>{volume}</code> (the number in the series, with two digits: <code>03</code>, so the books sort in order) and <code>{id}</code> (Open Library's). The default is <code>{author} - {title} ({year})</code>. Missing values leave nothing behind: without a series, <code>{series} {volume} - {title}</code> becomes just the title.</li>
+  <li><b>Swap title and author</b>: the ⇄ button in the review swaps the two fields, for names read the wrong way round.</li>
+  <li>The <b>title</b> is the edition's in the language chosen in Options (<b>Language of titles</b>). When the file has another title, from another translation, the file's stays. The original title shows in the review and in <code>{original title}</code>.</li>
+  <li>The same book in several formats (<code>.epub</code>, <code>.pdf</code>, <code>.mobi</code>) with the same details makes a single search and gets the same choice.</li>
+</ul>
+<h4>Folders, cover and metadata.opf</h4>
+<ul>
+  <li><b>Organize into author and book folders</b>: each book goes into <code>{author}/{title}</code> (the folder template can be changed; each <code>/</code> is a level), as Audiobookshelf expects. In large libraries, <code>{initial}/{author sort}/{title}</code> gives <code>S/Surname, Name/Book Title</code>. A dot at the end of a folder name (<i>Surname, C. S.</i>) goes, since Windows does not accept folders ending in a dot. Folders already named after the author or the book are reused, without new folders inside. Folders left empty are deleted; undo puts everything back.</li>
+  <li><b>Save the cover</b>: saves Open Library's cover as <code>cover.jpg</code> in the book's folder; without the folders option, with the book file's name (<code>….jpg</code>).</li>
+  <li><b>Save the book's details</b>: saves <code>metadata.opf</code> (or <code>….opf</code>, without the folders option), in OPF format, with title, authors, description, subjects, publisher, year, language, ISBN and series. Audiobookshelf and e-book managers read this file.</li>
+  <li>Books whose names are already right get the cover and details too (they count in the <b>Rename</b> button). Existing files are not replaced, and undo deletes what was created. The book file itself is never changed.</li>
+</ul>
+<h4>Limitations</h4>
+<ul>
+  <li><b>PDF</b>: many PDFs have empty or wrong document details (the Word file's name, the name of the computer it was made on). A <b>scanned</b> PDF is only a series of images, with no text to find the ISBN in. Then the file name is all that is left: a clear name, like <code>Author - Title</code>, helps a lot; a confusing one leads to the review.</li>
+  <li><b>Without an ISBN</b>, the book is found by title and author, but which edition it is stays unknown: the name uses the publisher and ISBN of the file itself, when it has them, and <code>{edition year}</code> stays empty.</li>
+  <li><b>Open Library</b> is kept by volunteers. Recent books, books from small publishers and books from some countries may be missing, or lack a cover or a year, or show up more than once with slightly different details. Many translations are missing: when the title is not found, the review shows the author's other books, where the work may be under its original title, or not there at all. Then mark <b>None of these</b> and rename it by hand.</li>
+  <li><b>BrasilAPI</b> only helps books with an ISBN, almost always from Brazilian publishers. It usually has no cover and no year. The year of first publication and the cover come from Open Library when it has the work; otherwise <code>{year}</code> stays empty and there is no cover. Its authors may include the translator or the illustrator: when the file says who the author is, only they are kept.</li>
+  <li>Sometimes the <b>ISBN stored in the file belongs to another book</b> (an advert at the end, or a box set), or the catalog has a mistake. When the title and author found do not match the file's, the book is not picked by itself: it goes to the review.</li>
+  <li><code>{year}</code> is the year of the work's first publication: a book first published in 1937 gets 1937, even in a 2019 edition. When the catalog gives a year after the edition stored in the file, which is its mistake, <code>{year}</code> stays empty. The year of your edition (<code>{edition year}</code>) is only known when the book is found by its ISBN.</li>
+  <li>The <b>series</b> and <b>volume</b> come only from the file's details (EPUB's or FB2's) or from the number in its name; Open Library hardly ever has them.</li>
+  <li>Comics (CBZ, CBR) and magazines are not handled by this rule.</li>
+</ul>
+<p class="tip">Only the searched title, author and ISBN are sent to Open Library, and only the ISBN to BrasilAPI, never the full file name, the folders or the book's content.</p>`,
   },
   {
     id: "preview",
@@ -363,7 +431,8 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
 <p>The <b>New name</b> column shows the result of the rules right away. In rows that change:</p>
 <ul>
   <li>in <b>Current name</b>, what goes away is shown <span class="del">in red, struck through</span>;</li>
-  <li>in <b>New name</b>, what comes in is shown <span class="ins">in blue</span>.</li>
+  <li>in <b>New name</b>, what comes in is shown <span class="ins">in blue</span>;</li>
+  <li>what only moved (the author now before the title, for instance) is shown <span class="mov">with a dotted underline</span>, on both sides.</li>
 </ul>
 <p>In the first column, ● means the file will be renamed, a red <span class="bad">!</span> is a conflict and a yellow <span class="warn">!</span> is a warning. Hover to see why.</p>
 <h4>Editing by hand</h4>

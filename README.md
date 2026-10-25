@@ -43,7 +43,7 @@ A built-in manual (F1) explains every rule with examples.
 - The preview highlights what is removed and added in each name.
 - Finds files with identical content in the list (even with different
   names) and shows them grouped, without deleting anything.
-- Movies: names files from TMDB (`Title (Year) [tmdbid-120]`, the format
+- Movies: names files from TMDB (`Title (Year) [tmdbid-12345]`, the format
   Jellyfin recognizes), picking the movie automatically when sure and
   letting you choose when not; optionally saves `.nfo` and poster next
   to each movie for Jellyfin, Kodi and Emby.
@@ -63,6 +63,14 @@ A built-in manual (F1) explains every rule with examples.
   their sound (AcoustID). Can also write a `.m3u8` playlist for each
   album, and the release's tags and cover into the songs themselves
   (undoable).
+- Books: names EPUB, MOBI, AZW3, PDF, FB2 and DjVu files from Open Library
+  (`Author - Title (Year)`), using the ISBN, title and author stored in
+  the file or its name; ISBNs Open Library does not know are looked up on
+  BrasilAPI (Brazilian editions). Picks the book automatically when sure
+  and lets you choose when not; optionally organizes them into
+  `Author/Title` folders and saves `cover.jpg` and a `metadata.opf`
+  (read by Audiobookshelf and e-book managers). The book files are never
+  changed.
 - Edit any new name by hand right in the preview (double-click or F2).
 - List filter: only the visible files are renamed.
 - Sort by new name (default) or by any column.

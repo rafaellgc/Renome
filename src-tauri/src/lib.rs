@@ -17,6 +17,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 mod acoustid;
 mod musicbrainz;
+mod openlibrary;
 mod tmdb;
 
 /// The session's file list. It lives on the Rust side so the whole list
@@ -47,6 +48,8 @@ struct AppState {
     /// The recordings each song was heard as (AcoustID), for the album
     /// review's choices.
     heard: Mutex<HashMap<PathBuf, Vec<String>>>,
+    /// Open Library, likewise.
+    ol: openlibrary::Client,
 }
 
 type Overrides = HashMap<PathBuf, String>;
@@ -627,6 +630,51 @@ fn folder_cover(dir: &Path) -> Option<Vec<u8>> {
 }
 
 /// The album folders among (or above) `dirs` that would get a playlist.
+/// Reads each book's details and looks it up on Open Library.
+#[tauri::command]
+async fn book_lookup(
+    app: AppHandle,
+    lang: String,
+    items: Vec<openlibrary::LookupItem>,
+) -> Result<Vec<openlibrary::Lookup>, String> {
+    let ol = &app.state::<AppState>().ol;
+    Ok(openlibrary::lookup(&app, ol, &lang, items).await)
+}
+
+/// A search typed in the book review.
+#[tauri::command]
+async fn book_search(
+    app: AppHandle,
+    lang: String,
+    title: String,
+    author: String,
+) -> Result<Vec<renome_core::books::Candidate>, String> {
+    let guess = renome_core::books::Guess {
+        title,
+        author,
+        from_file: true,
+        ..Default::default()
+    };
+    Ok(app.state::<AppState>().ol.find(&guess, &lang).await?.0)
+}
+
+/// Saves the books' covers and `metadata.opf` files and records them like
+/// `write_sidecars`.
+#[tauri::command]
+async fn write_book_sidecars(
+    app: AppHandle,
+    history_id: Option<String>,
+    items: Vec<openlibrary::SidecarItem>,
+    cover: bool,
+    opf: bool,
+    in_folder: bool,
+) -> Result<tmdb::SidecarReport, String> {
+    let ol = &app.state::<AppState>().ol;
+    let mut report = openlibrary::sidecars(&app, ol, items, cover, opf, in_folder).await;
+    record_created(&app, history_id, &mut report);
+    Ok(report)
+}
+
 #[tauri::command]
 async fn playlist_dirs(dirs: Vec<PathBuf>) -> Vec<PathBuf> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -821,6 +869,7 @@ pub fn run() {
             mb: musicbrainz::Client::default(),
             acoustid: acoustid::Client::default(),
             heard: Mutex::new(HashMap::new()),
+            ol: openlibrary::Client::default(),
         })
         .invoke_handler(tauri::generate_handler![
             checkpoint,
@@ -847,6 +896,9 @@ pub fn run() {
             write_playlists,
             write_tags,
             playlist_dirs,
+            book_lookup,
+            book_search,
+            write_book_sidecars,
             apply,
             history,
             undo,

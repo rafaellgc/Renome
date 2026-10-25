@@ -16,7 +16,7 @@ pub struct Named {
     pub name: String,
 }
 
-/// One artist of an artist credit (`Korn feat. Nas` is two).
+/// One artist of an artist credit (`Banda Azul feat. Rui` is two).
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Credit {
     #[serde(default)]
@@ -92,7 +92,7 @@ pub fn plain(s: &str) -> String {
         .replace('\u{2026}', "...")
 }
 
-/// An artist credit written out: `Korn feat. Nas`.
+/// An artist credit written out: `Banda Azul feat. Rui`.
 pub fn credit(c: &[Credit]) -> String {
     c.iter()
         .map(|a| format!("{}{}", a.name, a.joinphrase))
@@ -252,8 +252,8 @@ pub fn query(q: &AlbumQuery) -> String {
 }
 
 /// The album's name without what is in brackets, for a second search when
-/// the first finds nothing ("Analogue (20th Anniversary Edition)" is
-/// "Analogue" on MusicBrainz); `None` when nothing would change.
+/// the first finds nothing ("Maré Alta (20th Anniversary Edition)" is
+/// "Maré Alta" on MusicBrainz); `None` when nothing would change.
 pub fn simpler(q: &AlbumQuery) -> Option<AlbumQuery> {
     let bare = crate::tmdb::BRACKETS.replace_all(&q.album, " ");
     let bare = bare.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -415,8 +415,8 @@ impl SongMatch {
 /// A song in the list: its path and tags (with duration).
 pub type Song = (PathBuf, AudioTags);
 
-/// Titles alike, also without what is in brackets ("Celice (2026
-/// Remaster)" and "Celice").
+/// Titles alike, also without what is in brackets ("Lua Cheia (2026
+/// Remaster)" and "Lua Cheia").
 fn same_title(a: &str, b: &str) -> bool {
     let bare = |s: &str| crate::tmdb::BRACKETS.replace_all(s, " ").into_owned();
     a.trim().is_empty() || similarity(a, b) >= 0.6 || similarity(&bare(a), &bare(b)) >= 0.8
