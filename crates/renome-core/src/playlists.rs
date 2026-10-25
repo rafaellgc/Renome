@@ -321,12 +321,14 @@ pub fn changes(done: &[Operation]) -> Vec<ListChange> {
     out
 }
 
-/// A playlist for the album in `dir` (the folder above a disc folder
-/// counts as the album's): its songs, those of its disc folders included,
-/// in disc and track order, with their lengths and titles. `None` when
-/// the album already has a playlist or has fewer than two songs.
-/// Written as `<folder name>.m3u8`, with relative paths.
-pub fn album_playlist(dir: &Path) -> Option<(PathBuf, String)> {
+/// A song and the number of the disc folder it is in.
+type Song = (PathBuf, Option<u32>);
+
+/// The album in `dir` (the folder above a disc folder counts as the
+/// album's) and its songs, those of its disc folders included, each with
+/// its disc folder's number; `None` when the album already has a cue
+/// sheet or playlist, or has fewer than two songs.
+fn album_songs(dir: &Path) -> Option<(&Path, Vec<Song>)> {
     let dir = music::album_dir(dir);
     let mut folders = vec![(dir.to_path_buf(), None)];
     for e in fs::read_dir(dir).ok()?.flatten() {
@@ -347,21 +349,37 @@ pub fn album_playlist(dir: &Path) -> Option<(PathBuf, String)> {
         };
         for p in rd.flatten().map(|e| e.path()) {
             let ext = p.extension().unwrap_or_default().to_string_lossy();
-            if !p.is_file() || !music::is_audio(&ext) {
-                continue;
+            if p.is_file() && music::is_audio(&ext) {
+                songs.push((p, disc));
             }
+        }
+    }
+    (songs.len() >= 2).then_some((dir, songs))
+}
+
+/// The album folder `dir` belongs to, if [`album_playlist`] would write
+/// one there (without reading the tags).
+pub fn playlist_dir(dir: &Path) -> Option<PathBuf> {
+    album_songs(dir).map(|(d, _)| d.to_path_buf())
+}
+
+/// A playlist for the album in `dir` (see [`album_songs`]): its songs in
+/// disc and track order, with their lengths and titles. Written as
+/// `<folder name>.m3u8`, with relative paths.
+pub fn album_playlist(dir: &Path) -> Option<(PathBuf, String)> {
+    let (dir, found) = album_songs(dir)?;
+    let mut songs: Vec<_> = found
+        .into_iter()
+        .map(|(p, disc)| {
             let t = music::read(&p).unwrap_or_default();
             let key = (
                 disc.or(t.disc).unwrap_or(1),
                 t.track.unwrap_or(u32::MAX),
                 p.file_name().unwrap_or_default().to_os_string(),
             );
-            songs.push((key, p, t));
-        }
-    }
-    if songs.len() < 2 {
-        return None;
-    }
+            (key, p, t)
+        })
+        .collect();
     songs.sort_by(|a, b| a.0.cmp(&b.0));
     let mut text = String::from("#EXTM3U\n");
     for (_, p, t) in songs {
@@ -518,6 +536,7 @@ mod tests {
         fs::write(album.join("CD 1/01 - a.flac"), "x").unwrap();
         fs::write(album.join("cover.jpg"), "x").unwrap();
         // From a disc folder too: the playlist is the album's.
+        assert_eq!(playlist_dir(&album.join("CD 2")), Some(album.clone()));
         let (path, text) = album_playlist(&album.join("CD 2")).unwrap();
         assert_eq!(path, album.join("Album (2001).m3u8"));
         assert_eq!(
@@ -528,6 +547,7 @@ mod tests {
         // An album with a playlist keeps it.
         fs::write(album.join("old.m3u"), "").unwrap();
         assert!(album_playlist(&album).is_none());
+        assert!(playlist_dir(&album).is_none());
         // A single song needs none.
         let one = d.path().join("One");
         fs::create_dir(&one).unwrap();

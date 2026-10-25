@@ -101,6 +101,24 @@
     const status = new Map(preview.items.map((i) => [i.path, i.status]));
     return albums.filter((a) => a.choice && a.files.every((p) => status.get(p) === "unchanged")).length;
   });
+  /** Album folders whose songs keep their names but still get a playlist
+   *  (asked of the disk: those without one and with two songs or more). */
+  let playlistOnly = $state<string[]>([]);
+  $effect(() => {
+    const on = musicRule?.rule.type === "music" && musicRule.rule.playlist;
+    const items = preview.items;
+    const changed = new Set(items.filter((i) => i.status !== "unchanged").map((i) => i.dir));
+    const dirs = on
+      ? [...new Set(items.filter((i) => !i.isDir && i.status === "unchanged" && isAudio(i.original) && !changed.has(i.dir)).map((i) => i.dir))]
+      : [];
+    if (!dirs.length) {
+      playlistOnly = [];
+      return;
+    }
+    api.playlistDirs(dirs).then((d) => {
+      if (items === preview.items) playlistOnly = d;
+    }, () => {});
+  });
   const albumCounts = $derived.by(() => {
     let found = 0, choose = 0, none = 0;
     for (const a of albums) {
@@ -354,12 +372,14 @@
     await refresh();
     const meta = metaOnly.map((i) => ({ path: i.path, id: movies[i.path].choice!.id }));
     const tvMeta = episodeMetaOnly.map((i) => tvSidecarItem(i.path, i.path));
-    if (!preview.changed && !meta.length && !tvMeta.length && !coverOnly) return;
+    const listOnly = playlistOnly;
+    if (!preview.changed && !meta.length && !tvMeta.length && !coverOnly && !listOnly.length) return;
     if (settings.confirmApply) {
       const lines = [
         preview.changed ? t("confirmText", { n: preview.changed }) : "",
         meta.length + tvMeta.length ? t("confirmMeta", { n: meta.length + tvMeta.length }) : "",
         coverOnly ? t("confirmCovers", { n: coverOnly }) : "",
+        listOnly.length ? t("confirmPlaylists", { n: listOnly.length }) : "",
         preview.conflicts ? t("confirmConflicts", { n: preview.conflicts }) : "",
       ].filter(Boolean);
       const ok = await confirm({
@@ -401,7 +421,7 @@
       }
       if (mrule?.type === "music" && mrule.playlist) {
         const parent = (p: string) => p.slice(0, Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\")));
-        const dirs = [...new Set(r.done.filter((op) => isAudio(op.to)).map((op) => parent(op.to)))];
+        const dirs = [...new Set(r.done.filter((op) => isAudio(op.to)).map((op) => parent(op.to)).concat(listOnly))];
         if (dirs.length) saved += await writeMeta(() => api.writePlaylists(r.historyId, dirs));
       }
       const srule = seriesRule?.rule;
@@ -947,8 +967,8 @@
           <path fill="currentColor" fill-rule="evenodd" stroke="currentColor" stroke-width="1" stroke-linejoin="round" d="M12.15 3.76L11.96 1.50L8.04 1.50L7.85 3.76L5.67 5.02L3.62 4.05L1.66 7.45L3.52 8.74L3.52 11.26L1.66 12.55L3.62 15.95L5.67 14.98L7.85 16.24L8.04 18.50L11.96 18.50L12.15 16.24L14.33 14.98L16.38 15.95L18.34 12.55L16.48 11.26L16.48 8.74L18.34 7.45L16.38 4.05L14.33 5.02ZM13 10a3 3 0 1 0-6 0a3 3 0 1 0 6 0Z" />
         </svg>
       </button>
-      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !metaOnly.length && !episodeMetaOnly.length && !coverOnly) || busy} onclick={applyAll}>
-        {t("rename")} {preview.changed + metaOnly.length + episodeMetaOnly.length + coverOnly || ""}
+      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !metaOnly.length && !episodeMetaOnly.length && !coverOnly && !playlistOnly.length) || busy} onclick={applyAll}>
+        {t("rename")} {preview.changed + metaOnly.length + episodeMetaOnly.length + coverOnly + playlistOnly.length || ""}
       </button>
     </div>
   </header>

@@ -33,6 +33,7 @@ export const api = {
   mbSearch: (query: AlbumQuery) => invoke<MbCandidate[]>("mb_search", { query }),
   mbChoose: (id: string, paths: string[], fromName: boolean) =>
     invoke<{ matches: [string, SongMatch][]; agree: number }>("mb_choose", { id, paths, fromName }),
+  playlistDirs: (dirs: string[]) => invoke<string[]>("playlist_dirs", { dirs }),
   writePlaylists: (historyId: string | null, dirs: string[]) =>
     invoke<{ created: string[]; errors: [string, string][] }>("write_playlists", { historyId, dirs }),
   writeCovers: (historyId: string | null, items: { dir: string; release: string }[]) =>

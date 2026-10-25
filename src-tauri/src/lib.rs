@@ -440,6 +440,25 @@ async fn write_covers(
     Ok(report)
 }
 
+/// The album folders among (or above) `dirs` that would get a playlist.
+#[tauri::command]
+async fn playlist_dirs(dirs: Vec<PathBuf>) -> Vec<PathBuf> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut out: Vec<PathBuf> = Vec::new();
+        for d in dirs
+            .iter()
+            .filter_map(|d| renome_core::playlists::playlist_dir(d))
+        {
+            if !out.contains(&d) {
+                out.push(d);
+            }
+        }
+        out
+    })
+    .await
+    .unwrap_or_default()
+}
+
 /// Writes a playlist for each album in `dirs` (see
 /// `playlists::album_playlist`) and records them like `write_sidecars`.
 #[tauri::command]
@@ -633,6 +652,7 @@ pub fn run() {
             mb_choose,
             write_covers,
             write_playlists,
+            playlist_dirs,
             apply,
             history,
             undo,

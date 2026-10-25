@@ -291,8 +291,9 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   to it) listing its songs and those of its
   disc folders, by disc (the disc folder's number, else the tag), track
   number and file name; not when it has fewer than two songs or already
-  has a `.cue`, `.m3u` or `.m3u8`. Recorded in the history and deleted by
-  undo.
+  has a `.cue`, `.m3u` or `.m3u8`. Folders of visible songs that keep
+  their names get one too, and count in the Rename button. Recorded in
+  the history and deleted by undo.
 - MusicBrainz (no key; `User-Agent: Renome/<version> ( <repo> )`; one
   request at a time, at least 2 s apart; a 503, which it also sends when
   shedding load whatever the pace, is retried up to 3 times after its
