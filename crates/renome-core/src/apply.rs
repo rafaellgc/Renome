@@ -263,6 +263,23 @@ impl History {
         Self { dir: dir.into() }
     }
 
+    /// An id from the time, unused yet (two entries in the same
+    /// millisecond get `-2`, `-3`…).
+    fn new_id(&self, created: &DateTime<Local>) -> String {
+        let base = format!(
+            "{}-{}",
+            created.format("%Y%m%d-%H%M%S-%3f"),
+            std::process::id()
+        );
+        let mut id = base.clone();
+        let mut n = 1;
+        while self.dir.join(format!("{id}.json")).exists() {
+            n += 1;
+            id = format!("{base}-{n}");
+        }
+        id
+    }
+
     fn path(&self, id: &str) -> Result<PathBuf, String> {
         if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
             return Err("invalidId".into());
@@ -322,11 +339,7 @@ impl History {
         let mut report = execute(ops, Depth::DeepestFirst);
         if !report.done.is_empty() {
             let created = Local::now();
-            let id = format!(
-                "{}-{}",
-                created.format("%Y%m%d-%H%M%S-%3f"),
-                std::process::id()
-            );
+            let id = self.new_id(&created);
             let (lists, removed) = self.update_lists(&id, &report.done);
             report.lists = lists.len() - removed;
             report.lists_removed = removed;
@@ -385,11 +398,7 @@ impl History {
     /// movies whose names were already right), so undo deletes them.
     pub fn record_files(&self, paths: &[PathBuf]) -> Result<String, String> {
         let created = Local::now();
-        let id = format!(
-            "{}-{}",
-            created.format("%Y%m%d-%H%M%S-%3f"),
-            std::process::id()
-        );
+        let id = self.new_id(&created);
         let j = Journal {
             created,
             undone: false,
@@ -415,6 +424,15 @@ impl History {
     pub fn delete(&self, id: &str) -> Result<(), String> {
         let _ = fs::remove_dir_all(self.backups(id)?);
         fs::remove_file(self.path(id)?).map_err(|e| e.to_string())
+    }
+
+    /// Deletes every entry; returns how many there were.
+    pub fn clear(&self) -> Result<usize, String> {
+        let ids: Vec<String> = self.list().into_iter().map(|e| e.id).collect();
+        for id in &ids {
+            self.delete(id)?;
+        }
+        Ok(ids.len())
     }
 
     /// Undoes a history entry by renaming back. It is only marked as undone
@@ -549,6 +567,24 @@ mod tests {
 
         h.delete(&id).unwrap();
         assert!(h.list().is_empty());
+    }
+
+    #[test]
+    fn clear_keeps_the_files() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        fs::write(p.join("a"), "A").unwrap();
+        fs::write(p.join("b"), "B").unwrap();
+        let h = History::new(p.join("hist"));
+        h.apply(&[op(p, "a", "a2")]);
+        h.apply(&[op(p, "b", "b2")]);
+        assert_eq!(h.clear().unwrap(), 2);
+        assert!(h.list().is_empty());
+        assert_eq!(
+            (read(p.join("a2")), read(p.join("b2"))),
+            ("A".into(), "B".into())
+        );
+        assert_eq!(h.clear().unwrap(), 0);
     }
 
     #[test]

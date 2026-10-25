@@ -2,9 +2,12 @@
 //! asks, with the program identified; and the album lookups built on it.
 //! Covers come from the Cover Art Archive.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use renome_core::acoustid::Heard;
 use renome_core::music::{self, AudioTags};
 use renome_core::musicbrainz::{
     self as mb, AlbumQuery, Candidate, Release, Search, Song, SongMatch,
@@ -122,18 +125,42 @@ impl Client {
         .await
     }
 
-    /// The front cover (1200 pixels), or `None` if the release has none.
+    /// The front cover (1200 pixels): the release's, else its release
+    /// group's (an edition without artwork, a cassette say, shares the
+    /// album's); `None` if neither has one.
     async fn cover(&self, id: &str) -> Result<Option<Vec<u8>>, String> {
-        let res = self
-            .http
-            .get(format!("{}/release/{id}/front-1200", covers_base()))
-            .send()
+        if let Some(bytes) = self.front(&format!("release/{id}")).await? {
+            return Ok(Some(bytes));
+        }
+        let group = self
+            .release(id)
             .await
-            .map_err(net_error)?;
-        match res.status().as_u16() {
-            200 => Ok(Some(res.bytes().await.map_err(net_error)?.to_vec())),
-            404 => Ok(None),
-            code => Err(format!("mbNetwork: HTTP {code}")),
+            .ok()
+            .and_then(|r| r.release_group)
+            .map(|g| g.id)
+            .filter(|g| !g.is_empty());
+        match group {
+            Some(g) => self.front(&format!("release-group/{g}")).await,
+            None => Ok(None),
+        }
+    }
+
+    /// The front image of `what` (`release/<id>`, `release-group/<id>`).
+    /// The archive fails now and then (HTTP 5xx): it is asked once more.
+    async fn front(&self, what: &str) -> Result<Option<Vec<u8>>, String> {
+        let url = format!("{}/{what}/front-1200", covers_base());
+        let mut retried = false;
+        loop {
+            let res = self.http.get(&url).send().await.map_err(net_error)?;
+            match res.status().as_u16() {
+                200 => return Ok(Some(res.bytes().await.map_err(net_error)?.to_vec())),
+                404 => return Ok(None),
+                500..=599 if !retried => {
+                    retried = true;
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                }
+                code => return Err(format!("coverNetwork: HTTP {code}")),
+            }
         }
     }
 }
@@ -151,12 +178,21 @@ pub struct AlbumLookup {
     choice: Option<Candidate>,
     matches: Vec<(PathBuf, SongMatch)>,
     error: Option<String>,
+    /// Identified by the songs' sound (AcoustID), not their tags.
+    heard: bool,
 }
 
 #[derive(Clone, Serialize)]
 struct Progress {
     done: usize,
     total: usize,
+    /// `listen` while songs are fingerprinted and heard on AcoustID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<&'static str>,
+}
+
+fn progress(app: &AppHandle, done: usize, total: usize, kind: Option<&'static str>) {
+    let _ = app.emit("mb-progress", Progress { done, total, kind });
 }
 
 /// The songs among `files` grouped in albums, with album-wide details agreed.
@@ -191,12 +227,75 @@ fn query_of(songs: &[Song]) -> AlbumQuery {
     }
 }
 
+/// What a lookup works with: MusicBrainz, AcoustID and the recordings each
+/// song was heard as (kept for the review's choices).
+pub struct Services<'a> {
+    pub mb: &'a Client,
+    pub acoustid: &'a crate::acoustid::Client,
+    pub heard: &'a Mutex<HashMap<PathBuf, Vec<String>>>,
+}
+
 /// Looks up each album: by the MusicBrainz release in the tags, or by
 /// searching; the best release found is checked against the songs (track
-/// count and durations) and picked only if it fits without doubt.
-pub async fn lookup(app: &AppHandle, client: &Client, albums: Vec<Vec<Song>>) -> Vec<AlbumLookup> {
+/// count and durations) and picked only if it fits without doubt. With
+/// `listen`, the songs without a title in their tags (`unnamed`) and those
+/// of albums without a release picked are identified by their sound
+/// (AcoustID); for such an album, what was heard counts when it picks a
+/// release for some of its songs, else the search's candidates stay.
+pub async fn lookup(
+    app: &AppHandle,
+    s: &Services<'_>,
+    albums: Vec<Vec<Song>>,
+    unnamed: Vec<Song>,
+    listen: bool,
+) -> Vec<AlbumLookup> {
+    let looked = by_tags(app, s.mb, albums).await;
+    if !listen {
+        return looked.into_iter().map(|(a, _)| a).collect();
+    }
+    let mut out = Vec::new();
+    let mut pending: Vec<(Option<AlbumLookup>, Vec<Song>)> = Vec::new();
+    for (a, songs) in looked {
+        if a.choice.is_none() && a.error.is_none() {
+            pending.push((Some(a), songs));
+        } else {
+            out.push(a);
+        }
+    }
+    if !unnamed.is_empty() {
+        pending.push((None, unnamed));
+    }
+    if pending.is_empty() {
+        return out;
+    }
+    let mut all: Vec<Song> = pending.iter().flat_map(|(_, s)| s.clone()).collect();
+    let (heard, error) = hear(app, s, &mut all).await;
+    let recordings: HashMap<PathBuf, Vec<String>> =
+        all.into_iter().map(|(p, t)| (p, t.recordings)).collect();
+    let mut releases = HashMap::new();
+    for (by_name, mut songs) in pending {
+        for (p, t) in &mut songs {
+            t.recordings = recordings.get(p).cloned().unwrap_or_default();
+        }
+        let groups = by_sound(app, s, &songs, &heard, &error, &mut releases).await;
+        match by_name {
+            Some(a) if !a.candidates.is_empty() && groups.iter().all(|g| g.choice.is_none()) => {
+                out.push(a)
+            }
+            _ => out.extend(groups),
+        }
+    }
+    out
+}
+
+/// The lookups by tags, each with its songs.
+async fn by_tags(
+    app: &AppHandle,
+    client: &Client,
+    albums: Vec<Vec<Song>>,
+) -> Vec<(AlbumLookup, Vec<Song>)> {
     let total = albums.len();
-    let _ = app.emit("mb-progress", Progress { done: 0, total });
+    progress(app, 0, total, None);
     let mut out = Vec::new();
     for (done, songs) in albums.into_iter().enumerate() {
         let query = query_of(&songs);
@@ -212,6 +311,7 @@ pub async fn lookup(app: &AppHandle, client: &Client, albums: Vec<Vec<Song>>) ->
             choice: None,
             matches: Vec::new(),
             error: None,
+            heard: false,
         };
         let tagged = &songs[0].1.mb_release;
         let same_release = !tagged.is_empty() && songs.iter().all(|(_, t)| t.mb_release == *tagged);
@@ -223,6 +323,12 @@ pub async fn lookup(app: &AppHandle, client: &Client, albums: Vec<Vec<Song>>) ->
                 Some(r)
             } else {
                 found.candidates = client.search(&query).await?;
+                // Nothing by the full name: without what is in brackets.
+                if found.candidates.is_empty()
+                    && let Some(q) = mb::simpler(&query)
+                {
+                    found.candidates = client.search(&q).await?;
+                }
                 match found.candidates.first() {
                     Some(best) => Some(client.release(&best.id).await?),
                     None => None,
@@ -242,14 +348,177 @@ pub async fn lookup(app: &AppHandle, client: &Client, albums: Vec<Vec<Song>>) ->
         .await;
         found.error = result.err();
         found.candidates.truncate(12);
-        out.push(found);
-        let _ = app.emit(
-            "mb-progress",
-            Progress {
-                done: done + 1,
-                total,
+        out.push((found, songs));
+        progress(app, done + 1, total, None);
+    }
+    out
+}
+
+/// Fingerprints the songs and asks AcoustID what they are; each song gets
+/// the recordings it was heard as. Also returns the error that stopped the
+/// listening, if any.
+async fn hear(
+    app: &AppHandle,
+    s: &Services<'_>,
+    songs: &mut [Song],
+) -> (HashMap<PathBuf, Heard>, Option<String>) {
+    let total = songs.len();
+    progress(app, 0, total, Some("listen"));
+    let mut heard = HashMap::new();
+    let mut error = None;
+    for (done, (path, tags)) in songs.iter_mut().enumerate() {
+        let print = match &error {
+            Some(_) => None,
+            None => {
+                let p = path.clone();
+                tauri::async_runtime::spawn_blocking(move || renome_core::fingerprint::of(&p))
+                    .await
+                    .ok()
+                    .flatten()
+            }
+        };
+        let h = match print {
+            Some(print) => match s.acoustid.lookup(&print).await {
+                Ok(h) => h,
+                // The key, the connection: the next ones would fail too.
+                Err(e) => {
+                    error = Some(e);
+                    Default::default()
+                }
             },
-        );
+            None => Default::default(),
+        };
+        tags.recordings = h.recordings.clone();
+        if !h.recordings.is_empty() {
+            s.heard
+                .lock()
+                .unwrap()
+                .insert(path.clone(), h.recordings.clone());
+        }
+        heard.insert(path.clone(), h);
+        progress(app, done + 1, total, Some("listen"));
+    }
+    (heard, error)
+}
+
+/// Splits each folder's songs among the releases they were heard on and
+/// checks each album against its release, as [`lookup`] does. `releases`
+/// keeps those fetched.
+async fn by_sound(
+    app: &AppHandle,
+    s: &Services<'_>,
+    songs: &[Song],
+    heard: &HashMap<PathBuf, Heard>,
+    error: &Option<String>,
+    releases: &mut HashMap<String, Result<Release, String>>,
+) -> Vec<AlbumLookup> {
+    // Each folder (with its disc folders) on its own.
+    let mut folders: Vec<(PathBuf, Vec<usize>)> = Vec::new();
+    for (i, (p, _)) in songs.iter().enumerate() {
+        let dir = music::album_dir(p.parent().unwrap_or(Path::new(""))).to_path_buf();
+        match folders.iter_mut().find(|(d, _)| *d == dir) {
+            Some((_, v)) => v.push(i),
+            None => folders.push((dir, vec![i])),
+        }
+    }
+    let by_path: HashMap<&Path, &Song> = songs.iter().map(|s| (s.0.as_path(), s)).collect();
+    let mut found = Vec::new();
+    for (_, idx) in &folders {
+        let part: Vec<_> = idx
+            .iter()
+            .map(|&i| {
+                let p = &songs[i].0;
+                (p.clone(), heard.get(p).cloned().unwrap_or_default())
+            })
+            .collect();
+        let mut groups = renome_core::acoustid::albums(&part);
+        // A folder mostly on one release is that album: its other songs
+        // (a remaster heard as the original recording, say) join it when
+        // their tags fit one of its tracks.
+        if let Some(best) = groups.first().and_then(|g| g.candidates.first())
+            && part.len() > 1
+            && groups[0].songs.len() * 2 >= part.len()
+        {
+            let id = best.id.clone();
+            if !releases.contains_key(&id) {
+                releases.insert(id.clone(), s.mb.release(&id).await);
+            }
+            if let Some(Ok(r)) = releases.get(&id) {
+                let rest: Vec<Song> = groups[1..]
+                    .iter()
+                    .flat_map(|g| &g.songs)
+                    .map(|p| by_path[p.as_path()].clone())
+                    .collect();
+                let fit: Vec<PathBuf> = mb::match_tracks(r, &rest)
+                    .0
+                    .into_iter()
+                    .map(|(p, _)| p)
+                    .collect();
+                for g in &mut groups[1..] {
+                    g.songs.retain(|p| !fit.contains(p));
+                }
+                groups[0].songs.extend(fit);
+                groups.retain(|g| !g.songs.is_empty());
+            }
+        }
+        found.extend(groups);
+    }
+    let total = found.len();
+    progress(app, 0, total, None);
+    let mut out = Vec::new();
+    for (done, f) in found.into_iter().enumerate() {
+        let album: Vec<Song> = f
+            .songs
+            .iter()
+            .map(|p| by_path[p.as_path()].clone())
+            .collect();
+        let mut query = query_of(&album);
+        if let Some(best) = f.candidates.first() {
+            query.artist = best.artist.clone();
+            query.album = best.title.clone();
+            query.year = best.date.get(..4).and_then(|y| y.parse().ok());
+        }
+        // Nothing heard because AcoustID failed: say why.
+        let failed = if f.candidates.is_empty() {
+            error.clone()
+        } else {
+            None
+        };
+        let mut lookup = AlbumLookup {
+            files: f.songs.clone(),
+            dir: f.songs[0]
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_default(),
+            query,
+            candidates: f.candidates,
+            choice: None,
+            matches: Vec::new(),
+            error: failed,
+            heard: true,
+        };
+        if let Some(best) = lookup.candidates.first() {
+            if !releases.contains_key(&best.id) {
+                releases.insert(best.id.clone(), s.mb.release(&best.id).await);
+            }
+            match &releases[&best.id] {
+                Ok(r) => {
+                    let matches = mb::match_tracks(r, &album).0;
+                    if mb::sure(r, &album) {
+                        // The release's own details (format, label) for the review.
+                        let mut c = mb::rank(&lookup.query, std::slice::from_ref(r)).remove(0);
+                        c.score = best.score;
+                        lookup.candidates[0] = c.clone();
+                        lookup.choice = Some(c);
+                        lookup.matches = matches;
+                    }
+                }
+                Err(e) => lookup.error = Some(e.clone()),
+            }
+        }
+        lookup.candidates.truncate(12);
+        out.push(lookup);
+        progress(app, done + 1, total, None);
     }
     out
 }
@@ -285,7 +554,7 @@ pub async fn covers(
 ) -> crate::tmdb::SidecarReport {
     let mut report = crate::tmdb::SidecarReport::default();
     let total = items.len();
-    let _ = app.emit("mb-progress", Progress { done: 0, total });
+    progress(app, 0, total, None);
     for (done, item) in items.into_iter().enumerate() {
         let has_cover = std::fs::read_dir(&item.dir)
             .map(|rd| {
@@ -308,13 +577,7 @@ pub async fn covers(
                 Err(e) => report.errors.push((item.dir.display().to_string(), e)),
             }
         }
-        let _ = app.emit(
-            "mb-progress",
-            Progress {
-                done: done + 1,
-                total,
-            },
-        );
+        progress(app, done + 1, total, None);
     }
     report
 }

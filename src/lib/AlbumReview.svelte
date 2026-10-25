@@ -101,8 +101,12 @@
 
     {#if a}
       <p class="read">
-        <span class="muted">{t("albumRead")}</span>
-        {a.query.artist || "—"} · {a.query.album}{a.query.year ? ` (${a.query.year})` : ""}
+        <span class="muted">{t(a.heard ? "albumHeard" : "albumRead")}</span>
+        {#if a.heard && !a.candidates.length && !a.query.album}
+          {t("albumNotHeard")}
+        {:else}
+          {a.query.artist || "—"} · {a.query.album}{a.query.year ? ` (${a.query.year})` : ""}
+        {/if}
         {#if a.choice}<span class="muted"> · {t("albumMatched", { n: matched, total: a.files.length })}</span>{/if}
       </p>
       <form class="search" onsubmit={search}>

@@ -266,6 +266,9 @@ pub enum Rule {
         /// Write a playlist for each album (used by the app).
         #[serde(default)]
         playlist: bool,
+        /// Identify songs by their sound on AcoustID (used by the app).
+        #[serde(default = "yes")]
+        listen: bool,
     },
 }
 
@@ -288,6 +291,13 @@ pub fn song_tags(file: &FileEntry, from_name: bool) -> Option<AudioTags> {
         t.fill_from(music::from_name(&file.stem, &file.dir));
     }
     (!t.title.is_empty()).then_some(t)
+}
+
+/// A song's tags even without a title: for songs identified by their sound,
+/// whose details come from the release.
+pub fn any_song_tags(file: &FileEntry) -> Option<AudioTags> {
+    (!file.is_dir && music::is_audio(&file.ext))
+        .then(|| file.audio_tags().cloned().unwrap_or_default())
 }
 
 fn song_of(ctx: &Ctx, from_name: bool) -> Option<AudioTags> {

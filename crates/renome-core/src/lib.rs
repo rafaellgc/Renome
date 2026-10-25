@@ -12,9 +12,11 @@
 //! - [`tmdb`]: movie title guessing, ranking and `.nfo` files for TMDB.
 //! - [`tv`]: season and episode numbers, and matching files to a show.
 
+pub mod acoustid;
 pub mod apply;
 pub mod files;
 pub mod filter;
+pub mod fingerprint;
 pub mod identical;
 pub mod music;
 pub mod musicbrainz;

@@ -304,7 +304,9 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   its ID3/MP4 forms) is looked up by it and taken when every song
   matches one of its tracks (else it waits for review). Otherwise it is
   searched (`release:"<album>" AND artist:"<album artist>"`, the artist
-  left out for Various Artists, 25 results) and ranked: title similarity
+  left out for Various Artists, 25 results; when nothing is found, once
+  more with the album name without bracketed parts, "Analogue (20th
+  Anniversary Edition)" → "Analogue") and ranked: title similarity
   + 0.6 × artist similarity + 0.3 for the same track count as the songs
   (0.1 when more, −0.2 when fewer) + 0.1 for the same year + 0.05 if
   official + MusicBrainz's score / 2000. The best one is fetched with
@@ -318,6 +320,42 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   0.6, or ≥ 0.8 without bracketed parts) or length (within 5 s), else by
   title (≥ 0.8), each track once; a song that fits no track keeps its
   tags. "Picked without doubt" also needs every song matched this way.
+  A song heard on AcoustID (below) is matched first by its recording.
+- "Identify by sound (AcoustID)", on by default: after the search, the
+  songs of albums without a release picked (none found, or in doubt) and
+  the visible songs without a title in their tags (even with one taken
+  from the file name, which is only a guess) are identified by their
+  sound; for an album the search had candidates for, what was heard
+  counts only when it picks a release for some of its songs, else the
+  search's candidates stay. Each one's first 120 s are
+  decoded (`symphonia`: MP3, FLAC, Ogg Vorbis, MP4/M4A with AAC or ALAC,
+  WAV, AIFF; others, such as Opus, are not heard) and fingerprinted
+  (`rusty-chromaprint`, Chromaprint's default algorithm, compressed and
+  base64url-encoded as `fpcalc` does); fingerprint and length go to
+  AcoustID (`/v2/lookup`, POST, Renome's application key, one request
+  every 0.4 s; 429/503 retried 3 times after 3 s; an invalid key or a
+  network error stops the listening and is reported). Answers with a
+  score ≥ 0.5 count; of their recordings, those linked by at least half
+  as many submissions (`sources`) as the most linked one (a fingerprint
+  is sometimes linked to other songs too), with the releases they are on.
+  Each folder's songs (its disc folders' too) are then split among
+  releases: again and again, the release preferred for the songs still
+  without one takes those of them it has, preferring one with at least
+  half of the folder's songs (and more than one), then an album of the
+  artist's own (type Album, no secondary type), then more of the songs,
+  then a track count nearest the folder's song count, then the earliest
+  date, then the order AcoustID gave (so ties go the same way every
+  time). The releases with all of an album's songs are its candidates.
+  When the first release takes at least half of a folder's songs (of
+  two or more), the folder is that album: its other songs join it when
+  their tags fit one of its tracks (as in the matching above; a
+  remaster is often heard as the original recording).
+  The first is fetched from MusicBrainz and picked as above (every song
+  matched, lengths agreeing); otherwise the album waits for review
+  ("By sound" shows the release heard; songs nothing was heard for are
+  "not recognised"). The recordings heard are kept for the session, so
+  a release chosen in the review is matched by them too. A song without
+  a title is named from its release once matched.
 - A matched song takes the release's title (track), artist (the track's
   artist credit, else the release's), album artist (release credit),
   album, year (release date), track and disc numbers and totals, in
@@ -326,10 +364,13 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   dashes stay.
 - "Save the album's cover": after renaming, `cover.jpg` (front, 1200 px)
   in the folder each album with a release ends up in, unless it has a
-  `cover.*`, `folder.*` or `front.*` file; albums whose songs keep their
+  `cover.*`, `folder.*` or `front.*` file (an HTTP 5xx from the archive
+  is retried once after 3 s); a release without artwork (a cassette
+  edition, say) takes its release group's front; albums whose songs keep their
   names count in the Rename button too. Recorded in the history and
   deleted by undo.
-- Only the album and artist names (and release ids) are sent.
+- Only the album and artist names (and release ids) are sent to
+  MusicBrainz; to AcoustID, only each song's fingerprint and length.
 - The files' audio and tags are never changed (cue sheets and
   playlists that list them are updated, see 4).
 
@@ -400,7 +441,13 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   folder, e.g. `~/.local/share/renome/history/`), allowing **undo** even
   after closing the program. If part of an undo fails (file moved or
   deleted), the entry shows the failure and can be retried once the files
-  are back in place. Entries can be deleted from the history.
+  are back in place. Entries can be deleted from the history, one by one
+  or all at once ("Clear history", confirmed); the files stay as they
+  are. Entry ids come from the time (milliseconds) and the process,
+  with `-2`, `-3`… if one is taken.
+- When a rename (or undo) ends without errors, a short note in the
+  bottom right corner says what was done and goes away after 4 s (or
+  on a click); with errors, the error list is shown instead.
 - Confirmations and error reports use the app's own dialogs; the confirm
   button is focused by default (Enter confirms), except in destructive
   dialogs (e.g. deleting a history entry), where Cancel is. Errors name the

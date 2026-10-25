@@ -318,7 +318,7 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li><b>Singles</b>: a song tagged with the album <code>Single</code> gets its own title as album.</li>
   <li><b>Compilations</b>: on an album where most tracks are by others than the album's artist, the artist goes into the name before the title when the template lacks it: <code>03 - Eric Burdon - Orange and Red Beams</code>.</li>
   <li>If the album name already has a year (<code>Show 12 (2025-05-04)</code>), the template's <code>({year})</code> is left out.</li>
-  <li>Songs <b>without a title in their tags</b> are left as they are and get <b>✕</b>; the card shows how many. With <b>Fill in from the file name</b>, the program reads <code>01 - Artist - Title</code>, <code>01. Title</code> or <code>1-05 Title</code> from the name, and the album and year from the folder (<code>Artist - Album (1975)</code>, or just <code>Album</code>; a <code>CD2</code> folder gives the disc). Existing tags come first.</li>
+  <li>Songs <b>without a title in their tags</b> are left as they are and get <b>✕</b> (unless the search identifies them by sound, see below); the card shows how many. With <b>Fill in from the file name</b>, the program reads <code>01 - Artist - Title</code>, <code>01. Title</code> or <code>1-05 Title</code> from the name, and the album and year from the folder (<code>Artist - Album (1975)</code>, or just <code>Album</code>; a <code>CD2</code> folder gives the disc). Existing tags come first.</li>
 </ul>
 <h4>Artist and album folders</h4>
 <p>With <b>Organize into artist and album folders</b>, each song goes into <code>{album artist}/{album} ({year})</code> (the folder template can be changed; each <code>/</code> is a level). So <code>Music/Pink Floyd/WYWH/CD1/01.mp3</code> becomes <code>Music/Pink Floyd/Wish You Were Here (1975)/01 - Shine On….mp3</code>: folders already named after the artist, the album or a disc (or inside the artist's folder) are replaced, not filled with new folders. Loose files get the folders inside the folder they are in. Small spelling differences between the folder and the tag do not get in the way. A folder that already gathers albums named like it (<code>Show (1000 - ..)</code> for albums "Show 1037 - …") is taken as a collection: the albums go straight into it, with no artist folders in between.</p>
@@ -337,9 +337,19 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li>The visible songs are grouped by album. If the tags already have the MusicBrainz id, the album is known at once (when every song is on it; otherwise it goes to the review); otherwise the program searches by artist and album name.</li>
   <li>One album often has several editions (original, remaster, deluxe, another country's). The program checks the <b>number of tracks</b>, <b>each one's title</b> and <b>length</b> (a track with the same number but another title and length does not count): if the best edition found fits the songs, it is picked automatically (<b>✓</b>). Otherwise the review opens, with cover, date, country, format, label and track count (green when it equals the folder's), for you to choose, or <b>None</b> to keep the tags.</li>
   <li>With the album chosen, names and folders use MusicBrainz's details: each track's title, artist, album artist, album name and year, in their official spelling. Each song is matched to its track by disc and number (or by title).</li>
-  <li><b>Save the album's cover</b>: writes <code>cover.jpg</code> (from the Cover Art Archive) in the album's folder, if it has no cover yet. Undo deletes the cover created.</li>
+  <li><b>Save the album's cover</b>: writes <code>cover.jpg</code> (from the Cover Art Archive) in the album's folder, if it has no cover yet. If the chosen edition has no image (a cassette, say), the album's cover is used. Undo deletes the cover created.</li>
   <li>Lookups are spaced out (one every 2 seconds), as MusicBrainz asks; each album takes about 4 seconds.</li>
 </ul>
+<h4>Identify by sound (AcoustID)</h4>
+<p>With <b>Identify by sound</b> checked (the default), the search also takes care of songs <b>without a title in their tags</b> (even with <b>Fill in from the file name</b>, since the name is only a guess) and of albums the search by name did not find or left in doubt. For an album in doubt, what was heard counts only if it identifies a release with certainty; otherwise the search's candidates stay. The program listens to the first 2 minutes of each song, computes the sound's <b>fingerprint</b> and asks <b>AcoustID</b> (acoustid.org), an open fingerprint database linked to MusicBrainz, which recording it is.</p>
+<ul>
+  <li>The songs of a folder are split among the albums their recordings are on: if most are on one album, the folder is that album; loose songs go to the artist's studio album rather than a compilation.</li>
+  <li>Among the editions, the one with the track count nearest the folder's wins, then the earliest. If tracks and lengths fit, the album is picked automatically; otherwise it goes to the review, which shows <b>By sound:</b> with the album heard.</li>
+  <li>A song without a title takes the name of its track on the chosen album. A song AcoustID does not know shows as <b>not recognised</b> and is left as it is.</li>
+  <li>Reads MP3, FLAC, OGG, M4A (AAC and ALAC), WAV and AIFF. Other formats, such as Opus and WMA, are not listened to.</li>
+  <li>Each song takes about half a second to be listened to and looked up.</li>
+</ul>
+<p class="tip">Only each song's sound fingerprint and length are sent to AcoustID, never the file.</p>
 <p class="tip">Renome only reads the tags; the songs themselves are not changed. Only the artist and album name are sent to MusicBrainz.</p>`,
   },
   {
@@ -387,6 +397,7 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li>Renaming happens in two steps, through a temporary name. That is why names can be swapped (a ↔ b), and no file is ever overwritten.</li>
   <li>Folders and the files inside them can be renamed together: the contents first, then the folder.</li>
   <li>Cue sheets and playlists (<code>.cue</code>, <code>.m3u</code>, <code>.m3u8</code>) that list renamed or moved files are updated with the new names. A <code>.cue</code> listing only files that do not exist (a whole-disc file later split into tracks) is rebuilt with one track per file, matching each <code>TRACK</code> with the song in the folder tagged with that number; if that is not possible, it is deleted. <code>.m3u</code> playlists in which no song exists are deleted too. These are the only changes Renome makes to files; the original content is kept in the history, and undo puts it back.</li>
+  <li>When it finishes, a note in the bottom right corner tells how many files were renamed, and goes away by itself.</li>
   <li>If a file fails (no permission, deleted by another program…), the others still go ahead, and at the end you get a list of what failed and why.</li>
   <li>After renaming, the rules are turned off (can be changed in Options), so they are not applied twice.</li>
 </ul>
@@ -396,6 +407,7 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li><b>Undo</b>: brings back the previous names.</li>
   <li><b>Try again</b>: shown when part of an undo failed (for example, a file was moved afterwards). Put the file back and try again.</li>
   <li><b>✕</b>: deletes the entry from the history. The files do not change, but that rename can no longer be undone.</li>
+  <li><b>Clear history</b>: deletes all entries at once, with the same effect.</li>
 </ul>
 <p class="tip"><kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes changes to the <i>list</i> (add, remove, move, edit name). To undo a rename that was already done, use the History.</p>`,
   },

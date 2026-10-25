@@ -68,7 +68,7 @@ export function newRule(type: RuleType): Rule {
       };
     case "music": {
       const [template, folderTemplate] = MUSIC_TEMPLATE[settings.lang];
-      return { type, template, colon: " - ", discPrefix: true, fromName: false, folders: false, folderTemplate, cover: false, playlist: false };
+      return { type, template, colon: " - ", discPrefix: true, fromName: false, folders: false, folderTemplate, cover: false, playlist: false, listen: true };
     }
   }
 }
@@ -86,6 +86,8 @@ export function splitExt(name: string): [string, string] {
 }
 
 let counter = 0;
+/** Options added in later versions take their defaults in saved rules. */
 export function newStep(rule: Rule, enabled = true): Step {
-  return { id: `s${Date.now().toString(36)}${counter++}`, enabled, rule };
+  const full = { ...newRule(rule.type), ...rule } as Rule;
+  return { id: `s${Date.now().toString(36)}${counter++}`, enabled, rule: full };
 }

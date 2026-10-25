@@ -31,6 +31,14 @@
   let sortKey = $state<ViewSort>("newName");
   let sortDesc = $state(false);
   let notice = $state("");
+  /** A short note that the work is done, in a corner; it goes by itself. */
+  let toast = $state<string | null>(null);
+  let toastTimer: ReturnType<typeof setTimeout> | undefined;
+  function done(text: string) {
+    clearTimeout(toastTimer);
+    toast = text;
+    toastTimer = setTimeout(() => (toast = null), 4000);
+  }
   let busy = $state(false);
   let dragging = $state(false);
   let history = $state<HistoryEntry[] | null>(null);
@@ -87,7 +95,7 @@
   let albums = $state<AlbumState[]>([]);
   /** Albums in the review window (indexes); null when closed. */
   let albumReview = $state<number[] | null>(null);
-  let mbProgress = $state<{ done: number; total: number; kind: "search" | "save" } | null>(null);
+  let mbProgress = $state<{ done: number; total: number; kind: "search" | "listen" | "save" } | null>(null);
   /** Each song's details from its chosen release. */
   const songMatches = $derived(
     Object.fromEntries(albums.flatMap((a) => (a.choice ? Object.entries(a.matches) : []))) as Record<string, SongMatch>,
@@ -449,6 +457,7 @@
       ].filter(Boolean).join(" · ");
       await refresh();
       checkIdentical();
+      if (!r.errors.length && notice) done(notice);
       await showErrors(r, t("resultTitle"), `${t("renamedN", { n: r.done.length })}\n${t("errorsN", { n: r.errors.length })}:`);
     } catch (e) {
       notice = `${t("error")}: ${tError(e)}`;
@@ -470,6 +479,7 @@
       if (history) history = await api.history();
       await refresh();
       checkIdentical();
+      if (!r.errors.length) done(notice);
       await showErrors(
         r,
         r.done.length ? t("resultTitle") : t("undoFailed"),
@@ -569,7 +579,8 @@
       albums.filter((a) => a.status === "auto" || a.status === "chosen").flatMap((a) => a.files),
     );
     const paths = preview.items
-      .filter((i) => !i.isDir && !i.untagged && isAudio(i.original) && !settled.has(i.path))
+      // Songs without a title can still be identified by their sound.
+      .filter((i) => !i.isDir && (!i.untagged || rule.listen) && isAudio(i.original) && !settled.has(i.path))
       .map((i) => i.path);
     if (!paths.length) {
       notice = t("mbNoFiles");
@@ -577,7 +588,7 @@
     }
     mbProgress = { done: 0, total: 0, kind: "search" };
     try {
-      const found = await api.mbLookup(paths, rule.fromName);
+      const found = await api.mbLookup(paths, rule.fromName, rule.listen);
       if (!found.length) {
         notice = t("mbNoFiles");
         return;
@@ -599,6 +610,7 @@
           matches: Object.fromEntries(f.matches),
           status: f.choice ? "auto" : f.candidates.length ? "choose" : "none",
           error: f.error,
+          heard: f.heard,
         })),
       ];
       openAlbumReview();
@@ -796,6 +808,23 @@
     notice = t("listEditUndone");
   }
 
+  async function clearHistory() {
+    const ok = await confirm({
+      title: t("clearHistory"),
+      text: t("clearHistoryText"),
+      ok: t("clearHistoryOk"),
+      cancel: t("cancel"),
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.clearHistory();
+    } catch (e) {
+      await notify({ title: t("clearHistory"), text: tError(e) });
+    }
+    history = await api.history();
+  }
+
   async function deleteEntry(id: string) {
     const ok = await confirm({
       title: t("deleteEntry"),
@@ -904,8 +933,10 @@
     const unlistenTmdb = listen<{ done: number; total: number }>("tmdb-progress", (e) => {
       if (tmdbProgress) tmdbProgress = { ...tmdbProgress, ...e.payload };
     });
-    const unlistenMb = listen<{ done: number; total: number }>("mb-progress", (e) => {
-      if (mbProgress) mbProgress = { ...mbProgress, ...e.payload };
+    const unlistenMb = listen<{ done: number; total: number; kind?: "listen" }>("mb-progress", (e) => {
+      // After listening, the albums heard are looked up.
+      if (mbProgress)
+        mbProgress = { ...e.payload, kind: e.payload.kind ?? (mbProgress.kind === "listen" ? "search" : mbProgress.kind) };
     });
     const unlistenProgress = listen<{ done: number; total: number }>("identical-progress", (e) => {
       identicalProgress = e.payload.done < e.payload.total ? e.payload.done / e.payload.total : null;
@@ -1021,13 +1052,15 @@
                   ? {
                       ...albumCounts,
                       progress: mbProgress
-                        ? t(mbProgress.kind === "search" ? "mbSearching" : "coversWriting", mbProgress)
+                        ? t({ search: "mbSearching", listen: "mbListening", save: "coversWriting" }[mbProgress.kind] as "mbSearching", mbProgress)
                         : null,
                       onsearch: () => searchAlbums(step.rule as Extract<Rule, { type: "music" }>),
                       onreview: () => openAlbumReview(),
                     }
                   : undefined}
-            summary={step.rule.type === "music" && step.enabled && untaggedCount ? t("musicUntaggedN", { n: untaggedCount }) : null}
+            summary={step.rule.type === "music" && step.enabled && untaggedCount
+              ? t(step.rule.listen ? "musicUntaggedListenN" : "musicUntaggedN", { n: untaggedCount })
+              : null}
           />
         {:else}
           <p class="empty">{t("emptyRules")}</p>
@@ -1092,6 +1125,13 @@
 </div>
 {/if}
 
+{#if toast}
+  <div class="toast" role="status" aria-live="polite">
+    <span class="tick" aria-hidden="true">✓</span>{toast}
+    <button class="icon" title={t("close")} aria-label={t("close")} onclick={() => (toast = null)}>✕</button>
+  </div>
+{/if}
+
 {#if history}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <div class="overlay" onclick={() => (history = null)}>
@@ -1121,7 +1161,13 @@
       {:else}
         <p class="muted">{t("noHistory")}</p>
       {/if}
-      <div class="modal-foot"><button onclick={() => (history = null)}>{t("close")}</button></div>
+      <div class="modal-foot">
+        {#if history.length}
+          <button class="danger-text" onclick={clearHistory} disabled={busy}>{t("clearHistory")}</button>
+          <span class="spacer"></span>
+        {/if}
+        <button onclick={() => (history = null)}>{t("close")}</button>
+      </div>
     </div>
   </div>
 {/if}
@@ -1218,6 +1264,35 @@
     color: var(--muted);
   }
   .drop .big { font-size: 18px; color: var(--text); margin: 0 0 4px; }
+  .toast {
+    position: fixed;
+    right: 16px;
+    bottom: 40px;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: min(480px, calc(100vw - 32px));
+    padding: 8px 14px;
+    font-size: 13px;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    box-shadow: var(--shadow);
+    animation: toast-in 0.18s ease-out;
+  }
+  .toast .tick { color: var(--accent); font-weight: 700; }
+  .toast button.icon { margin: -4px -8px -4px 4px; font-size: 11px; border-color: transparent; background: transparent; }
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(6px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .toast { animation: none; }
+  }
+  .modal-foot .spacer { flex: 1; }
+  button.danger-text { color: var(--danger); }
   footer {
     display: flex;
     gap: 16px;

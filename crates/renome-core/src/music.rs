@@ -38,6 +38,9 @@ pub struct AudioTags {
     /// file names then show each song's artist.
     #[serde(skip)]
     pub compilation: bool,
+    /// The MusicBrainz recordings the song was heard as (AcoustID).
+    #[serde(skip)]
+    pub recordings: Vec<String>,
 }
 
 /// Audio formats whose tags can be read (video containers left out).
@@ -100,6 +103,7 @@ pub fn read(path: &Path) -> Option<AudioTags> {
                 .map(str::to_string)
         }),
         compilation: false,
+        recordings: Vec::new(),
     };
     (t != AudioTags::default()).then_some(t)
 }

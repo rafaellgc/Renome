@@ -33,7 +33,7 @@ export type Rule =
     }
   | {
       type: "music"; template: string; colon: string; discPrefix: boolean; fromName: boolean;
-      folders: boolean; folderTemplate: string; cover: boolean; playlist: boolean;
+      folders: boolean; folderTemplate: string; cover: boolean; playlist: boolean; listen: boolean;
     };
 
 export type RuleType = Rule["type"];
@@ -136,6 +136,8 @@ export interface AlbumLookup {
   choice: MbCandidate | null;
   matches: [string, SongMatch][];
   error: string | null;
+  /** Identified by the songs' sound (AcoustID), not their tags. */
+  heard: boolean;
 }
 
 export interface AlbumState {
@@ -147,6 +149,7 @@ export interface AlbumState {
   matches: Record<string, SongMatch>;
   status: MovieStatus;
   error: string | null;
+  heard: boolean;
 }
 
 /** A TMDB movie offered for a file, best first. */

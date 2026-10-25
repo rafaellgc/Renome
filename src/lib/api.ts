@@ -29,7 +29,8 @@ export const api = {
     invoke<{ query: string; candidates: Candidate[]; auto: boolean }>("tv_search", { key, lang, query, items }),
   tvLookup: (key: string, lang: string, id: number, items: TvItem[]) =>
     invoke<{ show: Show; files: EpisodeLookup[] }>("tv_lookup", { key, lang, id, items }),
-  mbLookup: (paths: string[], fromName: boolean) => invoke<AlbumLookup[]>("mb_lookup", { paths, fromName }),
+  mbLookup: (paths: string[], fromName: boolean, listen: boolean) =>
+    invoke<AlbumLookup[]>("mb_lookup", { paths, fromName, listen }),
   mbSearch: (query: AlbumQuery) => invoke<MbCandidate[]>("mb_search", { query }),
   mbChoose: (id: string, paths: string[], fromName: boolean) =>
     invoke<{ matches: [string, SongMatch][]; agree: number }>("mb_choose", { id, paths, fromName }),
@@ -56,6 +57,7 @@ export const api = {
   ) => invoke<{ created: string[]; errors: [string, string][] }>("write_tv_sidecars", { key, lang, historyId, items, fanart, folders }),
   undo: (id: string) => invoke<ApplyReport>("undo", { id }),
   deleteHistory: (id: string) => invoke<void>("delete_history", { id }),
+  clearHistory: () => invoke<number>("clear_history"),
   savePreset: (path: string, steps: Step[]) => invoke<void>("save_preset", { path, steps }),
   loadPreset: (path: string) => invoke<Step[]>("load_preset", { path }),
 };

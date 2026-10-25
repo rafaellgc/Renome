@@ -318,7 +318,7 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li><b>Singles</b>: uma música com o álbum <code>Single</code> nas tags tem o próprio título como álbum.</li>
   <li><b>Coletâneas</b>: num álbum em que a maioria das faixas é de outros artistas que não o do álbum, o artista entra no nome antes do título quando o modelo não o tem: <code>03 - Eric Burdon - Orange and Red Beams</code>.</li>
   <li>Se o nome do álbum já traz um ano (<code>Programa 12 (2025-05-04)</code>), o <code>({ano})</code> do modelo é omitido.</li>
-  <li>Músicas <b>sem título nas tags</b> ficam como estão e ganham <b>✕</b>; o card mostra quantas são. Com <b>Completar pelo nome do arquivo</b>, o programa lê <code>01 - Artista - Título</code>, <code>01. Título</code> ou <code>1-05 Título</code> do nome, e o álbum e o ano da pasta (<code>Artista - Álbum (1975)</code>, ou só <code>Álbum</code>; uma pasta <code>CD2</code> dá o disco). As tags que existem têm preferência.</li>
+  <li>Músicas <b>sem título nas tags</b> ficam como estão e ganham <b>✕</b> (a não ser que a busca as identifique pelo som, veja abaixo); o card mostra quantas são. Com <b>Completar pelo nome do arquivo</b>, o programa lê <code>01 - Artista - Título</code>, <code>01. Título</code> ou <code>1-05 Título</code> do nome, e o álbum e o ano da pasta (<code>Artista - Álbum (1975)</code>, ou só <code>Álbum</code>; uma pasta <code>CD2</code> dá o disco). As tags que existem têm preferência.</li>
 </ul>
 <h4>Pastas de artista e álbum</h4>
 <p>Com <b>Organizar em pastas de artista e álbum</b>, cada música vai para <code>{artista do álbum}/{álbum} ({ano})</code> (o modelo das pastas pode ser trocado; cada <code>/</code> é um nível). Assim, <code>Música/Pink Floyd/WYWH/CD1/01.mp3</code> vira <code>Música/Pink Floyd/Wish You Were Here (1975)/01 - Shine On….mp3</code>: as pastas que já levam o nome do artista, do álbum ou do disco (ou que estão dentro da pasta do artista) são substituídas, não ganham pastas novas dentro. Arquivos soltos ganham as pastas dentro da pasta onde estão. Pequenas diferenças de grafia entre a pasta e a tag (<code>Сага об</code> e <code>Сага о</code>) não atrapalham. Uma pasta que já reúne álbuns com o nome dela (<code>Programa (1000 - ..)</code> para os álbuns "Programa 1037 - …") é tratada como coleção: os álbuns ficam direto nela, sem pastas de artista no meio.</p>
@@ -337,9 +337,19 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li>As músicas visíveis são agrupadas por álbum. Se as tags já trazem o ID do MusicBrainz, o álbum é reconhecido direto (quando todas as músicas estão nele; senão, vai para a conferência); senão, o programa busca pelo artista e pelo nome do álbum.</li>
   <li>Um mesmo álbum costuma ter várias edições (original, remasterizada, de luxo, de outro país). O programa confere o <b>número de faixas</b>, o <b>título</b> e a <b>duração de cada uma</b> (uma faixa com o mesmo número mas outro título e outra duração não conta): se a melhor edição encontrada bate com as músicas, ela é escolhida sozinha (<b>✓</b>). Senão, abre a revisão, com capa, data, país, formato, gravadora e número de faixas (em verde quando é igual ao da pasta), para você escolher, ou <b>Nenhum</b> para manter as tags.</li>
   <li>Com o álbum escolhido, os nomes e as pastas usam os dados do MusicBrainz: título de cada faixa, artista, artista do álbum, nome do álbum e ano, com a grafia oficial. Cada música é casada com a sua faixa pelo disco e número (ou pelo título).</li>
-  <li><b>Salvar a capa do álbum</b>: grava <code>cover.jpg</code> (do Cover Art Archive) na pasta do álbum, se ela ainda não tiver capa. Desfazer apaga a capa criada.</li>
+  <li><b>Salvar a capa do álbum</b>: grava <code>cover.jpg</code> (do Cover Art Archive) na pasta do álbum, se ela ainda não tiver capa. Se a edição escolhida não tiver imagem (uma fita cassete, por exemplo), usa a capa do álbum. Desfazer apaga a capa criada.</li>
   <li>As consultas são espaçadas (uma a cada 2 segundos), como o MusicBrainz pede; cada álbum leva uns 4 segundos.</li>
 </ul>
+<h4>Identificar pelo som (AcoustID)</h4>
+<p>Com <b>Identificar pelo som</b> marcado (o padrão), a busca também cuida das músicas <b>sem título nas tags</b> (mesmo com <b>Completar pelo nome do arquivo</b>, já que o nome é só um palpite) e dos álbuns que a busca pelo nome não achou ou deixou em dúvida. Num álbum em dúvida, o resultado pelo som só vale se identificar um lançamento com segurança; senão, ficam os candidatos da busca. O programa ouve os 2 primeiros minutos de cada música, calcula a <b>impressão digital</b> do som e pergunta ao <b>AcoustID</b> (acoustid.org), um banco aberto de impressões digitais ligado ao MusicBrainz, qual gravação é aquela.</p>
+<ul>
+  <li>As músicas de uma pasta são repartidas entre os álbuns em que as gravações aparecem: se a maioria está num mesmo álbum, a pasta é esse álbum; músicas avulsas vão para o álbum de estúdio do artista, e não para uma coletânea.</li>
+  <li>Entre as edições, fica a com o número de faixas mais próximo do da pasta e, depois, a mais antiga. Se as faixas e as durações batem, o álbum é escolhido sozinho; senão, vai para a revisão, que mostra <b>Pelo som:</b> com o álbum ouvido.</li>
+  <li>Uma música sem título recebe o nome da faixa do álbum escolhido. Uma música que o AcoustID não conhece aparece como <b>não reconhecida</b> e fica como está.</li>
+  <li>Lê MP3, FLAC, OGG, M4A (AAC e ALAC), WAV e AIFF. Outros formatos, como Opus e WMA, não são ouvidos.</li>
+  <li>Cada música leva cerca de meio segundo para ser ouvida e consultada.</li>
+</ul>
+<p class="tip">Ao AcoustID vão só a impressão digital do som e a duração de cada música, nunca o arquivo.</p>
 <p class="tip">O Renome só lê as tags; o conteúdo das músicas não é alterado. Ao MusicBrainz vão só o artista e o nome do álbum.</p>`,
   },
   {
@@ -387,6 +397,7 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li>A renomeação é feita em duas etapas, passando por um nome temporário. Por isso dá para trocar nomes entre si (a ↔ b), e nenhum arquivo é sobrescrito.</li>
   <li>Pastas e arquivos de dentro delas podem ser renomeados juntos: primeiro o conteúdo, depois a pasta.</li>
   <li>Folhas de faixas e listas de reprodução (<code>.cue</code>, <code>.m3u</code>, <code>.m3u8</code>) que citam arquivos renomeados ou movidos são atualizadas com os novos nomes. Um <code>.cue</code> que cita só arquivos inexistentes (o disco inteiro num arquivo que depois foi dividido em faixas) é refeito com uma faixa por arquivo, casando cada <code>TRACK</code> com a música da pasta que tem aquele número nas tags; se não der, é apagado. Listas <code>.m3u</code> em que nenhuma música existe também são apagadas. São as únicas alterações que o Renome faz em arquivos; o conteúdo original fica guardado no histórico, e desfazer o devolve.</li>
+  <li>Ao terminar, um aviso no canto inferior direito confirma quantos arquivos foram renomeados e some sozinho.</li>
   <li>Se um arquivo falhar (sem permissão, apagado por outro programa…), os outros seguem, e no fim aparece a lista do que falhou e por quê.</li>
   <li>Depois de renomear, as regras são desligadas (desligável nas Opções), para não serem aplicadas duas vezes.</li>
 </ul>
@@ -396,6 +407,7 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li><b>Desfazer</b>: volta os nomes anteriores.</li>
   <li><b>Tentar de novo</b>: aparece quando parte do desfazer falhou (por exemplo, um arquivo foi movido depois). Devolva o arquivo ao lugar e tente de novo.</li>
   <li><b>✕</b>: exclui a entrada do histórico. Os arquivos não mudam, mas aquela renomeação não poderá mais ser desfeita.</li>
+  <li><b>Limpar histórico</b>: exclui todas as entradas de uma vez, com o mesmo efeito.</li>
 </ul>
 <p class="tip"><kbd>Ctrl</kbd>+<kbd>Z</kbd> desfaz alterações na <i>lista</i> (adicionar, remover, mover, editar nome). Para desfazer uma renomeação já feita, use o Histórico.</p>`,
   },

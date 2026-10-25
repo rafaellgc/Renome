@@ -318,7 +318,7 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li><b>Sencillos</b>: una canción con el álbum <code>Single</code> en las etiquetas toma su propio título como álbum.</li>
   <li><b>Recopilaciones</b>: en un álbum donde la mayoría de las pistas son de otros artistas que el del álbum, el artista entra en el nombre antes del título cuando la plantilla no lo tiene: <code>03 - Eric Burdon - Orange and Red Beams</code>.</li>
   <li>Si el nombre del álbum ya trae un año (<code>Programa 12 (2025-05-04)</code>), se omite el <code>({año})</code> de la plantilla.</li>
-  <li>Las canciones <b>sin título en las etiquetas</b> quedan como están y reciben <b>✕</b>; la tarjeta muestra cuántas son. Con <b>Completar con el nombre del archivo</b>, el programa lee <code>01 - Artista - Título</code>, <code>01. Título</code> o <code>1-05 Título</code> del nombre, y el álbum y el año de la carpeta (<code>Artista - Álbum (1975)</code>, o solo <code>Álbum</code>; una carpeta <code>CD2</code> da el disco). Las etiquetas existentes tienen prioridad.</li>
+  <li>Las canciones <b>sin título en las etiquetas</b> quedan como están y reciben <b>✕</b> (salvo que la búsqueda las identifique por el sonido, vea abajo); la tarjeta muestra cuántas son. Con <b>Completar con el nombre del archivo</b>, el programa lee <code>01 - Artista - Título</code>, <code>01. Título</code> o <code>1-05 Título</code> del nombre, y el álbum y el año de la carpeta (<code>Artista - Álbum (1975)</code>, o solo <code>Álbum</code>; una carpeta <code>CD2</code> da el disco). Las etiquetas existentes tienen prioridad.</li>
 </ul>
 <h4>Carpetas de artista y álbum</h4>
 <p>Con <b>Organizar en carpetas de artista y álbum</b>, cada canción va a <code>{artista del álbum}/{álbum} ({año})</code> (la plantilla de carpetas se puede cambiar; cada <code>/</code> es un nivel). Así, <code>Música/Pink Floyd/WYWH/CD1/01.mp3</code> queda <code>Música/Pink Floyd/Wish You Were Here (1975)/01 - Shine On….mp3</code>: las carpetas que ya llevan el nombre del artista, del álbum o de un disco (o que están dentro de la del artista) se reemplazan, no reciben carpetas nuevas dentro. Los archivos sueltos reciben las carpetas dentro de la carpeta donde están. Las pequeñas diferencias de escritura entre la carpeta y la etiqueta no molestan. Una carpeta que ya reúne álbumes con su nombre (<code>Programa (1000 - ..)</code> para los álbumes "Programa 1037 - …") se trata como colección: los álbumes quedan directamente en ella, sin carpetas de artista en medio.</p>
@@ -337,9 +337,19 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li>Las canciones visibles se agrupan por álbum. Si las etiquetas ya traen el ID de MusicBrainz, el álbum se reconoce directamente (cuando todas las canciones están en él; si no, pasa a la revisión); si no, el programa busca por artista y nombre del álbum.</li>
   <li>Un mismo álbum suele tener varias ediciones (original, remasterizada, de lujo, de otro país). El programa comprueba el <b>número de pistas</b>, el <b>título</b> y la <b>duración de cada una</b> (una pista con el mismo número pero otro título y otra duración no cuenta): si la mejor edición encontrada coincide con las canciones, se elige sola (<b>✓</b>). Si no, se abre la revisión, con portada, fecha, país, formato, sello y número de pistas (en verde cuando es igual al de la carpeta), para que usted elija, o <b>Ninguno</b> para mantener las etiquetas.</li>
   <li>Con el álbum elegido, los nombres y las carpetas usan los datos de MusicBrainz: título de cada pista, artista, artista del álbum, nombre del álbum y año, con la grafía oficial. Cada canción se empareja con su pista por disco y número (o por título).</li>
-  <li><b>Guardar la portada del álbum</b>: graba <code>cover.jpg</code> (del Cover Art Archive) en la carpeta del álbum, si aún no tiene portada. Deshacer borra la portada creada.</li>
+  <li><b>Guardar la portada del álbum</b>: graba <code>cover.jpg</code> (del Cover Art Archive) en la carpeta del álbum, si aún no tiene portada. Si la edición elegida no tiene imagen (un casete, por ejemplo), se usa la portada del álbum. Deshacer borra la portada creada.</li>
   <li>Las consultas se espacian (una cada 2 segundos), como pide MusicBrainz; cada álbum tarda unos 4 segundos.</li>
 </ul>
+<h4>Identificar por el sonido (AcoustID)</h4>
+<p>Con <b>Identificar por el sonido</b> marcado (el valor por defecto), la búsqueda también se ocupa de las canciones <b>sin título en las etiquetas</b> (incluso con <b>Completar con el nombre del archivo</b>, ya que el nombre es solo una suposición) y de los álbumes que la búsqueda por nombre no encontró o dejó en duda. En un álbum en duda, lo escuchado solo vale si identifica un lanzamiento con seguridad; si no, quedan los candidatos de la búsqueda. El programa escucha los 2 primeros minutos de cada canción, calcula la <b>huella digital</b> del sonido y le pregunta a <b>AcoustID</b> (acoustid.org), una base abierta de huellas digitales ligada a MusicBrainz, qué grabación es.</p>
+<ul>
+  <li>Las canciones de una carpeta se reparten entre los álbumes en que aparecen sus grabaciones: si la mayoría está en un mismo álbum, la carpeta es ese álbum; las canciones sueltas van al álbum de estudio del artista, y no a un recopilatorio.</li>
+  <li>Entre las ediciones, queda la de número de pistas más cercano al de la carpeta y, después, la más antigua. Si las pistas y las duraciones coinciden, el álbum se elige solo; si no, va a la revisión, que muestra <b>Por el sonido:</b> con el álbum escuchado.</li>
+  <li>Una canción sin título recibe el nombre de su pista en el álbum elegido. Una canción que AcoustID no conoce aparece como <b>no reconocida</b> y queda como está.</li>
+  <li>Lee MP3, FLAC, OGG, M4A (AAC y ALAC), WAV y AIFF. Otros formatos, como Opus y WMA, no se escuchan.</li>
+  <li>Cada canción tarda cerca de medio segundo en escucharse y consultarse.</li>
+</ul>
+<p class="tip">A AcoustID solo van la huella digital del sonido y la duración de cada canción, nunca el archivo.</p>
 <p class="tip">Renome solo lee las etiquetas; las canciones en sí no cambian. A MusicBrainz solo se envían el artista y el nombre del álbum.</p>`,
   },
   {
@@ -387,6 +397,7 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li>El renombrado se hace en dos pasos, pasando por un nombre temporal. Por eso se pueden intercambiar nombres (a ↔ b), y nunca se sobrescribe un archivo.</li>
   <li>Las carpetas y los archivos de dentro se pueden renombrar juntos: primero el contenido, después la carpeta.</li>
   <li>Las hojas de pistas y listas de reproducción (<code>.cue</code>, <code>.m3u</code>, <code>.m3u8</code>) que citan archivos renombrados o movidos se actualizan con los nuevos nombres. Un <code>.cue</code> que solo cita archivos inexistentes (el disco entero en un archivo que luego se dividió en pistas) se rehace con una pista por archivo, emparejando cada <code>TRACK</code> con la canción de la carpeta que tiene ese número en las etiquetas; si no es posible, se borra. Las listas <code>.m3u</code> en las que no existe ninguna canción también se borran. Son los únicos cambios que Renome hace en archivos; el contenido original queda guardado en el historial, y deshacer lo devuelve.</li>
+  <li>Al terminar, un aviso en la esquina inferior derecha indica cuántos archivos se renombraron y desaparece solo.</li>
   <li>Si un archivo falla (sin permiso, borrado por otro programa…), los demás siguen, y al final aparece la lista de lo que falló y por qué.</li>
   <li>Después de renombrar, las reglas se desactivan (se puede cambiar en Opciones), para no aplicarlas dos veces.</li>
 </ul>
@@ -396,6 +407,7 @@ ${ex("01.mp3", "01 - Shine On You Crazy Diamond.mp3")}
   <li><b>Deshacer</b>: recupera los nombres anteriores.</li>
   <li><b>Reintentar</b>: aparece cuando parte del deshacer falló (por ejemplo, un archivo se movió después). Devuelva el archivo a su sitio e inténtelo de nuevo.</li>
   <li><b>✕</b>: borra la entrada del historial. Los archivos no cambian, pero ese renombrado ya no se podrá deshacer.</li>
+  <li><b>Vaciar historial</b>: borra todas las entradas de una vez, con el mismo efecto.</li>
 </ul>
 <p class="tip"><kbd>Ctrl</kbd>+<kbd>Z</kbd> deshace cambios en la <i>lista</i> (añadir, quitar, mover, editar nombre). Para deshacer un renombrado ya hecho, use el Historial.</p>`,
   },

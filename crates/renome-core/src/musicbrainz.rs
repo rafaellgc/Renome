@@ -46,6 +46,8 @@ pub fn credit(c: &[Credit]) -> String {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ReleaseGroup {
+    #[serde(default)]
+    pub id: String,
     #[serde(default, rename = "primary-type")]
     pub primary_type: Option<String>,
     #[serde(default, rename = "first-release-date")]
@@ -60,6 +62,8 @@ pub struct LabelInfo {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Recording {
+    #[serde(default)]
+    pub id: String,
     #[serde(default)]
     pub title: String,
     #[serde(default)]
@@ -166,6 +170,18 @@ pub fn query(q: &AlbumQuery) -> String {
         parts.push(format!("artist:{}", phrase(&q.artist)));
     }
     parts.join(" AND ")
+}
+
+/// The album's name without what is in brackets, for a second search when
+/// the first finds nothing ("Analogue (20th Anniversary Edition)" is
+/// "Analogue" on MusicBrainz); `None` when nothing would change.
+pub fn simpler(q: &AlbumQuery) -> Option<AlbumQuery> {
+    let bare = crate::tmdb::BRACKETS.replace_all(&q.album, " ");
+    let bare = bare.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!bare.is_empty() && bare != q.album.trim()).then(|| AlbumQuery {
+        album: bare,
+        ..q.clone()
+    })
 }
 
 /// A release offered for an album, best first.
@@ -306,9 +322,10 @@ fn same_length(tr: &Track, song: &AudioTags) -> bool {
     matches!((length_of(tr), song.duration), (Some(ms), Some(secs)) if (ms / 1000).abs_diff(u64::from(secs)) <= 5)
 }
 
-/// Matches the songs of an album to a release's tracks: by disc and track
-/// number when the track has the song's title or length, else by title;
-/// each track at most once. A song that fits no track is left out (it keeps
+/// Matches the songs of an album to a release's tracks: by the recording
+/// the song was heard as (AcoustID), else by disc and track number when the
+/// track has the song's title or length, else by title; each track at most
+/// once. A song that fits no track is left out (it keeps
 /// its tags). Returns the matches and how many agree in length.
 pub fn match_tracks(release: &Release, songs: &[Song]) -> (Vec<(PathBuf, SongMatch)>, usize) {
     let album_artist = plain(&credit(&release.artist_credit));
@@ -325,13 +342,23 @@ pub fn match_tracks(release: &Release, songs: &[Song]) -> (Vec<(PathBuf, SongMat
         .collect();
     for (path, t) in songs {
         let disc = t.disc.unwrap_or(1);
+        let by_recording = || {
+            t.recordings.iter().find_map(|id| {
+                tracks.iter().position(|(m, tr)| {
+                    !used.contains(&(m.position, tr.position))
+                        && tr.recording.as_ref().is_some_and(|r| r.id == *id)
+                })
+            })
+        };
         // Same number, but another song (another edition's track list).
-        let by_number = tracks.iter().position(|(m, tr)| {
-            Some(tr.position) == t.track
-                && m.position.max(1) == disc
-                && !used.contains(&(m.position, tr.position))
-                && (same_title(&t.title, &tr.title) || same_length(tr, t))
-        });
+        let by_number = || {
+            tracks.iter().position(|(m, tr)| {
+                Some(tr.position) == t.track
+                    && m.position.max(1) == disc
+                    && !used.contains(&(m.position, tr.position))
+                    && (same_title(&t.title, &tr.title) || same_length(tr, t))
+            })
+        };
         let by_title = || {
             tracks
                 .iter()
@@ -342,7 +369,7 @@ pub fn match_tracks(release: &Release, songs: &[Song]) -> (Vec<(PathBuf, SongMat
                 .max_by(|a, b| a.1.total_cmp(&b.1))
                 .map(|(i, _)| i)
         };
-        let Some(i) = by_number.or_else(by_title) else {
+        let Some(i) = by_recording().or_else(by_number).or_else(by_title) else {
             continue;
         };
         let (m, tr) = tracks[i];
@@ -446,6 +473,33 @@ mod tests {
     }
 
     #[test]
+    fn matches_by_recording() {
+        let r = release(
+            r#"{"id":"r1","title":"Dawn","artist-credit":[{"name":"M83"}],
+            "media":[{"position":1,"track-count":2,"tracks":[
+                {"position":1,"title":"Moonchild","length":200000,"recording":{"id":"a"}},
+                {"position":2,"title":"Don't Save Us","length":300000,"recording":{"id":"b"}}]}]}"#,
+        );
+        // No title nor number: only the sound tells the song.
+        let heard = |file: &str, rec: &str, secs: u32| {
+            (
+                PathBuf::from(file),
+                AudioTags {
+                    duration: Some(secs),
+                    recordings: vec![rec.into()],
+                    ..Default::default()
+                },
+            )
+        };
+        let songs = vec![heard("/m/x.mp3", "b", 301), heard("/m/y.mp3", "a", 199)];
+        let (m, agree) = match_tracks(&r, &songs);
+        assert_eq!(agree, 2);
+        assert_eq!((m[0].1.track, m[0].1.title.as_str()), (2, "Don't Save Us"));
+        assert_eq!(m[1].1.track, 1);
+        assert!(sure(&r, &songs));
+    }
+
+    #[test]
     fn ranking() {
         let q = AlbumQuery {
             artist: "A-Ha".into(),
@@ -466,5 +520,11 @@ mod tests {
             query(&q),
             r#"release:"Hunting High And Low" AND artist:"A-Ha""#
         );
+        assert!(simpler(&q).is_none());
+        let q = AlbumQuery {
+            album: "Analogue (20th Anniversary Edition) [Deluxe]".into(),
+            ..q
+        };
+        assert_eq!(simpler(&q).unwrap().album, "Analogue");
     }
 }

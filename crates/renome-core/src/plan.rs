@@ -11,7 +11,7 @@ use crate::files::{FileEntry, join_name, natural_cmp, split_name};
 use crate::filter::Filter;
 use crate::music::{self, AudioTags};
 use crate::musicbrainz::SongMatch;
-use crate::rules::{Ctx, Move, Pipeline, RuleError, Step, song_tags};
+use crate::rules::{Ctx, Move, Pipeline, RuleError, Step, any_song_tags, song_tags};
 use crate::tmdb::MovieMatch;
 use crate::tv::EpisodeMatch;
 
@@ -520,7 +520,11 @@ pub fn preview(
             let mut tags: Vec<(PathBuf, AudioTags)> = Vec::new();
             let mut paths: Vec<&Path> = Vec::new();
             for f in visible {
-                if let Some(mut t) = song_tags(f, from_name) {
+                // A song without a title is named from its release, when it
+                // was identified by its sound.
+                let t = song_tags(f, from_name)
+                    .or_else(|| view.songs.get(&f.path).and_then(|_| any_song_tags(f)));
+                if let Some(mut t) = t {
                     if let Some(m) = view.songs.get(&f.path) {
                         m.apply(&mut t);
                     }
@@ -1083,6 +1087,7 @@ mod tests {
                 folder_template: "{album artist}/{album} ({year})".into(),
                 cover: false,
                 playlist: false,
+                listen: false,
             },
         }];
         let p = preview(&files, &steps, &HashMap::new(), &View::default());
@@ -1181,6 +1186,7 @@ mod tests {
                 folder_template: "{album artist}/{album}".into(),
                 cover: false,
                 playlist: false,
+                listen: false,
             },
         }];
         let p = preview(&files, &steps, &HashMap::new(), &View::default());

@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use renome_core::music::AudioTags;
-use renome_core::rules::song_tags;
+use renome_core::rules::{any_song_tags, song_tags};
 use renome_core::scan::Skipped;
 use renome_core::{
     ApplyReport, FileEntry, HashCache, History, HistoryEntry, Operation, Preview, ScanOptions,
@@ -15,6 +15,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+mod acoustid;
 mod musicbrainz;
 mod tmdb;
 
@@ -41,6 +42,11 @@ struct AppState {
     identical_run: AtomicU64,
     /// MusicBrainz, paced for all lookups together.
     mb: musicbrainz::Client,
+    /// AcoustID, likewise.
+    acoustid: acoustid::Client,
+    /// The recordings each song was heard as (AcoustID), for the album
+    /// review's choices.
+    heard: Mutex<HashMap<PathBuf, Vec<String>>>,
 }
 
 type Overrides = HashMap<PathBuf, String>;
@@ -369,12 +375,16 @@ async fn write_tv_sidecars(
     Ok(report)
 }
 
+type Songs = Vec<(PathBuf, AudioTags)>;
+
 /// The tags of the given songs in the list (with the name filled in, as
-/// the music rule does).
-fn songs_of(app: &AppHandle, paths: &[PathBuf], from_name: bool) -> Vec<(PathBuf, AudioTags)> {
+/// the music rule does, and the recordings they were heard as): the songs
+/// with a title in their tags, and those without (a title from the file
+/// name is only a guess).
+fn songs_of(app: &AppHandle, paths: &[PathBuf], from_name: bool) -> (Songs, Songs) {
+    let state = app.state::<AppState>();
     let wanted: HashSet<&PathBuf> = paths.iter().collect();
-    let files: Vec<FileEntry> = app
-        .state::<AppState>()
+    let files: Vec<FileEntry> = state
         .session
         .lock()
         .unwrap()
@@ -383,10 +393,20 @@ fn songs_of(app: &AppHandle, paths: &[PathBuf], from_name: bool) -> Vec<(PathBuf
         .filter(|f| wanted.contains(&f.path))
         .cloned()
         .collect();
-    files
-        .iter()
-        .filter_map(|f| Some((f.path.clone(), song_tags(f, from_name)?)))
-        .collect()
+    let heard = state.heard.lock().unwrap();
+    let (mut named, mut unnamed) = (Vec::new(), Vec::new());
+    for f in &files {
+        let Some(mut t) = song_tags(f, from_name).or_else(|| any_song_tags(f)) else {
+            continue;
+        };
+        t.recordings = heard.get(&f.path).cloned().unwrap_or_default();
+        if f.audio_tags().is_some_and(|t| !t.title.is_empty()) {
+            named.push((f.path.clone(), t));
+        } else {
+            unnamed.push((f.path.clone(), t));
+        }
+    }
+    (named, unnamed)
 }
 
 /// Groups the songs in albums and looks each one up on MusicBrainz.
@@ -395,15 +415,29 @@ async fn mb_lookup(
     app: AppHandle,
     paths: Vec<PathBuf>,
     from_name: bool,
+    listen: bool,
 ) -> Result<Vec<musicbrainz::AlbumLookup>, String> {
-    let songs = tauri::async_runtime::spawn_blocking({
+    let (mut named, mut unnamed) = tauri::async_runtime::spawn_blocking({
         let app = app.clone();
         move || songs_of(&app, &paths, from_name)
     })
     .await
     .map_err(|e| e.to_string())?;
-    let albums = musicbrainz::albums(&songs);
-    Ok(musicbrainz::lookup(&app, &app.state::<AppState>().mb, albums).await)
+    if !listen {
+        // Without listening, a title from the file name is all there is.
+        let (guessed, none): (Vec<_>, Vec<_>) =
+            unnamed.into_iter().partition(|(_, t)| !t.title.is_empty());
+        named.extend(guessed);
+        unnamed = none;
+    }
+    let albums = musicbrainz::albums(&named);
+    let state = app.state::<AppState>();
+    let services = musicbrainz::Services {
+        mb: &state.mb,
+        acoustid: &state.acoustid,
+        heard: &state.heard,
+    };
+    Ok(musicbrainz::lookup(&app, &services, albums, unnamed, listen).await)
 }
 
 /// A search typed in the album review.
@@ -423,8 +457,11 @@ async fn mb_choose(
     paths: Vec<PathBuf>,
     from_name: bool,
 ) -> Result<musicbrainz::Chosen, String> {
-    let songs = songs_of(&app, &paths, from_name);
-    let songs: Vec<_> = musicbrainz::albums(&songs).concat();
+    // Songs without a title in their tags match by the recording heard, or
+    // by what their file name tells.
+    let (mut songs, unnamed) = songs_of(&app, &paths, from_name);
+    songs = musicbrainz::albums(&songs).concat();
+    songs.extend(unnamed);
     musicbrainz::choose(&app.state::<AppState>().mb, &id, &songs).await
 }
 
@@ -507,6 +544,11 @@ fn undo(state: State<AppState>, id: String) -> Result<ApplyReport, String> {
 #[tauri::command]
 fn delete_history(state: State<AppState>, id: String) -> Result<(), String> {
     state.history.delete(&id)
+}
+
+#[tauri::command]
+fn clear_history(state: State<AppState>) -> Result<usize, String> {
+    state.history.clear()
 }
 
 #[tauri::command]
@@ -628,6 +670,8 @@ pub fn run() {
             hashes: Mutex::default(),
             identical_run: AtomicU64::new(0),
             mb: musicbrainz::Client::default(),
+            acoustid: acoustid::Client::default(),
+            heard: Mutex::new(HashMap::new()),
         })
         .invoke_handler(tauri::generate_handler![
             checkpoint,
@@ -657,6 +701,7 @@ pub fn run() {
             history,
             undo,
             delete_history,
+            clear_history,
             save_preset,
             load_preset,
             load_settings,
