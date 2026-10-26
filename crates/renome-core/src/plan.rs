@@ -8,11 +8,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::apply::Operation;
 use crate::books::BookMatch;
+use crate::comics::{self, ComicMatch};
 use crate::files::{FileEntry, join_name, natural_cmp, split_name};
 use crate::filter::Filter;
 use crate::music::{self, AudioTags};
 use crate::musicbrainz::SongMatch;
-use crate::rules::{Ctx, Move, Pipeline, RuleError, Step, any_song_tags, song_tags};
+use crate::rules::{Ctx, Move, Pipeline, Rule, RuleError, Step, any_song_tags, song_tags};
+use crate::text;
 use crate::tmdb::MovieMatch;
 use crate::tv::EpisodeMatch;
 
@@ -66,6 +68,10 @@ pub struct View {
     pub songs: HashMap<PathBuf, SongMatch>,
     /// The book chosen for each file (Open Library), for the book rule.
     pub books: HashMap<PathBuf, BookMatch>,
+    /// The issue chosen for each file (Comic Vine), for the comic rule;
+    /// other comics are named from what they say about themselves.
+    #[serde(default)]
+    pub comics: HashMap<PathBuf, crate::comics::ComicMatch>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -190,8 +196,13 @@ fn unify_folders(items: &mut [PreviewItem]) {
             .to_path_buf();
         Some((root, levels))
     };
+    // The same folder in either Unicode form of its accents is one too.
     let key = |root: &Path, levels: &[String]| {
-        format!("{}\0{}", root.display(), levels.join("/").to_lowercase())
+        format!(
+            "{}\0{}",
+            root.display(),
+            text::nfc(&levels.join("/").to_lowercase())
+        )
     };
     // Spellings of each folder, in order of appearance, with counts.
     let mut spellings: HashMap<String, Vec<(String, usize)>> = HashMap::new();
@@ -230,7 +241,7 @@ fn unify_folders(items: &mut [PreviewItem]) {
                         .unwrap_or_default()
                 })
                 .iter()
-                .find(|n| n.to_lowercase() == levels[k].to_lowercase())
+                .find(|n| text::nfc(&n.to_lowercase()) == text::nfc(&levels[k].to_lowercase()))
                 .cloned();
             let name = on_disk.unwrap_or_else(|| {
                 let v = &spellings[&key(&root, &levels[..=k])];
@@ -547,6 +558,35 @@ pub fn preview(
                 .collect()
         }
     };
+    // The comic rule names the batch's comics together (see
+    // `comics::arrange`): what each is, and the series of its folder.
+    let by_folder = steps.iter().find_map(|s| match &s.rule {
+        Rule::Comic { by_folder, .. } if s.enabled => Some(*by_folder),
+        _ => None,
+    });
+    let comics: HashMap<&Path, (ComicMatch, Option<ComicMatch>)> = match by_folder {
+        None => HashMap::new(),
+        Some(by_folder) => {
+            let (paths, mut found): (Vec<&Path>, Vec<ComicMatch>) = files
+                .iter()
+                .filter(|f| filter.matches(&f.file_name()))
+                .filter(|f| !f.is_dir && comics::is_comic(&f.ext))
+                .filter_map(|f| {
+                    let m = view
+                        .comics
+                        .get(&f.path)
+                        .cloned()
+                        .or_else(|| comics::from_file(f, by_folder))?;
+                    Some((f.path.as_path(), m))
+                })
+                .unzip();
+            let folders = comics::arrange(&mut found);
+            paths
+                .into_iter()
+                .zip(found.into_iter().zip(folders))
+                .collect()
+        }
+    };
     let mut per_folder: HashMap<&Path, usize> = HashMap::new();
     let mut items: Vec<PreviewItem> = files
         .iter()
@@ -577,6 +617,13 @@ pub fn preview(
                         episode: view.episodes.get(&file.path),
                         song: songs.get(file.path.as_path()),
                         book: view.books.get(&file.path),
+                        comic: comics
+                            .get(file.path.as_path())
+                            .map(|(m, _)| m)
+                            .or_else(|| view.comics.get(&file.path)),
+                        comic_folder: comics
+                            .get(file.path.as_path())
+                            .and_then(|(_, f)| f.as_ref()),
                     };
                     let (stem, ext, moved) = pipeline.run_full(&ctx);
                     empty_stem = stem.is_empty() && !file.stem.is_empty();

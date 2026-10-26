@@ -11,6 +11,23 @@
   let keyStatus = $state<{ ok: boolean; text: string } | null>(null);
   let testing = $state(false);
 
+  let showCvKey = $state(false);
+  let cvStatus = $state<{ ok: boolean; text: string } | null>(null);
+  let cvTesting = $state(false);
+
+  async function testCvKey() {
+    cvTesting = true;
+    cvStatus = null;
+    try {
+      await api.comicCheck(settings.comicVineKey.trim());
+      cvStatus = { ok: true, text: t("tmdbKeyOk") };
+    } catch (e) {
+      cvStatus = { ok: false, text: tError(e) };
+    } finally {
+      cvTesting = false;
+    }
+  }
+
   async function testKey() {
     testing = true;
     keyStatus = null;
@@ -113,6 +130,31 @@
           <option value="">{t("tmdbLangAuto")}</option>
           {#each TMDB_LANGS as code (code)}<option value={code}>{code}</option>{/each}
         </select>
+      </div>
+    </section>
+
+    <section>
+      <h3>{t("sectionComicVine")}</h3>
+      <div class="grid">
+        <label for="opt-cv-key">{t("tmdbKey")}</label>
+        <div class="key">
+          <input
+            id="opt-cv-key"
+            type={showCvKey ? "text" : "password"}
+            bind:value={settings.comicVineKey}
+            oninput={() => (cvStatus = null)}
+            spellcheck="false"
+            autocomplete="off"
+          />
+          <button onclick={() => (showCvKey = !showCvKey)}>{t(showCvKey ? "hide" : "show")}</button>
+          <button disabled={!settings.comicVineKey.trim() || cvTesting} onclick={testCvKey}>{t("tmdbTest")}</button>
+        </div>
+        <span></span>
+        <small>
+          {#if cvStatus}<b class:good={cvStatus.ok} class:bad={!cvStatus.ok}>{cvStatus.text}</b> · {/if}
+          {t("cvKeyHint")}
+          <button class="link" onclick={() => openUrl("https://comicvine.gamespot.com/api/")}>{t("tmdbGetKey")}</button>
+        </small>
       </div>
     </section>
 

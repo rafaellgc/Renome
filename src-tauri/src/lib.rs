@@ -16,6 +16,9 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 mod acoustid;
+mod comicvine;
+mod gcd;
+mod mangadex;
 mod musicbrainz;
 mod openlibrary;
 mod tmdb;
@@ -50,6 +53,12 @@ struct AppState {
     heard: Mutex<HashMap<PathBuf, Vec<String>>>,
     /// Open Library, likewise.
     ol: openlibrary::Client,
+    /// Comic Vine, likewise, with its answers kept.
+    cv: comicvine::Client,
+    /// The Grand Comics Database, and the account signed in (in memory).
+    gcd: gcd::Client,
+    /// MangaDex.
+    md: mangadex::Client,
 }
 
 type Overrides = HashMap<PathBuf, String>;
@@ -629,7 +638,6 @@ fn folder_cover(dir: &Path) -> Option<Vec<u8>> {
     std::fs::read(found.first()?).ok()
 }
 
-/// The album folders among (or above) `dirs` that would get a playlist.
 /// Reads each book's details and looks it up on Open Library.
 #[tauri::command]
 async fn book_lookup(
@@ -658,6 +666,104 @@ async fn book_search(
     Ok(app.state::<AppState>().ol.find(&guess, &lang).await?.0)
 }
 
+/// What each comic says about itself (its `ComicInfo.xml` and name), for
+/// grouping files by series and matching them to issues.
+#[tauri::command]
+async fn comic_guesses(
+    paths: Vec<PathBuf>,
+    by_folder: bool,
+) -> Vec<Option<renome_core::comics::ComicMatch>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        paths
+            .iter()
+            .map(|p| renome_core::comics::from_path(p, by_folder))
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
+}
+
+#[tauri::command]
+async fn comic_check(app: AppHandle, key: String) -> Result<(), String> {
+    app.state::<AppState>().cv.check(&key).await
+}
+
+/// Signs in to the Grand Comics Database for this session (kept in memory
+/// only), checking the account.
+#[tauri::command]
+async fn gcd_sign_in(app: AppHandle, email: String, password: String) -> Result<(), String> {
+    let gcd = &app.state::<AppState>().gcd;
+    gcd.sign_in(email, password);
+    let checked = gcd.check().await;
+    if checked.is_err() {
+        gcd.sign_out();
+    }
+    checked
+}
+
+#[tauri::command]
+fn gcd_sign_out(app: AppHandle) {
+    app.state::<AppState>().gcd.sign_out();
+}
+
+/// Series with a name in a catalogue (`gcd`, `comicvine`, `mangadex`),
+/// best first.
+#[tauri::command]
+async fn comic_search(
+    app: AppHandle,
+    source: String,
+    key: String,
+    query: String,
+    lang: String,
+) -> Result<Vec<renome_core::comics::Volume>, String> {
+    let state = app.state::<AppState>();
+    match source.as_str() {
+        "comicvine" => state.cv.search(&key, &query, &lang).await,
+        "mangadex" => state.md.search(&query, &lang).await,
+        _ => state.gcd.search(&query, &lang).await,
+    }
+}
+
+/// A series and its issues, and the issue each comic is (by its number).
+#[tauri::command]
+async fn comic_issues(
+    app: AppHandle,
+    source: String,
+    key: String,
+    id: String,
+    comics: Vec<renome_core::comics::ComicMatch>,
+) -> Result<ComicIssues, String> {
+    let state = app.state::<AppState>();
+    let (volume, issues) = match source.as_str() {
+        "comicvine" => state.cv.issues(&key, &id).await?,
+        _ => state.gcd.issues(&id).await?,
+    };
+    let found = comics
+        .iter()
+        .map(|m| renome_core::comics::find_issue(m, &issues).map(|i| i.id.clone()))
+        .collect();
+    Ok(ComicIssues {
+        volume,
+        issues,
+        found,
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ComicIssues {
+    volume: renome_core::comics::Volume,
+    issues: Vec<renome_core::comics::Issue>,
+    /// The issue of each comic asked about, when its number says it.
+    found: Vec<Option<String>>,
+}
+
+/// The Comic Vine series an issue belongs to.
+#[tauri::command]
+async fn comic_volume_of(app: AppHandle, key: String, issue: String) -> Result<String, String> {
+    app.state::<AppState>().cv.volume_of(&key, &issue).await
+}
+
 /// Saves the books' covers and `metadata.opf` files and records them like
 /// `write_sidecars`.
 #[tauri::command]
@@ -675,6 +781,7 @@ async fn write_book_sidecars(
     Ok(report)
 }
 
+/// The album folders among (or above) `dirs` that would get a playlist.
 #[tauri::command]
 async fn playlist_dirs(dirs: Vec<PathBuf>) -> Vec<PathBuf> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -870,6 +977,9 @@ pub fn run() {
             acoustid: acoustid::Client::default(),
             heard: Mutex::new(HashMap::new()),
             ol: openlibrary::Client::default(),
+            cv: comicvine::Client::default(),
+            gcd: gcd::Client::default(),
+            md: mangadex::Client::default(),
         })
         .invoke_handler(tauri::generate_handler![
             checkpoint,
@@ -898,6 +1008,13 @@ pub fn run() {
             playlist_dirs,
             book_lookup,
             book_search,
+            comic_guesses,
+            comic_check,
+            comic_search,
+            comic_issues,
+            comic_volume_of,
+            gcd_sign_in,
+            gcd_sign_out,
             write_book_sidecars,
             apply,
             history,

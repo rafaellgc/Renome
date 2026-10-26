@@ -246,6 +246,11 @@ ${ex("_photo.jpg", "photo.jpg")}
     html: `
 <p>Gives each movie its official name from <b>TMDB</b> (themoviedb.org), in the format Jellyfin recognizes. It needs a free <b>TMDB API key</b>, entered in Options.</p>
 ${ex("Movie.Name.2001.1080p.BluRay.x264.mkv", "Movie Name (2001) [tmdbid-12345].mkv")}
+<div class="notice">
+<p><b>Before using it: file names matter</b></p>
+<p>The movie is looked up by the <b>title</b> and <b>year</b> in the file's name. Names full of release marks (<code>Movie.Name.2001.1080p.BluRay</code>) work well, since the marks are dropped. But a name without the title (<code>movie1.mkv</code>), with only initials or abbreviations, or with the title in a language TMDB does not have, is not found or goes to the review; without the year, movies with the same name get mixed up.</p>
+<p>If your files are far from that, fix them first with the other rules (<b>Replace text</b>, <b>Remove range</b>, <b>Regular expression</b>), click <b>Rename</b>, and only then look them up on TMDB: the search reads the name the file has on disk, not what the rules above it in the list make of it.</p>
+</div>
 <ol>
   <li>Add the rule and click <b>Search TMDB</b>. The program takes the title and year from each file name (dots become spaces; brackets, parentheses and tags like 1080p, BluRay, x264 are dropped) and searches TMDB.</li>
   <li>When title and year clearly match, the movie is picked automatically (<b>✓</b> next to the new name). When in doubt (<b>?</b>), the review window opens: click the right movie (or press 1–9). The year in the file may be one year off from TMDB; that is taken into account.</li>
@@ -277,6 +282,11 @@ ${ex("Movie.Name.2001.1080p.BluRay.x264.mkv", "Movie Name (2001) [tmdbid-12345].
     html: `
 <p>Gives each episode its official <b>TMDB</b> name, with season, number and title, in the format Jellyfin recognizes. It uses the same API key as the movie rule.</p>
 ${ex("Show.Name.S01E03.720p.WEB-DL.mkv", "Show Name (2008) - S01E03 - Episode Title.mkv")}
+<div class="notice">
+<p><b>Before using it: file names matter</b></p>
+<p>Each file is matched to its episode by what its name says. The series' name can come from the <b>Show</b> field, but the episode cannot: the name needs <b>the season and episode numbers</b> (<code>S01E03</code>, <code>1x03</code>; the season may also come from the folder) <b>or the episode's title</b>. A name with neither (<code>Series Name - part A.mkv</code>, <code>video_0042.mkv</code>) is not found and goes to the review, where it is chosen by hand.</p>
+<p>If your files are far from that, fix them first with the other rules (<b>Replace text</b>, <b>Rearrange parts</b>, <b>Regular expression</b>, <b>Number</b>), click <b>Rename</b>, and only then look the episodes up: the search reads the name the file has on disk, not what the rules above it in the list make of it.</p>
+</div>
 <ol>
   <li>In the <b>Show</b> field, type the name or the TMDB id, or paste the link to the show's page (<code>themoviedb.org/tv/1396-…</code>). Left empty, the program uses the name the files share, or the folder's name.</li>
   <li>Click <b>Find episodes</b>. If more than one show looks alike, choose the right one. The program downloads the whole episode list and looks for each visible file's episode.</li>
@@ -413,7 +423,7 @@ ${ex("book_title_author.pdf", "Author Name - Book Title (1937).pdf")}
 </ul>
 <h4>Limitations</h4>
 <ul>
-  <li><b>PDF</b>: many PDFs have empty or wrong document details (the Word file's name, the name of the computer it was made on). A <b>scanned</b> PDF is only a series of images, with no text to find the ISBN in. Then the file name is all that is left: a clear name, like <code>Author - Title</code>, helps a lot; a confusing one leads to the review.</li>
+  <li><b>PDF</b>: many PDFs have empty or wrong document details (the Word file's name, the name of the computer it was made on). A <b>scanned</b> PDF is only a series of images, with no text to find the ISBN in. Then the file name is all that is left: a clear name, like <code>Author - Title</code>, helps a lot; a confusing one leads to the review. It is worth fixing these files' names first, with the other rules, and clicking <b>Rename</b>: the search reads the name the file has on disk, not what the rules above it in the list make of it.</li>
   <li><b>Without an ISBN</b>, the book is found by title and author, but which edition it is stays unknown: the name uses the publisher and ISBN of the file itself, when it has them, and <code>{edition year}</code> stays empty.</li>
   <li><b>Open Library</b> is kept by volunteers. Recent books, books from small publishers and books from some countries may be missing, or lack a cover or a year, or show up more than once with slightly different details. Many translations are missing: when the title is not found, the review shows the author's other books, where the work may be under its original title, or not there at all. Then mark <b>None of these</b> and rename it by hand.</li>
   <li><b>BrasilAPI</b> only helps books with an ISBN, almost always from Brazilian publishers. It usually has no cover and no year. The year of first publication and the cover come from Open Library when it has the work; otherwise <code>{year}</code> stays empty and there is no cover. Its authors may include the translator or the illustrator: when the file says who the author is, only they are kept.</li>
@@ -423,6 +433,64 @@ ${ex("book_title_author.pdf", "Author Name - Book Title (1937).pdf")}
   <li>Comics (CBZ, CBR) and magazines are not handled by this rule.</li>
 </ul>
 <p class="tip">Only the searched title, author and ISBN are sent to Open Library, and only the ISBN to BrasilAPI, never the full file name, the folders or the book's content.</p>`,
+  },
+  {
+    id: "r-comic",
+    title: "Comic",
+    sub: true,
+    html: `
+<p>Names each comic by series and number. It works two ways: <b>offline</b>, with what the file itself says, and, if you want, <b>looking the series up in a catalog</b> to fill in each issue's name, year, publisher and title.</p>
+${ex("Series_Name_012_(2019)_(Digital)_(group).cbz", "Series Name #012 (2019).cbz")}
+<div class="notice">
+<p><b>Before using it: file names matter</b></p>
+<p>Offline, this rule only knows what each file says about itself: its <code>ComicInfo.xml</code>, when there is one, and its name. It understands the usual ways of writing series, volume and number, but it cannot guess what the name does not say. An abbreviation (<code>SrNm 12</code>) or a numbered story without the series' name (<code>07 - Story Name</code>) cannot become <code>Series Name #007</code>.</p>
+<p>For a good result, each file needs at least:</p>
+<ul>
+  <li>the <b>series' name</b> in full, always spelled the same way;</li>
+  <li>the issue's <b>number</b> (<code>#12</code>, <code>012</code>) and, if the series had more than one run, the <b>volume</b> (<code>Vol. 2</code>);</li>
+  <li>the title or year, if you want to keep them, after " - " or in brackets.</li>
+</ul>
+<p>Names like these work well: <code>Series Name #012</code>, <code>Series Name Vol. 2 #005</code>, <code>Series Name - Album Name (1990)</code>.</p>
+<p>If your files are far from that, fix them first with the other rules: <b>Replace text</b> to turn abbreviations into the full name, <b>Rearrange parts</b> or <b>Regular expression</b> to change the order, <b>Remove range</b> to take out leftovers. Click <b>Rename</b>, and only then use the <b>Comic</b> rule: it reads the name the file has on disk, not what the rules above it in the list make of it.</p>
+<p>Two shortcuts: for a folder holding a single series, the <b>The series is the folder's name</b> option saves renaming first; and, when looking it up in a catalog, the <b>Series to look for</b> field finds the right series even from an abbreviated name.</p>
+</div>
+<h4>Offline</h4>
+<ul>
+  <li>In <b>CBZ, CB7 and CBT</b> files, the program reads the <code>ComicInfo.xml</code> inside, when there is one: series, number, volume, title, year, publisher, writer and penciller. It is the most reliable data, with one exception: if the <code>ComicInfo.xml</code>'s series is another than the file name's (the English original of a translated edition, for instance), the name's series and title count, since that is what you called the file.</li>
+  <li>Without it (and always for <b>CBR, PDF and EPUB</b>), it uses the file name. It understands issue numbers (<code>Series 012</code>, <code>#12</code>, <code>No. 12</code>, <code>Issue 12</code>, <code>#12.1</code>), volumes or tomes (<code>v02</code>, <code>Vol. 3</code>, <code>Vol. III</code>, <code>(Vol.03)</code>, <code>Tome 5</code>, <code>T05</code>, <code>Book 3</code>), manga chapters (<code>Ch. 21</code>, <code>Chapter 21</code>, <code>c045</code>), the year in brackets and the count (<code>(of 6)</code>, <code>#2 of 6</code>). What comes between the volume and the number belongs to the series (<code>Series Vol. 2 Annual #01</code> is the annual, not issue 1). A number followed by a word is part of the name (<code>Name with 714 Words</code>, <code>10 Years</code>), and a leading number followed by a dash is the issue's (<code>19 - Story Name</code>). Marks like <code>(Digital)</code>, <code>(c2c)</code> and group names in brackets are ignored.</li>
+  <li>A file with just a number (<code>012.cbz</code>) takes its series from its folder; a folder named <code>Series Name (2012)</code> also gives the series' year, and a folder <code>Vol. 3</code>, the volume.</li>
+  <li>In a name that starts with its number (<code>19 - Story Name</code>), the number is the leading one: numbers inside the title do not count.</li>
+  <li><b>The series is the folder's name</b>: for a folder of one series, with files that carry the story's number and title (<code>Series Name (Complete)/01 - Story Name</code>). Each file gets the folder's series (without the year and what is in brackets), and what its name had becomes the title: <code>Series Name #001 - Story Name</code>. It is off by default, because in a folder that is not a series' (<code>Downloads</code>) its name would become everyone's series.</li>
+  <li>A one-shot or collection without a number gets the series and year (<code>Album Name (2024)</code>), without the marks of the original name.</li>
+  <li>Some programs write accented letters as their code between underscores (<code>M_244_nica</code> for <i>Mônica</i>); the program puts them back.</li>
+  <li>Files without even a series to be found are left as they are.</li>
+</ul>
+<h4>Looking it up in a catalog</h4>
+<p>In <b>Where to look</b>, choose the catalog:</p>
+<ul>
+  <li><b>Grand Comics Database</b> (comics.org): made by volunteers, with editions from many countries. It gives the series' name as published, the year, the publisher and the issues' numbers. It asks for the <b>sign-in of a free account</b>: asked when you search and kept <b>only in memory</b> until the program closes; it is never saved. Without an account, the GCD takes only about 30 requests an hour, and may stop taking them.</li>
+  <li><b>MangaDex</b> (mangadex.org): manga, with no account or key. It gives the series' name and year (in your language, when there is one, or in English); the volume and chapter stay the file's.</li>
+  <li><b>Comic Vine</b> (comicvine.gamespot.com): strong in American comics, with each issue's title. It asks for a free key, pasted in <b>Options</b>.</li>
+</ul>
+<ol>
+  <li>Click <b>Look up the series</b>. Files are grouped by series (or use <b>Series to look for</b> for all of them at once). When only one series has that name (and year) and enough issues for the files' numbers, it is picked by itself; otherwise you choose among the publications, shown with country, language, starting year and number of issues. If the full name finds nothing (<i>Series: Story</i>), the search tries the series alone.</li>
+  <li>Each file is matched to its issue by number (or by volume, for manga numbered by volumes; a one-shot, with the series' only issue). Those that do not match get the series' name with their own number, in the same folder as the others, and open the review, with the series' list of issues, to choose the exact issue. <b>None of these</b> brings back the name the file says.</li>
+</ol>
+<ul>
+  <li><b>Template</b>: <code>{series}</code>, <code>{series year}</code>, <code>{number}</code> (three digits: <code>012</code>), <code>{volume}</code> (two), <code>{chapter}</code> (three), <code>{title}</code> (the issue's), <code>{year}</code> (the issue's), <code>{count}</code>, <code>{publisher}</code>, <code>{writer}</code>, <code>{artist}</code> and <code>{id}</code> (the catalog's). The default is <code>{series} v{volume} #{number} c{chapter} - {title} ({year})</code>: a missing value goes along with the mark stuck to it (<code>v</code>, <code>#</code>, <code>c</code>), ending in a dot (<code>Vol. </code>) or the dash before it. So an American issue becomes <code>Series #012 (2019)</code>, a manga volume, <code>Series v03</code>, and a collection with a title, <code>Series v01 - Title (2018)</code>.</li>
+  <li><b>Organize into series folders</b>: each comic goes into <code>{series} ({series year})</code> (the folder template can be changed; each <code>/</code> is a level). A comic already in a folder named after its series stays where it is, even if the folder is named another way (<code>Series Name Vol. 2 (1988-1998)</code>, <code>Series Name/Vol. 1</code>, <code>Series Name</code> for a special <code>Series Name - Special</code>, or a slightly different spelling). The comics in the list are arranged together, as a library:<ul><li>each series gets one spelling, the most common in the list (case, accents and one letter apart in a word, as in <code>Apocalipse</code> and <code>Apocalypse</code>, count as the same series), in the folder's name and the files';</li><li>a special or one-shot goes into the folder of the series its name starts with (<code>Series Name - Special</code> into <code>Series Name</code>; when there are several, the one with the longest name);</li><li>one-shots that share what comes before " - " (<code>Series Name - Album One</code>, <code>Series Name - Album Two</code>) go together into a folder named after it;</li><li>the others each go into their series' folder, even with a single file.</li></ul>Undo puts everything back.</li>
+</ul>
+<h4>Limitations</h4>
+<ul>
+  <li><b>CBR</b> (RAR) files are renamed from their file name only: there is no RAR reader with a free licence for the program to read what is inside. In practice, almost no CBR has a <code>ComicInfo.xml</code>.</li>
+  <li>Very unusual file names may be read wrong (a number that is part of the series' name, for instance). Check the <b>New name</b> column before renaming.</li>
+  <li>Catalogs have gaps: Brazilian and other countries' editions may be missing on Comic Vine, and the GCD, made by volunteers, may be incomplete. When the right series is not there, skip it: the files keep the name they say themselves. The search does not always find a series by a translated name; in the picker, you can search again with another name (the original, for instance).</li>
+  <li>On the GCD, the review shows only the issues' numbers, without titles or covers: fetching them would take one request per issue. A series with the same name in another language (the French edition, when there is one in yours) is not picked by itself.</li>
+  <li>The GCD and Comic Vine count <b>issues and volumes</b>, not chapters: loose manga chapters are not looked up and keep the name read from the file. MangaDex gives the series only.</li>
+  <li><b>Request limits</b>: the GCD takes about 25 a minute with an account (about 30 an hour without one); Comic Vine, about 200 an hour, for non-commercial use only. The program uses few per series and keeps the answers while it is open; if you reach a limit, wait a little and search again.</li>
+  <li>The comic file is never changed: its <code>ComicInfo.xml</code> is only read.</li>
+</ul>
+<p class="tip">Only the searched series name and the series' and issues' numbers are sent to the catalogs, never the full file name, the folders or the content. The GCD sign-in goes only to comics.org.</p>`,
   },
   {
     id: "preview",

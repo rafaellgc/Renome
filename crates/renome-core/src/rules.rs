@@ -9,6 +9,7 @@ use regex::{NoExpand, Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
 
 use crate::books::{self, BookMatch};
+use crate::comics;
 use crate::files::{FileEntry, join_name, split_name};
 use crate::music::{self, AudioTags};
 use crate::text;
@@ -302,10 +303,43 @@ pub enum Rule {
         #[serde(default)]
         opf: bool,
     },
+    /// Names comics after their series and number: the issue chosen on
+    /// Comic Vine, else what the file's `ComicInfo.xml` and name say. Files
+    /// with neither are left alone.
+    Comic {
+        /// `{series}`, `{number}`, `{volume}`, `{chapter}`, `{year}`…
+        template: String,
+        #[serde(default = "colon")]
+        colon: String,
+        /// The series to look for, as typed (used by the app, not here).
+        #[serde(default)]
+        series: String,
+        /// Where to look it up: `gcd`, `comicvine` or `mangadex` (used by
+        /// the app, not here).
+        #[serde(default = "comic_source")]
+        source: String,
+        /// Moves each comic into folders made from `folder_template`.
+        #[serde(default)]
+        folders: bool,
+        /// Folder levels separated by `/`, with the same keys as `template`.
+        #[serde(default = "comic_folder")]
+        folder_template: String,
+        /// The series is the name of the folder each file is in.
+        #[serde(default)]
+        by_folder: bool,
+    },
 }
 
 fn colon() -> String {
     " - ".into()
+}
+
+fn comic_source() -> String {
+    "gcd".into()
+}
+
+fn comic_folder() -> String {
+    "{series} ({series year})".into()
 }
 
 fn book_folder() -> String {
@@ -381,6 +415,12 @@ pub struct Ctx<'a> {
     pub song: Option<&'a AudioTags>,
     /// The book chosen for this file, for the book rule.
     pub book: Option<&'a BookMatch>,
+    /// The issue chosen for this file, for the comic rule; else the
+    /// comic is named from the file.
+    pub comic: Option<&'a crate::comics::ComicMatch>,
+    /// The series its folder is named after, when not its own (see
+    /// [`crate::comics::arrange`]).
+    pub comic_folder: Option<&'a crate::comics::ComicMatch>,
 }
 
 enum Compiled {
@@ -499,6 +539,26 @@ impl Pipeline {
                         if !levels.is_empty() {
                             moved = Some(Move::Into {
                                 root: books::library_root(&ctx.file.dir, m, &levels),
+                                folders: levels,
+                            });
+                        }
+                    }
+                    if !ctx.file.is_dir
+                        && let Rule::Comic {
+                            folders: true,
+                            folder_template,
+                            colon,
+                            by_folder,
+                            ..
+                        } = rule
+                        && let Some(m) = comic_of(ctx, *by_folder)
+                    {
+                        let m = ctx.comic_folder.cloned().unwrap_or(m);
+                        let levels = comics::folders(folder_template, &m, colon);
+                        // Already in its series' folder: it stays.
+                        if !levels.is_empty() && !comics::in_place(&ctx.file.dir, &m) {
+                            moved = Some(Move::Into {
+                                root: comics::library_root(&ctx.file.dir, &m, &levels),
                                 folders: levels,
                             });
                         }
@@ -843,8 +903,33 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             }
         }
 
+        Rule::Comic {
+            template,
+            colon,
+            by_folder,
+            ..
+        } => {
+            if let Some(m) = comic_of(ctx, *by_folder) {
+                let name = comics::comic_name(template, &m, colon);
+                if !name.is_empty() {
+                    *stem = name;
+                }
+            }
+        }
+
         Rule::Replace { .. } | Rule::Regex { .. } => unreachable!("compiled separately"),
     }
+}
+
+/// The comic a file is: the issue chosen for it, else what it says about
+/// itself.
+fn comic_of(ctx: &Ctx, by_folder: bool) -> Option<comics::ComicMatch> {
+    if ctx.file.is_dir || !comics::is_comic(&ctx.file.ext) {
+        return None;
+    }
+    ctx.comic
+        .cloned()
+        .or_else(|| comics::from_file(ctx.file, by_folder))
 }
 
 fn folder_name(file: &FileEntry) -> String {
@@ -1008,6 +1093,7 @@ mod tests {
             is_dir: false,
             taken: Default::default(),
             tags: Default::default(),
+            comic: Default::default(),
         }
     }
 
@@ -1034,6 +1120,8 @@ mod tests {
             episode: None,
             song: None,
             book: None,
+            comic: None,
+            comic_folder: None,
         });
         join_name(&s, &e)
     }
@@ -1457,6 +1545,8 @@ mod tests {
             episode: None,
             song: None,
             book: None,
+            comic: None,
+            comic_folder: None,
         });
         assert_eq!(s, "a");
     }

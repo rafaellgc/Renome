@@ -35,7 +35,8 @@ export type Rule =
       type: "music"; template: string; colon: string; discPrefix: boolean; fromName: boolean;
       folders: boolean; folderTemplate: string; cover: boolean; playlist: boolean; listen: boolean; writeTags: boolean; embedCover: boolean; cleanTags: boolean;
     }
-  | { type: "book"; template: string; colon: string; folders: boolean; folderTemplate: string; cover: boolean; opf: boolean };
+  | { type: "book"; template: string; colon: string; folders: boolean; folderTemplate: string; cover: boolean; opf: boolean }
+  | { type: "comic"; template: string; colon: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; byFolder: boolean };
 
 export type RuleType = Rule["type"];
 
@@ -99,6 +100,8 @@ export interface View {
   songs: Record<string, SongMatch>;
   /** The book chosen for each file, for the book rule. */
   books: Record<string, BookMatch>;
+  /** The issue chosen for each file (Comic Vine), for the comic rule. */
+  comics: Record<string, ComicMatch>;
 }
 
 /** A MusicBrainz release offered for an album, best first. */
@@ -366,3 +369,56 @@ export interface Copies {
 export type SortKey = "name" | "ext" | "dir" | "modified" | "size";
 /** Displayed order: a column, the new name or the manual order. */
 export type ViewSort = SortKey | "newName" | "manual";
+
+/** A comic as the comic rule names it: what the file says, or its issue on Comic Vine. */
+export interface ComicMatch {
+  series: string;
+  seriesYear: number | null;
+  number: string;
+  volume: number | null;
+  chapter: string;
+  title: string;
+  year: number | null;
+  count: number | null;
+  publisher: string;
+  writer: string;
+  artist: string;
+  /** The issue on Comic Vine. */
+  id: string;
+}
+
+/** Where comics are looked up. */
+export type ComicSource = "gcd" | "comicvine" | "mangadex";
+
+/** A series in a catalogue (a "volume" on Comic Vine). */
+export interface ComicVolume {
+  id: string;
+  name: string;
+  startYear: number | null;
+  publisher: string;
+  count: number;
+  cover: string;
+  country: string;
+  language: string;
+  format: string;
+  writer: string;
+}
+
+export interface ComicIssue {
+  id: string;
+  number: string;
+  name: string;
+  coverDate: string;
+  cover: string;
+}
+
+/** A comic file's series and issue in a catalogue. */
+export interface ComicState {
+  /** `source:id` of its series in `comicVolumes`. */
+  volumeKey: string;
+  /** What the file says about itself. */
+  own: ComicMatch;
+  /** The issue chosen; "" for the series alone (MangaDex); null for none. */
+  choice: string | null;
+  status: MovieStatus;
+}

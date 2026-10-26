@@ -11,16 +11,19 @@
   import Help from "$lib/Help.svelte";
   import AlbumReview from "$lib/AlbumReview.svelte";
   import BookReview from "$lib/BookReview.svelte";
+  import ComicPicker from "$lib/ComicPicker.svelte";
+  import ComicReview from "$lib/ComicReview.svelte";
+  import GcdLogin from "$lib/GcdLogin.svelte";
   import EpisodeReview from "$lib/EpisodeReview.svelte";
   import MovieReview from "$lib/MovieReview.svelte";
   import Options from "$lib/Options.svelte";
   import RuleCard from "$lib/RuleCard.svelte";
   import ShowPicker from "$lib/ShowPicker.svelte";
   import { LOCALES, MOD, t, tError } from "$lib/i18n";
-  import { RULE_TYPES, isAudio, isBook, isVideo, newRule, newStep, splitExt } from "$lib/rules";
+  import { RULE_TYPES, isAudio, isBook, isComic, isVideo, newRule, newStep, splitExt } from "$lib/rules";
   import { loadSettings, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
-    AlbumState, ApplyReport, BookCandidate, BookMatch, BookState, Candidate, Copies, MbCandidate, SongMatch, EpKey, EpisodeMatch, EpisodeState, MovieMatch, MovieState, MovieStatus, HistoryEntry,
+    AlbumState, ApplyReport, BookCandidate, BookMatch, BookState, Candidate, ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, Copies, MbCandidate, SongMatch, EpKey, EpisodeMatch, EpisodeState, MovieMatch, MovieState, MovieStatus, HistoryEntry,
     OpError, Preview, Rule, RuleType, Show, Step, View, ViewSort,
   } from "$lib/types";
 
@@ -97,6 +100,7 @@
         mbProgress,
       );
     if (tvProgress) return { label: tvProgress };
+    if (comicProgress && !comicPick && !gcdLogin) return { label: comicProgress };
     if (task) return { label: t({ add: "workingAdd", rename: "workingRename", undo: "workingUndo" }[task] as "workingAdd") };
     return null;
   });
@@ -136,6 +140,67 @@
     return { path, book: bookMatches[key], cover: c.cover, language: c.exact ? c.language : books[key].guess.language };
   }
 
+  /** Comic Vine issues per file, for the comic rule. */
+  let comics = $state<Record<string, ComicState>>({});
+  /** Series fetched with their issues, by `source:id`. */
+  let comicVolumes = $state<Record<string, { volume: ComicVolume; issues: ComicIssue[] }>>({});
+  /** The series picked for each search text (typed, or the files' series). */
+  let pickedComics = $state<Record<string, ComicVolume>>({});
+  /** Files in the comic review window; null when closed. */
+  let comicReview = $state<string[] | null>(null);
+  /** The series picker, while open. */
+  let comicPick = $state<{ source: ComicSource; query: string; files: number; candidates: ComicVolume[]; resolve: (v: ComicVolume | null) => void } | null>(null);
+  /** The Grand Comics Database sign-in, while asked. */
+  let gcdLogin = $state<{ resolve: (how: "in" | "anonymous" | null) => void } | null>(null);
+  /** How this session uses the GCD: signed in, without an account, or not asked yet. */
+  let gcdSession = $state<"in" | "anonymous" | null>(null);
+  let comicProgress = $state<string | null>(null);
+  const comicRule = $derived(steps.find((s) => s.enabled && s.rule.type === "comic"));
+  /** A comic named after its issue: series, number, title, year and
+   *  publisher from Comic Vine; volume and chapter from the file (as the
+   *  Rust core's `with_issue`). */
+  /** What a file's series has after the catalogue's (as the Rust core's `story`). */
+  function story(own: string, series: string): string {
+    const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+    const name = series.trim();
+    if (!name || own.length === name.length || !fold(own).startsWith(fold(name))) return "";
+    const rest = own.slice(name.length);
+    return /^[: \-–]/.test(rest) ? rest.replace(/^[\s:\-–—,.#]+|[\s\-–—:,.#]+$/g, "") : "";
+  }
+
+  function withIssue(own: ComicMatch, volume: ComicVolume, issue: ComicIssue | undefined): ComicMatch {
+    const year = Number.parseInt((issue?.coverDate ?? "").slice(0, 4), 10);
+    return {
+      series: volume.name,
+      seriesYear: volume.startYear ?? own.seriesYear,
+      // A book found by its volume (`v03`, a manga's) stays a volume, and a
+      // one-shot gets no number.
+      number: own.number && issue?.number ? issue.number : own.number,
+      volume: own.volume,
+      chapter: own.chapter,
+      // Many issues have no title there: the file's stays, or what its
+      // series had after the catalogue's (`Series: Story`).
+      title: issue?.name.trim() ? issue.name : own.title || story(own.series, volume.name),
+      year: Number.isNaN(year) ? own.year : year,
+      count: volume.count > 0 ? volume.count : own.count,
+      publisher: volume.publisher || own.publisher,
+      writer: own.writer || volume.writer,
+      artist: own.artist,
+      id: issue ? issue.id : volume.id,
+    };
+  }
+  const comicMatches = $derived(
+    Object.fromEntries(
+      Object.entries(comics).flatMap(([p, c]): [string, ComicMatch][] => {
+        const v = comicVolumes[c.volumeKey];
+        if (!v || c.choice == null) return [];
+        // "": the series alone (MangaDex).
+        const issue = c.choice === "" ? undefined : v.issues.find((i) => i.id === c.choice);
+        return c.choice === "" || issue ? [[p, withIssue(c.own, v.volume, issue)]] : [];
+      }),
+    ),
+  );
+  const comicCounts = $derived(counts(comics));
   /** TMDB episodes per file, for the series rule. */
   let series = $state<Record<string, EpisodeState>>({});
   /** Shows fetched, by id. */
@@ -250,6 +315,10 @@
       const tip = { auto: "bookAuto", chosen: "bookChosen", choose: "bookChoose", none: "bookNone" } as const;
       for (const [p, b] of Object.entries(books)) out[p] = { status: b.status, tip: t(tip[b.status]) };
     }
+    if (comicRule) {
+      const tip = { auto: "comicAuto", chosen: "comicChosen", choose: "comicChoose", none: "comicNoneTip" } as const;
+      for (const [p, c] of Object.entries(comics)) out[p] = { status: c.status, tip: t(tip[c.status]) };
+    }
     if (musicRule) {
       const tip = { auto: "albumAuto", chosen: "albumChosen", choose: "albumChoose", none: "albumNone" } as const;
       for (const a of albums) for (const p of a.files) out[p] = { status: a.status, tip: t(tip[a.status]) };
@@ -273,7 +342,7 @@
   let ruleMenu = $state(false);
   let table = $state<FileTable>();
 
-  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, movies: movieMatches, episodes: episodeMatches, songs: songMatches, books: bookMatches });
+  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, movies: movieMatches, episodes: episodeMatches, songs: songMatches, books: bookMatches, comics: comicMatches });
   /** Example name for rule cards: the first file in natural name order, so
    *  it does not jump around while the preview re-sorts. */
   const collator = new Intl.Collator(undefined, { numeric: true });
@@ -747,6 +816,10 @@
         books[op.to] = books[op.from];
         delete books[op.from];
       }
+      if (comics[op.from]) {
+        comics[op.to] = comics[op.from];
+        delete comics[op.from];
+      }
       if (movies[op.from]) {
         movies[op.to] = movies[op.from];
         delete movies[op.from];
@@ -761,6 +834,153 @@
       a.files = a.files.map((p) => moved.get(p) ?? p);
       a.matches = Object.fromEntries(Object.entries(a.matches).map(([p, m]) => [moved.get(p) ?? p, m]));
     }
+  }
+
+  /** Comic Vine for the visible comics: one series per group of files
+   *  (the series typed, else each series the files say), picked by itself
+   *  when only one has that name (and year), else asked; then each file's
+   *  issue by its number. Files left without one keep the name they say. */
+  async function searchComics(rule: Extract<Rule, { type: "comic" }>) {
+    const source = rule.source ?? "gcd";
+    const key = settings.comicVineKey.trim();
+    if (source === "comicvine" && !key) {
+      const ok = await confirm({ title: t("rule.comic"), text: t("cvNeedsKey"), ok: t("options"), cancel: t("cancel") });
+      if (ok) showOptions = true;
+      return;
+    }
+    // The GCD wants an account: asked once per session, kept in memory only.
+    if (source === "gcd" && gcdSession === null) {
+      const chosen = await new Promise<"in" | "anonymous" | null>((resolve) => (gcdLogin = { resolve }));
+      gcdLogin = null;
+      if (!chosen) return;
+      gcdSession = chosen;
+    }
+    const files = preview.items.filter((i) => !i.isDir && isComic(i.original));
+    if (!files.length) {
+      notice = t("comicNoFiles");
+      return;
+    }
+    comicProgress = t("comicReading");
+    const lang = settings.lang === "pt" ? "pt-br" : settings.lang;
+    try {
+      const owns = await api.comicGuesses(files.map((f) => f.path), !!rule.byFolder);
+      const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+      const groups = new Map<string, { query: string; paths: string[]; owns: ComicMatch[] }>();
+      files.forEach((f, i) => {
+        const own = owns[i];
+        if (!own) return;
+        const query = rule.series.trim() || own.series;
+        const g = groups.get(fold(query)) ?? { query, paths: [], owns: [] };
+        g.paths.push(f.path);
+        g.owns.push(own);
+        groups.set(fold(query), g);
+      });
+      if (!groups.size) {
+        notice = t("comicNoFiles");
+        return;
+      }
+      for (const [k, g] of groups) {
+        // Loose chapters are no issues in the catalogues of issues.
+        if (source !== "mangadex" && g.owns.every((o) => !o.number && o.volume == null && !!o.chapter)) continue;
+        const picked = `${source}:${k}`;
+        let volume: ComicVolume | null = pickedComics[picked] ?? null;
+        // A `ComicInfo.xml` link to a Comic Vine issue tells the series.
+        const linked = source === "comicvine" ? g.owns.find((o) => o.id) : undefined;
+        if (!volume && linked) {
+          try {
+            const id = await api.comicVolumeOf(key, linked.id);
+            volume = comicVolumes[`${source}:${id}`]?.volume ?? { id, name: g.query, startYear: null, publisher: "", count: 0, cover: "", country: "", language: "", format: "", writer: "" };
+          } catch {
+            volume = null;
+          }
+        }
+        if (!volume) {
+          comicProgress = t("comicSearching", { series: g.query });
+          let found = await api.comicSearch(source, key, g.query, lang);
+          // `Series: Story` may be a story in `Series`: the series alone.
+          const head = g.query.split(/\s*[:–]\s*|\s+-\s+/)[0].trim();
+          if (!found.length && head && head !== g.query.trim()) found = await api.comicSearch(source, key, head, lang);
+          const year = g.owns.find((o) => o.seriesYear)?.seriesYear ?? null;
+          // The highest number among the files: a series with fewer issues
+          // is not theirs.
+          const highest = Math.max(
+            0,
+            ...g.owns.map((o) => Number.parseFloat(o.number || (o.chapter ? "" : String(o.volume ?? ""))) || 0),
+          );
+          const fits = (v: ComicVolume) => !v.count || v.count >= Math.floor(highest);
+          const sorted = [...found.filter(fits), ...found.filter((v) => !fits(v))];
+          const same = sorted.filter((v) => fold(v.name) === k && (year == null || v.startYear === year) && fits(v));
+          // The same name in another language (a French edition for a
+          // Brazilian reader, when there is one in Portuguese) is not
+          // picked by itself.
+          const mine = (v: ComicVolume) => !v.language || v.language.toLowerCase().startsWith(settings.lang);
+          const foreign = same.length === 1 && !mine(same[0]) && found.some(mine);
+          volume =
+            same.length === 1 && !foreign
+              ? same[0]
+              : await new Promise<ComicVolume | null>((resolve) => (comicPick = { source, query: g.query, files: g.paths.length, candidates: sorted, resolve }));
+          comicPick = null;
+          if (!volume) continue;
+        }
+        pickedComics[picked] = volume;
+        // MangaDex has series, not a publisher's volumes: the file's
+        // numbers stay.
+        if (source === "mangadex") {
+          const vkey = `${source}:${volume.id}`;
+          comicVolumes[vkey] = { volume, issues: [] };
+          for (const [i, p] of g.paths.entries()) comics[p] = { volumeKey: vkey, own: g.owns[i], choice: "", status: "auto" };
+          continue;
+        }
+        comicProgress = t("comicLoading", { series: volume.name });
+        const res = await api.comicIssues(source, key, volume.id, g.owns);
+        const vkey = `${source}:${res.volume.id}`;
+        // The search's own details where the series' lack them (a cover).
+        comicVolumes[vkey] = { volume: { ...volume, ...Object.fromEntries(Object.entries(res.volume).filter(([, x]) => x !== "" && x !== null && x !== 0)) }, issues: res.issues };
+        g.paths.forEach((p, i) => {
+          const found = res.found[i];
+          const own = g.owns[i];
+          // A loose chapter is no issue there: the series is all there is.
+          const chapterOnly = !own.number && !!own.chapter;
+          // A file without its issue still takes the series ("": the series
+          // alone, with its own numbers), so a series' files stay together;
+          // the review can still pick its issue.
+          comics[p] = {
+            volumeKey: vkey,
+            own,
+            choice: found ?? "",
+            status: found != null || chapterOnly ? "auto" : "choose",
+          };
+        });
+      }
+      if (Object.values(comics).some((c) => c.status === "choose")) openComicReview();
+    } catch (e) {
+      const err = String(e);
+      // A refused sign-in is asked again next time.
+      if (err.startsWith("gcdBadLogin")) {
+        gcdSession = null;
+        api.gcdSignOut();
+      }
+      await notify({ title: t("rule.comic"), text: tError(e) });
+    } finally {
+      comicProgress = null;
+      comicPick = null;
+    }
+  }
+
+  /** Opens the review on the comics still without an issue (or on one). */
+  function openComicReview(start?: string) {
+    const paths = preview.items.map((i) => i.path);
+    const pending = [
+      ...paths.filter((p) => comics[p]?.status === "choose"),
+      ...paths.filter((p) => comics[p]?.status === "none"),
+    ];
+    const queue = start ? [start, ...pending.filter((p) => p !== start)] : pending;
+    comicReview = queue.length ? queue : null;
+  }
+
+  function chooseComic(path: string, issue: string | null) {
+    const c = comics[path];
+    if (c) comics[path] = { ...c, choice: issue, status: issue == null ? "none" : "chosen" };
   }
 
   /** Looks up the visible songs' albums on MusicBrainz; albums already
@@ -1069,14 +1289,17 @@
       episodeReview = null;
       albumReview = null;
       bookReview = null;
+      comicReview = null;
       showPick?.resolve(null);
+      comicPick?.resolve(null);
+      gcdLogin?.resolve(null);
     }
     if (e.key === "F1") {
       e.preventDefault();
       help ??= "manual";
       return;
     }
-    if (history || showOptions || help || review || episodeReview || albumReview || bookReview || showPick || busy || working) return;
+    if (history || showOptions || help || review || episodeReview || albumReview || bookReview || comicReview || comicPick || gcdLogin || showPick || busy || working) return;
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
     // These work even while typing in a rule.
@@ -1254,6 +1477,14 @@
                       onsearch: () => searchAlbums(step.rule as Extract<Rule, { type: "music" }>),
                       onreview: () => openAlbumReview(),
                     }
+                  : step.rule.type === "comic"
+                    ? {
+                        ...comicCounts,
+                        show: null,
+                        progress: comicProgress,
+                        onsearch: () => searchComics(step.rule as Extract<Rule, { type: "comic" }>),
+                        onreview: () => openComicReview(),
+                      }
                   : step.rule.type === "book"
                     ? {
                         ...bookCounts,
@@ -1302,6 +1533,7 @@
             else if (movieRule && movies[p]) openReview(p);
             else if (musicRule && albumOf.has(p)) openAlbumReview(albumOf.get(p));
             else if (bookRule && books[p]) openBookReview(p);
+            else if (comicRule && comics[p]) openComicReview(p);
           }}
         />
         {#if !preview.items.length}<p class="no-match">{t("noMatch")}</p>{/if}
@@ -1425,6 +1657,25 @@
     onchoose={chooseBook}
     onclose={() => (bookReview = null)}
   />
+{/if}
+
+{#if comicReview}
+  <ComicReview
+    queue={comicReview}
+    {comics}
+    volumes={comicVolumes}
+    names={Object.fromEntries(preview.items.map((i) => [i.path, i.original]))}
+    onchoose={chooseComic}
+    onclose={() => (comicReview = null)}
+  />
+{/if}
+
+{#if comicPick}
+  <ComicPicker source={comicPick.source} query={comicPick.query} files={comicPick.files} candidates={comicPick.candidates} onpick={(v) => comicPick?.resolve(v)} />
+{/if}
+
+{#if gcdLogin}
+  <GcdLogin onclose={(how) => gcdLogin?.resolve(how)} />
 {/if}
 
 {#if albumReview}

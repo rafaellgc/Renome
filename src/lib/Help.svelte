@@ -153,6 +153,10 @@
           </button>
           <p class="muted">{t("tmdbNotice")}</p>
         </div>
+        <p class="muted cv">
+          {t("cvNotice")}
+          <button class="link" onclick={() => openUrl("https://www.comics.org")}>comics.org</button> · <button class="link" onclick={() => openUrl("https://mangadex.org")}>mangadex.org</button> · <button class="link" onclick={() => openUrl("https://comicvine.gamespot.com")}>comicvine.gamespot.com</button>
+        </p>
       </div>
     {/if}
   </div>
@@ -251,6 +255,14 @@
     background: var(--accent-soft);
     border-radius: 0 6px 6px 0;
   }
+  .content :global(.notice) {
+    margin: 10px 0;
+    padding: 8px 12px;
+    border-left: 3px solid var(--warn);
+    background: color-mix(in srgb, var(--warn) 14%, transparent);
+    border-radius: 0 6px 6px 0;
+  }
+  .content :global(.notice p) { margin: 6px 0; }
   .content :global(.ins) { color: var(--accent); background: var(--accent-soft); font-weight: 600; border-radius: 3px; padding: 0 2px; }
   .content :global(.del) { color: var(--danger); text-decoration: line-through; }
   .content :global(.mov) { text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px; }

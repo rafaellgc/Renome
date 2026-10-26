@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AlbumLookup, AlbumQuery, ApplyReport, BookCandidate, BookLookup, BookMatch, Candidate, EpisodeLookup, MbCandidate, SongMatch, HistoryEntry, Lookup, Preview, ScanOptions, Show, SortKey, Step, View } from "./types";
+import type { AlbumLookup, AlbumQuery, ApplyReport, BookCandidate, BookLookup, BookMatch, Candidate, ComicIssue, ComicMatch, ComicSource, ComicVolume, EpisodeLookup, MbCandidate, SongMatch, HistoryEntry, Lookup, Preview, ScanOptions, Show, SortKey, Step, View } from "./types";
 
 type Overrides = Record<string, string>;
 type TvItem = { path: string; name: string; isDir: boolean };
@@ -34,6 +34,15 @@ export const api = {
   mbSearch: (query: AlbumQuery) => invoke<MbCandidate[]>("mb_search", { query }),
   mbChoose: (id: string, paths: string[], fromName: boolean) =>
     invoke<{ matches: [string, SongMatch][]; agree: number }>("mb_choose", { id, paths, fromName }),
+  comicGuesses: (paths: string[], byFolder: boolean) => invoke<(ComicMatch | null)[]>("comic_guesses", { paths, byFolder }),
+  comicCheck: (key: string) => invoke<void>("comic_check", { key }),
+  comicSearch: (source: ComicSource, key: string, query: string, lang: string) =>
+    invoke<ComicVolume[]>("comic_search", { source, key, query, lang }),
+  comicIssues: (source: ComicSource, key: string, id: string, comics: ComicMatch[]) =>
+    invoke<{ volume: ComicVolume; issues: ComicIssue[]; found: (string | null)[] }>("comic_issues", { source, key, id, comics }),
+  comicVolumeOf: (key: string, issue: string) => invoke<string>("comic_volume_of", { key, issue }),
+  gcdSignIn: (email: string, password: string) => invoke<void>("gcd_sign_in", { email, password }),
+  gcdSignOut: () => invoke<void>("gcd_sign_out"),
   bookLookup: (lang: string, items: { path: string; name: string }[]) =>
     invoke<BookLookup[]>("book_lookup", { lang, items }),
   bookSearch: (lang: string, title: string, author: string) =>

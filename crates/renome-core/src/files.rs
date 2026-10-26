@@ -31,6 +31,9 @@ pub struct FileEntry {
     /// Tags of an audio file, read on first use.
     #[serde(skip)]
     pub(crate) tags: OnceLock<Option<AudioTags>>,
+    /// The `ComicInfo.xml` of a comic, read on first use.
+    #[serde(skip)]
+    pub(crate) comic: OnceLock<Option<crate::comics::ComicInfo>>,
 }
 
 impl FileEntry {
@@ -54,6 +57,7 @@ impl FileEntry {
             is_dir,
             taken: OnceLock::new(),
             tags: OnceLock::new(),
+            comic: OnceLock::new(),
         })
     }
 
@@ -74,6 +78,16 @@ impl FileEntry {
         }
         self.tags
             .get_or_init(|| crate::music::read(&self.path))
+            .as_ref()
+    }
+
+    /// The `ComicInfo.xml` inside a comic file. Read once and cached.
+    pub fn comic_info(&self) -> Option<&crate::comics::ComicInfo> {
+        if self.is_dir || !crate::comics::is_comic(&self.ext) {
+            return None;
+        }
+        self.comic
+            .get_or_init(|| crate::comics::read(&self.path))
             .as_ref()
     }
 

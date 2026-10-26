@@ -467,6 +467,79 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
 - Only the searched title, author and ISBN are sent to Open Library, and
   only the ISBN to BrasilAPI. The book files are never changed.
 
+### 2.5 Comics (ComicInfo.xml, Comic Vine)
+
+- Applies to CBZ, CBR, CB7, CBT, PDF and EPUB files. The `ComicInfo.xml`
+  inside a CBZ/EPUB (zip), CB7 (7z; solid archives over 300 MB skipped)
+  or CBT (tar) is read: series, number, count, volume (a number, or the
+  series' first year when it is one), title, year, publisher, writer,
+  penciller, web (a Comic Vine issue link gives its id). CBR (RAR) is
+  never opened: no RAR reader has a free licence.
+- The file name is read for what that lacks: release notes in brackets
+  are dropped (a year among them is the issue's, `(of N)` the count),
+  dots and underscores stand for spaces (not in `12.1`), then a chapter
+  (`Ch.`, `Cap.`, `Chapter`, `c045`), a volume (`v2`, `Vol.`, `Volume`,
+  `Tome`, `Tomo`, `T05`, `Book`, `Livro`), an issue number (`#12`, `#12.1`,
+  `nº`, `No.`, `Issue`, `Edição`), else the last bare number that is not
+  a year; what is before is the series, what follows a dash the title.
+  The folder gives the series for a name without one, the series' year
+  (`Series (2012)`) and a volume (`Vol. 3`).
+- Letters written as their code between underscores (`M_244_nica`,
+  codes 192–255 of letters) are put back first.
+- Offline, every comic with a series is named from that (one without a
+  number is a one-shot: series and year); others are left alone.
+- Volumes may be Roman (`Vol. III`) or in brackets (`(Vol.03)`); words
+  between the volume and the number belong to the series (`Vol. 2 Annual
+  #01`); a bare number followed by a word is part of the name; `#2 of 6`
+  gives the count; folder years may be runs (`(1988-1998)`).
+- A `ComicInfo.xml` whose series is not the file name's (a translation
+  that kept the original's) gives only its writer and artist.
+- Series folders: a comic already in a folder named after its series
+  (another volume's form, a `Vol. 1` folder under it, a near spelling,
+  or the series of a special included) stays. The batch's comics are
+  arranged together: one spelling per series (the most common; case,
+  accents and one letter apart in one word of five or more letters are
+  the same), in folders and names; a series of one file goes into the
+  folder of the longest series in the batch its name starts with, or,
+  when two such files share what comes before ` - `, into one named so;
+  every other series gets its folder, even for one file.
+- A name that starts with its number (`19 - Story`) takes that number;
+  bare numbers after it are no issue. An option (off by default) takes
+  the series from the file's folder (without brackets and year), and what
+  the name had as its series becomes the title.
+- Catalogues, chosen in the rule: the Grand Comics Database (default;
+  HTTP Basic sign-in of the user's free account, asked when searching and
+  kept in memory only, never on disk; without one, anonymous access of
+  about 30 requests an hour; requests 2.5 s apart), MangaDex (no account;
+  series only, titled in the reader's language when it has one, else in
+  English; fan works left out) and Comic Vine (the user's key; about 200
+  requests an hour; requests 1.1 s apart; a `ComicInfo.xml` link gives the
+  series directly). Answers are cached for the session.
+- Files are grouped by the series typed, else by their own; loose
+  chapters are not looked up (but on MangaDex). A search that finds
+  nothing for `Series: Story` tries `Series`. Found series are ranked by
+  name (equal, then starting alike, then similarity), the reader's
+  language first; one with the name (and year, when known) that can hold
+  the highest number among the files is picked by itself, else a picker
+  lists them, those that can hold the numbers first. The series' issues
+  (GCD: its issue descriptors, their first number; Comic Vine: 100 a
+  page) are matched by number (`012` = `12`, `12.10` = `12.1`), or by
+  volume for a book without a number, or, for a one-shot, the series' only
+  issue (or its first, unnumbered, printing); two issues with one number,
+  or none, open the review. The issue's title, when there is one, and its
+  year replace the file's; otherwise the file's title stays, or what its
+  series had after the catalogue's (`Series: Story`).
+- Template keys (also in Portuguese and Spanish): `{series}`,
+  `{series year}`, `{number}` (three digits), `{volume}` (two),
+  `{chapter}` (three), `{title}`, `{year}`, `{count}`, `{publisher}`,
+  `{writer}`, `{artist}`, `{id}`. An empty key drops the label stuck to
+  it (`v`, `#`, `c`) or ending in a dot (`Vol. `). Optional series
+  folders (default `{series} ({series year})`) reuse folders already
+  named after the series.
+- Only the series name and the series' and issues' ids go to the
+  catalogues; the GCD sign-in only to comics.org.
+  Files are never changed.
+
 ## 3. Preview
 
 - Table: original name → new name, with a status per row:

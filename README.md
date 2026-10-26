@@ -71,6 +71,14 @@ A built-in manual (F1) explains every rule with examples.
   `Author/Title` folders and saves `cover.jpg` and a `metadata.opf`
   (read by Audiobookshelf and e-book managers). The book files are never
   changed.
+- Comics: names CBZ, CBR, CB7, CBT, PDF and EPUB files by series and
+  number (`Series #012 (2019)`, `Series v03` for manga volumes), from the
+  `ComicInfo.xml` inside the file or from its name (issue numbers,
+  volumes, tomes, chapters, years; release notes ignored), offline.
+  Optionally looks the series up on the Grand Comics Database (editions
+  from many countries; a free account, signed in for the session only),
+  MangaDex (manga, no account) or Comic Vine (your own key), and organizes
+  series folders.
 - Edit any new name by hand right in the preview (double-click or F2).
 - List filter: only the visible files are renamed.
 - Sort by new name (default) or by any column.

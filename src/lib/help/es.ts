@@ -246,6 +246,11 @@ ${ex("_foto.jpg", "foto.jpg")}
     html: `
 <p>Da a cada película su nombre oficial de <b>TMDB</b> (themoviedb.org), en el formato que reconoce Jellyfin. Necesita una <b>clave de la API de TMDB</b>, gratuita, introducida en Opciones.</p>
 ${ex("Nombre.de.la.Pelicula.2001.1080p.BluRay.x264.mkv", "Nombre de la Película (2001) [tmdbid-12345].mkv")}
+<div class="notice">
+<p><b>Antes de usarla: el nombre de los archivos importa</b></p>
+<p>La película se busca por el <b>título</b> y el <b>año</b> que hay en el nombre del archivo. Los nombres llenos de marcas de lanzamiento (<code>Nombre.de.la.Pelicula.2001.1080p.BluRay</code>) funcionan bien, porque las marcas se descartan. Pero un nombre sin el título (<code>pelicula1.mkv</code>), solo con siglas o abreviaturas, o con el título en un idioma que TMDB no tiene, no se encuentra o va a la revisión; sin el año, las películas con el mismo nombre se confunden.</p>
+<p>Si sus archivos están lejos de eso, arréglelos antes con las otras reglas (<b>Reemplazar texto</b>, <b>Quitar fragmento</b>, <b>Expresión regular</b>), haga clic en <b>Renombrar</b> y solo entonces busque en TMDB: la búsqueda lee el nombre que el archivo tiene en el disco, no lo que hacen de él las reglas que están encima en la lista.</p>
+</div>
 <ol>
   <li>Añada la regla y haga clic en <b>Buscar en TMDB</b>. El programa toma el título y el año del nombre de cada archivo (los puntos pasan a espacios; se quitan corchetes, paréntesis y marcas como 1080p, BluRay, x264) y busca en TMDB.</li>
   <li>Cuando título y año coinciden sin duda, la película se elige sola (<b>✓</b> junto al nuevo nombre). Si hay dudas (<b>?</b>), se abre la ventana de revisión: haga clic en la película correcta (o pulse 1–9). El año del archivo puede diferir en uno del de TMDB; se tiene en cuenta.</li>
@@ -277,6 +282,11 @@ ${ex("Nombre.de.la.Pelicula.2001.1080p.BluRay.x264.mkv", "Nombre de la Película
     html: `
 <p>Da a cada episodio el nombre oficial de <b>TMDB</b>, con temporada, número y título, en el formato que Jellyfin reconoce. Usa la misma clave de la API que la regla de películas.</p>
 ${ex("Nombre.de.la.Serie.S01E03.720p.WEB-DL.mkv", "Nombre de la Serie (2008) - S01E03 - Título del Episodio.mkv")}
+<div class="notice">
+<p><b>Antes de usarla: el nombre de los archivos importa</b></p>
+<p>Cada archivo se empareja con su episodio por lo que dice su nombre. El nombre de la serie puede venir del campo <b>Serie</b>, pero el episodio no: el nombre necesita <b>el número de temporada y de episodio</b> (<code>S01E03</code>, <code>1x03</code>; la temporada también puede venir de la carpeta) <b>o el título del episodio</b>. Un nombre sin ninguno de los dos (<code>Nombre de la Serie - parte A.mkv</code>, <code>video_0042.mkv</code>) no se encuentra y va a la revisión, donde se elige a mano.</p>
+<p>Si sus archivos están lejos de eso, arréglelos antes con las otras reglas (<b>Reemplazar texto</b>, <b>Reorganizar partes</b>, <b>Expresión regular</b>, <b>Numerar</b>), haga clic en <b>Renombrar</b> y solo entonces busque los episodios: la búsqueda lee el nombre que el archivo tiene en el disco, no lo que hacen de él las reglas que están encima en la lista.</p>
+</div>
 <ol>
   <li>En el campo <b>Serie</b>, escriba el nombre o el ID de TMDB, o pegue el enlace de la página de la serie (<code>themoviedb.org/tv/1396-…</code>). Vacío, el programa usa el nombre que los archivos tienen en común, o el de la carpeta.</li>
   <li>Haga clic en <b>Buscar episodios</b>. Si hay más de una serie parecida, elija la correcta. El programa descarga la lista completa de episodios y busca el de cada archivo visible.</li>
@@ -413,7 +423,7 @@ ${ex("titulo_del_libro_autor.pdf", "Nombre del Autor - Título del Libro (1937).
 </ul>
 <h4>Limitaciones</h4>
 <ul>
-  <li><b>PDF</b>: muchos PDF tienen los datos del documento vacíos o erróneos (el nombre del archivo de Word, el nombre del equipo de quien lo hizo). Un PDF <b>escaneado</b> es solo una serie de imágenes, sin texto donde buscar el ISBN. En esos casos queda el nombre del archivo: un nombre claro, como <code>Autor - Título</code>, ayuda mucho; uno confuso lleva a la revisión.</li>
+  <li><b>PDF</b>: muchos PDF tienen los datos del documento vacíos o erróneos (el nombre del archivo de Word, el nombre del equipo de quien lo hizo). Un PDF <b>escaneado</b> es solo una serie de imágenes, sin texto donde buscar el ISBN. En esos casos queda el nombre del archivo: un nombre claro, como <code>Autor - Título</code>, ayuda mucho; uno confuso lleva a la revisión. Conviene arreglar antes el nombre de esos archivos, con las otras reglas, y hacer clic en <b>Renombrar</b>: la búsqueda lee el nombre que el archivo tiene en el disco, no lo que hacen de él las reglas que están encima en la lista.</li>
   <li><b>Sin ISBN</b>, el libro se encuentra por el título y el autor, pero no se sabe qué edición es: el nombre usa la editorial y el ISBN del propio archivo, si los tiene, y <code>{año de edición}</code> queda vacío.</li>
   <li><b>Open Library</b> lo mantienen voluntarios. Los libros recientes, de editoriales pequeñas o de algunos países pueden no estar, o estar sin portada, sin año o repetidos, con datos algo distintos en cada copia. Faltan muchas traducciones: cuando el título no aparece, la revisión muestra los otros libros del autor, donde la obra puede estar con el título original, o no estar. En ese caso, marque <b>Ninguno de estos</b> y renómbrelo a mano.</li>
   <li><b>BrasilAPI</b> solo ayuda con libros con ISBN, casi siempre de editoriales brasileñas. Suele venir sin portada y sin año. El año de la primera publicación y la portada vienen de Open Library cuando tiene la obra; si no, <code>{año}</code> queda vacío y no hay portada. Entre los autores pueden venir el traductor o el ilustrador: cuando el archivo dice quién es el autor, solo queda él.</li>
@@ -423,6 +433,64 @@ ${ex("titulo_del_libro_autor.pdf", "Nombre del Autor - Título del Libro (1937).
   <li>Los cómics (CBZ, CBR) y las revistas no los trata esta regla.</li>
 </ul>
 <p class="tip">A Open Library solo se envían el título, el autor y el ISBN buscados, y a BrasilAPI solo el ISBN, nunca el nombre completo del archivo, las carpetas ni el contenido del libro.</p>`,
+  },
+  {
+    id: "r-comic",
+    title: "Cómic",
+    sub: true,
+    html: `
+<p>Da a cada cómic un nombre con la serie y el número. Funciona de dos formas: <b>sin internet</b>, con lo que dice el propio archivo, y, si quiere, <b>buscando la serie en un catálogo</b> para completar el nombre, el año, la editorial y el título de cada número.</p>
+${ex("Nombre_de_la_Serie_012_(2019)_(Digital)_(grupo).cbz", "Nombre de la Serie #012 (2019).cbz")}
+<div class="notice">
+<p><b>Antes de usarla: el nombre de los archivos importa</b></p>
+<p>Sin internet, esta regla solo sabe lo que cada archivo dice de sí mismo: su <code>ComicInfo.xml</code>, cuando existe, y su nombre. Entiende las formas habituales de escribir la serie, el volumen y el número, pero no adivina lo que el nombre no dice. Una abreviatura (<code>NmSr 12</code>) o una historia numerada sin el nombre de la serie (<code>07 - Nombre de la Historia</code>) no pueden convertirse en <code>Nombre de la Serie #007</code>.</p>
+<p>Para un buen resultado, cada archivo necesita al menos:</p>
+<ul>
+  <li>el <b>nombre de la serie</b> completo, escrito siempre igual;</li>
+  <li>el <b>número</b> (<code>#12</code>, <code>012</code>) y, si la serie tuvo más de una etapa, el <b>volumen</b> (<code>Vol. 2</code>);</li>
+  <li>el título o el año, si quiere conservarlos, después de " - " o entre paréntesis.</li>
+</ul>
+<p>Nombres así funcionan bien: <code>Nombre de la Serie #012</code>, <code>Nombre de la Serie Vol. 2 #005</code>, <code>Nombre de la Serie - Nombre del Álbum (1990)</code>.</p>
+<p>Si sus archivos están lejos de eso, arréglelos antes con las otras reglas: <b>Reemplazar texto</b> para cambiar abreviaturas por el nombre completo, <b>Reorganizar partes</b> o <b>Expresión regular</b> para cambiar el orden, <b>Quitar fragmento</b> para quitar restos. Haga clic en <b>Renombrar</b> y solo entonces use la regla <b>Cómic</b>: lee el nombre que el archivo tiene en el disco, no lo que hacen de él las reglas que están encima en la lista.</p>
+<p>Dos atajos: para una carpeta con una sola serie, la opción <b>La serie es el nombre de la carpeta</b> evita renombrar antes; y, buscando en un catálogo, el campo <b>Serie a buscar</b> encuentra la serie correcta aunque el nombre esté abreviado.</p>
+</div>
+<h4>Sin internet</h4>
+<ul>
+  <li>En <b>CBZ, CB7 y CBT</b>, el programa lee el <code>ComicInfo.xml</code> de dentro del archivo, cuando existe: serie, número, volumen, título, año, editorial, guion y dibujo. Es el dato más fiable, con una excepción: si la serie del <code>ComicInfo.xml</code> es otra que la del nombre del archivo (el original en inglés de una edición traducida, por ejemplo), valen la serie y el título del nombre, que es como usted llamó al archivo.</li>
+  <li>Sin él (y siempre en <b>CBR, PDF y EPUB</b>), usa el nombre del archivo. Entiende el número (<code>Serie 012</code>, <code>#12</code>, <code>nº 12</code>, <code>Número 12</code>, <code>#12.1</code>), el volumen o tomo (<code>v02</code>, <code>Vol. 3</code>, <code>Vol. III</code>, <code>(Vol.03)</code>, <code>Tomo 5</code>, <code>T05</code>, <code>Libro 3</code>), el capítulo de manga (<code>Cap. 21</code>, <code>Ch. 21</code>, <code>c045</code>), el año entre paréntesis y el total (<code>(de 6)</code>, <code>#2 de 6</code>). Lo que hay entre el volumen y el número es de la serie (<code>Serie Vol. 2 Anual #01</code> es el anual, no el número 1). Un número seguido de una palabra es parte del nombre (<code>Nombre con 714 Palabras</code>, <code>10 Años</code>), y un número al principio seguido de un guion es el del número (<code>19 - Nombre de la Historia</code>). Las marcas como <code>(Digital)</code>, <code>(c2c)</code> y los nombres de grupos entre corchetes o paréntesis se ignoran.</li>
+  <li>Un archivo solo con el número (<code>012.cbz</code>) toma la serie de su carpeta; una carpeta <code>Nombre de la Serie (2012)</code> también da el año de la serie, y una carpeta <code>Vol. 3</code>, el volumen.</li>
+  <li>En un nombre que empieza por su número (<code>19 - Nombre de la Historia</code>), el número es el del principio: los números dentro del título no cuentan.</li>
+  <li><b>La serie es el nombre de la carpeta</b>: para una carpeta de una sola serie, con archivos que traen el número y el título de la historia (<code>Nombre de la Serie (Completo)/01 - Nombre de la Historia</code>). Cada archivo queda con la serie de la carpeta (sin el año y lo que está entre paréntesis), y lo que traía su nombre pasa a ser el título: <code>Nombre de la Serie #001 - Nombre de la Historia</code>. Viene desactivada, porque en una carpeta que no es de una serie (<code>Descargas</code>) su nombre pasaría a ser la serie de todos.</li>
+  <li>Un número único o recopilatorio sin numeración queda con la serie y el año (<code>Nombre del Álbum (2024)</code>), sin las marcas del nombre original.</li>
+  <li>Algunos programas guardan las letras acentuadas como su código entre guiones bajos (<code>M_244_nica</code> por <i>Mônica</i>); el programa las restituye.</li>
+  <li>Los archivos en los que no se encuentra ni la serie quedan como están.</li>
+</ul>
+<h4>Buscando en un catálogo</h4>
+<p>En <b>Dónde buscar</b>, elija el catálogo:</p>
+<ul>
+  <li><b>Grand Comics Database</b> (comics.org): hecho por voluntarios, con ediciones de muchos países. Da el nombre de la serie como se publicó, el año, la editorial y la numeración. Pide el <b>acceso de una cuenta gratuita</b>: se pide al buscar y queda <b>solo en la memoria</b> hasta cerrar el programa; nunca se guarda. Sin cuenta, el GCD acepta solo unas 30 consultas por hora, y puede dejar de aceptarlas.</li>
+  <li><b>MangaDex</b> (mangadex.org): manga, sin cuenta ni clave. Da el nombre y el año de la serie (en su idioma, cuando lo hay, o en inglés); el volumen y el capítulo quedan los del archivo.</li>
+  <li><b>Comic Vine</b> (comicvine.gamespot.com): fuerte en cómics estadounidenses, con el título de cada número. Pide una clave gratuita, pegada en <b>Opciones</b>.</li>
+</ul>
+<ol>
+  <li>Haga clic en <b>Buscar la serie</b>. Los archivos se agrupan por serie (o use <b>Serie a buscar</b> para todos a la vez). Cuando solo una serie tiene ese nombre (y año) y números suficientes para los de los archivos, se elige sola; si no, usted elige entre las publicaciones, que muestran país, idioma, año de inicio y cantidad de números. Si el nombre completo no encuentra nada (<i>Serie: Historia</i>), la búsqueda prueba solo la serie.</li>
+  <li>Cada archivo se empareja con su número por la numeración (o por el volumen, en un manga numerado por volúmenes; un número único, con el único número de la serie). Los que no coinciden quedan con el nombre de la serie y su propio número, en la misma carpeta que los demás, y abren la revisión, con la lista de números de la serie, para elegir el número exacto. <b>Ninguno de estos</b> devuelve el nombre que dice el archivo.</li>
+</ol>
+<ul>
+  <li><b>Plantilla</b>: <code>{serie}</code>, <code>{año de la serie}</code>, <code>{número}</code> (tres dígitos: <code>012</code>), <code>{volumen}</code> (dos), <code>{capítulo}</code> (tres), <code>{título}</code> (del número), <code>{año}</code> (del número), <code>{total}</code>, <code>{editorial}</code>, <code>{guion}</code>, <code>{dibujo}</code> e <code>{id}</code> (del catálogo). La predeterminada es <code>{serie} v{volumen} #{número} c{capítulo} - {título} ({año})</code>: lo que falta se va junto con la marca pegada a ello (<code>v</code>, <code>#</code>, <code>c</code>), terminada en punto (<code>Vol. </code>) o el guion anterior. Así, un número estadounidense queda <code>Serie #012 (2019)</code>, un volumen de manga, <code>Serie v03</code>, y un tomo recopilatorio con título, <code>Serie v01 - Título (2018)</code>.</li>
+  <li><b>Organizar en carpetas de serie</b>: cada cómic va a <code>{serie} ({año de la serie})</code> (la plantilla de las carpetas se puede cambiar; cada <code>/</code> es un nivel). Un cómic que ya está en una carpeta con el nombre de su serie se queda donde está, aunque la carpeta tenga otro formato (<code>Nombre de la Serie Vol. 2 (1988-1998)</code>, <code>Nombre de la Serie/Vol. 1</code>, <code>Nombre de la Serie</code> para un especial <code>Nombre de la Serie - Especial</code>, o una grafía un poco distinta). Los cómics de la lista se organizan juntos, como una biblioteca:<ul><li>cada serie queda con una sola grafía, la más común en la lista (mayúsculas, acentos y una letra cambiada en una palabra, como en <code>Apocalipse</code> y <code>Apocalypse</code>, cuentan como la misma serie), en el nombre de la carpeta y en el de los archivos;</li><li>un especial o número único va a la carpeta de la serie con cuyo nombre empieza el suyo (<code>Nombre de la Serie - Especial</code> en <code>Nombre de la Serie</code>; si hay varias, la de nombre más largo);</li><li>los números únicos con la misma parte antes del " - " (<code>Nombre de la Serie - Álbum Uno</code>, <code>Nombre de la Serie - Álbum Dos</code>) van juntos a una carpeta con esa parte;</li><li>los demás van cada uno a la carpeta de su serie, aunque sea un solo archivo.</li></ul>Deshacer lo devuelve todo a su sitio.</li>
+</ul>
+<h4>Limitaciones</h4>
+<ul>
+  <li>Los archivos <b>CBR</b> (RAR) se renombran solo por el nombre del archivo: no hay lector de RAR con licencia libre para que el programa lea lo que hay dentro. En la práctica, casi ningún CBR trae <code>ComicInfo.xml</code>.</li>
+  <li>Los nombres de archivo muy fuera de lo común pueden leerse mal (un número que forma parte del nombre de la serie, por ejemplo). Revise la columna <b>Nuevo nombre</b> antes de renombrar.</li>
+  <li>Los catálogos tienen huecos: las ediciones brasileñas y de otros países pueden faltar en Comic Vine, y el GCD, hecho por voluntarios, puede estar incompleto. Cuando no esté la serie correcta, sáltela: los archivos quedan con el nombre que dicen ellos mismos. La búsqueda no siempre encuentra una serie por un nombre traducido; en el selector, puede buscar de nuevo con otro nombre (el original, por ejemplo).</li>
+  <li>En el GCD, la revisión muestra solo la numeración, sin títulos ni portadas: traerlos costaría una consulta por número. Una serie con el mismo nombre en otro idioma (la edición francesa, cuando hay una en el suyo) no se elige sola.</li>
+  <li>El GCD y Comic Vine cuentan <b>números y volúmenes</b>, no capítulos: los capítulos sueltos de manga no se buscan y quedan con el nombre leído del archivo. MangaDex solo da la serie.</li>
+  <li><b>Límites de consultas</b>: el GCD acepta unas 25 por minuto con cuenta (unas 30 por hora sin cuenta); Comic Vine, unas 200 por hora, solo para uso no comercial. El programa usa pocas por serie y guarda las respuestas mientras está abierto; si llega a un límite, espere un poco y busque de nuevo.</li>
+  <li>El archivo del cómic nunca cambia: su <code>ComicInfo.xml</code> solo se lee.</li>
+</ul>
+<p class="tip">A los catálogos solo van el nombre de la serie buscada y los números de las series y los números, nunca el nombre completo del archivo, las carpetas ni el contenido. El acceso del GCD solo va a comics.org.</p>`,
   },
   {
     id: "preview",

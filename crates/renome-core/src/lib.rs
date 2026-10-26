@@ -11,12 +11,14 @@
 //! - [`musicbrainz`]: albums from MusicBrainz (ranking, matching tracks).
 //! - [`ebook`]: details of book files (EPUB, MOBI, PDF, FB2) and ISBNs.
 //! - [`books`]: books from Open Library (guessing, ranking, names).
+//! - [`comics`]: comics (`ComicInfo.xml`, numbers in names, names).
 //! - [`tmdb`]: movie title guessing, ranking and `.nfo` files for TMDB.
 //! - [`tv`]: season and episode numbers, and matching files to a show.
 
 pub mod acoustid;
 pub mod apply;
 pub mod books;
+pub mod comics;
 pub mod ebook;
 pub mod files;
 pub mod filter;

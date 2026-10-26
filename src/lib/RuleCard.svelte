@@ -285,6 +285,27 @@
         <label class="check"><input type="checkbox" bind:checked={r.cover} /> <span>{t("bookCover")}<small>{t("bookCoverHint")}</small></span></label>
         <label class="check"><input type="checkbox" bind:checked={r.opf} /> <span>{t("bookOpf")}<small>{t("bookOpfHint")}</small></span></label>
         {@render actions(t("olSearch"), "bookSummary")}
+      {:else if r.type === "comic"}
+        <p class="hint top">{t("comicHint")}</p>
+        <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
+        <p class="hint mono">{t("comicTemplateHint")}</p>
+        <label class="colon">{t("colonLabel")} <input class="mono sep" bind:value={r.colon} spellcheck="false" /></label>
+        <label class="check"><input type="checkbox" bind:checked={r.byFolder} /> <span>{t("comicByFolder")}<small>{t("comicByFolderHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.folders} /> <span>{t("comicFolders")}<small>{t("comicFoldersHint")}</small></span></label>
+        {#if r.folders}
+          <label class="sub">{t("musicFolderName")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
+        {/if}
+        <label>{t("comicSource")}
+          <select bind:value={r.source}>
+            <option value="gcd">{t("comicSourceGcd")}</option>
+            <option value="mangadex">{t("comicSourceMangadex")}</option>
+            <option value="comicvine">{t("comicSourceCv")}</option>
+          </select>
+        </label>
+        <p class="hint">{t(r.source === "comicvine" ? "cvHint" : r.source === "mangadex" ? "mdHint" : "gcdHint")}</p>
+        <label>{t("comicSeries")} <input bind:value={r.series} placeholder={t("comicSeriesPlaceholder")} spellcheck="false" /></label>
+        {#if lookup?.show}<p class="hint">{t("seriesCurrent", { show: lookup.show })}</p>{/if}
+        {@render actions(t("comicSearch"), "comicSummary")}
       {/if}
 
       {#if summary}<p class="hint">{summary}</p>{/if}
@@ -293,7 +314,7 @@
   {/if}
 </article>
 
-{#snippet actions(label: string, summary: "movieSummary" | "seriesSummary" | "albumSummary" | "bookSummary")}
+{#snippet actions(label: string, summary: "movieSummary" | "seriesSummary" | "albumSummary" | "bookSummary" | "comicSummary")}
   {#if lookup}
     <div class="movie-actions">
       <button class="primary-soft" disabled={!!lookup.progress} onclick={lookup.onsearch}>{label}</button>
