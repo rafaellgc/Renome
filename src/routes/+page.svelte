@@ -1269,6 +1269,37 @@
     }
   }
 
+  /** Saves the list as shown to a CSV file (`;` between fields where a
+   *  comma is the decimal mark, as spreadsheets there expect). */
+  async function exportCsv() {
+    const path = await save({
+      title: t("exportCsv"),
+      filters: [{ name: t("csvFile"), extensions: ["csv"] }],
+      defaultPath: t("defaultCsvName"),
+    });
+    if (!path) return;
+    const sep = settings.lang === "en" ? "," : ";";
+    const cell = (v: string) => (/[",;\n\r]/.test(v) ? `"${v.replaceAll('"', '""')}"` : v);
+    const rows = [
+      [t("csv.folder"), t("csv.original"), t("csv.new"), t("csv.dest"), t("csv.status"), t("csv.problem")],
+      ...preview.items.map((i) => [
+        i.dir,
+        i.original,
+        i.newName,
+        i.folder ?? "",
+        t(`csv.${i.status}`),
+        i.problem ? t(`problem.${i.problem}`) : "",
+      ]),
+    ];
+    try {
+      // The mark at the start tells spreadsheets the file is UTF-8.
+      await api.saveText(path, "\ufeff" + rows.map((r) => r.map(cell).join(sep)).join("\r\n") + "\r\n");
+      notice = t("csvSaved");
+    } catch (e) {
+      await notify({ title: t("exportCsv"), text: tError(e) });
+    }
+  }
+
   async function loadPreset() {
     const path = await open({ title: t("openRules"), filters: presetFilter() });
     if (typeof path !== "string") return;
@@ -1574,6 +1605,9 @@
         <svg class="copy-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M5 1.5h7A1.5 1.5 0 0 1 13.5 3v8.5H12V3H5zM2.5 4.5A1.5 1.5 0 0 1 4 3h6a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 10 15H4a1.5 1.5 0 0 1-1.5-1.5zM4 4.5v9h6v-9z" /></svg>
         {t("identicalCount", { n: identicalCount })}
       </button>
+    {/if}
+    {#if preview.items.length}
+      <button class="link" title={t("exportCsvHint")} onclick={exportCsv}>{t("exportCsv")}</button>
     {/if}
     <span class="spacer"></span>
     <span class="notice">{notice}</span>

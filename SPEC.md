@@ -513,6 +513,9 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   bare numbers after it are no issue. An option (off by default) takes
   the series from the file's folder (without brackets and year), and what
   the name had as its series becomes the title.
+- Ready-made templates: Renome's default (Komga takes each folder as a
+  series) and Kavita's (`{series} v{volume} #{number} c{chapter}
+  ({year})`, no title); both turn series folders on.
 - Catalogues, chosen in the rule: the Grand Comics Database (default;
   HTTP Basic sign-in of the user's free account, asked when searching and
   kept in memory only, never on disk; without one, anonymous access of
@@ -580,6 +583,11 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   while whole files are read;
   clicking it shows only those files, grouped.
 - A "same name" conflict between identical files says so.
+
+- "Export list" (footer) saves the list as shown to a CSV file: folder,
+  current name, new name, folder it moves into, status, problem; UTF-8
+  with a byte order mark, `;` between fields in Portuguese and Spanish
+  (`,` in English).
 
 ## 4. Apply
 

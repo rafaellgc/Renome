@@ -31,6 +31,31 @@ const COMIC_TEMPLATE = {
   en: ["{series} v{volume} #{number} c{chapter} - {title} ({year})", "{series} ({series year})"],
   es: ["{serie} v{volumen} #{número} c{capítulo} - {título} ({año})", "{serie} ({año de la serie})"],
 } as const;
+/** Kavita reads `Series v01 #001 c001`; a title after " - " is not in its
+ *  examples, so it is left out. */
+const KAVITA_TEMPLATE = {
+  pt: ["{série} v{volume} #{número} c{capítulo} ({ano})", "{série} ({ano da série})"],
+  en: ["{series} v{volume} #{number} c{chapter} ({year})", "{series} ({series year})"],
+  es: ["{serie} v{volumen} #{número} c{capítulo} ({año})", "{serie} ({año de la serie})"],
+} as const;
+
+export type ComicPreset = "renome" | "kavita";
+
+/** A ready-made comic template and folder template, in the current
+ *  language; both servers want each series in its own folder. */
+export function comicPreset(preset: ComicPreset): { template: string; folderTemplate: string; folders: true } {
+  const [template, folderTemplate] = (preset === "kavita" ? KAVITA_TEMPLATE : COMIC_TEMPLATE)[settings.lang];
+  return { template, folderTemplate, folders: true };
+}
+
+/** The preset a rule's templates match, if any. */
+export function comicPresetOf(r: { template: string; folderTemplate: string; folders: boolean }): ComicPreset | "" {
+  for (const p of ["renome", "kavita"] as const) {
+    const t = comicPreset(p);
+    if (r.folders && r.template === t.template && r.folderTemplate === t.folderTemplate) return p;
+  }
+  return "";
+}
 const SERIES_TEMPLATE = {
   pt: "{série} ({ano}) - S{temporada}E{episódio} - {título}",
   en: "{show} ({year}) - S{season}E{episode} - {title}",

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t } from "./i18n";
-  import { splitExt, splitParts } from "./rules";
+  import { comicPreset, comicPresetOf, splitExt, splitParts, type ComicPreset } from "./rules";
   import type { Step } from "./types";
 
   let {
@@ -287,6 +287,20 @@
         {@render actions(t("olSearch"), "bookSummary")}
       {:else if r.type === "comic"}
         <p class="hint top">{t("comicHint")}</p>
+        <label>{t("comicPreset")}
+          <select
+            value={comicPresetOf(r)}
+            onchange={(e) => {
+              const v = (e.currentTarget as HTMLSelectElement).value as ComicPreset | "";
+              if (v) Object.assign(r, comicPreset(v));
+            }}
+          >
+            <option value="" disabled>{t("comicPresetCustom")}</option>
+            <option value="renome">{t("comicPresetRenome")}</option>
+            <option value="kavita">{t("comicPresetKavita")}</option>
+          </select>
+        </label>
+        <p class="hint">{t("comicPresetHint")}</p>
         <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
         <p class="hint mono">{t("comicTemplateHint")}</p>
         <label class="colon">{t("colonLabel")} <input class="mono sep" bind:value={r.colon} spellcheck="false" /></label>

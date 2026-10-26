@@ -866,6 +866,12 @@ fn save_preset(path: PathBuf, steps: Vec<Step>) -> Result<(), String> {
     std::fs::write(path, text).map_err(|e| e.to_string())
 }
 
+/// Writes a text file the user chose (the exported list).
+#[tauri::command]
+fn save_text(path: PathBuf, text: String) -> Result<(), String> {
+    std::fs::write(path, text).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn load_preset(path: PathBuf) -> Result<Vec<Step>, String> {
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
@@ -1020,6 +1026,7 @@ pub fn run() {
             comic_volume_of,
             gcd_sign_in,
             gcd_sign_out,
+            save_text,
             write_book_sidecars,
             apply,
             history,

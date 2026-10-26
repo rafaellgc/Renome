@@ -35,6 +35,7 @@ export const api = {
   mbChoose: (id: string, paths: string[], fromName: boolean) =>
     invoke<{ matches: [string, SongMatch][]; agree: number }>("mb_choose", { id, paths, fromName }),
   /** `names`: the name each file is read by (null: its own). */
+  saveText: (path: string, text: string) => invoke<void>("save_text", { path, text }),
   comicGuesses: (paths: string[], names: (string | null)[], byFolder: boolean) =>
     invoke<(ComicMatch | null)[]>("comic_guesses", { paths, names, byFolder }),
   comicCheck: (key: string) => invoke<void>("comic_check", { key }),
