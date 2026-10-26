@@ -588,6 +588,7 @@ ${ex("Show.S01E02.720p.WEB.mkv", "Show S01E02.mkv")}
   <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>Undo the last change to the list</td></tr>
   <tr><td><kbd>Ctrl</kbd>+<kbd>O</kbd></td><td>Add files</td></tr>
   <tr><td><kbd>F2</kbd></td><td>Edit the new name of the selected file</td></tr>
+  <tr><td><kbd>↑</kbd> <kbd>↓</kbd> <kbd>Home</kbd> <kbd>End</kbd></td><td>Move through the file list and select (reach it with <kbd>Tab</kbd> or a click); with <kbd>Shift</kbd>, extend the selection</td></tr>
   <tr><td><kbd>Delete</kbd></td><td>Remove the selected files from the list</td></tr>
   <tr><td><kbd>Ctrl</kbd>+<kbd>A</kbd></td><td>Select all</td></tr>
   <tr><td><kbd>F1</kbd></td><td>Open this help</td></tr>

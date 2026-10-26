@@ -515,7 +515,14 @@
   const errText = (e: OpError) => {
     if (e.kind === "history") return `${t("err.history")} (${e.detail})`;
     const why =
-      e.kind === "io" ? e.detail || t("err.io") : e.kind === "tags" ? `${t("err.tags")}: ${tError(e.detail)}` : t(`err.${e.kind}`);
+      e.kind === "io"
+        ? e.detail || t("err.io")
+        : e.kind === "tags"
+          ? `${t("err.tags")}: ${tError(e.detail)}`
+          : // The temporary name it was left under, to find it.
+            e.kind === "restoreFailed" && e.detail
+            ? `${t("err.restoreFailed")} ${basename(e.detail)}`
+            : t(`err.${e.kind}`);
     return `${basename(e.from)} — ${why}`;
   };
 

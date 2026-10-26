@@ -78,17 +78,24 @@ A built-in manual (F1) explains every rule with examples.
   Optionally looks the series up on the Grand Comics Database (editions
   from many countries; a free account, signed in for the session only),
   MangaDex (manga, no account) or Comic Vine (your own key), and organizes
-  series folders.
+  series folders (with ready-made templates for Komga and Kavita).
+- Movie, TV show, book and comic lookups read the name as the rules above
+  them leave it, so a "Replace text" can fix an abbreviation first.
 - Edit any new name by hand right in the preview (double-click or F2).
 - List filter: only the visible files are renamed.
 - Sort by new name (default) or by any column.
 - Conflicts are caught before renaming (duplicate names, existing files,
   invalid names, characters Windows does not accept).
 - Safe two-phase renaming: swaps (a↔b) work and files are never overwritten.
+  If the program or the computer stops halfway through a rename or an
+  undo, the next start puts every file back under a real name.
 - Persistent history with **undo**, even after closing the app.
+- Export the list (current name, new name, folder, status) to CSV, to
+  check a big batch in a spreadsheet.
 - Rule presets saved as JSON.
-- Keyboard shortcuts: Ctrl+Enter renames, Ctrl+Z undoes the last change to
-  the list, F1 opens the manual.
+- Works from the keyboard: Ctrl+Enter renames, Ctrl+Z undoes the last
+  change to the list, arrows move through the list, F2 edits a name, F1
+  opens the manual.
 - Interface in English, Portuguese and Spanish; light, dark or system theme.
 
 ## Screenshots

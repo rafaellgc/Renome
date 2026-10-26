@@ -54,7 +54,7 @@ export const pt: Section[] = [
     html: `
 <p>As regras são aplicadas <b>de cima para baixo</b>, cada uma sobre o resultado da anterior. A ordem importa: numerar e depois trocar maiúsculas não dá o mesmo resultado que o contrário.</p>
 <ul>
-  <li>O <b>checkbox</b> no título liga e desliga a regra sem apagá-la.</li>
+  <li>A <b>caixa de seleção</b> no título liga e desliga a regra sem apagá-la.</li>
   <li><b>↑ ↓</b> mudam a ordem; <b>✕</b> remove a regra; clicar no título recolhe o card.</li>
   <li>Uma regra com erro (expressão inválida, por exemplo) fica com borda vermelha e é ignorada até ser corrigida.</li>
 </ul>
@@ -588,6 +588,7 @@ ${ex("Serie.S01E02.720p.WEB.mkv", "Serie S01E02.mkv")}
   <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>Desfazer a última alteração na lista</td></tr>
   <tr><td><kbd>Ctrl</kbd>+<kbd>O</kbd></td><td>Adicionar arquivos</td></tr>
   <tr><td><kbd>F2</kbd></td><td>Editar o novo nome do arquivo selecionado</td></tr>
+  <tr><td><kbd>↑</kbd> <kbd>↓</kbd> <kbd>Home</kbd> <kbd>End</kbd></td><td>Andar pela lista de arquivos e selecionar (chegue nela com <kbd>Tab</kbd> ou um clique); com <kbd>Shift</kbd>, estende a seleção</td></tr>
   <tr><td><kbd>Delete</kbd></td><td>Remover os selecionados da lista</td></tr>
   <tr><td><kbd>Ctrl</kbd>+<kbd>A</kbd></td><td>Selecionar todos</td></tr>
   <tr><td><kbd>F1</kbd></td><td>Abrir esta ajuda</td></tr>

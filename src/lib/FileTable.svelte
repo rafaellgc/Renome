@@ -71,7 +71,41 @@
     await startEdit(item);
   }
 
+  /** The row the arrow keys move from (the last one clicked or reached). */
+  let cursor = $state<number | null>(null);
+
+  /** Arrows move the selection (Shift extends it), Home and End go to the
+   *  first and last row: the list works without a mouse. */
+  function onkeys(e: KeyboardEvent) {
+    if (editing || !items.length) return;
+    const last = items.length - 1;
+    const from = cursor ?? anchor ?? -1;
+    const page = Math.max(1, Math.floor(height / ROW) - 1);
+    const to = {
+      ArrowDown: Math.min(last, from + 1),
+      ArrowUp: Math.max(0, from - 1),
+      PageDown: Math.min(last, from + page),
+      PageUp: Math.max(0, from - page),
+      Home: 0,
+      End: last,
+    }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    cursor = to;
+    if (e.shiftKey && anchor !== null) {
+      const next = new Set<string>();
+      const [a, b] = [Math.min(anchor, to), Math.max(anchor, to)];
+      for (let i = a; i <= b; i++) next.add(items[i].path);
+      selected = next;
+    } else {
+      anchor = to;
+      selected = new Set([items[to].path]);
+    }
+    reveal([items[to].path]);
+  }
+
   function select(e: MouseEvent, index: number) {
+    cursor = index;
     const path = items[index].path;
     const next = new Set(e.ctrlKey || e.metaKey ? selected : []);
     if (e.shiftKey && anchor !== null) {
@@ -166,6 +200,11 @@
     bind:this={viewport}
     bind:clientHeight={height}
     onscroll={() => (scrollTop = viewport.scrollTop)}
+    role="grid"
+    tabindex="0"
+    aria-label={t("fileList")}
+    aria-multiselectable="true"
+    onkeydown={onkeys}
   >
     <div class="spacer" style:height="{items.length * ROW}px">
       {#each visible as item, k (item.path)}
@@ -273,6 +312,7 @@
   .th.c-size, .th.c-date { text-align: right; }
   .arrow { font-size: 9px; margin-left: 2px; }
   .viewport { flex: 1; overflow: auto; position: relative; }
+  .viewport:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .spacer { position: relative; }
   .row {
     position: absolute;

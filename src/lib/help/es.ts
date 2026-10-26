@@ -588,6 +588,7 @@ ${ex("Serie.S01E02.720p.WEB.mkv", "Serie S01E02.mkv")}
   <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>Deshacer el último cambio en la lista</td></tr>
   <tr><td><kbd>Ctrl</kbd>+<kbd>O</kbd></td><td>Añadir archivos</td></tr>
   <tr><td><kbd>F2</kbd></td><td>Editar el nuevo nombre del archivo seleccionado</td></tr>
+  <tr><td><kbd>↑</kbd> <kbd>↓</kbd> <kbd>Inicio</kbd> <kbd>Fin</kbd></td><td>Moverse por la lista de archivos y seleccionar (llegue a ella con <kbd>Tab</kbd> o un clic); con <kbd>Mayús</kbd>, amplía la selección</td></tr>
   <tr><td><kbd>Supr</kbd></td><td>Quitar los seleccionados de la lista</td></tr>
   <tr><td><kbd>Ctrl</kbd>+<kbd>A</kbd></td><td>Seleccionar todos</td></tr>
   <tr><td><kbd>F1</kbd></td><td>Abrir esta ayuda</td></tr>
