@@ -5,8 +5,9 @@
   import { en } from "./help/en";
   import { es } from "./help/es";
   import { pt } from "./help/pt";
-  import { t } from "./i18n";
+  import { LOCALES, t } from "./i18n";
   import { settings } from "./settings.svelte";
+  import type { RuleType } from "./types";
   import appLicense from "../../LICENSE?raw";
 
   type Tab = "manual" | "about" | "licenses";
@@ -39,7 +40,23 @@
   const EMAIL = "rafaellgcorreia@gmail.com";
   const REPO = "https://github.com/rafaellgc/Renome";
 
-  const sections = $derived({ pt, en, es }[settings.lang]);
+  /** Each rule's section, by rule type. */
+  const RULE_OF: Record<string, RuleType> = {
+    "r-replace": "replace", "r-regex": "regex", "r-rearrange": "rearrange", "r-case": "case", "r-insert": "insert",
+    "r-number": "number", "r-remove": "remove", "r-range": "removeRange", "r-char": "charAt", "r-ext": "extension",
+    "r-movie": "movie", "r-series": "series", "r-music": "music", "r-book": "book", "r-comic": "comic",
+  };
+  /** The rules' sections in the order of the "+ Rule" menu: alphabetical
+   *  by the rule's name in the current language. */
+  const sections = $derived.by(() => {
+    const all = { pt, en, es }[settings.lang];
+    const name = (id: string) => t(`rule.${RULE_OF[id]}`);
+    const rules = all
+      .filter((s) => RULE_OF[s.id])
+      .sort((a, b) => name(a.id).localeCompare(name(b.id), LOCALES[settings.lang]));
+    let next = 0;
+    return all.map((s) => (RULE_OF[s.id] ? rules[next++] : s));
+  });
   let current = $state("start");
   let content = $state<HTMLElement>();
   let version = $state("");

@@ -503,8 +503,14 @@ pub struct ComicMatch {
 /// number is a one-shot: named by its series (and year). `by_folder`: the
 /// series is the folder's (see [`in_folder`]).
 pub fn from_file(file: &FileEntry, by_folder: bool) -> Option<ComicMatch> {
+    from_name(file, &file.stem, by_folder)
+}
+
+/// Like [`from_file`], reading `stem` as its name (what the rules above
+/// the comic rule made of it).
+pub fn from_name(file: &FileEntry, stem: &str, by_folder: bool) -> Option<ComicMatch> {
     let folder = file.dir.file_name().unwrap_or_default().to_string_lossy();
-    let g = parse_name(&file.stem, &folder);
+    let g = parse_name(stem, &folder);
     let info = file.comic_info().cloned().unwrap_or_default();
     let mut m = merge(&g, &info);
     if by_folder {
@@ -534,19 +540,20 @@ pub fn in_folder(m: &mut ComicMatch, folder: &str) {
     m.volume = m.volume.or(f.volume);
 }
 
-/// Like [`from_file`], for a path.
-pub fn from_path(path: &Path, by_folder: bool) -> Option<ComicMatch> {
+/// Like [`from_name`], for a path; `stem`, when given, is read as its name.
+pub fn from_path(path: &Path, stem: Option<&str>, by_folder: bool) -> Option<ComicMatch> {
     let ext = path.extension()?.to_string_lossy();
     if !is_comic(&ext) {
         return None;
     }
-    let stem = path.file_stem()?.to_string_lossy();
+    let own = path.file_stem()?.to_string_lossy();
+    let stem = stem.unwrap_or(&own);
     let folder = path
         .parent()?
         .file_name()
         .unwrap_or_default()
         .to_string_lossy();
-    let mut m = merge(&parse_name(&stem, &folder), &read(path).unwrap_or_default());
+    let mut m = merge(&parse_name(stem, &folder), &read(path).unwrap_or_default());
     if by_folder {
         in_folder(&mut m, &folder);
     }

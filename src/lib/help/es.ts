@@ -249,7 +249,7 @@ ${ex("Nombre.de.la.Pelicula.2001.1080p.BluRay.x264.mkv", "Nombre de la Película
 <div class="notice">
 <p><b>Antes de usarla: el nombre de los archivos importa</b></p>
 <p>La película se busca por el <b>título</b> y el <b>año</b> que hay en el nombre del archivo. Los nombres llenos de marcas de lanzamiento (<code>Nombre.de.la.Pelicula.2001.1080p.BluRay</code>) funcionan bien, porque las marcas se descartan. Pero un nombre sin el título (<code>pelicula1.mkv</code>), solo con siglas o abreviaturas, o con el título en un idioma que TMDB no tiene, no se encuentra o va a la revisión; sin el año, las películas con el mismo nombre se confunden.</p>
-<p>Si sus archivos están lejos de eso, arréglelos antes con las otras reglas (<b>Reemplazar texto</b>, <b>Quitar fragmento</b>, <b>Expresión regular</b>), haga clic en <b>Renombrar</b> y solo entonces busque en TMDB: la búsqueda lee el nombre que el archivo tiene en el disco, no lo que hacen de él las reglas que están encima en la lista.</p>
+<p>Si sus archivos están lejos de eso, ponga encima de esta regla, en la lista, las reglas que arreglan el nombre (<b>Reemplazar texto</b>, <b>Quitar fragmento</b>, <b>Expresión regular</b>): la búsqueda lee el nombre tal como sale de ellas, y la columna <b>Nuevo nombre</b> muestra el resultado antes de renombrar.</p>
 </div>
 <ol>
   <li>Añada la regla y haga clic en <b>Buscar en TMDB</b>. El programa toma el título y el año del nombre de cada archivo (los puntos pasan a espacios; se quitan corchetes, paréntesis y marcas como 1080p, BluRay, x264) y busca en TMDB.</li>
@@ -285,7 +285,7 @@ ${ex("Nombre.de.la.Serie.S01E03.720p.WEB-DL.mkv", "Nombre de la Serie (2008) - S
 <div class="notice">
 <p><b>Antes de usarla: el nombre de los archivos importa</b></p>
 <p>Cada archivo se empareja con su episodio por lo que dice su nombre. El nombre de la serie puede venir del campo <b>Serie</b>, pero el episodio no: el nombre necesita <b>el número de temporada y de episodio</b> (<code>S01E03</code>, <code>1x03</code>; la temporada también puede venir de la carpeta) <b>o el título del episodio</b>. Un nombre sin ninguno de los dos (<code>Nombre de la Serie - parte A.mkv</code>, <code>video_0042.mkv</code>) no se encuentra y va a la revisión, donde se elige a mano.</p>
-<p>Si sus archivos están lejos de eso, arréglelos antes con las otras reglas (<b>Reemplazar texto</b>, <b>Reorganizar partes</b>, <b>Expresión regular</b>, <b>Numerar</b>), haga clic en <b>Renombrar</b> y solo entonces busque los episodios: la búsqueda lee el nombre que el archivo tiene en el disco, no lo que hacen de él las reglas que están encima en la lista.</p>
+<p>Si sus archivos están lejos de eso, ponga encima de esta regla, en la lista, las reglas que arreglan el nombre (<b>Reemplazar texto</b>, <b>Reorganizar partes</b>, <b>Expresión regular</b>, <b>Numerar</b>): la búsqueda lee el nombre tal como sale de ellas.</p>
 </div>
 <ol>
   <li>En el campo <b>Serie</b>, escriba el nombre o el ID de TMDB, o pegue el enlace de la página de la serie (<code>themoviedb.org/tv/1396-…</code>). Vacío, el programa usa el nombre que los archivos tienen en común, o el de la carpeta.</li>
@@ -423,7 +423,7 @@ ${ex("titulo_del_libro_autor.pdf", "Nombre del Autor - Título del Libro (1937).
 </ul>
 <h4>Limitaciones</h4>
 <ul>
-  <li><b>PDF</b>: muchos PDF tienen los datos del documento vacíos o erróneos (el nombre del archivo de Word, el nombre del equipo de quien lo hizo). Un PDF <b>escaneado</b> es solo una serie de imágenes, sin texto donde buscar el ISBN. En esos casos queda el nombre del archivo: un nombre claro, como <code>Autor - Título</code>, ayuda mucho; uno confuso lleva a la revisión. Conviene arreglar antes el nombre de esos archivos, con las otras reglas, y hacer clic en <b>Renombrar</b>: la búsqueda lee el nombre que el archivo tiene en el disco, no lo que hacen de él las reglas que están encima en la lista.</li>
+  <li><b>PDF</b>: muchos PDF tienen los datos del documento vacíos o erróneos (el nombre del archivo de Word, el nombre del equipo de quien lo hizo). Un PDF <b>escaneado</b> es solo una serie de imágenes, sin texto donde buscar el ISBN. En esos casos queda el nombre del archivo: un nombre claro, como <code>Autor - Título</code>, ayuda mucho; uno confuso lleva a la revisión. Conviene arreglar el nombre de esos archivos con las otras reglas, puestas encima de esta en la lista: la búsqueda lee el nombre tal como sale de ellas.</li>
   <li><b>Sin ISBN</b>, el libro se encuentra por el título y el autor, pero no se sabe qué edición es: el nombre usa la editorial y el ISBN del propio archivo, si los tiene, y <code>{año de edición}</code> queda vacío.</li>
   <li><b>Open Library</b> lo mantienen voluntarios. Los libros recientes, de editoriales pequeñas o de algunos países pueden no estar, o estar sin portada, sin año o repetidos, con datos algo distintos en cada copia. Faltan muchas traducciones: cuando el título no aparece, la revisión muestra los otros libros del autor, donde la obra puede estar con el título original, o no estar. En ese caso, marque <b>Ninguno de estos</b> y renómbrelo a mano.</li>
   <li><b>BrasilAPI</b> solo ayuda con libros con ISBN, casi siempre de editoriales brasileñas. Suele venir sin portada y sin año. El año de la primera publicación y la portada vienen de Open Library cuando tiene la obra; si no, <code>{año}</code> queda vacío y no hay portada. Entre los autores pueden venir el traductor o el ilustrador: cuando el archivo dice quién es el autor, solo queda él.</li>
@@ -451,8 +451,8 @@ ${ex("Nombre_de_la_Serie_012_(2019)_(Digital)_(grupo).cbz", "Nombre de la Serie 
   <li>el título o el año, si quiere conservarlos, después de " - " o entre paréntesis.</li>
 </ul>
 <p>Nombres así funcionan bien: <code>Nombre de la Serie #012</code>, <code>Nombre de la Serie Vol. 2 #005</code>, <code>Nombre de la Serie - Nombre del Álbum (1990)</code>.</p>
-<p>Si sus archivos están lejos de eso, arréglelos antes con las otras reglas: <b>Reemplazar texto</b> para cambiar abreviaturas por el nombre completo, <b>Reorganizar partes</b> o <b>Expresión regular</b> para cambiar el orden, <b>Quitar fragmento</b> para quitar restos. Haga clic en <b>Renombrar</b> y solo entonces use la regla <b>Cómic</b>: lee el nombre que el archivo tiene en el disco, no lo que hacen de él las reglas que están encima en la lista.</p>
-<p>Dos atajos: para una carpeta con una sola serie, la opción <b>La serie es el nombre de la carpeta</b> evita renombrar antes; y, buscando en un catálogo, el campo <b>Serie a buscar</b> encuentra la serie correcta aunque el nombre esté abreviado.</p>
+<p>Si sus archivos están lejos de eso, ponga encima de esta regla, en la lista, las reglas que arreglan el nombre: <b>Reemplazar texto</b> para cambiar abreviaturas por el nombre completo, <b>Reorganizar partes</b> o <b>Expresión regular</b> para cambiar el orden, <b>Quitar fragmento</b> para quitar restos. La regla <b>Cómic</b> y la búsqueda leen el nombre tal como sale de esas reglas, y la columna <b>Nuevo nombre</b> muestra el resultado antes de renombrar.</p>
+<p>Dos atajos: para una carpeta con una sola serie, la opción <b>La serie es el nombre de la carpeta</b> no necesita otras reglas; y, buscando en un catálogo, el campo <b>Serie a buscar</b> encuentra la serie correcta aunque el nombre esté abreviado.</p>
 </div>
 <h4>Sin internet</h4>
 <ul>

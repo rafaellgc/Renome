@@ -69,6 +69,9 @@ export interface PreviewItem {
   retag: boolean;
   /** Matched, with tags that cleaning would take away. */
   junk: boolean;
+  /** The name the lookups read, when the rules above the first lookup rule
+   *  change it (else the original). */
+  lookupName?: string;
 }
 
 export interface Preview {

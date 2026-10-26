@@ -671,12 +671,17 @@ async fn book_search(
 #[tauri::command]
 async fn comic_guesses(
     paths: Vec<PathBuf>,
+    names: Vec<Option<String>>,
     by_folder: bool,
 ) -> Vec<Option<renome_core::comics::ComicMatch>> {
     tauri::async_runtime::spawn_blocking(move || {
         paths
             .iter()
-            .map(|p| renome_core::comics::from_path(p, by_folder))
+            .enumerate()
+            .map(|(i, p)| {
+                let stem = names.get(i).cloned().flatten();
+                renome_core::comics::from_path(p, stem.as_deref(), by_folder)
+            })
             .collect()
     })
     .await

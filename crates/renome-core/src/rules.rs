@@ -434,6 +434,18 @@ enum Compiled {
     Plain(Rule),
 }
 
+impl Compiled {
+    /// A rule that looks the file up by its name.
+    fn is_lookup(&self) -> bool {
+        matches!(
+            self,
+            Compiled::Plain(
+                Rule::Movie { .. } | Rule::Series { .. } | Rule::Book { .. } | Rule::Comic { .. }
+            )
+        )
+    }
+}
+
 pub struct Pipeline {
     steps: Vec<Compiled>,
     pub errors: Vec<RuleError>,
@@ -481,10 +493,27 @@ impl Pipeline {
     /// Like [`run`](Self::run), plus where a rule moves the file (movie
     /// rule with "folder", series rule with "folders").
     pub fn run_full(&self, ctx: &Ctx) -> (String, String, Option<Move>) {
+        self.run_steps(ctx, false)
+    }
+
+    /// The name (stem, extension) the rules above the first lookup rule
+    /// (movie, series, book, comic) make: what that rule reads and looks
+    /// up. `None` without a lookup rule.
+    pub fn lookup_name(&self, ctx: &Ctx) -> Option<(String, String)> {
+        self.steps.iter().any(Compiled::is_lookup).then(|| {
+            let (stem, ext, _) = self.run_steps(ctx, true);
+            (stem, ext)
+        })
+    }
+
+    fn run_steps(&self, ctx: &Ctx, to_lookup: bool) -> (String, String, Option<Move>) {
         let mut moved = None;
         let mut stem = ctx.file.stem.clone();
         let mut ext = ctx.file.ext.clone();
         for step in &self.steps {
+            if to_lookup && step.is_lookup() {
+                break;
+            }
             match step {
                 Compiled::Replace {
                     re,
@@ -551,7 +580,7 @@ impl Pipeline {
                             by_folder,
                             ..
                         } = rule
-                        && let Some(m) = comic_of(ctx, *by_folder)
+                        && let Some(m) = comic_of(ctx, *by_folder, &stem)
                     {
                         let m = ctx.comic_folder.cloned().unwrap_or(m);
                         let levels = comics::folders(folder_template, &m, colon);
@@ -909,7 +938,7 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             by_folder,
             ..
         } => {
-            if let Some(m) = comic_of(ctx, *by_folder) {
+            if let Some(m) = comic_of(ctx, *by_folder, stem) {
                 let name = comics::comic_name(template, &m, colon);
                 if !name.is_empty() {
                     *stem = name;
@@ -922,14 +951,14 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
 }
 
 /// The comic a file is: the issue chosen for it, else what it says about
-/// itself.
-fn comic_of(ctx: &Ctx, by_folder: bool) -> Option<comics::ComicMatch> {
+/// itself, its name being `stem` (what the rules above made of it).
+fn comic_of(ctx: &Ctx, by_folder: bool, stem: &str) -> Option<comics::ComicMatch> {
     if ctx.file.is_dir || !comics::is_comic(&ctx.file.ext) {
         return None;
     }
     ctx.comic
         .cloned()
-        .or_else(|| comics::from_file(ctx.file, by_folder))
+        .or_else(|| comics::from_name(ctx.file, stem, by_folder))
 }
 
 fn folder_name(file: &FileEntry) -> String {

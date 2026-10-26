@@ -34,7 +34,9 @@ export const api = {
   mbSearch: (query: AlbumQuery) => invoke<MbCandidate[]>("mb_search", { query }),
   mbChoose: (id: string, paths: string[], fromName: boolean) =>
     invoke<{ matches: [string, SongMatch][]; agree: number }>("mb_choose", { id, paths, fromName }),
-  comicGuesses: (paths: string[], byFolder: boolean) => invoke<(ComicMatch | null)[]>("comic_guesses", { paths, byFolder }),
+  /** `names`: the name each file is read by (null: its own). */
+  comicGuesses: (paths: string[], names: (string | null)[], byFolder: boolean) =>
+    invoke<(ComicMatch | null)[]>("comic_guesses", { paths, names, byFolder }),
   comicCheck: (key: string) => invoke<void>("comic_check", { key }),
   comicSearch: (source: ComicSource, key: string, query: string, lang: string) =>
     invoke<ComicVolume[]>("comic_search", { source, key, query, lang }),

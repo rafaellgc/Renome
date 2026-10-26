@@ -46,6 +46,12 @@ live. The rule set can be saved and loaded as a *preset* (JSON).
 By default rules act on the name without the extension; text rules can
 optionally act only on the extension or on the full name.
 
+The lookup rules (movie, TV show, book, comic) read and look up the name
+the rules above the first of them make, not the name on disk: a
+"Replace text" above the comic rule turns an abbreviation into the series
+before it is read. The preview sends that name to the app
+(`lookupName`) when it differs from the file's.
+
 | Rule | Parameters |
 |---|---|
 | Replace text | find, replace with, case-sensitive, first occurrence only |

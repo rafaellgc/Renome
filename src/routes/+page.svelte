@@ -24,7 +24,7 @@
   import { loadSettings, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
     AlbumState, ApplyReport, BookCandidate, BookMatch, BookState, Candidate, ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, Copies, MbCandidate, SongMatch, EpKey, EpisodeMatch, EpisodeState, MovieMatch, MovieState, MovieStatus, HistoryEntry,
-    OpError, Preview, Rule, RuleType, Show, Step, View, ViewSort,
+    OpError, Preview, PreviewItem, Rule, RuleType, Show, Step, View, ViewSort,
   } from "$lib/types";
 
   let ready = $state(false);
@@ -354,6 +354,8 @@
     preview.items.reduce<string>((min, i) => (!min || collator.compare(i.original, min) < 0 ? i.original : min), ""),
   );
   const canMove = $derived(selected.size > 0 && sortKey !== "newName");
+  /** The name the lookups read: what the rules above the lookup rule make of it. */
+  const readName = (i: PreviewItem) => i.lookupName ?? i.original;
 
   function ruleError(i: number) {
     const e = preview.ruleErrors.find((e) => e.index === i);
@@ -716,7 +718,7 @@
     }
     const items = preview.items
       .filter((i) => movies[i.path]?.status !== "auto" && movies[i.path]?.status !== "chosen")
-      .map((i) => ({ path: i.path, name: i.isDir ? i.original : splitExt(i.original)[0] }));
+      .map((i) => ({ path: i.path, name: i.isDir ? readName(i) : splitExt(readName(i))[0] }));
     if (!items.length) {
       notice = t("tmdbNoFiles");
       return;
@@ -752,7 +754,7 @@
   async function searchBooks() {
     const items = preview.items
       .filter((i) => !i.isDir && isBook(i.original) && books[i.path]?.status !== "auto" && books[i.path]?.status !== "chosen")
-      .map((i) => ({ path: i.path, name: splitExt(i.original)[0] }));
+      .map((i) => ({ path: i.path, name: splitExt(readName(i))[0] }));
     if (!items.length) {
       notice = t("bookNoFiles");
       return;
@@ -863,7 +865,11 @@
     comicProgress = t("comicReading");
     const lang = settings.lang === "pt" ? "pt-br" : settings.lang;
     try {
-      const owns = await api.comicGuesses(files.map((f) => f.path), !!rule.byFolder);
+      const owns = await api.comicGuesses(
+        files.map((f) => f.path),
+        files.map((f) => (f.lookupName ? splitExt(f.lookupName)[0] : null)),
+        !!rule.byFolder,
+      );
       const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
       const groups = new Map<string, { query: string; paths: string[]; owns: ComicMatch[] }>();
       files.forEach((f, i) => {
@@ -1081,7 +1087,7 @@
       if (ok) showOptions = true;
       return;
     }
-    const all = preview.items.map((i) => ({ path: i.path, name: i.original, isDir: i.isDir }));
+    const all = preview.items.map((i) => ({ path: i.path, name: readName(i), isDir: i.isDir }));
     if (!all.length) return;
     const key = settings.tmdbKey;
     const lang = tmdbLang();

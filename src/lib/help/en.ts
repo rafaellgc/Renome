@@ -249,7 +249,7 @@ ${ex("Movie.Name.2001.1080p.BluRay.x264.mkv", "Movie Name (2001) [tmdbid-12345].
 <div class="notice">
 <p><b>Before using it: file names matter</b></p>
 <p>The movie is looked up by the <b>title</b> and <b>year</b> in the file's name. Names full of release marks (<code>Movie.Name.2001.1080p.BluRay</code>) work well, since the marks are dropped. But a name without the title (<code>movie1.mkv</code>), with only initials or abbreviations, or with the title in a language TMDB does not have, is not found or goes to the review; without the year, movies with the same name get mixed up.</p>
-<p>If your files are far from that, fix them first with the other rules (<b>Replace text</b>, <b>Remove range</b>, <b>Regular expression</b>), click <b>Rename</b>, and only then look them up on TMDB: the search reads the name the file has on disk, not what the rules above it in the list make of it.</p>
+<p>If your files are far from that, put the rules that fix the name above this one in the list (<b>Replace text</b>, <b>Remove range</b>, <b>Regular expression</b>): the search reads the name as they leave it, and the <b>New name</b> column shows the result before renaming.</p>
 </div>
 <ol>
   <li>Add the rule and click <b>Search TMDB</b>. The program takes the title and year from each file name (dots become spaces; brackets, parentheses and tags like 1080p, BluRay, x264 are dropped) and searches TMDB.</li>
@@ -285,7 +285,7 @@ ${ex("Show.Name.S01E03.720p.WEB-DL.mkv", "Show Name (2008) - S01E03 - Episode Ti
 <div class="notice">
 <p><b>Before using it: file names matter</b></p>
 <p>Each file is matched to its episode by what its name says. The series' name can come from the <b>Show</b> field, but the episode cannot: the name needs <b>the season and episode numbers</b> (<code>S01E03</code>, <code>1x03</code>; the season may also come from the folder) <b>or the episode's title</b>. A name with neither (<code>Series Name - part A.mkv</code>, <code>video_0042.mkv</code>) is not found and goes to the review, where it is chosen by hand.</p>
-<p>If your files are far from that, fix them first with the other rules (<b>Replace text</b>, <b>Rearrange parts</b>, <b>Regular expression</b>, <b>Number</b>), click <b>Rename</b>, and only then look the episodes up: the search reads the name the file has on disk, not what the rules above it in the list make of it.</p>
+<p>If your files are far from that, put the rules that fix the name above this one in the list (<b>Replace text</b>, <b>Rearrange parts</b>, <b>Regular expression</b>, <b>Number</b>): the search reads the name as they leave it.</p>
 </div>
 <ol>
   <li>In the <b>Show</b> field, type the name or the TMDB id, or paste the link to the show's page (<code>themoviedb.org/tv/1396-…</code>). Left empty, the program uses the name the files share, or the folder's name.</li>
@@ -423,7 +423,7 @@ ${ex("book_title_author.pdf", "Author Name - Book Title (1937).pdf")}
 </ul>
 <h4>Limitations</h4>
 <ul>
-  <li><b>PDF</b>: many PDFs have empty or wrong document details (the Word file's name, the name of the computer it was made on). A <b>scanned</b> PDF is only a series of images, with no text to find the ISBN in. Then the file name is all that is left: a clear name, like <code>Author - Title</code>, helps a lot; a confusing one leads to the review. It is worth fixing these files' names first, with the other rules, and clicking <b>Rename</b>: the search reads the name the file has on disk, not what the rules above it in the list make of it.</li>
+  <li><b>PDF</b>: many PDFs have empty or wrong document details (the Word file's name, the name of the computer it was made on). A <b>scanned</b> PDF is only a series of images, with no text to find the ISBN in. Then the file name is all that is left: a clear name, like <code>Author - Title</code>, helps a lot; a confusing one leads to the review. It is worth fixing these files' names with the other rules, put above this one in the list: the search reads the name as they leave it.</li>
   <li><b>Without an ISBN</b>, the book is found by title and author, but which edition it is stays unknown: the name uses the publisher and ISBN of the file itself, when it has them, and <code>{edition year}</code> stays empty.</li>
   <li><b>Open Library</b> is kept by volunteers. Recent books, books from small publishers and books from some countries may be missing, or lack a cover or a year, or show up more than once with slightly different details. Many translations are missing: when the title is not found, the review shows the author's other books, where the work may be under its original title, or not there at all. Then mark <b>None of these</b> and rename it by hand.</li>
   <li><b>BrasilAPI</b> only helps books with an ISBN, almost always from Brazilian publishers. It usually has no cover and no year. The year of first publication and the cover come from Open Library when it has the work; otherwise <code>{year}</code> stays empty and there is no cover. Its authors may include the translator or the illustrator: when the file says who the author is, only they are kept.</li>
@@ -451,8 +451,8 @@ ${ex("Series_Name_012_(2019)_(Digital)_(group).cbz", "Series Name #012 (2019).cb
   <li>the title or year, if you want to keep them, after " - " or in brackets.</li>
 </ul>
 <p>Names like these work well: <code>Series Name #012</code>, <code>Series Name Vol. 2 #005</code>, <code>Series Name - Album Name (1990)</code>.</p>
-<p>If your files are far from that, fix them first with the other rules: <b>Replace text</b> to turn abbreviations into the full name, <b>Rearrange parts</b> or <b>Regular expression</b> to change the order, <b>Remove range</b> to take out leftovers. Click <b>Rename</b>, and only then use the <b>Comic</b> rule: it reads the name the file has on disk, not what the rules above it in the list make of it.</p>
-<p>Two shortcuts: for a folder holding a single series, the <b>The series is the folder's name</b> option saves renaming first; and, when looking it up in a catalog, the <b>Series to look for</b> field finds the right series even from an abbreviated name.</p>
+<p>If your files are far from that, put the rules that fix the name above this one in the list: <b>Replace text</b> to turn abbreviations into the full name, <b>Rearrange parts</b> or <b>Regular expression</b> to change the order, <b>Remove range</b> to take out leftovers. The <b>Comic</b> rule and the search read the name as those rules leave it, and the <b>New name</b> column shows the result before renaming.</p>
+<p>Two shortcuts: for a folder holding a single series, the <b>The series is the folder's name</b> option needs no other rules; and, when looking it up in a catalog, the <b>Series to look for</b> field finds the right series even from an abbreviated name.</p>
 </div>
 <h4>Offline</h4>
 <ul>

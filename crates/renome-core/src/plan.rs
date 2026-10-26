@@ -102,6 +102,10 @@ pub struct PreviewItem {
     pub retag: bool,
     /// A matched song with tags that cleaning would take away.
     pub junk: bool,
+    /// The name the lookups (movie, series, book, comic) read: what the
+    /// rules above the first lookup rule make of it, when not the original.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lookup_name: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -558,6 +562,39 @@ pub fn preview(
                 .collect()
         }
     };
+    // The files shown, with their place in the list and in their folder.
+    let mut per_folder: HashMap<&Path, usize> = HashMap::new();
+    let shown: Vec<(usize, usize, &FileEntry)> = files
+        .iter()
+        .filter(|f| filter.matches(&f.file_name()))
+        .filter(|f| !view.identical_only || view.identical.contains_key(&f.path))
+        .enumerate()
+        .map(|(index, file)| {
+            let n = per_folder.entry(&file.dir).or_default();
+            *n += 1;
+            (index, *n - 1, file)
+        })
+        .collect();
+    let ctx_of = |index, folder_index, file| Ctx {
+        index,
+        folder_index,
+        file,
+        now,
+        movie: view.movies.get(&file.path),
+        episode: view.episodes.get(&file.path),
+        song: songs.get(file.path.as_path()),
+        book: view.books.get(&file.path),
+        comic: None,
+        comic_folder: None,
+    };
+    // What each lookup reads (see `Pipeline::lookup_name`).
+    let lookup: HashMap<&Path, (String, String)> = shown
+        .iter()
+        .filter_map(|&(index, folder_index, file)| {
+            let name = pipeline.lookup_name(&ctx_of(index, folder_index, file))?;
+            Some((file.path.as_path(), name))
+        })
+        .collect();
     // The comic rule names the batch's comics together (see
     // `comics::arrange`): what each is, and the series of its folder.
     let by_folder = steps.iter().find_map(|s| match &s.rule {
@@ -567,16 +604,17 @@ pub fn preview(
     let comics: HashMap<&Path, (ComicMatch, Option<ComicMatch>)> = match by_folder {
         None => HashMap::new(),
         Some(by_folder) => {
-            let (paths, mut found): (Vec<&Path>, Vec<ComicMatch>) = files
+            let (paths, mut found): (Vec<&Path>, Vec<ComicMatch>) = shown
                 .iter()
-                .filter(|f| filter.matches(&f.file_name()))
+                .map(|&(_, _, f)| f)
                 .filter(|f| !f.is_dir && comics::is_comic(&f.ext))
                 .filter_map(|f| {
+                    let stem = lookup.get(f.path.as_path()).map_or(&f.stem, |(s, _)| s);
                     let m = view
                         .comics
                         .get(&f.path)
                         .cloned()
-                        .or_else(|| comics::from_file(f, by_folder))?;
+                        .or_else(|| comics::from_name(f, stem, by_folder))?;
                     Some((f.path.as_path(), m))
                 })
                 .unzip();
@@ -587,19 +625,14 @@ pub fn preview(
                 .collect()
         }
     };
-    let mut per_folder: HashMap<&Path, usize> = HashMap::new();
-    let mut items: Vec<PreviewItem> = files
+    let mut items: Vec<PreviewItem> = shown
         .iter()
-        .filter(|f| filter.matches(&f.file_name()))
-        .filter(|f| !view.identical_only || view.identical.contains_key(&f.path))
-        .enumerate()
-        .map(|(index, file)| {
+        .map(|&(index, folder_index, file)| {
             let original = file.file_name();
-            let folder_index = {
-                let n = per_folder.entry(&file.dir).or_default();
-                *n += 1;
-                *n - 1
-            };
+            let lookup_name = lookup
+                .get(file.path.as_path())
+                .map(|(stem, ext)| join_name(stem, ext))
+                .filter(|n| *n != original);
             // The rules emptied the name but left the extension: `.txt` would
             // be a hidden file with no name.
             let mut empty_stem = false;
@@ -609,14 +642,6 @@ pub fn preview(
                 Some(name) => (name.clone(), true),
                 None => {
                     let ctx = Ctx {
-                        index,
-                        folder_index,
-                        file,
-                        now,
-                        movie: view.movies.get(&file.path),
-                        episode: view.episodes.get(&file.path),
-                        song: songs.get(file.path.as_path()),
-                        book: view.books.get(&file.path),
                         comic: comics
                             .get(file.path.as_path())
                             .map(|(m, _)| m)
@@ -624,6 +649,7 @@ pub fn preview(
                         comic_folder: comics
                             .get(file.path.as_path())
                             .and_then(|(_, f)| f.as_ref()),
+                        ..ctx_of(index, folder_index, file)
                     };
                     let (stem, ext, moved) = pipeline.run_full(&ctx);
                     empty_stem = stem.is_empty() && !file.stem.is_empty();
@@ -686,6 +712,7 @@ pub fn preview(
                 untagged,
                 retag,
                 junk,
+                lookup_name,
             }
         })
         .collect();
@@ -810,6 +837,32 @@ mod tests {
                 target: Target::Name,
             },
         }]
+    }
+
+    #[test]
+    fn lookups_read_what_the_rules_above_make() {
+        let d = tempfile::tempdir().unwrap();
+        let files = entries(d.path(), &["SrNm #01.cbz", "SrNm #02.cbz"]);
+        let mut steps = replace("SrNm", "Series Name");
+        steps.push(
+            serde_json::from_value(serde_json::json!({"rule": {"type": "comic",
+            "template": "{series} #{number}", "colon": " - "}}))
+            .unwrap(),
+        );
+        let p = preview(&files, &steps, &HashMap::new(), &View::default());
+        assert_eq!(p.items[0].new_name, "Series Name #001.cbz");
+        assert_eq!(
+            p.items[0].lookup_name.as_deref(),
+            Some("Series Name #01.cbz")
+        );
+        // Without a lookup rule, nothing to read.
+        let p = preview(
+            &files,
+            &replace("SrNm", "X"),
+            &HashMap::new(),
+            &View::default(),
+        );
+        assert_eq!(p.items[0].lookup_name, None);
     }
 
     #[test]
