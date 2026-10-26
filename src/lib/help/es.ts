@@ -288,13 +288,13 @@ ${ex("Nombre.de.la.Serie.S01E03.720p.WEB-DL.mkv", "Nombre de la Serie (2008) - S
 <p>Si sus archivos están lejos de eso, ponga encima de esta regla, en la lista, las reglas que arreglan el nombre (<b>Reemplazar texto</b>, <b>Reorganizar partes</b>, <b>Expresión regular</b>, <b>Numerar</b>): la búsqueda lee el nombre tal como sale de ellas.</p>
 </div>
 <ol>
-  <li>En el campo <b>Serie</b>, escriba el nombre o el ID de TMDB, o pegue el enlace de la página de la serie (<code>themoviedb.org/tv/1396-…</code>). Vacío, el programa usa el nombre que los archivos tienen en común, o el de la carpeta.</li>
+  <li>En el campo <b>Serie</b>, escriba el nombre o el ID de TMDB, o pegue el enlace de la página de la serie (<code>themoviedb.org/tv/1396-…</code>). Vacío, el programa usa el nombre que los archivos tienen en común (con el año, cuando los nombres lo traen), o el de la carpeta. Si la mayoría de los archivos trae <code>[tmdbid-…]</code> en el nombre, la serie se busca directamente por ese número.</li>
   <li>Haga clic en <b>Buscar episodios</b>. Si hay más de una serie parecida, elija la correcta. El programa descarga la lista completa de episodios y busca el de cada archivo visible.</li>
   <li>Los episodios encontrados con seguridad reciben <b>✓</b>. Los dudosos (<b>?</b>) y los no encontrados (<b>✕</b>) van a la ventana de revisión.</li>
 </ol>
 <h4>Cómo se encuentra cada episodio</h4>
 <ul>
-  <li><b>Por el número</b>, en varios formatos: <code>S01E02</code>, <code>s1e2</code>, <code>1x02</code>, <code>T1 E2</code>, <code>Temporada 1 Episodio 2</code>, <code>Ep 02</code> (la temporada viene de la carpeta, como <code>Season 2</code> o <code>Temporada 2</code>), numeración absoluta (<code>Nombre de la Serie - 125</code>), <code>201</code> (temporada 2, episodio 1) y fecha de emisión (<code>2024.03.15</code>). Los archivos con dos episodios (<code>S01E01E02</code>, <code>S01E01-02</code>) quedan como <code>S01E01-E02</code>.</li>
+  <li><b>Por el número</b>, en varios formatos: <code>S01E02</code>, <code>s1e2</code>, <code>1x02</code>, <code>T1 E2</code>, <code>Temporada 1 Episodio 2</code>, <code>Ep 02</code> (la temporada viene de la carpeta, como <code>Season 2</code> o <code>Temporada 2</code>), numeración absoluta (<code>Nombre de la Serie - 125</code>), <code>201</code> (temporada 2, episodio 1) y fecha de emisión (<code>2024.03.15</code>). Los archivos con dos episodios (<code>S01E01E02</code>, <code>S01E01-02</code>) quedan como <code>S01E01-E02</code>. Los nombres hechos solo de bloques entre corchetes (<code>[Grupo][Nombre de la Serie][S03E22][Título][1080p]</code>, también con <code>【】</code>) también se leen: el bloque con el número, la serie antes y el título después.</li>
   <li><b>Por el título</b>: el texto después del número se compara con los títulos de todos los episodios, en su idioma, en inglés y en el idioma original, sin tener en cuenta acentos, mayúsculas ni pequeños errores. Sin número, basta el título si está claro.</li>
   <li><b>Cuando el número y el título no coinciden</b> (el nombre dice S02E08, pero el título es el de S01E03), el archivo queda con <b>?</b>, y la revisión muestra las dos opciones, sugiriendo la del título.</li>
 </ul>
@@ -334,6 +334,7 @@ ${ex("Nombre.de.la.Serie.S01E03.720p.WEB-DL.mkv", "Nombre de la Serie (2008) - S
 ${ex("01.mp3", "01 - Título de la Canción.mp3")}
 <ul>
   <li><b>Plantilla</b>: <code>{pista}</code>, <code>{título}</code>, <code>{artista}</code>, <code>{artista del álbum}</code>, <code>{álbum}</code>, <code>{año}</code>, <code>{disco}</code>, <code>{género}</code> y <code>{compositor}</code>. La predeterminada es <code>{pista} - {título}</code>. La pista tiene dos dígitos (tres en álbumes con más de 99 pistas).</li>
+  <li>Sin número de pista en las etiquetas, queda el número con el que empieza el nombre del archivo (<code>07. Título.flac</code>), para no perder el orden. Un álbum queda con un solo año, el más común entre sus pistas: una pista extra de una reedición no recibe una carpeta aparte.</li>
   <li>Las etiquetas vacías no dejan restos: con <code>{pista} - {artista} - {título}</code>, una canción sin artista queda <code>01 - Título</code>.</li>
   <li><b>Número de disco en la pista</b>: en álbumes con más de un disco, la pista queda <code>1-01</code>, <code>2-01</code>…, para que los discos no se mezclen.</li>
   <li><b>El álbum como un todo</b>: las pistas de un mismo álbum (misma carpeta, o discos <code>CD 01</code>/<code>CD 02</code>, y mismo nombre de álbum) comparten los datos del álbum. Una pista sin año recibe el de las demás. Sin "artista del álbum" en las etiquetas, vale el artista de la mayoría de las pistas (sin contar colaboraciones como <code>feat.</code>); sin mayoría, el álbum es una recopilación: <code>Various Artists</code>, como lo reconoce Jellyfin. Así, las pistas de un álbum nunca se reparten en carpetas distintas.</li>
@@ -345,6 +346,11 @@ ${ex("01.mp3", "01 - Título de la Canción.mp3")}
 </ul>
 <h4>Carpetas de artista y álbum</h4>
 <p>Con <b>Organizar en carpetas de artista y álbum</b>, cada canción va a <code>{artista del álbum}/{álbum} ({año})</code> (la plantilla de carpetas se puede cambiar; cada <code>/</code> es un nivel). Así, <code>Música/Artista/Album/CD1/01.mp3</code> queda <code>Música/Artista/Álbum (1975)/01 - Título de la Canción.mp3</code>: las carpetas que ya llevan el nombre del artista, del álbum o de un disco (o que están dentro de la del artista) se reemplazan, no reciben carpetas nuevas dentro. Los archivos sueltos reciben las carpetas dentro de la carpeta donde están. Las pequeñas diferencias de escritura entre la carpeta y la etiqueta no molestan. Una carpeta que ya reúne álbumes con su nombre (<code>Programa (1000 - ..)</code> para los álbumes "Programa 1037 - …") se trata como colección: los álbumes quedan directamente en ella, sin carpetas de artista en medio.</p>
+<div class="notice">
+<p><b>Las carpetas de canciones sueltas quedan juntas</b></p>
+<p>Una carpeta en la que casi todas las canciones son de álbumes distintos, con una o dos pistas de cada uno (como una carpeta <code>Sueltas</code>, <code>Misc</code> o <code>Singles</code>), se trata como una recopilación que usted armó. Sus canciones se renombran como siempre, pero <b>quedan en ella</b>: no van cada una a la carpeta de su álbum. El álbum de cada una sigue en sus etiquetas.</p>
+<p>La regla exacta: al menos 3 canciones, de al menos 3 álbumes, y al menos 4 de cada 5 de esos álbumes con una o dos pistas en la carpeta. La carpeta de un álbum de verdad, con varias pistas del mismo disco, se organiza como siempre. Si quiere separar las sueltas de todos modos, muévalas a mano a las carpetas que prefiera.</p>
+</div>
 <p><b>Copias</b>: si dos copias idénticas de un álbum (encontradas por el programa, como en <b>Copias idénticas</b>) irían al mismo lugar, la primera sigue y la otra se queda donde está, marcada como copia.</p>
 <ul>
   <li>Las letras (<code>.lrc</code>) con el nombre de una canción reciben su nuevo nombre y van con ella.</li>

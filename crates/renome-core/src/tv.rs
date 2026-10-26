@@ -32,6 +32,12 @@ pub struct EpisodeGuess {
     pub date: Option<String>,
     /// Text after the numbers: maybe the episode's title.
     pub title: String,
+    /// The show's year, when the name has it (`Show (1992) - S01E02`).
+    #[serde(default)]
+    pub year: Option<u16>,
+    /// The show's TMDB id, when the name has it (`[tmdbid-1234]`).
+    #[serde(default)]
+    pub id: Option<u64>,
 }
 
 /// S01E02, s1e2, S01 E02, T1E2, S01E01E02, S01E01-02, S2015E05.
@@ -86,9 +92,41 @@ pub fn folder_season(folder: &str) -> Option<u16> {
     c.get(1).or_else(|| c.get(2))?.as_str().parse().ok()
 }
 
+/// A name made only of bracketed pieces (`[Group][Show (1987)][S03E22]
+/// [Title][DVDrip]`, also with `【】`), read as `Show - S03E22 - Title`:
+/// the piece with the episode, the one before it as the show and the one
+/// after it as the title, unless that is a release tag.
+fn unbracket(name: &str) -> Option<String> {
+    static PIECE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"[\[【〔「『]([^\]】〕」』]*)[\]】〕」』]").unwrap());
+    let pieces: Vec<&str> = PIECE
+        .captures_iter(name)
+        .filter_map(|c| c.get(1))
+        .map(|m| m.as_str().trim())
+        .collect();
+    let outside = PIECE.replace_all(name, "");
+    let loose = outside.trim_matches(|c: char| c.is_whitespace() || "-_.".contains(c));
+    if pieces.len() < 3 || !loose.is_empty() {
+        return None;
+    }
+    let at = pieces.iter().position(|p| {
+        SXE.is_match(p)
+            || NXN.is_match(p)
+            || (!p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+    })?;
+    let show = at.checked_sub(1).map_or("", |i| pieces[i]);
+    let title = pieces
+        .get(at + 1)
+        .filter(|t| !TAGS.is_match(t))
+        .copied()
+        .unwrap_or("");
+    Some(format!("{show} - {} - {title}", pieces[at]))
+}
+
 /// Reads season, episode and title from a file name without extension;
 /// `folder` (the name of the folder it is in) can give the season.
 pub fn parse(name: &str, folder: &str) -> EpisodeGuess {
+    let name = unbracket(name).unwrap_or_else(|| name.to_string());
     let spaced = name.replace(['.', '_'], " ");
     let num = |s: &str| s.parse::<u16>().ok();
     let extra = |s: &str| {
@@ -97,7 +135,10 @@ pub fn parse(name: &str, folder: &str) -> EpisodeGuess {
             .filter_map(|m| num(m.as_str()))
             .collect::<Vec<_>>()
     };
-    let mut g = EpisodeGuess::default();
+    let mut g = EpisodeGuess {
+        id: tmdb::guess(&name).id,
+        ..Default::default()
+    };
     let range = if let Some(c) = SXE.captures(&spaced) {
         g.season = num(&c[1]);
         g.episodes = num(&c[2]).into_iter().chain(extra(&c[3])).collect();
@@ -135,6 +176,7 @@ pub fn parse(name: &str, folder: &str) -> EpisodeGuess {
         return g;
     };
     g.show = clean(&spaced[..range.start]);
+    g.year = tmdb::guess(&spaced[..range.start]).year;
     let after = &spaced[range.end..];
     g.title = clean(&after[..TAGS.find(after).map_or(after.len(), |m| m.start())]);
     if g.season.is_none() {
@@ -164,16 +206,43 @@ pub fn parse(name: &str, folder: &str) -> EpisodeGuess {
 /// folder). Items are (file name without extension, folder path).
 pub fn guess_show(items: &[(String, std::path::PathBuf)]) -> Guess {
     let mut count: HashMap<String, (usize, String)> = HashMap::new();
+    // The year and TMDB id the files of each show say, with how many say it.
+    let mut years: HashMap<(String, u16), usize> = HashMap::new();
+    let mut ids: HashMap<u64, usize> = HashMap::new();
     for (name, dir) in items {
         let folder = dir.file_name().unwrap_or_default().to_string_lossy();
-        let show = parse(name, &folder).show;
-        if !show.is_empty() {
-            let e = count.entry(show.to_lowercase()).or_insert((0, show));
+        let g = parse(name, &folder);
+        if let Some(id) = g.id {
+            *ids.entry(id).or_default() += 1;
+        }
+        if !g.show.is_empty() {
+            if let Some(y) = g.year {
+                *years.entry((g.show.to_lowercase(), y)).or_default() += 1;
+            }
+            let e = count.entry(g.show.to_lowercase()).or_insert((0, g.show));
             e.0 += 1;
         }
     }
+    // An id most of the files carry names the show outright.
+    let id = ids
+        .into_iter()
+        .max_by_key(|(_, n)| *n)
+        .filter(|(_, n)| 2 * n > items.len())
+        .map(|(id, _)| id);
     let text = match count.into_values().max_by_key(|(n, _)| *n) {
-        Some((_, show)) => show,
+        Some((_, show)) => {
+            let key = show.to_lowercase();
+            let year = years
+                .iter()
+                .filter(|((s, _), _)| *s == key)
+                .max_by_key(|(_, n)| **n)
+                .map(|((_, y), _)| *y);
+            return Guess {
+                title: show,
+                year,
+                id,
+            };
+        }
         None => items
             .first()
             .map(|(_, dir)| {
@@ -1046,6 +1115,59 @@ mod tests {
     fn p(name: &str) -> (Option<u16>, Vec<u16>, Option<u32>, String, String) {
         let g = parse(name, "");
         (g.season, g.episodes, g.number, g.show, g.title)
+    }
+
+    #[test]
+    fn show_year_and_id_from_names() {
+        let d = std::path::PathBuf::from("/v");
+        let items = |names: &[&str]| -> Vec<(String, std::path::PathBuf)> {
+            names.iter().map(|n| (n.to_string(), d.clone())).collect()
+        };
+        let g = guess_show(&items(&[
+            "Highlander - A Série (1992) - S02E03",
+            "Highlander - A Série (1992) - S02E15",
+        ]));
+        assert_eq!(
+            (g.title.as_str(), g.year, g.id),
+            ("Highlander - A Série", Some(1992), None)
+        );
+        let g = guess_show(&items(&[
+            "Show - S01E01 - A [tmdbid-72871]",
+            "Show - S01E02 - B [tmdbid-72871]",
+            "Show - S01E03",
+        ]));
+        assert_eq!(g.id, Some(72871));
+        // One file in three is not enough to name the show.
+        let g = guess_show(&items(&[
+            "Show - S01E01 [tmdbid-5]",
+            "Show - S01E02",
+            "Show - S01E03",
+        ]));
+        assert_eq!(g.id, None);
+    }
+
+    #[test]
+    fn bracketed_pieces() {
+        let g = parse(
+            "【CXRAW】【TMNT (1987)】【S03E22】【Return of the Fly】【DVDrip】【x264 Hi10P AAC】【MP4】",
+            "",
+        );
+        assert_eq!(
+            (
+                g.show.as_str(),
+                g.season,
+                g.episodes.clone(),
+                g.title.as_str()
+            ),
+            ("TMNT", Some(3), vec![22], "Return of the Fly")
+        );
+        let g = parse("[Group][Show Name][05][1080p]", "");
+        assert_eq!(
+            (g.show.as_str(), g.number, g.title.as_str()),
+            ("Show Name", Some(5), "")
+        );
+        // Text outside the brackets: read as before.
+        assert_eq!(parse("[Group] Show - 05 [1080p]", "").show, "Show");
     }
 
     #[test]

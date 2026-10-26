@@ -131,6 +131,12 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
 
 ### 2.2 TV shows (TMDB)
 
+- A name made only of bracketed pieces (`[Group][Show (1987)][S03E22]
+  [Title][1080p]`, also `【】`) reads the piece with the episode, the
+  one before it as the show and the one after as the title (not a release
+  tag). The show's year and a `[tmdbid-N]` in the names are kept: an id
+  most files carry looks the show up directly (by name if it finds
+  nothing).
 - Same key and language as movies. "Find episodes" first finds the show:
   by id (digits, a `themoviedb.org/tv/N` link or `tmdbid-N`), else by name
   (with an optional year) on TMDB's show search, ranked like movies. With
@@ -224,6 +230,12 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
 
 ### 2.3 Music (tags)
 
+- With artist and album folders, a folder of loose songs (at least 3
+  songs from at least 3 albums, 4 in 5 of which have one or two songs
+  there) is a collection: its songs are renamed but stay in it.
+- A song whose tags have no track number keeps the number its name starts
+  with. An album (folder + album name) gets one year, its tracks' most
+  common, so a reissue's bonus track does not get a folder of its own.
 - Tags are read with `lofty` (no audio decoded, no cover art): MP3/MP2
   (ID3v2, ID3v1, APE), FLAC, OGG Vorbis, Opus, Speex, M4A/M4B/M4P/M4R,
   AAC, AIFF, WAV, WavPack, APE, Musepack. Video containers (`mp4`, `m4v`,

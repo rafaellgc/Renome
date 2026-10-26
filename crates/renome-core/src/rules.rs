@@ -359,6 +359,10 @@ pub fn song_tags(file: &FileEntry, from_name: bool) -> Option<AudioTags> {
     let mut t = file.audio_tags().cloned().unwrap_or_default();
     if from_name {
         t.fill_from(music::from_name(&file.stem, &file.dir));
+    } else if t.track.is_none() {
+        // No track number in the tags: the one the name starts with stays,
+        // or renaming would lose the order.
+        t.track = music::from_name(&file.stem, &file.dir).track;
     }
     (!t.title.is_empty()).then_some(t)
 }

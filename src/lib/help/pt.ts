@@ -288,13 +288,13 @@ ${ex("Nome.da.Serie.S01E03.720p.WEB-DL.mkv", "Nome da Série (2008) - S01E03 - T
 <p>Se os seus arquivos estão longe disso, ponha acima desta regra, na lista, as regras que acertam o nome (<b>Substituir texto</b>, <b>Reorganizar partes</b>, <b>Expressão regular</b>, <b>Numerar</b>): a busca lê o nome como ele sai delas.</p>
 </div>
 <ol>
-  <li>No campo <b>Série</b>, digite o nome, o ID do TMDB ou cole o link da página da série (<code>themoviedb.org/tv/1396-…</code>). Vazio, o programa usa o nome que os arquivos têm em comum, ou o nome da pasta.</li>
+  <li>No campo <b>Série</b>, digite o nome, o ID do TMDB ou cole o link da página da série (<code>themoviedb.org/tv/1396-…</code>). Vazio, o programa usa o nome que os arquivos têm em comum (com o ano, quando os nomes o trazem), ou o nome da pasta. Se a maioria dos arquivos traz <code>[tmdbid-…]</code> no nome, a série é buscada direto por esse número.</li>
   <li>Clique em <b>Buscar episódios</b>. Se houver mais de uma série parecida, escolha a certa. O programa baixa a lista completa de episódios e procura o de cada arquivo visível.</li>
   <li>Os episódios encontrados com segurança ganham <b>✓</b>. Os duvidosos (<b>?</b>) e os não encontrados (<b>✕</b>) vão para a janela de revisão.</li>
 </ol>
 <h4>Como cada episódio é encontrado</h4>
 <ul>
-  <li><b>Pelo número</b>, em vários formatos: <code>S01E02</code>, <code>s1e2</code>, <code>1x02</code>, <code>T1 E2</code>, <code>Temporada 1 Episódio 2</code>, <code>Ep 02</code> (a temporada vem da pasta, como <code>Season 2</code> ou <code>Temporada 2</code>), numeração corrida (<code>Nome da Série - 125</code>), <code>201</code> (temporada 2, episódio 1) e data de exibição (<code>2024.03.15</code>). Arquivos com dois episódios (<code>S01E01E02</code>, <code>S01E01-02</code>) viram <code>S01E01-E02</code>.</li>
+  <li><b>Pelo número</b>, em vários formatos: <code>S01E02</code>, <code>s1e2</code>, <code>1x02</code>, <code>T1 E2</code>, <code>Temporada 1 Episódio 2</code>, <code>Ep 02</code> (a temporada vem da pasta, como <code>Season 2</code> ou <code>Temporada 2</code>), numeração corrida (<code>Nome da Série - 125</code>), <code>201</code> (temporada 2, episódio 1) e data de exibição (<code>2024.03.15</code>). Arquivos com dois episódios (<code>S01E01E02</code>, <code>S01E01-02</code>) viram <code>S01E01-E02</code>. Nomes feitos só de blocos entre colchetes (<code>[Grupo][Nome da Série][S03E22][Título][1080p]</code>, também com <code>【】</code>) também são lidos: o bloco com o número, a série antes dele e o título depois.</li>
   <li><b>Pelo título</b>: o texto depois do número é comparado com os títulos de todos os episódios, no seu idioma, em inglês e no idioma original, ignorando acentos, maiúsculas e pequenos erros de grafia. Sem número nenhum, o título sozinho basta, se for claro.</li>
   <li><b>Quando o número e o título discordam</b> (o nome diz S02E08, mas o título é o do S01E03), o arquivo fica com <b>?</b>, e a revisão mostra as duas opções, sugerindo a do título.</li>
 </ul>
@@ -334,6 +334,7 @@ ${ex("Nome.da.Serie.S01E03.720p.WEB-DL.mkv", "Nome da Série (2008) - S01E03 - T
 ${ex("01.mp3", "01 - Título da Música.mp3")}
 <ul>
   <li><b>Modelo</b>: <code>{faixa}</code>, <code>{título}</code>, <code>{artista}</code>, <code>{artista do álbum}</code>, <code>{álbum}</code>, <code>{ano}</code>, <code>{disco}</code>, <code>{gênero}</code> e <code>{compositor}</code>. O padrão é <code>{faixa} - {título}</code>. A faixa tem dois dígitos (três em álbuns com mais de 99 faixas).</li>
+  <li>Sem número de faixa nas tags, fica o número com que o nome do arquivo começa (<code>07. Título.flac</code>), para a ordem não se perder. Um álbum fica com um ano só, o mais comum entre as faixas: uma faixa bônus de um relançamento não ganha uma pasta à parte.</li>
   <li>Tags vazias não deixam sobras: com <code>{faixa} - {artista} - {título}</code>, uma música sem artista vira <code>01 - Título</code>.</li>
   <li><b>Número do disco na faixa</b>: em álbuns com mais de um disco, a faixa vira <code>1-01</code>, <code>2-01</code>…, para os discos não se misturarem.</li>
   <li><b>O álbum como um todo</b>: as faixas de um mesmo álbum (mesma pasta, ou discos <code>CD 01</code>/<code>CD 02</code>, e mesmo nome de álbum) combinam os dados do álbum. Uma faixa sem ano recebe o das outras. Sem "artista do álbum" nas tags, vale o artista da maioria das faixas (desconsiderando participações, como <code>feat.</code>); sem maioria, o álbum é uma coletânea: <code>Various Artists</code>, como o Jellyfin reconhece. Assim, as faixas de um álbum nunca se espalham em pastas diferentes.</li>
@@ -345,6 +346,11 @@ ${ex("01.mp3", "01 - Título da Música.mp3")}
 </ul>
 <h4>Pastas de artista e álbum</h4>
 <p>Com <b>Organizar em pastas de artista e álbum</b>, cada música vai para <code>{artista do álbum}/{álbum} ({ano})</code> (o modelo das pastas pode ser trocado; cada <code>/</code> é um nível). Assim, <code>Música/Artista/Album/CD1/01.mp3</code> vira <code>Música/Artista/Álbum (1975)/01 - Título da Música.mp3</code>: as pastas que já levam o nome do artista, do álbum ou do disco (ou que estão dentro da pasta do artista) são substituídas, não ganham pastas novas dentro. Arquivos soltos ganham as pastas dentro da pasta onde estão. Pequenas diferenças de grafia entre a pasta e a tag (<code>Сказка об</code> e <code>Сказка о</code>) não atrapalham. Uma pasta que já reúne álbuns com o nome dela (<code>Programa (1000 - ..)</code> para os álbuns "Programa 1037 - …") é tratada como coleção: os álbuns ficam direto nela, sem pastas de artista no meio.</p>
+<div class="notice">
+<p><b>Pastas de músicas avulsas ficam juntas</b></p>
+<p>Uma pasta em que quase todas as músicas são de álbuns diferentes, com uma ou duas faixas de cada (como uma pasta <code>Avulsas</code>, <code>Misc</code> ou <code>Singles</code>), é tratada como uma coletânea que você montou. As músicas dela são renomeadas normalmente, mas <b>ficam nela</b>: não vão cada uma para a pasta do seu álbum. O álbum de cada uma continua nas tags.</p>
+<p>A regra exata: pelo menos 3 músicas, de pelo menos 3 álbuns, e pelo menos 4 em cada 5 desses álbuns com uma ou duas faixas na pasta. Uma pasta de álbum de verdade, com várias faixas do mesmo disco, é organizada como sempre. Se quiser separar as avulsas mesmo assim, mova-as à mão para as pastas que preferir.</p>
+</div>
 <p><b>Cópias</b>: se duas cópias idênticas de um álbum (encontradas pelo programa, como em <b>Cópias idênticas</b>) iriam para o mesmo lugar, a primeira segue e a outra fica onde está, marcada como cópia.</p>
 <ul>
   <li>Letras (<code>.lrc</code>) com o mesmo nome de uma música recebem o novo nome dela e vão junto.</li>

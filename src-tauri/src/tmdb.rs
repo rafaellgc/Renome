@@ -425,7 +425,23 @@ pub async fn search_show(
             None => g.title.clone(),
         },
     };
-    let (candidates, auto) = client.search_tv(&q).await?;
+    // An id the files carry, when it finds nothing, gives way to the name.
+    let (candidates, auto) = match &q {
+        ShowQuery::Name(g) if g.id.is_some() => {
+            match client.search_tv(&ShowQuery::Id(g.id.unwrap())).await {
+                Ok(found) if !found.0.is_empty() => found,
+                _ => {
+                    client
+                        .search_tv(&ShowQuery::Name(Guess {
+                            id: None,
+                            ..g.clone()
+                        }))
+                        .await?
+                }
+            }
+        }
+        _ => client.search_tv(&q).await?,
+    };
     Ok(ShowSearch {
         query: text,
         candidates,

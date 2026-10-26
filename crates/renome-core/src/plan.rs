@@ -375,6 +375,42 @@ fn climb_shared_roots(items: &mut [PreviewItem]) {
     }
 }
 
+/// A folder of loose songs (`Misc`, `Singles`): at least three songs from
+/// at least three albums, nearly all of which (four in five) have only one
+/// or two songs there. It is a collection someone put together, not an
+/// album: its songs are renamed but stay in it, instead of each going to a
+/// folder of its own album.
+fn keep_collections(items: &mut [PreviewItem], songs: &HashMap<&Path, AudioTags>) {
+    let mut albums: HashMap<&Path, HashMap<String, usize>> = HashMap::new();
+    for i in items.iter() {
+        if let Some(t) = songs.get(i.path.as_path()) {
+            *albums
+                .entry(i.dir.as_path())
+                .or_default()
+                .entry(t.album.to_lowercase())
+                .or_default() += 1;
+        }
+    }
+    let loose: HashSet<PathBuf> = albums
+        .into_iter()
+        .filter(|(_, by_album)| {
+            let songs: usize = by_album.values().sum();
+            let small = by_album.values().filter(|n| **n <= 2).count();
+            songs >= 3 && by_album.len() >= 3 && small * 5 >= by_album.len() * 4
+        })
+        .map(|(dir, _)| dir.to_path_buf())
+        .collect();
+    for i in items.iter_mut() {
+        if i.dest.is_some() && loose.contains(&i.dir) && songs.contains_key(i.path.as_path()) {
+            i.dest = None;
+            i.folder = None;
+            if i.status == Status::Ok && i.new_name == i.original && i.problem.is_none() {
+                i.status = Status::Unchanged;
+            }
+        }
+    }
+}
+
 /// A folder that already gathers a collection (a show's folder,
 /// `Аэростат (1000 - ..)` for "Аэростат 1037 - …") needs no artist folders
 /// inside it: when most songs going into it have albums named after the
@@ -784,6 +820,7 @@ pub fn preview(
     unify_folders(&mut items);
     if let Some((_, folders)) = music {
         if folders {
+            keep_collections(&mut items, &songs);
             skip_artist_level(&mut items, &songs);
         }
         follow_songs(&mut items, folders, &view.identical);
@@ -902,6 +939,51 @@ mod tests {
                 target: Target::Name,
             },
         }]
+    }
+
+    #[test]
+    fn loose_songs_stay_together() {
+        use crate::tagwrite::{Field, write};
+        let d = tempfile::tempdir().unwrap();
+        let tag = |dir: &str, name: &str, album: &str| {
+            let p = d.path().join(dir);
+            fs::create_dir_all(&p).unwrap();
+            let p = p.join(name);
+            fs::copy("tests/fixtures/song.mp3", &p).unwrap();
+            let f = vec![
+                (Field::Title, vec![name.to_string()]),
+                (Field::Artist, vec!["Band".to_string()]),
+                (Field::Album, vec![album.to_string()]),
+            ];
+            write(&p, &f, None, false, &d.path().join("store")).unwrap();
+            FileEntry::from_path(&p, &fs::metadata(&p).unwrap()).unwrap()
+        };
+        let files = vec![
+            tag("Misc", "a.mp3", "One"),
+            tag("Misc", "b.mp3", "Two"),
+            tag("Misc", "c.mp3", "Three"),
+            tag("Album", "x.mp3", "Real"),
+            tag("Album", "y.mp3", "Real"),
+            tag("Album", "z.mp3", "Real"),
+        ];
+        let steps: Vec<Step> = vec![
+            serde_json::from_value(serde_json::json!({"rule": {"type": "music",
+            "template": "{title}", "colon": " - ", "folders": true,
+            "folderTemplate": "{album artist}/{album}"}}))
+            .unwrap(),
+        ];
+        let p = preview(&files, &steps, &HashMap::new(), &View::default());
+        let folder = |n: &str| {
+            p.items
+                .iter()
+                .find(|i| i.original == n)
+                .unwrap()
+                .folder
+                .clone()
+        };
+        // The loose songs stay in their folder; the album's get one.
+        assert_eq!(folder("a.mp3"), None);
+        assert_eq!(folder("x.mp3").as_deref(), Some("Band/Real"));
     }
 
     #[test]

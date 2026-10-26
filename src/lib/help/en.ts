@@ -288,13 +288,13 @@ ${ex("Show.Name.S01E03.720p.WEB-DL.mkv", "Show Name (2008) - S01E03 - Episode Ti
 <p>If your files are far from that, put the rules that fix the name above this one in the list (<b>Replace text</b>, <b>Rearrange parts</b>, <b>Regular expression</b>, <b>Number</b>): the search reads the name as they leave it.</p>
 </div>
 <ol>
-  <li>In the <b>Show</b> field, type the name or the TMDB id, or paste the link to the show's page (<code>themoviedb.org/tv/1396-…</code>). Left empty, the program uses the name the files share, or the folder's name.</li>
+  <li>In the <b>Show</b> field, type the name or the TMDB id, or paste the link to the show's page (<code>themoviedb.org/tv/1396-…</code>). Left empty, the program uses the name the files share (with the year, when the names have it), or the folder's name. If most files carry <code>[tmdbid-…]</code> in their name, the show is looked up directly by that number.</li>
   <li>Click <b>Find episodes</b>. If more than one show looks alike, choose the right one. The program downloads the whole episode list and looks for each visible file's episode.</li>
   <li>Episodes found with certainty get <b>✓</b>. Doubtful ones (<b>?</b>) and those not found (<b>✕</b>) go to the review window.</li>
 </ol>
 <h4>How each episode is found</h4>
 <ul>
-  <li><b>By number</b>, in many forms: <code>S01E02</code>, <code>s1e2</code>, <code>1x02</code>, <code>Season 1 Episode 2</code>, <code>Ep 02</code> (the season comes from the folder, such as <code>Season 2</code>), absolute numbering (<code>Show Name - 125</code>), <code>201</code> (season 2, episode 1) and air date (<code>2024.03.15</code>). Files with two episodes (<code>S01E01E02</code>, <code>S01E01-02</code>) become <code>S01E01-E02</code>.</li>
+  <li><b>By number</b>, in many forms: <code>S01E02</code>, <code>s1e2</code>, <code>1x02</code>, <code>Season 1 Episode 2</code>, <code>Ep 02</code> (the season comes from the folder, such as <code>Season 2</code>), absolute numbering (<code>Show Name - 125</code>), <code>201</code> (season 2, episode 1) and air date (<code>2024.03.15</code>). Files with two episodes (<code>S01E01E02</code>, <code>S01E01-02</code>) become <code>S01E01-E02</code>. Names made only of bracketed pieces (<code>[Group][Show Name][S03E22][Title][1080p]</code>, also with <code>【】</code>) are read too: the piece with the number, the show before it and the title after it.</li>
   <li><b>By title</b>: the text after the number is compared with the titles of every episode, in your language, in English and in the original language, ignoring accents, case and small misspellings. With no number at all, the title alone is enough when it is clear.</li>
   <li><b>When the number and the title disagree</b> (the name says S02E08, but the title is S01E03's), the file gets <b>?</b>, and the review shows both, suggesting the title's.</li>
 </ul>
@@ -334,6 +334,7 @@ ${ex("Show.Name.S01E03.720p.WEB-DL.mkv", "Show Name (2008) - S01E03 - Episode Ti
 ${ex("01.mp3", "01 - Song Title.mp3")}
 <ul>
   <li><b>Template</b>: <code>{track}</code>, <code>{title}</code>, <code>{artist}</code>, <code>{album artist}</code>, <code>{album}</code>, <code>{year}</code>, <code>{disc}</code>, <code>{genre}</code> and <code>{composer}</code>. The default is <code>{track} - {title}</code>. The track has two digits (three on albums with over 99 tracks).</li>
+  <li>Without a track number in the tags, the number the file name starts with stays (<code>07. Title.flac</code>), so the order is not lost. An album gets one year, the most common among its tracks: a bonus track from a reissue does not get a folder of its own.</li>
   <li>Empty tags leave nothing behind: with <code>{track} - {artist} - {title}</code>, a song without an artist becomes <code>01 - Title</code>.</li>
   <li><b>Disc number in the track</b>: on albums with more than one disc, the track becomes <code>1-01</code>, <code>2-01</code>…, so the discs do not mix.</li>
   <li><b>The album as a whole</b>: the tracks of one album (same folder, or <code>CD 01</code>/<code>CD 02</code> discs, and same album name) share the album's details. A track without a year gets the others'. Without an album artist in the tags, the artist of most tracks counts (guests such as <code>feat.</code> left out); with no majority, the album is a compilation: <code>Various Artists</code>, as Jellyfin knows it. So an album's tracks never scatter into different folders.</li>
@@ -345,6 +346,11 @@ ${ex("01.mp3", "01 - Song Title.mp3")}
 </ul>
 <h4>Artist and album folders</h4>
 <p>With <b>Organize into artist and album folders</b>, each song goes into <code>{album artist}/{album} ({year})</code> (the folder template can be changed; each <code>/</code> is a level). So <code>Music/Artist/Album/CD1/01.mp3</code> becomes <code>Music/Artist/Album (1975)/01 - Song Title.mp3</code>: folders already named after the artist, the album or a disc (or inside the artist's folder) are replaced, not filled with new folders. Loose files get the folders inside the folder they are in. Small spelling differences between the folder and the tag do not get in the way. A folder that already gathers albums named like it (<code>Show (1000 - ..)</code> for albums "Show 1037 - …") is taken as a collection: the albums go straight into it, with no artist folders in between.</p>
+<div class="notice">
+<p><b>Folders of loose songs stay together</b></p>
+<p>A folder where nearly every song is from a different album, with one or two tracks from each (such as a <code>Loose</code>, <code>Misc</code> or <code>Singles</code> folder), is taken as a collection you put together. Its songs are renamed as usual but <b>stay in it</b>: they do not each go to their album's folder. Each song's album is still in its tags.</p>
+<p>The exact rule: at least 3 songs, from at least 3 albums, with at least 4 in 5 of those albums having one or two tracks in the folder. A real album's folder, with several tracks from the same record, is organized as always. If you want the loose songs split up anyway, move them by hand to the folders you prefer.</p>
+</div>
 <p><b>Copies</b>: if two identical copies of an album (found by the program, as in <b>Identical copies</b>) would go to the same place, the first goes ahead and the other stays where it is, marked as a copy.</p>
 <ul>
   <li>Lyrics (<code>.lrc</code>) with a song's name get its new name and go with it.</li>

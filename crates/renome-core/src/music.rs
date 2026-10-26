@@ -351,7 +351,9 @@ pub fn fill_albums(songs: &mut [(PathBuf, AudioTags)]) {
         });
         for &i in idx {
             let t = &mut songs[i].1;
-            t.year = t.year.or(year);
+            // One year for the album (a bonus track from a later reissue
+            // does not get a folder of its own).
+            t.year = year.or(t.year);
             if t.album_artist.is_empty()
                 && let Some(a) = &artist
             {
@@ -973,6 +975,18 @@ mod tests {
             expand("{faixa} - {título}", &songs[4].1, " - ", true),
             "05 - Play Me"
         );
+        // A bonus track from a later reissue: one year for the album.
+        let year = |y| AudioTags {
+            year: Some(y),
+            ..song("Song", "Artist", "Album", 1)
+        };
+        let mut songs = vec![
+            (dir.clone(), year(2018)),
+            (dir.clone(), year(2018)),
+            (dir.clone(), year(2020)),
+        ];
+        fill_albums(&mut songs);
+        assert!(songs.iter().all(|(_, t)| t.year == Some(2018)));
     }
 
     #[test]
