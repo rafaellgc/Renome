@@ -40,6 +40,33 @@
   const EMAIL = "rafaellgcorreia@gmail.com";
   const REPO = "https://github.com/rafaellgc/Renome";
 
+  /** The services the lookups use, credited as their terms ask. */
+  const SOURCES: { key: "sourcesMusic" | "sourcesBooks" | "sourcesComics"; items: { name: string; url: string; note?: "gcdLicense" | "acoustidTerms" }[] }[] = [
+    {
+      key: "sourcesMusic",
+      items: [
+        { name: "MusicBrainz", url: "https://musicbrainz.org" },
+        { name: "Cover Art Archive", url: "https://coverartarchive.org" },
+        { name: "AcoustID", url: "https://acoustid.org", note: "acoustidTerms" },
+      ],
+    },
+    {
+      key: "sourcesBooks",
+      items: [
+        { name: "Open Library", url: "https://openlibrary.org" },
+        { name: "BrasilAPI", url: "https://brasilapi.com.br" },
+      ],
+    },
+    {
+      key: "sourcesComics",
+      items: [
+        { name: "Grand Comics Database", url: "https://www.comics.org", note: "gcdLicense" },
+        { name: "MangaDex", url: "https://mangadex.org" },
+        { name: "Comic Vine", url: "https://comicvine.gamespot.com" },
+      ],
+    },
+  ];
+
   /** Each rule's section, by rule type. */
   const RULE_OF: Record<string, RuleType> = {
     "r-replace": "replace", "r-regex": "regex", "r-rearrange": "rearrange", "r-case": "case", "r-insert": "insert",
@@ -170,10 +197,15 @@
           </button>
           <p class="muted">{t("tmdbNotice")}</p>
         </div>
-        <p class="muted cv">
-          {t("cvNotice")}
-          <button class="link" onclick={() => openUrl("https://www.comics.org")}>comics.org</button> · <button class="link" onclick={() => openUrl("https://mangadex.org")}>mangadex.org</button> · <button class="link" onclick={() => openUrl("https://comicvine.gamespot.com")}>comicvine.gamespot.com</button>
-        </p>
+        <div class="sources muted">
+          <p><b>{t("dataSources")}</b></p>
+          {#each SOURCES as group (group.key)}
+            <p>
+              {t(group.key)}:
+              {#each group.items as s, i (s.url)}{#if i}{", "}{/if}<button class="link" onclick={() => openUrl(s.url)}>{s.name}</button>{#if s.note}{` (${t(s.note)})`}{/if}{/each}
+            </p>
+          {/each}
+        </div>
       </div>
     {/if}
   </div>
@@ -300,6 +332,8 @@
   .about h2 { margin: 8px 0 0; font-size: 24px; }
   .about p { margin: 6px 0; line-height: 1.5; }
   .about .primary-soft { margin-top: 10px; }
+  .sources { margin-top: 8px; font-size: 13px; }
+  .sources p { margin: 2px 0; }
   .link { border: none; background: none; height: auto; padding: 0; color: var(--accent); }
   .link:hover:not(:disabled) { background: none; text-decoration: underline; }
   .muted { color: var(--muted); }

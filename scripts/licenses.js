@@ -21,6 +21,8 @@ function licenseFiles(dir) {
     return [];
   }
   return names
+    // `LICENSE.spdx` is a description of the package, not a license text.
+    .filter((n) => !/\.spdx$/i.test(n))
     .map((n) => path.join(dir, n))
     .filter((p) => fs.statSync(p).isFile())
     .map((p) => ({ name: path.basename(p), text: fs.readFileSync(p, "utf8").replace(/\r\n/g, "\n").trim() }));
@@ -77,6 +79,7 @@ function rustPackages(root, warn) {
         version: p.version,
         license: p.license ?? (p.license_file ? "see license file" : ""),
         url: p.repository ?? p.homepage ?? `https://crates.io/crates/${p.name}`,
+        authors: (p.authors ?? []).map((a) => a.replace(/\s*<[^>]*>/, "")),
         kind: "rust",
         files: licenseFiles(path.dirname(p.manifest_path)),
       }));
@@ -119,9 +122,58 @@ function npmPackages(moduleIds) {
   });
 }
 
+/** The MIT license with a package's own copyright line, for packages
+ *  published without their license file. */
+function mitText(p) {
+  const who = p.authors?.length ? p.authors.join(", ") : `the ${p.name} authors`;
+  const where = p.url && !p.url.includes("crates.io") ? ` (${p.url})` : "";
+  return `MIT License
+
+Copyright (c) ${who}${where}
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.`;
+}
+
 /** Builds the list; identical texts are stored once and referred to by index. */
 function collect(root, moduleIds, warn) {
   const all = [...rustPackages(root, warn), ...npmPackages(moduleIds)];
+  // A package without license files takes those of another package from
+  // the same repository under the same license (the npm side of a Rust
+  // plugin): same authors.
+  const repo = (u) => (u ?? "").toLowerCase().replace(/^https?:\/\/(www\.)?/, "").replace(/\/(tree|blob)\/.*$/, "").replace(/\/$/, "");
+  const byRepo = new Map();
+  // "MIT OR Apache-2.0" and "Apache-2.0 OR MIT" are one license.
+  const terms = (l) => [...new Set(l.match(/[A-Za-z0-9.+-]+/g) ?? [])].sort().join(" ");
+  const key = (p) => `${repo(p.url)} ${terms(p.license)}`;
+  for (const p of all) if (p.files.length && repo(p.url) && !byRepo.has(key(p))) byRepo.set(key(p), p.files);
+  const generic = [];
+  for (const p of all) {
+    if (p.files.length) continue;
+    const same = byRepo.get(key(p));
+    if (same) p.files = same;
+    // MIT names its authors: written with this package's own.
+    else if (/\bMIT\b/.test(p.license) && !/\bAND\b/.test(p.license)) p.files = [{ name: "LICENSE-MIT", text: mitText(p) }];
+    else generic.push(p.name);
+  }
+  // Licenses without a copyright line of their own (MPL, Apache) are the
+  // same text for everyone.
+  if (generic.length) warn(`standard license texts used for: ${generic.join(", ")}`);
   // Standard texts for the few packages without license files, taken from
   // packages that have them.
   const standard = new Map();
