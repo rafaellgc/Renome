@@ -553,7 +553,9 @@ ${ex("Nombre_de_la_Serie_012_(2019)_(Digital)_(grupo).cbz", "Nombre de la Serie 
   <li><b>✕</b>: borra la entrada del historial. Los archivos no cambian, pero ese renombrado ya no se podrá deshacer.</li>
   <li><b>Vaciar historial</b>: borra todas las entradas de una vez, con el mismo efecto.</li>
 </ul>
-<p class="tip"><kbd>Ctrl</kbd>+<kbd>Z</kbd> deshace cambios en la <i>lista</i> (añadir, quitar, mover, editar nombre). Para deshacer un renombrado ya hecho, use el Historial.</p>`,
+<p class="tip"><kbd>Ctrl</kbd>+<kbd>Z</kbd> deshace cambios en la <i>lista</i> (añadir, quitar, mover, editar nombre). Para deshacer un renombrado ya hecho, use el Historial.</p>
+<p>Si se cierra el programa o se apaga el equipo en medio de un renombrado, la próxima vez que Renome se abra termina con seguridad: los archivos que aún tenían un nombre temporal recuperan su nombre anterior, y los que ya se habían renombrado entran en el <b>Historial</b>, para deshacerlos si quiere.</p>
+`,
   },
   {
     id: "recipes",
@@ -598,7 +600,7 @@ ${ex("Serie.S01E02.720p.WEB.mkv", "Serie S01E02.mkv")}
   <li><b>Incluir archivos ocultos al añadir carpetas</b>.</li>
   <li><b>Pedir confirmación antes de renombrar</b>.</li>
   <li><b>Desactivar las reglas después de renombrar</b>.</li>
-  <li><b>Avisar sobre caracteres que Windows no acepta</b>: útil para archivos que van a un pendrive o a Windows.</li>
+  <li><b>Avisar sobre nombres que Windows no acepta</b>: caracteres como <code>:</code> y <code>?</code>, punto o espacio al final, y nombres reservados como <code>CON</code> y <code>NUL</code>. Útil para archivos que van a un pendrive o a Windows.</li>
 </ul>
 <p>Las opciones se guardan en <code>~/.config/renome</code> (Linux), <code>%APPDATA%\\renome</code> (Windows) o <code>~/Library/Application Support/renome</code> (macOS). El historial está en <code>~/.local/share/renome/history</code> en Linux y en la misma carpeta de las opciones en los demás sistemas.</p>`,
   },

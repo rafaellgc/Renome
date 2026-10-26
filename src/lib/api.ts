@@ -81,6 +81,8 @@ export const api = {
     folders: boolean,
   ) => invoke<{ created: string[]; errors: [string, string][] }>("write_tv_sidecars", { key, lang, historyId, items, fanart, folders }),
   undo: (id: string) => invoke<ApplyReport>("undo", { id }),
+  /** Puts back renames a stopped program left halfway. */
+  recover: () => invoke<{ restored: number; renamed: number; stuck: { from: string; to: string }[] }>("recover"),
   deleteHistory: (id: string) => invoke<void>("delete_history", { id }),
   clearHistory: () => invoke<number>("clear_history"),
   savePreset: (path: string, steps: Step[]) => invoke<void>("save_preset", { path, steps }),

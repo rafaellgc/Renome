@@ -597,6 +597,22 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
 - Renames run by depth: deepest first, so a folder is renamed after the
   files inside it (undo runs the other way).
 - Failure midway: whatever was done for that file is reverted.
+- The target is taken only if free, in one step on Linux (`renameat2`
+  with `RENAME_NOREPLACE`; elsewhere, or where the file system cannot,
+  a check right before).
+- What is about to happen (each rename and its temporary name) is written
+  to the history folder before starting and removed once the history
+  entry is written. If the program stops in between, the next start puts
+  files still under a temporary name back under their old one, records
+  those already renamed as an entry that can be undone, and lists the
+  temporaries whose old name is taken.
+- Renaming, undoing, adding folders and the preview run away from the
+  window's thread; a preview that comes back after a newer one is dropped.
+- Names are compared without case where the file system ignores it:
+  always on Windows and macOS, and on Linux where looking an existing name
+  up in the other case finds it (exFAT, FAT, NTFS mounted so).
+- When the history entry cannot be written, nothing more (metadata files,
+  covers, playlists, tags) is written for that rename.
 - Report at the end: successes and errors.
 - Several files heading for one name are all blocked, except identical
   copies (by content, as found in the background): the first in the list

@@ -87,13 +87,12 @@ fn from_7z(path: &Path) -> Option<String> {
     let size = std::fs::metadata(path).ok()?.len();
     let mut reader =
         sevenz_rust2::ArchiveReader::open(path, sevenz_rust2::Password::empty()).ok()?;
-    let name = reader
-        .archive()
-        .files
-        .iter()
-        .find(|f| is_info(f.name()))?
-        .name()
-        .to_string();
+    let entry = reader.archive().files.iter().find(|f| is_info(f.name()))?;
+    // Read whole: one claiming to be bigger than a `ComicInfo.xml` is not.
+    if entry.size() > MAX_INFO {
+        return None;
+    }
+    let name = entry.name().to_string();
     if reader.archive().is_solid && size > 300 << 20 {
         return None;
     }

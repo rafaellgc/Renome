@@ -65,6 +65,46 @@ pub struct ApplyReport {
     pub lists_removed: usize,
 }
 
+/// Renames `from` to `to` only if `to` does not exist. On Linux the check
+/// and the rename are one step (nothing can appear in between); elsewhere,
+/// and on file systems that cannot do that, it checks first.
+fn rename_new(from: &Path, to: &Path) -> Result<(), (ErrorKind, String)> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        if let (Ok(f), Ok(t)) = (
+            CString::new(from.as_os_str().as_bytes()),
+            CString::new(to.as_os_str().as_bytes()),
+        ) {
+            // SAFETY: both are valid C strings for the call's duration.
+            let r = unsafe {
+                libc::renameat2(
+                    libc::AT_FDCWD,
+                    f.as_ptr(),
+                    libc::AT_FDCWD,
+                    t.as_ptr(),
+                    libc::RENAME_NOREPLACE,
+                )
+            };
+            if r == 0 {
+                return Ok(());
+            }
+            let e = std::io::Error::last_os_error();
+            match e.raw_os_error() {
+                Some(libc::EEXIST) => return Err((ErrorKind::TargetExists, String::new())),
+                // Not supported here: check, then rename.
+                Some(libc::EINVAL | libc::ENOSYS | libc::ENOTSUP) => {}
+                _ => return Err(io_kind(&e)),
+            }
+        }
+    }
+    if fs::symlink_metadata(to).is_ok() {
+        return Err((ErrorKind::TargetExists, String::new()));
+    }
+    fs::rename(from, to).map_err(|e| io_kind(&e))
+}
+
 fn temp_path(from: &Path, i: usize) -> PathBuf {
     from.with_file_name(format!(".renome-{}-{i}.tmp", std::process::id()))
 }
@@ -131,11 +171,7 @@ fn execute_level(ops: &[(usize, &Operation)], report: &mut ApplyReport) {
                 continue;
             }
         };
-        let result = if fs::symlink_metadata(&op.to).is_ok() {
-            Err((ErrorKind::TargetExists, String::new()))
-        } else {
-            fs::rename(&tmp, &op.to).map_err(|e| io_kind(&e))
-        };
+        let result = rename_new(&tmp, &op.to);
         match result {
             Ok(()) => report.done.push(op.clone()),
             Err((kind, detail)) => {
@@ -247,6 +283,30 @@ struct Journal {
     tagged: usize,
 }
 
+/// A rename in progress: written before it starts and removed when the
+/// history entry is written, so that, if the program stops in between,
+/// the files left with temporary names can be put back.
+#[derive(Debug, Serialize, Deserialize)]
+struct Pending {
+    created: DateTime<Local>,
+    ops: Vec<Operation>,
+    /// The temporary name of each operation (see [`temp_path`]).
+    temps: Vec<PathBuf>,
+}
+
+/// What [`History::recover`] did with renames left halfway.
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Recovered {
+    /// Files put back under their old names.
+    pub restored: usize,
+    /// Files that had been renamed: kept, in a history entry to undo.
+    pub renamed: usize,
+    /// Temporary files that could not be put back (their old name is
+    /// taken), with the name each should have.
+    pub stuck: Vec<Operation>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryEntry {
@@ -334,6 +394,70 @@ impl History {
         (kept, removed)
     }
 
+    fn pending_path(&self, id: &str) -> Result<PathBuf, String> {
+        Ok(self.path(id)?.with_extension("pending"))
+    }
+
+    /// Puts back renames a stopped program left halfway: files still under
+    /// a temporary name get their old one back; those already renamed stay
+    /// so, in a history entry that can undo them.
+    pub fn recover(&self) -> Recovered {
+        let mut out = Recovered::default();
+        let Ok(rd) = fs::read_dir(&self.dir) else {
+            return out;
+        };
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let Some(id) = name.strip_suffix(".pending") else {
+                continue;
+            };
+            let Ok(p) = fs::read_to_string(e.path())
+                .map_err(|e| e.to_string())
+                .and_then(|t| serde_json::from_str::<Pending>(&t).map_err(|e| e.to_string()))
+            else {
+                continue;
+            };
+            let mut done = Vec::new();
+            for (op, tmp) in p.ops.iter().zip(&p.temps) {
+                let here = |p: &Path| fs::symlink_metadata(p).is_ok();
+                if here(tmp) {
+                    match rename_new(tmp, &op.from) {
+                        Ok(()) => out.restored += 1,
+                        Err(_) => out.stuck.push(Operation {
+                            from: tmp.clone(),
+                            to: op.from.clone(),
+                        }),
+                    }
+                } else if !here(&op.from) && here(&op.to) {
+                    done.push(op.clone());
+                }
+            }
+            out.renamed += done.len();
+            let kept = done.is_empty()
+                || self
+                    .write(
+                        id,
+                        &Journal {
+                            created: p.created,
+                            undone: false,
+                            ops: done,
+                            reverted: 0,
+                            failed: 0,
+                            extra_files: Vec::new(),
+                            dirs: Vec::new(),
+                            lists: Vec::new(),
+                            tags: Vec::new(),
+                            tagged: 0,
+                        },
+                    )
+                    .is_ok();
+            if kept && out.stuck.is_empty() {
+                let _ = fs::remove_file(e.path());
+            }
+        }
+        out
+    }
+
     fn read(&self, id: &str) -> Result<Journal, String> {
         let text = fs::read_to_string(self.path(id)?).map_err(|e| e.to_string())?;
         serde_json::from_str(&text).map_err(|e| e.to_string())
@@ -345,12 +469,26 @@ impl History {
         fs::write(self.path(id)?, text).map_err(|e| e.to_string())
     }
 
-    /// Runs and records in the history.
+    /// Runs and records in the history. What is about to happen is written
+    /// first (see [`Pending`]), so a stop halfway can be recovered.
     pub fn apply(&self, ops: &[Operation]) -> ApplyReport {
+        let created = Local::now();
+        let id = self.new_id(&created);
+        let pending = self.pending_path(&id).ok().filter(|path| {
+            let p = Pending {
+                created,
+                ops: ops.to_vec(),
+                temps: ops
+                    .iter()
+                    .enumerate()
+                    .map(|(i, op)| temp_path(&op.from, i))
+                    .collect(),
+            };
+            fs::create_dir_all(&self.dir).is_ok()
+                && serde_json::to_vec(&p).is_ok_and(|t| fs::write(path, t).is_ok())
+        });
         let mut report = execute(ops, Depth::DeepestFirst);
         if !report.done.is_empty() {
-            let created = Local::now();
-            let id = self.new_id(&created);
             let (lists, removed) = self.update_lists(&id, &report.done);
             report.lists = lists.len() - removed;
             report.lists_removed = removed;
@@ -377,6 +515,9 @@ impl History {
                     detail: e,
                 }),
             }
+        }
+        if let Some(p) = pending {
+            let _ = fs::remove_file(p);
         }
         report
     }
@@ -795,6 +936,58 @@ mod tests {
         let id = h.record_files(&[p.join("c.nfo")]).unwrap();
         h.undo(&id).unwrap();
         assert!(!p.join("c.nfo").exists());
+    }
+
+    #[test]
+    fn recovers_a_stop_halfway() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        for n in ["a", "b", "c"] {
+            fs::write(p.join(n), n).unwrap();
+        }
+        let h = History::new(p.join("hist"));
+        // As if the program stopped: `a` is under its temporary name, `b`
+        // was renamed, `c` was not touched.
+        let ops = [op(p, "a", "a2"), op(p, "b", "b2"), op(p, "c", "c2")];
+        let temps: Vec<PathBuf> = ops
+            .iter()
+            .enumerate()
+            .map(|(i, o)| temp_path(&o.from, i))
+            .collect();
+        fs::rename(p.join("a"), &temps[0]).unwrap();
+        fs::rename(p.join("b"), p.join("b2")).unwrap();
+        fs::create_dir_all(p.join("hist")).unwrap();
+        let pending = Pending {
+            created: Local::now(),
+            ops: ops.to_vec(),
+            temps,
+        };
+        fs::write(
+            p.join("hist/x-1.pending"),
+            serde_json::to_string(&pending).unwrap(),
+        )
+        .unwrap();
+
+        let r = h.recover();
+        assert_eq!((r.restored, r.renamed, r.stuck.len()), (1, 1, 0));
+        assert_eq!(read(p.join("a")), "a");
+        assert_eq!(read(p.join("b2")), "b");
+        assert!(!p.join("hist/x-1.pending").exists());
+        // The rename that went through can be undone.
+        assert_eq!(h.list().len(), 1);
+        h.undo("x-1").unwrap();
+        assert_eq!(read(p.join("b")), "b");
+        // Nothing left to recover; a normal apply leaves nothing pending.
+        h.apply(&[op(p, "c", "c3")]);
+        assert_eq!(h.recover().restored, 0);
+        assert_eq!(
+            fs::read_dir(p.join("hist"))
+                .unwrap()
+                .flatten()
+                .filter(|e| e.file_name().to_string_lossy().ends_with(".pending"))
+                .count(),
+            0
+        );
     }
 
     #[test]

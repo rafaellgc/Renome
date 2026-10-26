@@ -553,7 +553,9 @@ ${ex("Nome_da_Serie_012_(2019)_(Digital)_(grupo).cbz", "Nome da Série #012 (201
   <li><b>✕</b>: exclui a entrada do histórico. Os arquivos não mudam, mas aquela renomeação não poderá mais ser desfeita.</li>
   <li><b>Limpar histórico</b>: exclui todas as entradas de uma vez, com o mesmo efeito.</li>
 </ul>
-<p class="tip"><kbd>Ctrl</kbd>+<kbd>Z</kbd> desfaz alterações na <i>lista</i> (adicionar, remover, mover, editar nome). Para desfazer uma renomeação já feita, use o Histórico.</p>`,
+<p class="tip"><kbd>Ctrl</kbd>+<kbd>Z</kbd> desfaz alterações na <i>lista</i> (adicionar, remover, mover, editar nome). Para desfazer uma renomeação já feita, use o Histórico.</p>
+<p>Se o programa for fechado ou o computador desligar no meio de uma renomeação, na próxima vez que o Renome abrir ele termina o serviço com segurança: os arquivos que ainda estavam com um nome temporário voltam ao nome antigo, e os que já tinham sido renomeados entram no <b>Histórico</b>, para você desfazer se quiser.</p>
+`,
   },
   {
     id: "recipes",
@@ -598,7 +600,7 @@ ${ex("Serie.S01E02.720p.WEB.mkv", "Serie S01E02.mkv")}
   <li><b>Incluir arquivos ocultos ao adicionar pastas</b>.</li>
   <li><b>Pedir confirmação antes de renomear</b>.</li>
   <li><b>Desligar as regras depois de renomear</b>.</li>
-  <li><b>Avisar sobre caracteres que o Windows não aceita</b>: útil para arquivos que vão para um pendrive ou para o Windows.</li>
+  <li><b>Avisar sobre nomes que o Windows não aceita</b>: caracteres como <code>:</code> e <code>?</code>, ponto ou espaço no fim, e nomes reservados como <code>CON</code> e <code>NUL</code>. Útil para arquivos que vão para um pendrive ou para o Windows.</li>
 </ul>
 <p>As opções ficam em <code>~/.config/renome</code> (Linux), <code>%APPDATA%\\renome</code> (Windows) ou <code>~/Library/Application Support/renome</code> (macOS). O histórico fica em <code>~/.local/share/renome/history</code> no Linux e na mesma pasta das opções nos outros sistemas.</p>`,
   },

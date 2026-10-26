@@ -3305,6 +3305,7 @@ dependencies = [
  "encoding_rs",
  "globset",
  "kamadak-exif",
+ "libc",
  "lofty",
  "lopdf",
  "regex",

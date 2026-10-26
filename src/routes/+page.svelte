@@ -374,9 +374,14 @@
     });
   }
 
+  /** The latest preview asked for: an older one that comes back later is
+   *  dropped (they run in the background). */
+  let previewRun = 0;
   async function refresh() {
+    const run = ++previewRun;
     try {
-      preview = await api.preview(payload(), $state.snapshot(overrides), $state.snapshot(view));
+      const p = await api.preview(payload(), $state.snapshot(overrides), $state.snapshot(view));
+      if (run === previewRun) preview = p;
     } catch (e) {
       notice = `${t("error")}: ${tError(e)}`;
     }
@@ -556,7 +561,10 @@
         ? await api.apply(payload(), $state.snapshot(overrides), $state.snapshot(view))
         : { done: [], errors: [], historyId: null, lists: 0, listsRemoved: 0 };
       let saved = 0;
-      if (rule?.type === "movie" && rule.sidecar) {
+      // Renamed without a history entry (it could not be written): nothing
+      // more is written, or undo could not take it back.
+      const recorded = !r.done.length || !!r.historyId;
+      if (recorded && rule?.type === "movie" && rule.sidecar) {
         const items = r.done
           .filter((op) => movies[op.from]?.choice && isVideo(op.to))
           .map((op) => ({ path: op.to, id: movies[op.from].choice!.id }))
@@ -567,7 +575,7 @@
         }
       }
       const mrule = musicRule?.rule;
-      if (mrule?.type === "music" && mrule.cover) {
+      if (recorded && mrule?.type === "music" && mrule.cover) {
         const items = coverItems(r);
         if (items.length) {
           mbProgress = { done: 0, total: items.length, kind: "save" };
@@ -578,13 +586,13 @@
           }
         }
       }
-      if (mrule?.type === "music" && mrule.playlist) {
+      if (recorded && mrule?.type === "music" && mrule.playlist) {
         const parent = (p: string) => p.slice(0, Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\")));
         const dirs = [...new Set(r.done.filter((op) => isAudio(op.to)).map((op) => parent(op.to)).concat(listOnly))];
         if (dirs.length) saved += await writeMeta(() => api.writePlaylists(r.historyId, dirs));
       }
       let tagged = 0;
-      if (mrule?.type === "music" && mrule.writeTags) {
+      if (recorded && mrule?.type === "music" && mrule.writeTags) {
         // Every matched song that moved, and those that keep their names.
         const items = r.done
           .filter((op) => songMatches[op.from] && isAudio(op.to))
@@ -610,7 +618,7 @@
         }
       }
       const brule = bookRule?.rule;
-      if (brule?.type === "book" && (brule.cover || brule.opf)) {
+      if (recorded && brule?.type === "book" && (brule.cover || brule.opf)) {
         const items = r.done
           .filter((op) => books[op.from]?.choice && isBook(op.to))
           .map((op) => bookSidecarItem(op.from, op.to))
@@ -625,7 +633,7 @@
         }
       }
       const srule = seriesRule?.rule;
-      if (srule?.type === "series" && srule.sidecar) {
+      if (recorded && srule?.type === "series" && srule.sidecar) {
         const items = r.done
           .filter((op) => episodeMatches[op.from] && isVideo(op.to))
           .map((op) => tvSidecarItem(op.from, op.to))
@@ -813,35 +821,33 @@
 
   /** Movie, episode and book choices follow their files when renamed or restored. */
   function followMatches(r: ApplyReport) {
-    for (const op of r.done) {
-      if (books[op.from]) {
-        books[op.to] = books[op.from];
-        delete books[op.from];
-      }
-      if (comics[op.from]) {
-        comics[op.to] = comics[op.from];
-        delete comics[op.from];
-      }
-      if (movies[op.from]) {
-        movies[op.to] = movies[op.from];
-        delete movies[op.from];
-      }
-      if (series[op.from]) {
-        series[op.to] = series[op.from];
-        delete series[op.from];
-      }
+    if (!r.done.length) return;
+    // All the renames at once (two files may swap names), then the folders
+    // renamed along, which carry what is inside them.
+    const exact = new Map(r.done.map((op) => [op.from, op.to]));
+    const inside = (p: string, dir: string) => p.startsWith(`${dir}/`) || p.startsWith(`${dir}\\`);
+    const follow = (p: string) => {
+      let q = exact.get(p) ?? p;
+      for (const op of r.done) if (inside(q, op.from)) q = op.to + q.slice(op.from.length);
+      return q;
+    };
+    function moved<T>(m: Record<string, T>): Record<string, T> {
+      return Object.fromEntries(Object.entries(m).map(([p, v]) => [follow(p), v]));
     }
-    const moved = new Map(r.done.map((op) => [op.from, op.to]));
+    books = moved(books);
+    comics = moved(comics);
+    movies = moved(movies);
+    series = moved(series);
     for (const a of albums) {
-      a.files = a.files.map((p) => moved.get(p) ?? p);
-      a.matches = Object.fromEntries(Object.entries(a.matches).map(([p, m]) => [moved.get(p) ?? p, m]));
+      a.files = a.files.map(follow);
+      a.matches = moved(a.matches);
     }
   }
 
-  /** Comic Vine for the visible comics: one series per group of files
-   *  (the series typed, else each series the files say), picked by itself
-   *  when only one has that name (and year), else asked; then each file's
-   *  issue by its number. Files left without one keep the name they say. */
+  /** The chosen catalogue (GCD, MangaDex, Comic Vine) for the visible
+   *  comics: one series per group of files (the series typed, else each
+   *  series the files say), picked by itself when only one has that name
+   *  (and year), else asked; then each file's issue by its number. */
   async function searchComics(rule: Extract<Rule, { type: "comic" }>) {
     const source = rule.source ?? "gcd";
     const key = settings.comicVineKey.trim();
@@ -1399,6 +1405,22 @@
     (async () => {
       await loadSettings();
       if (settings.rememberRules) steps = settings.rules.map((s) => newStep(s.rule, s.enabled));
+      // A rename the program could not finish (it was closed, the
+      // computer went off) is put back first.
+      try {
+        const r = await api.recover();
+        if (r.restored || r.renamed || r.stuck.length)
+          await notify({
+            title: t("recoverTitle"),
+            text: [
+              t("recoverText", { restored: r.restored, renamed: r.renamed }),
+              r.stuck.length ? t("recoverStuck") : "",
+            ].filter(Boolean).join("\n\n"),
+            items: r.stuck.map((s) => `${s.from} → ${s.to}`),
+          });
+      } catch {
+        // Nothing to recover.
+      }
       ready = true;
       await refresh();
       checkIdentical();

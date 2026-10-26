@@ -143,12 +143,30 @@ impl Preview {
 
 const WINDOWS_UNSAFE: &[char] = &['\\', ':', '*', '?', '"', '<', '>', '|'];
 
+/// A name Windows does not accept: its forbidden characters, a dot or space
+/// at the end, or a device's name (`CON`, `NUL`, `COM1`…, with any
+/// extension).
+fn windows_bad(name: &str) -> bool {
+    let base = name
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .trim_end()
+        .to_uppercase();
+    let device = matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ((base.starts_with("COM") || base.starts_with("LPT"))
+            && base.len() == 4
+            && base.as_bytes()[3].is_ascii_digit()
+            && base.as_bytes()[3] != b'0');
+    name.contains(WINDOWS_UNSAFE) || name.ends_with(['.', ' ']) || device
+}
+
 fn validate(name: &str) -> Option<Problem> {
     if name.is_empty() || name == "." || name == ".." {
         Some(Problem::Empty)
     } else if name.contains(['/', '\0']) {
         Some(Problem::Slash)
-    } else if cfg!(windows) && (name.contains(WINDOWS_UNSAFE) || name.ends_with(['.', ' '])) {
+    } else if cfg!(windows) && windows_bad(name) {
         Some(Problem::WindowsChars)
     } else if name.len() > 255 {
         Some(Problem::TooLong)
@@ -166,13 +184,58 @@ fn same_file(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// Key for comparing paths: the default file systems on Windows and macOS
-/// are case-insensitive, so `A.txt` and `a.txt` are the same target.
-fn path_key(p: &Path) -> PathBuf {
-    if cfg!(any(windows, target_os = "macos")) {
-        PathBuf::from(p.to_string_lossy().to_lowercase())
-    } else {
-        p.to_path_buf()
+/// Keys for comparing paths: where names ignore case, `A.txt` and `a.txt`
+/// are the same target. That is the default on Windows and macOS; on Linux,
+/// disks formatted for them (exFAT, FAT, NTFS mounted so) do it too, found
+/// by looking an existing name up in the other case.
+#[derive(Default)]
+struct PathKeys {
+    folded: HashMap<PathBuf, bool>,
+}
+
+impl PathKeys {
+    fn key(&mut self, p: &Path) -> PathBuf {
+        let dir = p.parent().unwrap_or(p);
+        if self.ignores_case(dir) {
+            PathBuf::from(p.to_string_lossy().to_lowercase())
+        } else {
+            p.to_path_buf()
+        }
+    }
+
+    /// Whether names in `dir` (or in its nearest existing folder) ignore case.
+    fn ignores_case(&mut self, dir: &Path) -> bool {
+        if cfg!(any(windows, target_os = "macos")) {
+            return true;
+        }
+        let Some(dir) = dir.ancestors().find(|d| d.is_dir()) else {
+            return false;
+        };
+        if let Some(&v) = self.folded.get(dir) {
+            return v;
+        }
+        let swap = |s: &str| -> String {
+            s.chars()
+                .flat_map(|c| -> Vec<char> {
+                    if c.is_lowercase() {
+                        c.to_uppercase().collect()
+                    } else {
+                        c.to_lowercase().collect()
+                    }
+                })
+                .collect()
+        };
+        // A name in it that reads differently in the other case.
+        let v = std::fs::read_dir(dir).ok().and_then(|rd| {
+            rd.flatten().find_map(|e| {
+                let name = e.file_name().into_string().ok()?;
+                let other = swap(&name);
+                (other != name).then(|| same_file(&dir.join(&name), &dir.join(other)))
+            })
+        });
+        let v = v.unwrap_or(false);
+        self.folded.insert(dir.to_path_buf(), v);
+        v
     }
 }
 
@@ -480,15 +543,16 @@ fn follow_songs(items: &mut [PreviewItem], folders: bool, identical: &HashMap<Pa
         if i.status == Status::Unchanged {
             i.status = Status::Ok;
         }
-        i.windows_unsafe = i.new_name.contains(WINDOWS_UNSAFE);
+        i.windows_unsafe = windows_bad(&i.new_name);
         followers.push(n);
     }
     // Same name in the same place: add the folder each came from (identical
     // copies are left to the duplicate check, which lets one through).
+    let mut keys = PathKeys::default();
     let mut by_target: HashMap<PathBuf, Vec<usize>> = HashMap::new();
     for &n in &followers {
         by_target
-            .entry(path_key(&items[n].target()))
+            .entry(keys.key(&items[n].target()))
             .or_default()
             .push(n);
     }
@@ -685,7 +749,7 @@ pub fn preview(
             } else {
                 Status::Ok
             };
-            let windows_unsafe = new_name.contains(WINDOWS_UNSAFE);
+            let windows_unsafe = windows_bad(&new_name);
             let untagged = music.is_some_and(|_| {
                 !file.is_dir
                     && music::is_audio(&file.ext)
@@ -727,10 +791,11 @@ pub fn preview(
 
     // Repeated targets within the batch. A file that keeps its name is not
     // flagged: the one moving onto it is, as "exists", below.
+    let mut keys = PathKeys::default();
     let mut targets: HashMap<PathBuf, Vec<usize>> = HashMap::new();
     for (i, item) in items.iter().enumerate() {
         if item.status == Status::Ok {
-            targets.entry(path_key(&item.target())).or_default().push(i);
+            targets.entry(keys.key(&item.target())).or_default().push(i);
         }
     }
     for idx in targets.values().filter(|v| v.len() > 1) {
@@ -757,7 +822,7 @@ pub fn preview(
         let moving: HashSet<PathBuf> = items
             .iter()
             .filter(|i| i.status == Status::Ok)
-            .map(|i| path_key(&i.path))
+            .map(|i| keys.key(&i.path))
             .collect();
         let mut blocked = Vec::new();
         for (i, item) in items
@@ -769,7 +834,7 @@ pub fn preview(
             let exists = std::fs::symlink_metadata(&target).is_ok();
             // Case-only change on a case-insensitive file system:
             // the "target" is the file itself.
-            if exists && !moving.contains(&path_key(&target)) && !same_file(&target, &item.path) {
+            if exists && !moving.contains(&keys.key(&target)) && !same_file(&target, &item.path) {
                 blocked.push(i);
             }
         }
@@ -837,6 +902,25 @@ mod tests {
                 target: Target::Name,
             },
         }]
+    }
+
+    #[test]
+    fn names_windows_refuses() {
+        for bad in [
+            "CON",
+            "con.txt",
+            "Nul.tar.gz",
+            "COM1.mkv",
+            "lpt9",
+            "a:b",
+            "x.",
+            "x ",
+        ] {
+            assert!(windows_bad(bad), "{bad}");
+        }
+        for ok in ["CONTO.txt", "COM0", "COM10.txt", "console.log", "a.b"] {
+            assert!(!windows_bad(ok), "{ok}");
+        }
     }
 
     #[test]

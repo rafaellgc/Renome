@@ -97,17 +97,38 @@ fn undo_list(state: State<AppState>) -> Option<Overrides> {
     Some(overrides)
 }
 
+/// Runs `work` away from the window's thread (commands without `async`
+/// run on it and freeze the window while they last).
+async fn in_background<T: Send + 'static>(
+    app: AppHandle,
+    work: impl FnOnce(&AppState) -> T + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(move || work(&app.state::<AppState>()))
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
-fn add_paths(state: State<AppState>, paths: Vec<PathBuf>, options: ScanOptions) -> AddResult {
-    let mut s = state.session.lock().unwrap();
-    let known: HashSet<PathBuf> = s.files.iter().map(|f| f.path.clone()).collect();
-    let result = renome_core::scan(&paths, &options, &known);
-    let added = result.files.iter().map(|f| f.path.clone()).collect();
-    s.files.extend(result.files);
-    AddResult {
-        added,
-        skipped: result.skipped,
-    }
+async fn add_paths(
+    app: AppHandle,
+    paths: Vec<PathBuf>,
+    options: ScanOptions,
+) -> Result<AddResult, String> {
+    in_background(app, move |state| {
+        let known: HashSet<PathBuf> = {
+            let s = state.session.lock().unwrap();
+            s.files.iter().map(|f| f.path.clone()).collect()
+        };
+        // Scanned without holding the list: a big folder takes a while.
+        let result = renome_core::scan(&paths, &options, &known);
+        let added = result.files.iter().map(|f| f.path.clone()).collect();
+        state.session.lock().unwrap().files.extend(result.files);
+        AddResult {
+            added,
+            skipped: result.skipped,
+        }
+    })
+    .await
 }
 
 #[tauri::command]
@@ -151,15 +172,18 @@ fn sort_files(state: State<AppState>, key: SortKey, descending: bool) {
 }
 
 #[tauri::command]
-fn preview(
-    state: State<AppState>,
+async fn preview(
+    app: AppHandle,
     steps: Vec<Step>,
     overrides: Overrides,
     mut view: View,
-) -> Preview {
-    let s = state.session.lock().unwrap();
-    view.identical = s.identical.clone();
-    renome_core::preview(&s.files, &steps, &overrides, &view)
+) -> Result<Preview, String> {
+    in_background(app, move |state| {
+        let s = state.session.lock().unwrap();
+        view.identical = s.identical.clone();
+        renome_core::preview(&s.files, &steps, &overrides, &view)
+    })
+    .await
 }
 
 #[derive(Clone, Serialize)]
@@ -259,21 +283,24 @@ fn refresh_renamed(files: &mut [FileEntry], report: &ApplyReport) {
 }
 
 #[tauri::command]
-fn apply(
-    state: State<AppState>,
+async fn apply(
+    app: AppHandle,
     steps: Vec<Step>,
     overrides: Overrides,
     mut view: View,
-) -> ApplyReport {
-    let mut s = state.session.lock().unwrap();
-    view.identical = s.identical.clone();
-    // Recompute the preview here to apply exactly what is visible and valid right now.
-    let ops = renome_core::preview(&s.files, &steps, &overrides, &view).operations();
-    let report = state.history.apply(&ops);
-    refresh_renamed(&mut s.files, &report);
-    // Earlier states point to the old names.
-    s.undo.clear();
-    report
+) -> Result<ApplyReport, String> {
+    in_background(app, move |state| {
+        let mut s = state.session.lock().unwrap();
+        view.identical = s.identical.clone();
+        // Recompute the preview here to apply exactly what is visible and valid right now.
+        let ops = renome_core::preview(&s.files, &steps, &overrides, &view).operations();
+        let report = state.history.apply(&ops);
+        refresh_renamed(&mut s.files, &report);
+        // Earlier states point to the old names.
+        s.undo.clear();
+        report
+    })
+    .await
 }
 
 #[tauri::command]
@@ -842,12 +869,22 @@ fn history(state: State<AppState>) -> Vec<HistoryEntry> {
 }
 
 #[tauri::command]
-fn undo(state: State<AppState>, id: String) -> Result<ApplyReport, String> {
-    let report = state.history.undo(&id)?;
-    let s = &mut *state.session.lock().unwrap();
-    refresh_renamed(&mut s.files, &report);
-    s.undo.clear();
-    Ok(report)
+async fn undo(app: AppHandle, id: String) -> Result<ApplyReport, String> {
+    in_background(app, move |state| {
+        let report = state.history.undo(&id)?;
+        let s = &mut *state.session.lock().unwrap();
+        refresh_renamed(&mut s.files, &report);
+        s.undo.clear();
+        Ok(report)
+    })
+    .await?
+}
+
+/// Puts back renames a stopped program left halfway (see
+/// [`History::recover`]); called once at start.
+#[tauri::command]
+async fn recover(app: AppHandle) -> Result<renome_core::apply::Recovered, String> {
+    in_background(app, |state| state.history.recover()).await
 }
 
 #[tauri::command]
@@ -1027,6 +1064,7 @@ pub fn run() {
             gcd_sign_in,
             gcd_sign_out,
             save_text,
+            recover,
             write_book_sidecars,
             apply,
             history,

@@ -553,7 +553,9 @@ ${ex("Series_Name_012_(2019)_(Digital)_(group).cbz", "Series Name #012 (2019).cb
   <li><b>✕</b>: deletes the entry from the history. The files do not change, but that rename can no longer be undone.</li>
   <li><b>Clear history</b>: deletes all entries at once, with the same effect.</li>
 </ul>
-<p class="tip"><kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes changes to the <i>list</i> (add, remove, move, edit name). To undo a rename that was already done, use the History.</p>`,
+<p class="tip"><kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes changes to the <i>list</i> (add, remove, move, edit name). To undo a rename that was already done, use the History.</p>
+<p>If the program is closed or the computer goes off in the middle of a rename, the next time Renome opens it finishes safely: files still under a temporary name get their old name back, and those already renamed go into the <b>History</b>, for you to undo if you want.</p>
+`,
   },
   {
     id: "recipes",
@@ -598,7 +600,7 @@ ${ex("Show.S01E02.720p.WEB.mkv", "Show S01E02.mkv")}
   <li><b>Include hidden files when adding folders</b>.</li>
   <li><b>Ask for confirmation before renaming</b>.</li>
   <li><b>Turn rules off after renaming</b>.</li>
-  <li><b>Warn about characters Windows does not accept</b>: useful for files headed to a USB stick or to Windows.</li>
+  <li><b>Warn about names Windows does not accept</b>: characters such as <code>:</code> and <code>?</code>, a dot or space at the end, and reserved names such as <code>CON</code> and <code>NUL</code>. Useful for files headed to a USB stick or to Windows.</li>
 </ul>
 <p>Options are stored in <code>~/.config/renome</code> (Linux), <code>%APPDATA%\\renome</code> (Windows) or <code>~/Library/Application Support/renome</code> (macOS). The history is in <code>~/.local/share/renome/history</code> on Linux and in the same folder as the options on the other systems.</p>`,
   },
