@@ -31,6 +31,8 @@ pub enum ErrorKind {
     /// The source no longer exists (moved or deleted).
     NotFound,
     PermissionDenied,
+    /// The target is on another disk (a move would be a copy).
+    OtherDisk,
     /// Any other OS error; `detail` holds its message.
     Io,
     /// Failed and the original name could not be restored; `detail` is the temporary.
@@ -235,6 +237,7 @@ fn io_kind(e: &std::io::Error) -> (ErrorKind, String) {
     match e.kind() {
         std::io::ErrorKind::NotFound => (ErrorKind::NotFound, String::new()),
         std::io::ErrorKind::PermissionDenied => (ErrorKind::PermissionDenied, String::new()),
+        std::io::ErrorKind::CrossesDevices => (ErrorKind::OtherDisk, String::new()),
         _ => {
             let text = e.to_string();
             let text = text.split(" (os error").next().unwrap_or(&text);
@@ -292,6 +295,9 @@ struct Pending {
     ops: Vec<Operation>,
     /// The temporary name of each operation (see [`temp_path`]).
     temps: Vec<PathBuf>,
+    /// An undo of this entry, not a rename.
+    #[serde(default)]
+    undoing: bool,
 }
 
 /// What [`History::recover`] did with renames left halfway.
@@ -302,6 +308,8 @@ pub struct Recovered {
     pub restored: usize,
     /// Files that had been renamed: kept, in a history entry to undo.
     pub renamed: usize,
+    /// Files an undo had already taken back: kept so, out of their entry.
+    pub undone: usize,
     /// Temporary files that could not be put back (their old name is
     /// taken), with the name each should have.
     pub stuck: Vec<Operation>,
@@ -398,9 +406,11 @@ impl History {
         Ok(self.path(id)?.with_extension("pending"))
     }
 
-    /// Puts back renames a stopped program left halfway: files still under
-    /// a temporary name get their old one back; those already renamed stay
-    /// so, in a history entry that can undo them.
+    /// Puts back renames (and undos) a stopped program left halfway: files
+    /// still under a temporary name get their name from before back; those
+    /// already renamed stay so, in a history entry that can undo them (with
+    /// the folders made for them); those an undo had already taken back are
+    /// taken out of their entry.
     pub fn recover(&self) -> Recovered {
         let mut out = Recovered::default();
         let Ok(rd) = fs::read_dir(&self.dir) else {
@@ -417,6 +427,7 @@ impl History {
             else {
                 continue;
             };
+            let stuck = out.stuck.len();
             let mut done = Vec::new();
             for (op, tmp) in p.ops.iter().zip(&p.temps) {
                 let here = |p: &Path| fs::symlink_metadata(p).is_ok();
@@ -432,30 +443,68 @@ impl History {
                     done.push(op.clone());
                 }
             }
-            out.renamed += done.len();
-            let kept = done.is_empty()
-                || self
-                    .write(
-                        id,
-                        &Journal {
-                            created: p.created,
-                            undone: false,
-                            ops: done,
-                            reverted: 0,
-                            failed: 0,
-                            extra_files: Vec::new(),
-                            dirs: Vec::new(),
-                            lists: Vec::new(),
-                            tags: Vec::new(),
-                            tagged: 0,
-                        },
-                    )
-                    .is_ok();
-            if kept && out.stuck.is_empty() {
+            let kept = if p.undoing {
+                out.undone += done.len();
+                done.is_empty() || self.settle_undo(id, &done).is_ok()
+            } else {
+                out.renamed += done.len();
+                // The folders the renamed files went into, as far as they
+                // were not there for the old names; undo removes them when
+                // they are left empty.
+                let mut dirs: Vec<PathBuf> = Vec::new();
+                for op in &done {
+                    for d in op.to.ancestors().skip(1) {
+                        if op.from.starts_with(d) {
+                            break;
+                        }
+                        if !dirs.iter().any(|x| x == d) {
+                            dirs.push(d.to_path_buf());
+                        }
+                    }
+                }
+                // Outermost first.
+                dirs.sort_by_key(|d| d.components().count());
+                done.is_empty()
+                    || self
+                        .write(
+                            id,
+                            &Journal {
+                                created: p.created,
+                                undone: false,
+                                ops: done,
+                                reverted: 0,
+                                failed: 0,
+                                extra_files: Vec::new(),
+                                dirs,
+                                lists: Vec::new(),
+                                tags: Vec::new(),
+                                tagged: 0,
+                            },
+                        )
+                        .is_ok()
+            };
+            if kept && out.stuck.len() == stuck {
                 let _ = fs::remove_file(e.path());
             }
         }
         out
+    }
+
+    /// Takes out of entry `id` the renames an undo took back (`back` are
+    /// the undo's operations), as the undo would have.
+    fn settle_undo(&self, id: &str, back: &[Operation]) -> Result<(), String> {
+        let mut j = self.read(id)?;
+        let back: HashSet<(&Path, &Path)> = back
+            .iter()
+            .map(|b| (b.to.as_path(), b.from.as_path()))
+            .collect();
+        let before = j.ops.len();
+        j.ops
+            .retain(|op| !back.contains(&(op.from.as_path(), op.to.as_path())));
+        j.reverted += before - j.ops.len();
+        j.undone =
+            j.ops.is_empty() && j.extra_files.is_empty() && j.lists.is_empty() && j.tags.is_empty();
+        self.write(id, &j)
     }
 
     fn read(&self, id: &str) -> Result<Journal, String> {
@@ -483,6 +532,7 @@ impl History {
                     .enumerate()
                     .map(|(i, op)| temp_path(&op.from, i))
                     .collect(),
+                undoing: false,
             };
             fs::create_dir_all(&self.dir).is_ok()
                 && serde_json::to_vec(&p).is_ok_and(|t| fs::write(path, t).is_ok())
@@ -660,6 +710,20 @@ impl History {
                 to: op.from.clone(),
             })
             .collect();
+        // As for a rename: written first, so a stop halfway is recovered.
+        let pending = self.pending_path(id).ok().filter(|path| {
+            let p = Pending {
+                created: j.created,
+                ops: reverse.clone(),
+                temps: reverse
+                    .iter()
+                    .enumerate()
+                    .map(|(i, op)| temp_path(&op.from, i))
+                    .collect(),
+                undoing: true,
+            };
+            serde_json::to_vec(&p).is_ok_and(|t| fs::write(path, t).is_ok())
+        });
         let mut report = execute(&reverse, Depth::ShallowestFirst);
         j.reverted += report.done.len();
         let back: HashSet<(&Path, &Path)> = report
@@ -682,6 +746,9 @@ impl History {
         j.undone =
             j.ops.is_empty() && j.extra_files.is_empty() && j.lists.is_empty() && j.tags.is_empty();
         self.write(id, &j)?;
+        if let Some(p) = pending {
+            let _ = fs::remove_file(p);
+        }
         Ok(report)
     }
 }
@@ -961,6 +1028,7 @@ mod tests {
             created: Local::now(),
             ops: ops.to_vec(),
             temps,
+            undoing: false,
         };
         fs::write(
             p.join("hist/x-1.pending"),
@@ -988,6 +1056,49 @@ mod tests {
                 .count(),
             0
         );
+    }
+
+    #[test]
+    fn recovers_an_undo_stopped_halfway() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        fs::write(p.join("a"), "a").unwrap();
+        fs::write(p.join("b"), "b").unwrap();
+        let h = History::new(p.join("hist"));
+        let id = h
+            .apply(&[op(p, "a", "New/a2"), op(p, "b", "New/b2")])
+            .history_id
+            .unwrap();
+        // As if an undo stopped: `a` went back, `b` is under its temporary
+        // name.
+        let back = [op(p, "New/a2", "a"), op(p, "New/b2", "b")];
+        let temps: Vec<PathBuf> = back
+            .iter()
+            .enumerate()
+            .map(|(i, o)| temp_path(&o.from, i))
+            .collect();
+        fs::rename(p.join("New/a2"), p.join("a")).unwrap();
+        fs::rename(p.join("New/b2"), &temps[1]).unwrap();
+        let pending = Pending {
+            created: Local::now(),
+            ops: back.to_vec(),
+            temps,
+            undoing: true,
+        };
+        fs::write(
+            h.pending_path(&id).unwrap(),
+            serde_json::to_string(&pending).unwrap(),
+        )
+        .unwrap();
+        let r = h.recover();
+        assert_eq!((r.restored, r.undone), (1, 1));
+        assert_eq!(read(p.join("New/b2")), "b");
+        // The entry keeps only what is left to undo, and finishes it.
+        assert_eq!(h.list()[0].reverted, 1);
+        h.undo(&id).unwrap();
+        assert_eq!(read(p.join("b")), "b");
+        assert!(h.list()[0].undone);
+        assert!(!p.join("New").exists());
     }
 
     #[test]

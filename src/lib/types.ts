@@ -333,7 +333,7 @@ export interface EpisodeMatch {
   titles: string[];
 }
 
-export type ErrorKind = "tempExists" | "targetExists" | "notFound" | "permissionDenied" | "io" | "restoreFailed" | "history" | "tags";
+export type ErrorKind = "tempExists" | "targetExists" | "notFound" | "permissionDenied" | "otherDisk" | "io" | "restoreFailed" | "history" | "tags";
 export interface OpError { from: string; to: string; kind: ErrorKind; detail: string }
 
 export interface ApplyReport {

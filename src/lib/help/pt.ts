@@ -560,7 +560,7 @@ ${ex("Nome_da_Serie_012_(2019)_(Digital)_(grupo).cbz", "Nome da Série #012 (201
   <li><b>Limpar histórico</b>: exclui todas as entradas de uma vez, com o mesmo efeito.</li>
 </ul>
 <p class="tip"><kbd>Ctrl</kbd>+<kbd>Z</kbd> desfaz alterações na <i>lista</i> (adicionar, remover, mover, editar nome). Para desfazer uma renomeação já feita, use o Histórico.</p>
-<p>Se o programa for fechado ou o computador desligar no meio de uma renomeação, na próxima vez que o Renome abrir ele termina o serviço com segurança: os arquivos que ainda estavam com um nome temporário voltam ao nome antigo, e os que já tinham sido renomeados entram no <b>Histórico</b>, para você desfazer se quiser.</p>
+<p>Se o programa for fechado ou o computador desligar no meio de uma renomeação (ou de um desfazer), na próxima vez que o Renome abrir ele termina o serviço com segurança: os arquivos que ainda estavam com um nome temporário voltam ao nome de antes, os que já tinham sido renomeados entram no <b>Histórico</b>, para você desfazer se quiser, e os que um desfazer já tinha devolvido saem dele. Nenhum arquivo se perde.</p>
 `,
   },
   {

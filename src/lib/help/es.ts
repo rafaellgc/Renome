@@ -560,7 +560,7 @@ ${ex("Nombre_de_la_Serie_012_(2019)_(Digital)_(grupo).cbz", "Nombre de la Serie 
   <li><b>Vaciar historial</b>: borra todas las entradas de una vez, con el mismo efecto.</li>
 </ul>
 <p class="tip"><kbd>Ctrl</kbd>+<kbd>Z</kbd> deshace cambios en la <i>lista</i> (añadir, quitar, mover, editar nombre). Para deshacer un renombrado ya hecho, use el Historial.</p>
-<p>Si se cierra el programa o se apaga el equipo en medio de un renombrado, la próxima vez que Renome se abra termina con seguridad: los archivos que aún tenían un nombre temporal recuperan su nombre anterior, y los que ya se habían renombrado entran en el <b>Historial</b>, para deshacerlos si quiere.</p>
+<p>Si se cierra el programa o se apaga el equipo en medio de un renombrado (o de un deshacer), la próxima vez que Renome se abra termina con seguridad: los archivos que aún tenían un nombre temporal recuperan el nombre de antes, los que ya se habían renombrado entran en el <b>Historial</b>, para deshacerlos si quiere, y los que un deshacer ya había devuelto salen de él. No se pierde ningún archivo.</p>
 `,
   },
   {

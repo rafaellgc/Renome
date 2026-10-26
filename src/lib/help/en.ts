@@ -560,7 +560,7 @@ ${ex("Series_Name_012_(2019)_(Digital)_(group).cbz", "Series Name #012 (2019).cb
   <li><b>Clear history</b>: deletes all entries at once, with the same effect.</li>
 </ul>
 <p class="tip"><kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes changes to the <i>list</i> (add, remove, move, edit name). To undo a rename that was already done, use the History.</p>
-<p>If the program is closed or the computer goes off in the middle of a rename, the next time Renome opens it finishes safely: files still under a temporary name get their old name back, and those already renamed go into the <b>History</b>, for you to undo if you want.</p>
+<p>If the program is closed or the computer goes off in the middle of a rename (or an undo), the next time Renome opens it finishes safely: files still under a temporary name get their name from before back, those already renamed go into the <b>History</b>, for you to undo if you want, and those an undo had already taken back leave it. No file is lost.</p>
 `,
   },
   {

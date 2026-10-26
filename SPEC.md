@@ -616,8 +616,11 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   to the history folder before starting and removed once the history
   entry is written. If the program stops in between, the next start puts
   files still under a temporary name back under their old one, records
-  those already renamed as an entry that can be undone, and lists the
-  temporaries whose old name is taken.
+  those already renamed as an entry that can be undone (with the folders
+  they went into, removed by undo when empty), and lists the temporaries
+  whose old name is taken. An undo is written down the same way; one
+  stopped halfway takes what it had already undone out of its entry.
+- A move to another disk is refused ("other disk"); the file stays.
 - Renaming, undoing, adding folders and the preview run away from the
   window's thread; a preview that comes back after a newer one is dropped.
 - Names are compared without case where the file system ignores it:

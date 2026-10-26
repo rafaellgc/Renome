@@ -1409,11 +1409,12 @@
       // computer went off) is put back first.
       try {
         const r = await api.recover();
-        if (r.restored || r.renamed || r.stuck.length)
+        if (r.restored || r.renamed || r.undone || r.stuck.length)
           await notify({
             title: t("recoverTitle"),
             text: [
               t("recoverText", { restored: r.restored, renamed: r.renamed }),
+              r.undone ? t("recoverUndone", { undone: r.undone }) : "",
               r.stuck.length ? t("recoverStuck") : "",
             ].filter(Boolean).join("\n\n"),
             items: r.stuck.map((s) => `${s.from} → ${s.to}`),
