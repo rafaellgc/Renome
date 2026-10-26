@@ -16,7 +16,7 @@
   <a href="#screenshots">Screenshots</a>
 </p>
 
-![Renome cleaning up episode names: dots become spaces, the quality tag is removed and the parts are rearranged](docs/screenshots/main.png)
+![Renome cleaning up episode names: dots become spaces, the release tags are removed and the parts are rearranged, with what changes highlighted](docs/screenshots/main.png)
 
 ## How it works
 
@@ -102,10 +102,14 @@ A built-in manual (F1) explains every rule with examples.
 
 | | |
 |---|---|
-| ![Numbering photos per folder](docs/screenshots/photos.png) | ![Dark theme](docs/screenshots/main-dark.png) |
-| Photos from two folders, numbered per folder with the folder name | Dark theme |
-| ![Built-in manual](docs/screenshots/help.png) | ![About](docs/screenshots/about.png) |
-| Built-in manual, in English, Portuguese and Spanish | About |
+| ![Choosing between two movies with the same title, with posters](docs/screenshots/movies.png) | ![Songs named and sorted into artist and album folders from their tags](docs/screenshots/music.png) |
+| Movies: when two have the same title, you choose | Music: named and sorted into `Artist/Album (Year)` from the tags |
+| ![Messy comic file names turned into series and number, in series folders, dark theme](docs/screenshots/comics.png) | ![Photos from two folders, numbered per folder with the folder name](docs/screenshots/photos.png) |
+| Comics: series, number and series folders, offline (dark theme) | Photos numbered per folder, with the folder name |
+| ![Built-in manual](docs/screenshots/help.png) | ![About, with the data sources](docs/screenshots/about.png) |
+| Built-in manual, in English, Portuguese and Spanish | About, with the data sources |
+
+All names in the screenshots are made up.
 
 The functional specification is in [SPEC.md](SPEC.md).
 

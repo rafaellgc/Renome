@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tmdbImage } from "./tmdbImages.svelte";
   import { t } from "./i18n";
   import type { EpKey, Episode, EpisodeState, Show } from "./types";
 
@@ -111,7 +112,7 @@
     if (n >= 1 && n <= Math.min(9, alts.length)) choose(alts[n - 1]);
   }
 
-  const still = (p: string | null) => (p ? `https://image.tmdb.org/t/p/w300${p}` : null);
+  const still = (p: string | null) => tmdbImage("w300", p);
   const date = (d: string | null) => (d ? new Date(`${d}T12:00`).toLocaleDateString() : "");
 </script>
 

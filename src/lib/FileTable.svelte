@@ -255,7 +255,12 @@
               {/if}
             {/if}
           </span>
-          <span class="c-dir" title={item.dir}>{dir(item.dir)}</span>
+          <!-- Moving: where to, without hovering over the folder icon. -->
+          {#if item.folder}
+            <span class="c-dir into-dir" title={t("intoFolder", { folder: item.folder })}>{`→ ${item.folder}`}</span>
+          {:else}
+            <span class="c-dir" title={item.dir}>{dir(item.dir)}</span>
+          {/if}
           <span class="c-size">{item.isDir ? "" : size(item.size)}</span>
           <span class="c-date">{date(item.modified)}</span>
         </div>
@@ -279,7 +284,7 @@
   }
   .head, .row {
     display: grid;
-    grid-template-columns: 28px minmax(140px, 1fr) minmax(160px, 1.2fr) minmax(90px, 0.6fr) 76px 120px;
+    grid-template-columns: 28px minmax(140px, 1fr) minmax(160px, 1.2fr) minmax(90px, 0.8fr) 76px 120px;
     align-items: center;
     gap: 8px;
     padding: 0 10px;
@@ -328,6 +333,8 @@
   .row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .c-size, .c-date { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
   .row .c-dir { color: var(--muted); direction: rtl; text-align: left; }
+  /* Where it goes reads from its start (the artist, the show). */
+  .row .c-dir.into-dir { color: var(--accent); direction: ltr; }
   .c-new { display: flex; align-items: center; gap: 4px; }
   .name { overflow: hidden; text-overflow: ellipsis; }
   .row.conflict .name { color: var(--danger); }

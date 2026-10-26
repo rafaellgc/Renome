@@ -303,6 +303,16 @@ async fn apply(
     .await
 }
 
+/// Where TMDB images are shown from, without the size (`…/t/p`): tests
+/// point it elsewhere with `RENOME_TMDB_IMAGES`.
+#[tauri::command]
+fn tmdb_images() -> String {
+    std::env::var("RENOME_TMDB_IMAGES")
+        .ok()
+        .and_then(|b| b.strip_suffix("/original").map(str::to_string))
+        .unwrap_or_else(|| "https://image.tmdb.org/t/p".into())
+}
+
 #[tauri::command]
 async fn tmdb_check(key: String) -> Result<(), String> {
     tmdb::Client::new(&key, "en-US").check().await
@@ -1064,6 +1074,7 @@ pub fn run() {
             gcd_sign_in,
             gcd_sign_out,
             save_text,
+            tmdb_images,
             recover,
             write_book_sidecars,
             apply,

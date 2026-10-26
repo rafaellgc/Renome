@@ -508,6 +508,7 @@ ${ex("Series_Name_012_(2019)_(Digital)_(group).cbz", "Series Name #012 (2019).cb
   <li>in <b>Current name</b>, what goes away is shown <span class="del">in red, struck through</span>;</li>
   <li>in <b>New name</b>, what comes in is shown <span class="ins">in blue</span>;</li>
   <li>what only moved (the author now before the title, for instance) is shown <span class="mov">with a dotted underline</span>, on both sides.</li>
+  <li>a file that moves to another folder gets a folder icon in its new name, and the <b>Folder</b> column shows, in blue, where it goes (<code>→ Artist/Album (2019)</code>).</li>
 </ul>
 <p>In the first column, ● means the file will be renamed, a red <span class="bad">!</span> is a conflict and a yellow <span class="warn">!</span> is a warning. Hover to see why.</p>
 <h4>Editing by hand</h4>
@@ -521,7 +522,7 @@ ${ex("Series_Name_012_(2019)_(Digital)_(group).cbz", "Series Name #012 (2019).cb
   <li>a file with that name already exists outside the list (nothing is overwritten);</li>
   <li>on Windows: the characters <code>\\ : * ? " &lt; &gt; |</code>, or a dot or space at the end of the name.</li>
 </ul>
-<p>On other systems, those Windows characters only cause a yellow warning, which can be turned off in Options. On Windows and macOS, names that differ only in case count as the same.</p>
+<p>On other systems, those Windows characters only cause a yellow warning, which can be turned off in Options. On Windows, macOS and disks that ignore case (exFAT, FAT, NTFS, as on USB sticks), names that differ only in case count as the same.</p>
 <p><b>Export list</b>, in the footer, saves the list as shown (folder, current name, new name, folder it moves into, status and problem) to a CSV file, which opens in any spreadsheet. It helps check a large batch calmly before renaming.</p>
 `,
   },

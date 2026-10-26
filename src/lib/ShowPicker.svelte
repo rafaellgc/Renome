@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tmdbImage } from "./tmdbImages.svelte";
   import { api } from "./api";
   import { t, tError } from "./i18n";
   import { settings, tmdbLang } from "./settings.svelte";
@@ -43,7 +44,7 @@
     if (n >= 1 && n <= Math.min(9, candidates.length)) onpick(candidates[n - 1]);
   }
 
-  const poster = (p: string | null) => (p ? `https://image.tmdb.org/t/p/w185${p}` : null);
+  const poster = (p: string | null) => tmdbImage("w185", p);
 </script>
 
 <svelte:window {onkeydown} />

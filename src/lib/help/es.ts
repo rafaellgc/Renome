@@ -508,6 +508,7 @@ ${ex("Nombre_de_la_Serie_012_(2019)_(Digital)_(grupo).cbz", "Nombre de la Serie 
   <li>en <b>Nombre actual</b>, lo que se va aparece <span class="del">en rojo, tachado</span>;</li>
   <li>en <b>Nuevo nombre</b>, lo que entra aparece <span class="ins">en azul</span>;</li>
   <li>lo que solo cambió de lugar (el autor que pasó delante del título, por ejemplo) aparece <span class="mov">subrayado con puntos</span>, en los dos lados.</li>
+  <li>un archivo que cambia de carpeta recibe un icono de carpeta en el nombre nuevo, y la columna <b>Carpeta</b> muestra, en azul, adónde va (<code>→ Artista/Álbum (2019)</code>).</li>
 </ul>
 <p>En la primera columna, ● indica que el archivo se renombrará, un <span class="bad">!</span> rojo es un conflicto y un <span class="warn">!</span> amarillo es un aviso. Pase el ratón para ver el motivo.</p>
 <h4>Editar a mano</h4>
@@ -521,7 +522,7 @@ ${ex("Nombre_de_la_Serie_012_(2019)_(Digital)_(grupo).cbz", "Nombre de la Serie 
   <li>ya existe un archivo con ese nombre fuera de la lista (nada se sobrescribe);</li>
   <li>en Windows: los caracteres <code>\\ : * ? " &lt; &gt; |</code>, o un punto o espacio al final del nombre.</li>
 </ul>
-<p>En otros sistemas, esos caracteres de Windows solo generan un aviso amarillo, que se puede desactivar en Opciones. En Windows y macOS, los nombres que solo difieren en mayúsculas cuentan como iguales.</p>
+<p>En otros sistemas, esos caracteres de Windows solo generan un aviso amarillo, que se puede desactivar en Opciones. En Windows, macOS y los discos que no distinguen mayúsculas (exFAT, FAT, NTFS, como los pendrives), los nombres que solo difieren en mayúsculas cuentan como iguales.</p>
 <p><b>Exportar lista</b>, en el pie, guarda la lista tal como se ve (carpeta, nombre actual, nombre nuevo, carpeta a la que va, estado y problema) en un archivo CSV, que se abre en cualquier hoja de cálculo. Sirve para revisar con calma un lote grande antes de renombrar.</p>
 `,
   },

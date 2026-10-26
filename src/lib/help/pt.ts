@@ -508,6 +508,7 @@ ${ex("Nome_da_Serie_012_(2019)_(Digital)_(grupo).cbz", "Nome da Série #012 (201
   <li>no <b>Nome atual</b>, o que vai sair aparece <span class="del">em vermelho, riscado</span>;</li>
   <li>no <b>Novo nome</b>, o que entra aparece <span class="ins">em azul</span>;</li>
   <li>o que só mudou de lugar (o autor que passou para a frente do título, por exemplo) aparece <span class="mov">sublinhado com pontinhos</span>, nos dois lados.</li>
+  <li>um arquivo que vai mudar de pasta ganha um ícone de pasta no novo nome, e a coluna <b>Pasta</b> mostra, em azul, para onde ele vai (<code>→ Artista/Álbum (2019)</code>).</li>
 </ul>
 <p>Na primeira coluna, ● indica que o arquivo será renomeado, <span class="bad">!</span> vermelho indica um conflito e <span class="warn">!</span> amarelo indica um aviso. Passe o mouse para ver o motivo.</p>
 <h4>Editar à mão</h4>
@@ -521,7 +522,7 @@ ${ex("Nome_da_Serie_012_(2019)_(Digital)_(grupo).cbz", "Nome da Série #012 (201
   <li>já existe um arquivo com esse nome fora da lista (nada é sobrescrito);</li>
   <li>no Windows: os caracteres <code>\\ : * ? " &lt; &gt; |</code>, ou ponto ou espaço no fim do nome.</li>
 </ul>
-<p>Em outros sistemas, esses caracteres do Windows só geram um aviso amarelo, desligável nas Opções. No Windows e no macOS, nomes que só diferem em maiúsculas contam como iguais.</p>
+<p>Em outros sistemas, esses caracteres do Windows só geram um aviso amarelo, desligável nas Opções. No Windows, no macOS e em discos que não diferenciam maiúsculas (exFAT, FAT, NTFS, como pendrives), nomes que só diferem em maiúsculas contam como iguais.</p>
 <p><b>Exportar lista</b>, no rodapé, salva a lista como está na tela (pasta, nome atual, novo nome, pasta para onde vai, situação e problema) num arquivo CSV, que abre em qualquer planilha. Serve para conferir com calma um lote grande antes de renomear.</p>
 `,
   },
