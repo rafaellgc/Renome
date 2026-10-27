@@ -63,6 +63,11 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.12.2" date="2026-10-27">
+      <description>
+        <p>An optional tip link in the status bar and the About tab. Renome stays free.</p>
+      </description>
+    </release>
     <release version="0.12.1" date="2026-10-27">
       <description>
         <p>Album playlists are made even when the album has a cue sheet; a rule turned off can no longer be changed or searched with.</p>
