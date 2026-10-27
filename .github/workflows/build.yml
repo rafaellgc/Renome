@@ -2,7 +2,8 @@
 # - On every push/PR: builds and tests, and keeps the installers as run
 #   artifacts (Actions tab → run → Artifacts).
 # - When a v* tag is pushed (e.g. v0.2.0): creates a draft GitHub Release
-#   with all the installers attached.
+#   with all the installers attached, a Flatpak bundle included (also made
+#   when the workflow is run by hand).
 name: build
 
 on:
@@ -69,7 +70,7 @@ jobs:
           releaseName: "Renome ${{ github.ref_name }}"
           releaseBody: |
             **Downloads**
-            - Linux: `.AppImage` (any distro), `.deb` or `.rpm`
+            - Linux: `.AppImage` (any distro), `.flatpak`, `.deb` or `.rpm`
             - Windows: `_x64-setup.exe` (or `.msi`)
             - macOS: `_universal.dmg` (Intel and Apple Silicon)
 
@@ -87,3 +88,38 @@ jobs:
             target/**/release/bundle/**/*-setup.exe
             target/**/release/bundle/**/*.dmg
           if-no-files-found: ignore
+
+  flatpak:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Flatpak tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          # Ubuntu 24.04 keeps bubblewrap from making its sandbox otherwise.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+
+      - name: Build the bundle
+        run: |
+          flatpak-builder --user --install-deps-from=flathub --disable-rofiles-fuse --force-clean \
+            --state-dir="$RUNNER_TEMP/fb-state" --repo="$RUNNER_TEMP/repo" \
+            "$RUNNER_TEMP/build-dir" flatpak/io.github.rafaellgc.Renome.yml
+          # The bundle names Flathub, where the GNOME runtime comes from.
+          flatpak build-bundle "$RUNNER_TEMP/repo" "Renome_${GITHUB_REF_NAME#v}_x86_64.flatpak" \
+            io.github.rafaellgc.Renome --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" Renome_*.flatpak --clobber
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: renome-flatpak
+          path: Renome_*.flatpak

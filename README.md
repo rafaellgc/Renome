@@ -119,13 +119,18 @@ Installers are attached to each [release](https://github.com/rafaellgc/Renome/re
 
 | System | Files |
 |---|---|
-| Linux | `.AppImage` (any distro), `.deb`, `.rpm` |
+| Linux | `.AppImage` (any distro), `.flatpak`, `.deb`, `.rpm` |
 | Windows | `-setup.exe` or `.msi` |
 | macOS | `.dmg` (Intel and Apple Silicon) |
 
 The installers are not signed, so Windows (SmartScreen) and macOS
 (Gatekeeper) will show a warning the first time. On macOS, right-click the
 app and choose *Open*.
+
+The Flatpak is not on Flathub; install the downloaded file with a double
+click or `flatpak install --user Renome_<version>_x86_64.flatpak`. The
+GNOME runtime it needs comes from Flathub. It does not update itself:
+install the new file when a release comes out.
 
 ## Layout
 
@@ -175,7 +180,9 @@ The given paths go into the initial list.
 
 - on every push to `main`, the installers are under *Actions → run → Artifacts*;
 - pushing a tag (`git tag v0.2.0 && git push --tags`) creates a draft
-  *Release* with all of them attached.
+  *Release* with all of them attached, and a Flatpak bundle built from
+  `flatpak/io.github.rafaellgc.Renome.yml` (also made when the workflow is
+  run by hand).
 
 ## Credits
 
