@@ -694,7 +694,9 @@ A "?" button (or F1) opens a window with three tabs:
   preview and conflicts, renaming and undoing, recipes, shortcuts, options.
 - **About**: icon, version, description, author, credits (developed with
   the help of Claude, by Anthropic), license (a link to the Licenses tab)
-  and a link to the repository.
+  a link to the repository and an optional tip link (Ko-fi), which the
+  status bar also shows at its right end, small. Nothing in the program
+  depends on tipping.
 - **Licenses**: Renome's MIT license in full, and the open source
   components built into the app, with a filter by name or license; each
   one opens to its link and license texts. The list is made when building

@@ -182,6 +182,9 @@ The given paths go into the initial list.
 Created by Rafael Luciano Gonçalves Correia, developed with the help of
 Claude (Anthropic).
 
+Renome is and will stay free. If it helps you and you would like to give
+something back, you can [leave a tip on Ko-fi](https://ko-fi.com/rafaellgc).
+
 ## License
 
 [MIT](LICENSE). The licenses of the open source components built into the

@@ -26,6 +26,7 @@
   <launchable type="desktop-id">io.github.rafaellgc.Renome.desktop</launchable>
   <url type="homepage">https://github.com/rafaellgc/Renome</url>
   <url type="bugtracker">https://github.com/rafaellgc/Renome/issues</url>
+  <url type="donation">https://ko-fi.com/rafaellgc</url>
   <url type="vcs-browser">https://github.com/rafaellgc/Renome</url>
   <screenshots>
     <screenshot type="default">

@@ -3,6 +3,7 @@
   import { listen } from "@tauri-apps/api/event";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { open, save } from "@tauri-apps/plugin-dialog";
+  import { openUrl } from "@tauri-apps/plugin-opener";
   import { api } from "$lib/api";
   import { authorSpellings } from "$lib/authors";
   import Dialog from "$lib/Dialog.svelte";
@@ -1649,6 +1650,7 @@
     {/if}
     <span class="spacer"></span>
     <span class="notice">{notice}</span>
+    <button class="link" title={t("donateHint")} onclick={() => openUrl("https://ko-fi.com/rafaellgc")}>♥ {t("donate")}</button>
   </footer>
 </div>
 {/if}

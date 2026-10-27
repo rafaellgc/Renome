@@ -39,6 +39,7 @@
   const AUTHOR = "Rafael Luciano Gonçalves Correia";
   const EMAIL = "rafaellgcorreia@gmail.com";
   const REPO = "https://github.com/rafaellgc/Renome";
+  const DONATE = "https://ko-fi.com/rafaellgc";
 
   /** The services the lookups use, credited as their terms ask. */
   const SOURCES: { key: "sourcesMusic" | "sourcesBooks" | "sourcesComics"; items: { name: string; url: string; note?: "gcdLicense" | "acoustidTerms" }[] }[] = [
@@ -190,7 +191,10 @@
           <button class="link" onclick={() => (tab = "licenses")}>{t("aboutLicense")}</button><br />
           © 2026 {AUTHOR}
         </p>
-        <button class="primary-soft" onclick={() => openUrl(REPO)}>{t("aboutRepo")}</button>
+        <div class="about-links">
+          <button class="primary-soft" onclick={() => openUrl(REPO)}>{t("aboutRepo")}</button>
+          <button class="primary-soft" title={t("donateHint")} onclick={() => openUrl(DONATE)}>♥ {t("donate")}</button>
+        </div>
         <div class="tmdb">
           <button class="logo" title="themoviedb.org" onclick={() => openUrl("https://www.themoviedb.org")}>
             <img src="/tmdb-logo.svg" alt="TMDB" width="140" />
@@ -337,6 +341,7 @@
   .link { border: none; background: none; height: auto; padding: 0; color: var(--accent); }
   .link:hover:not(:disabled) { background: none; text-decoration: underline; }
   .muted { color: var(--muted); }
+  .about-links { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
   .tmdb { margin-top: 18px; display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: 420px; }
   .tmdb .logo { border: none; background: none; height: auto; padding: 4px; }
   .tmdb p { font-size: 12px; margin: 0; }
