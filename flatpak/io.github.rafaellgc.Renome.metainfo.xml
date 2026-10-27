@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.rafaellgc.Renome</id>
+  <name>Renome</name>
+  <summary>Rename many files at once, and undo it</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="io.github.rafaellgc">
+    <name>Rafael Luciano Gonçalves Correia</name>
+  </developer>
+  <description>
+    <p>
+      Renome renames hundreds of files at once. Stack a few rules, see every
+      new name before anything changes, and undo it all from the history,
+      even after closing the app.
+    </p>
+    <ul>
+      <li>Rules: replace text, regular expressions, rearrange parts, case, insert dates (including when a photo was taken), numbering, remove characters or ranges</li>
+      <li>Movies and TV shows named from TMDB in the format Jellyfin, Kodi and Emby recognize</li>
+      <li>Music named and sorted from its tags, optionally fixed with MusicBrainz</li>
+      <li>Books named from Open Library, comics from their ComicInfo.xml, file name or a catalog</li>
+      <li>Files are never overwritten; a rename stopped halfway is recovered on the next start</li>
+      <li>Built-in manual; interface in English, Portuguese and Spanish</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.rafaellgc.Renome.desktop</launchable>
+  <url type="homepage">https://github.com/rafaellgc/Renome</url>
+  <url type="bugtracker">https://github.com/rafaellgc/Renome/issues</url>
+  <url type="vcs-browser">https://github.com/rafaellgc/Renome</url>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Text rules cleaning up episode names, with what changes highlighted</caption>
+      <image>https://raw.githubusercontent.com/rafaellgc/Renome/main/docs/screenshots/main.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Choosing between two movies with the same title</caption>
+      <image>https://raw.githubusercontent.com/rafaellgc/Renome/main/docs/screenshots/movies.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Songs named and sorted into artist and album folders from their tags</caption>
+      <image>https://raw.githubusercontent.com/rafaellgc/Renome/main/docs/screenshots/music.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Comics named by series and number, in series folders</caption>
+      <image>https://raw.githubusercontent.com/rafaellgc/Renome/main/docs/screenshots/comics.png</image>
+    </screenshot>
+  </screenshots>
+  <categories>
+    <category>Utility</category>
+  </categories>
+  <keywords>
+    <keyword>rename</keyword>
+    <keyword>batch</keyword>
+    <keyword>files</keyword>
+  </keywords>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.12.1" date="2026-10-27">
+      <description>
+        <p>Album playlists are made even when the album has a cue sheet; a rule turned off can no longer be changed or searched with.</p>
+      </description>
+    </release>
+    <release version="0.12.0" date="2026-10-26">
+      <description>
+        <p>The Folder column shows where a file goes; complete license texts; every data source credited.</p>
+      </description>
+    </release>
+    <release version="0.11.0" date="2026-10-26">
+      <description>
+        <p>Renames and undos stopped halfway are recovered; the window keeps responding during long work; the list works from the keyboard.</p>
+      </description>
+    </release>
+  </releases>
+</component>

@@ -568,6 +568,8 @@
         ? await api.apply(payload(), $state.snapshot(overrides), $state.snapshot(view))
         : { done: [], errors: [], historyId: null, lists: 0, listsRemoved: 0 };
       let saved = 0;
+      // Albums whose playlist was there already (and follows the renames).
+      let keptLists = 0;
       // Renamed without a history entry (it could not be written): nothing
       // more is written, or undo could not take it back.
       const recorded = !r.done.length || !!r.historyId;
@@ -596,7 +598,12 @@
       if (recorded && mrule?.type === "music" && mrule.playlist) {
         const parent = (p: string) => p.slice(0, Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\")));
         const dirs = [...new Set(r.done.filter((op) => isAudio(op.to)).map((op) => parent(op.to)).concat(listOnly))];
-        if (dirs.length) saved += await writeMeta(() => api.writePlaylists(r.historyId, dirs));
+        if (dirs.length)
+          saved += await writeMeta(async () => {
+            const res = await api.writePlaylists(r.historyId, dirs);
+            keptLists = res.kept;
+            return res;
+          });
       }
       let tagged = 0;
       if (recorded && mrule?.type === "music" && mrule.writeTags) {
@@ -660,6 +667,7 @@
         r.lists ? t("listsN", { n: r.lists }) : "",
         r.listsRemoved ? t("listsRemovedN", { n: r.listsRemoved }) : "",
         saved ? t("sidecarsN", { n: saved }) : "",
+        keptLists ? t("playlistsKeptN", { n: keptLists }) : "",
         tagged ? t("tagsN", { n: tagged }) : "",
         r.errors.length ? t("errorsN", { n: r.errors.length }) : "",
       ].filter(Boolean).join(" · ");

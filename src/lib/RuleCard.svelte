@@ -70,7 +70,8 @@
   </header>
 
   {#if open}
-    <div class="body">
+    <!-- A rule turned off is left as it is: no edits, no searches. -->
+    <fieldset class="body" disabled={!step.enabled}>
       {#if r.type === "replace"}
         <label>{t("find")} <input bind:value={r.find} spellcheck="false" /></label>
         <label>{t("replaceWith")} <input bind:value={r.replace} spellcheck="false" /></label>
@@ -324,7 +325,7 @@
 
       {#if summary}<p class="hint">{summary}</p>{/if}
       {#if error}<p class="error">{error}</p>{/if}
-    </div>
+    </fieldset>
   {/if}
 </article>
 
@@ -394,6 +395,9 @@
     flex-direction: column;
     gap: 8px;
     padding: 4px 12px 12px;
+    margin: 0;
+    border: none;
+    min-width: 0;
   }
   label {
     display: flex;

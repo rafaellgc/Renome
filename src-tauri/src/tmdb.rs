@@ -497,6 +497,8 @@ pub struct SidecarReport {
     pub created: Vec<PathBuf>,
     /// File name and reason.
     pub errors: Vec<(String, String)>,
+    /// Albums that already had a playlist (kept, and kept up to date).
+    pub kept: usize,
 }
 
 fn sibling(video: &Path, suffix: &str) -> PathBuf {

@@ -63,7 +63,7 @@ export const api = {
   writeTags: (historyId: string | null, items: { path: string; song: SongMatch }[], cover: boolean, clean: boolean) =>
     invoke<{ written: number; errors: [string, string][] }>("write_tags", { historyId, items, cover, clean }),
   writePlaylists: (historyId: string | null, dirs: string[]) =>
-    invoke<{ created: string[]; errors: [string, string][] }>("write_playlists", { historyId, dirs }),
+    invoke<{ created: string[]; errors: [string, string][]; kept: number }>("write_playlists", { historyId, dirs }),
   writeCovers: (historyId: string | null, items: { dir: string; release: string }[]) =>
     invoke<{ created: string[]; errors: [string, string][] }>("write_covers", { historyId, items }),
   writeSidecars: (

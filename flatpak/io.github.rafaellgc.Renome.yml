@@ -1,0 +1,55 @@
+# Local Flatpak build of Renome (network allowed while building).
+# flatpak run org.flatpak.Builder --user --install --force-clean build-dir flatpak/io.github.rafaellgc.Renome.yml
+id: io.github.rafaellgc.Renome
+runtime: org.gnome.Platform
+runtime-version: '51'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+  - org.freedesktop.Sdk.Extension.node22
+command: renome
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # Movie, show, music, book and comic lookups.
+  - --share=network
+  # A renamer works on whole folders (moves, new series folders, undo),
+  # not on single files picked through the portal.
+  - --filesystem=home
+  - --filesystem=/media
+  - --filesystem=/run/media
+  - --filesystem=/mnt
+modules:
+  - name: renome
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node22/bin
+      build-args:
+        - --share=network
+      env:
+        CARGO_HOME: /run/build/renome/cargo
+        npm_config_cache: /run/build/renome/npm-cache
+    build-commands:
+      - npm ci
+      - npm run tauri build -- --no-bundle
+      - install -Dm755 target/release/renome /app/bin/renome
+      - install -Dm644 src-tauri/icons/32x32.png /app/share/icons/hicolor/32x32/apps/io.github.rafaellgc.Renome.png
+      - install -Dm644 src-tauri/icons/64x64.png /app/share/icons/hicolor/64x64/apps/io.github.rafaellgc.Renome.png
+      - install -Dm644 src-tauri/icons/128x128.png /app/share/icons/hicolor/128x128/apps/io.github.rafaellgc.Renome.png
+      - install -Dm644 src-tauri/icons/128x128@2x.png /app/share/icons/hicolor/256x256/apps/io.github.rafaellgc.Renome.png
+      - install -Dm644 src-tauri/icons/icon.png /app/share/icons/hicolor/512x512/apps/io.github.rafaellgc.Renome.png
+      - install -Dm644 flatpak/io.github.rafaellgc.Renome.desktop /app/share/applications/io.github.rafaellgc.Renome.desktop
+      - install -Dm644 flatpak/io.github.rafaellgc.Renome.metainfo.xml /app/share/metainfo/io.github.rafaellgc.Renome.metainfo.xml
+    sources:
+      - type: dir
+        path: ..
+        skip:
+          - target
+          - node_modules
+          - build
+          - .svelte-kit
+          - .git
+          - .flatpak-builder
+          - build-dir

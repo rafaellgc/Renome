@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=Renome
+GenericName=Batch File Renamer
+GenericName[pt]=Renomeador de arquivos em lote
+GenericName[pt_BR]=Renomeador de arquivos em lote
+GenericName[es]=Renombrador de archivos por lotes
+Comment=Rename many files at once, preview every new name and undo it all
+Comment[pt]=Renomeie muitos arquivos de uma vez, veja cada novo nome antes e desfaça tudo
+Comment[pt_BR]=Renomeie muitos arquivos de uma vez, veja cada novo nome antes e desfaça tudo
+Comment[es]=Renombre muchos archivos a la vez, vea cada nombre nuevo antes y deshágalo todo
+Exec=renome %F
+Icon=io.github.rafaellgc.Renome
+Terminal=false
+Categories=Utility;FileTools;
+Keywords=rename;batch;files;movies;music;comics;renomear;renombrar;
+StartupWMClass=renome

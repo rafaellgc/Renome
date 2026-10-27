@@ -54,7 +54,7 @@ export const en: Section[] = [
     html: `
 <p>Rules are applied <b>from top to bottom</b>, each on the result of the previous one. Order matters: numbering and then changing case is not the same as the other way round.</p>
 <ul>
-  <li>The <b>checkbox</b> in the title turns the rule on and off without deleting it.</li>
+  <li>The <b>checkbox</b> in the title turns the rule on and off without deleting it. While off, it is locked: turn it on to change its options or search.</li>
   <li><b>↑ ↓</b> change the order; <b>✕</b> removes the rule; clicking the title collapses the card.</li>
   <li>A rule with an error (an invalid expression, say) gets a red border and is skipped until it is fixed.</li>
 </ul>
@@ -357,7 +357,7 @@ ${ex("01.mp3", "01 - Song Title.mp3")}
   <li>Covers, <code>.cue</code>, <code>.log</code> and other files in the album's folder go along with most of the folder's songs (songs from other albums that are not bonus tracks follow their own). Subfolders without songs (<code>Artwork</code>, <code>Scans</code>) go along with the same name; so do files in the folder above <code>CD 01</code>/<code>CD 02</code>. If two such files would get the same name (a <code>log.txt</code> on each disc), they get their folder's name: <code>log (CD 01).txt</code>.</li>
   <li>Artist or album names that differ only in case (<code>artist name</code> and <code>Artist Name</code>, from different albums' tags) become one folder: the one already on disk, or the most used spelling.</li>
   <li>Old folders left empty are deleted; undo puts everything back.</li>
-  <li><b>Create a playlist for each album</b>: after renaming, writes <code>&lt;folder name&gt;.m3u8</code> in each album's folder, with its songs (from every disc) in disc and track order. Albums whose names are already right get one too (they count in the <b>Rename</b> button). Not created when the album already has a <code>.cue</code> or a playlist, nor for a single song. Undo deletes the playlist created.</li>
+  <li><b>Create a playlist for each album</b>: after renaming, writes <code>&lt;folder name&gt;.m3u8</code> in each album's folder, with its songs (from every disc) in disc and track order. Albums whose names are already right get one too (they count in the <b>Rename</b> button). Not created when the album already has a playlist (<code>.m3u</code> or <code>.m3u8</code>): that one is updated to the new names, and the summary at the end says so. A <code>.cue</code> does not stop it, since it describes the disc and most players do not use it as a playlist. Not created for a single song either. Undo deletes the playlist created.</li>
   <li><code>.cue</code> files and <code>.m3u</code> playlists list the songs' new names (see <b>Renaming and undoing</b>).</li>
 </ul>
 <h4>Fixing with MusicBrainz</h4>

@@ -54,7 +54,7 @@ export const es: Section[] = [
     html: `
 <p>Las reglas se aplican <b>de arriba abajo</b>, cada una sobre el resultado de la anterior. El orden importa: numerar y luego cambiar mayúsculas no da lo mismo que al revés.</p>
 <ul>
-  <li>La <b>casilla</b> del título activa y desactiva la regla sin borrarla.</li>
+  <li>La <b>casilla</b> del título activa y desactiva la regla sin borrarla. Desactivada, queda bloqueada: para cambiar sus opciones o buscar, actívela antes.</li>
   <li><b>↑ ↓</b> cambian el orden; <b>✕</b> quita la regla; un clic en el título pliega la tarjeta.</li>
   <li>Una regla con error (una expresión inválida, por ejemplo) queda con borde rojo y se ignora hasta que se corrija.</li>
 </ul>
@@ -357,7 +357,7 @@ ${ex("01.mp3", "01 - Título de la Canción.mp3")}
   <li>Las portadas, <code>.cue</code>, <code>.log</code> y otros archivos de la carpeta del álbum van con la mayoría de las canciones de la carpeta (las canciones de otros álbumes que no son pistas extra siguen el suyo). Las subcarpetas sin canciones (<code>Artwork</code>, <code>Scans</code>) van con él, con el mismo nombre; también los archivos de la carpeta de encima de <code>CD 01</code>/<code>CD 02</code>. Si dos de esos archivos quedarían con el mismo nombre (un <code>log.txt</code> en cada disco), reciben el nombre de su carpeta: <code>log (CD 01).txt</code>.</li>
   <li>Los nombres de artista o álbum que solo difieren en mayúsculas (<code>nombre del artista</code> y <code>Nombre del Artista</code>, de etiquetas de álbumes distintos) quedan en una sola carpeta: la que ya existe en el disco o la grafía más usada.</li>
   <li>Las carpetas antiguas que quedan vacías se borran; deshacer lo devuelve todo a su sitio.</li>
-  <li><b>Crear una lista de reproducción por álbum</b>: después de renombrar, graba <code>&lt;nombre de la carpeta&gt;.m3u8</code> en la carpeta de cada álbum, con las canciones (de todos los discos) en el orden de los discos y pistas. También vale para los álbumes que ya tienen los nombres correctos (cuentan en el botón <b>Renombrar</b>). No se crea si el álbum ya tiene un <code>.cue</code> o una lista, ni para una canción sola. Deshacer borra la lista creada.</li>
+  <li><b>Crear una lista de reproducción por álbum</b>: después de renombrar, graba <code>&lt;nombre de la carpeta&gt;.m3u8</code> en la carpeta de cada álbum, con las canciones (de todos los discos) en el orden de los discos y pistas. También vale para los álbumes que ya tienen los nombres correctos (cuentan en el botón <b>Renombrar</b>). No se crea si el álbum ya tiene una lista (<code>.m3u</code> o <code>.m3u8</code>): esa se actualiza con los nombres nuevos, y el resumen del final lo avisa. Un <code>.cue</code> no lo impide, porque describe el disco y la mayoría de los reproductores no lo usan como lista. Tampoco se crea para una canción sola. Deshacer borra la lista creada.</li>
   <li>Los archivos <code>.cue</code> y las listas <code>.m3u</code> pasan a citar los nuevos nombres de las canciones (vea <b>Renombrar y deshacer</b>).</li>
 </ul>
 <h4>Corregir con MusicBrainz</h4>

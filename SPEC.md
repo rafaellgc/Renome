@@ -40,7 +40,8 @@ This document describes **what** the program does, not **how**.
 ## 2. Rules (pipeline)
 
 Transformations are **rules** stacked and applied in sequence to the name.
-Each rule can be turned on/off, reordered and removed. The preview updates
+Each rule can be turned on/off, reordered and removed; a rule turned off
+is locked (no option changes, no searches) until turned on. The preview updates
 live. The rule set can be saved and loaded as a *preset* (JSON).
 
 By default rules act on the name without the extension; text rules can
@@ -313,7 +314,8 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   to it) listing its songs and those of its
   disc folders, by disc (the disc folder's number, else the tag), track
   number and file name; not when it has fewer than two songs or already
-  has a `.cue`, `.m3u` or `.m3u8`. Folders of visible songs that keep
+  has a `.m3u` or `.m3u8` (which follows the renames; the summary counts
+  those albums); a `.cue` does not stop it. Folders of visible songs that keep
   their names get one too, and count in the Rename button. Recorded in
   the history and deleted by undo.
 - MusicBrainz (no key; `User-Agent: Renome/<version> ( <repo> )`; one

@@ -18,6 +18,21 @@ fn is_list(path: &Path) -> bool {
         .is_some_and(|e| matches!(e.to_lowercase().as_str(), "cue" | "m3u" | "m3u8"))
 }
 
+/// A playlist (`.m3u`, `.m3u8`); a cue sheet describes the disc instead.
+fn is_playlist(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| matches!(e.to_lowercase().as_str(), "m3u" | "m3u8"))
+}
+
+/// Whether the album in `dir` already has a playlist (which renames keep
+/// up to date), so none is written for it.
+pub fn has_playlist(dir: &Path) -> bool {
+    fs::read_dir(music::album_dir(dir))
+        .map(|rd| rd.flatten().any(|e| is_playlist(&e.path())))
+        .unwrap_or(false)
+}
+
 /// `a/./b/../c` → `a/c`, without touching the disk.
 fn normalize(p: &Path) -> PathBuf {
     let mut out = PathBuf::new();
@@ -326,14 +341,15 @@ type Song = (PathBuf, Option<u32>);
 
 /// The album in `dir` (the folder above a disc folder counts as the
 /// album's) and its songs, those of its disc folders included, each with
-/// its disc folder's number; `None` when the album already has a cue
-/// sheet or playlist, or has fewer than two songs.
+/// its disc folder's number; `None` when the album already has a
+/// playlist (a cue sheet does not count: it describes the disc), or has
+/// fewer than two songs.
 fn album_songs(dir: &Path) -> Option<(&Path, Vec<Song>)> {
     let dir = music::album_dir(dir);
     let mut folders = vec![(dir.to_path_buf(), None)];
     for e in fs::read_dir(dir).ok()?.flatten() {
         let p = e.path();
-        if is_list(&p) {
+        if is_playlist(&p) {
             return None;
         }
         if p.is_dir()
@@ -544,8 +560,13 @@ mod tests {
             "#EXTM3U\n#EXTINF:-1,01 - a\nCD 1/01 - a.flac\n#EXTINF:-1,02 - b\n\
              CD 1/02 - b.flac\n#EXTINF:-1,01 - c\nCD 2/01 - c.flac\n"
         );
+        // A cue sheet is no playlist: one is still written.
+        fs::write(album.join("album.cue"), "").unwrap();
+        assert!(album_playlist(&album).is_some());
+        assert!(!has_playlist(&album));
         // An album with a playlist keeps it.
         fs::write(album.join("old.m3u"), "").unwrap();
+        assert!(has_playlist(&album.join("CD 1")));
         assert!(album_playlist(&album).is_none());
         assert!(playlist_dir(&album).is_none());
         // A single song needs none.

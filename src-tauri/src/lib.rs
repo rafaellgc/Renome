@@ -853,8 +853,12 @@ async fn write_playlists(
     let mut report = tauri::async_runtime::spawn_blocking(move || {
         let mut report = tmdb::SidecarReport::default();
         let mut seen = HashSet::new();
+        let mut kept = HashSet::new();
         for dir in dirs {
             let Some((path, text)) = renome_core::playlists::album_playlist(&dir) else {
+                if renome_core::playlists::has_playlist(&dir) {
+                    kept.insert(renome_core::music::album_dir(&dir).to_path_buf());
+                }
                 continue;
             };
             if !seen.insert(path.clone()) {
@@ -865,6 +869,7 @@ async fn write_playlists(
                 Err(e) => report.errors.push((path.display().to_string(), e)),
             }
         }
+        report.kept = kept.len();
         report
     })
     .await
