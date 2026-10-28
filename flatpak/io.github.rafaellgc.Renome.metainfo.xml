@@ -63,6 +63,11 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.14.0" date="2026-10-28">
+      <description>
+        <p>Movie and TV show rules touch only videos and subtitles; "Part II" matches "Part 2"; every season in one folder is matched by title; missing episodes can be exported to CSV.</p>
+      </description>
+    </release>
     <release version="0.13.0" date="2026-10-28">
       <description>
         <p>TV shows: aired episodes missing from your seasons show up as faded rows; a folder mixing several shows is looked up show by show; files named after another show are no longer matched to the one searched.</p>
