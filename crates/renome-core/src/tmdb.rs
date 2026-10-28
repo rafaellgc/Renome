@@ -125,8 +125,17 @@ fn words(s: &str) -> Vec<String> {
         .replace('&', " and ")
         .split(|c: char| !c.is_alphanumeric())
         .filter(|w| !w.is_empty())
-        .map(str::to_string)
+        .map(|w| roman(w).map_or_else(|| w.to_string(), |n| n.to_string()))
         .collect()
+}
+
+/// A Roman numeral up to 39 (`ii`, `xiv`), so "Part II" reads as "Part 2".
+fn roman(w: &str) -> Option<u32> {
+    const UNITS: [&str; 10] = ["", "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix"];
+    let tens = w.len() - w.trim_start_matches('x').len();
+    let unit = UNITS.iter().position(|u| *u == &w[tens..])?;
+    let n = tens * 10 + unit;
+    (tens <= 3 && n > 0).then_some(n as u32)
 }
 
 fn bigrams(s: &str) -> Vec<(char, char)> {
@@ -620,8 +629,7 @@ pub fn nfo(d: &Details, lang: &str) -> String {
 /// `.eng.forced`), kept when the movie or episode name replaces the rest.
 /// Codes must be lowercase, so a title such as `No` is not taken for one.
 pub fn subtitle_suffix<'a>(stem: &'a str, ext: &str) -> &'a str {
-    const SUBTITLES: &[&str] = &["srt", "ass", "ssa", "sub", "idx", "vtt", "sup", "smi"];
-    if !SUBTITLES.contains(&ext.to_lowercase().as_str()) {
+    if !is_subtitle(ext) {
         return "";
     }
     let mut start = stem.len();
@@ -650,6 +658,17 @@ fn is_subtitle_tag(s: &str) -> bool {
             && (region.is_empty()
                 || ((2..=4).contains(&region.len())
                     && region.chars().all(|c| c.is_ascii_alphanumeric()))))
+}
+
+pub fn is_subtitle(ext: &str) -> bool {
+    const SUBTITLES: &[&str] = &["srt", "ass", "ssa", "sub", "idx", "vtt", "sup", "smi"];
+    SUBTITLES.contains(&ext.to_lowercase().as_str())
+}
+
+/// The files the movie and TV show rules name: videos and their subtitles
+/// (posters, `.nfo` and other files are left alone).
+pub fn is_screen(ext: &str) -> bool {
+    is_video(ext) || is_subtitle(ext)
 }
 
 pub const IMAGE_BASE: &str = "https://image.tmdb.org/t/p/original";
@@ -787,6 +806,12 @@ mod tests {
 
     #[test]
     fn subtitle_suffixes() {
+        assert_eq!(roman("ii"), Some(2));
+        assert_eq!(roman("xiv"), Some(14));
+        assert_eq!(roman("xxxix"), Some(39));
+        assert_eq!(roman("iiii"), None);
+        assert_eq!(roman("mix"), None);
+        assert_eq!(similarity("Part II", "Part 2"), 1.0);
         assert_eq!(subtitle_suffix("Matrix.1999.pt-BR", "srt"), ".pt-BR");
         assert_eq!(
             subtitle_suffix("Matrix.1999.eng.forced", "srt"),

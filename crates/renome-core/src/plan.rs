@@ -15,7 +15,7 @@ use crate::music::{self, AudioTags};
 use crate::musicbrainz::SongMatch;
 use crate::rules::{Ctx, Move, Pipeline, Rule, RuleError, Step, any_song_tags, song_tags};
 use crate::text;
-use crate::tmdb::MovieMatch;
+use crate::tmdb::{self, MovieMatch};
 use crate::tv::EpisodeMatch;
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -680,10 +680,20 @@ pub fn preview(
         folder_index,
         file,
         now,
-        movie: view.movies.get(&file.path),
-        episode: view.episodes.get(&file.path),
+        // Each lookup names only its own kind of file.
+        movie: view
+            .movies
+            .get(&file.path)
+            .filter(|_| file.is_dir || tmdb::is_screen(&file.ext)),
+        episode: view
+            .episodes
+            .get(&file.path)
+            .filter(|_| !file.is_dir && tmdb::is_screen(&file.ext)),
         song: songs.get(file.path.as_path()),
-        book: view.books.get(&file.path),
+        book: view
+            .books
+            .get(&file.path)
+            .filter(|_| !file.is_dir && crate::ebook::is_book(&file.ext)),
         comic: None,
         comic_folder: None,
     };
@@ -1319,7 +1329,10 @@ mod tests {
                 missing: true,
             },
         }];
-        let files = entries(d.path(), &["show.s01e02.mkv", "show.s01e02.pt-BR.srt"]);
+        let files = entries(
+            d.path(),
+            &["show.s01e02.mkv", "show.s01e02.pt-BR.srt", "poster.jpg"],
+        );
         let mut view = View::default();
         for f in &files {
             view.episodes.insert(f.path.clone(), m.clone());
@@ -1330,7 +1343,9 @@ mod tests {
             names,
             [
                 "Show - S01E02 - Title.mkv",
-                "Show - S01E02 - Title.pt-BR.srt"
+                "Show - S01E02 - Title.pt-BR.srt",
+                // Not a video or subtitle: left alone even with a match.
+                "poster.jpg"
             ]
         );
     }

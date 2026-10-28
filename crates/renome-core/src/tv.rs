@@ -588,6 +588,13 @@ pub fn find(show: &Show, g: &EpisodeGuess) -> EpisodeLookup {
             push(run_together);
             push(absolute(n).map(|k| vec![k]));
         }
+        // Numbered within each season, the seasons in one folder: the
+        // title tells which season.
+        if n < 100 && !g.title.is_empty() {
+            for &s in &seasons {
+                push(Some(vec![(s, n as u16)]));
+            }
+        }
     }
     if let Some(d) = &g.date {
         for e in show
@@ -653,9 +660,11 @@ pub fn find(show: &Show, g: &EpisodeGuess) -> EpisodeLookup {
                 alternatives,
             };
         }
-        let clear = by_number
-            .get(1)
-            .is_none_or(|second| best >= 0.6 && group_sim(second) < best - 0.1);
+        // The very title ("Part 2") beats a close one ("Part 1").
+        let clear = by_number.get(1).is_none_or(|second| {
+            let second = group_sim(second);
+            best >= 0.6 && (second < best - 0.1 || (best == 1.0 && second < 1.0))
+        });
         return if clear {
             found(by_number[0].clone(), by_number)
         } else {
@@ -1526,6 +1535,22 @@ mod tests {
         // No show in the name, in a folder of several shows (none with
         // most of its files).
         assert_eq!(loose, vec![5]);
+    }
+
+    #[test]
+    fn roman_parts() {
+        // Two seasons in one folder, numbered per season: the number fits
+        // both, the part in Roman numerals tells them apart.
+        let mut s = show();
+        s.episodes = vec![
+            ep(1, 2, "Secret Origins - Part 2"),
+            ep(2, 1, "Twilight - Part 1"),
+            ep(2, 2, "Twilight - Part 2"),
+            ep(2, 3, "Clean Slate - Part 1"),
+        ];
+        let f = |name: &str| find(&s, &parse(name, ""));
+        assert_eq!(f("02 - Twilight Part II").choice, vec![(2, 2)]);
+        assert_eq!(f("01 - Twilight Part I").choice, vec![(2, 1)]);
     }
 
     #[test]

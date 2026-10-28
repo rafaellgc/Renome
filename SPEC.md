@@ -76,6 +76,9 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
 - Needs a TMDB API key (v3 key or v4 read token) in Options, plus the
   language of titles (default: the interface's). The key stays in the
   local settings; only the searched title and year are sent to TMDB.
+- Only videos, subtitles and folders take part (looked up and renamed);
+  images, `.nfo` and other files stay as they are, even with a match
+  kept from before.
 - "Search TMDB" looks up the visible files without a movie yet. Title and
   year come from the name: dots and underscores become spaces; the year is
   the last plausible one (1900–next year) with text before it; without a
@@ -138,6 +141,8 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   tag). The show's year and a `[tmdbid-N]` in the names are kept: an id
   most files carry looks the show up directly (by name if it finds
   nothing).
+- Only videos and subtitles take part (looked up and renamed); folders,
+  images, `.nfo` and other files stay as they are.
 - Same key and language as movies. "Find episodes" first finds the show:
   by id (digits, a `themoviedb.org/tv/N` link or `tmdbid-N`), else by name
   (with an optional year) on TMDB's show search, ranked like movies. An
@@ -189,16 +194,21 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   else counted straight through the regular seasons; a bare number is
   counted straight through and also read as season and episode (`201` =
   S02E01); for shows with seasons over 99 episodes, only counted straight
-  through when that episode exists; an
+  through when that episode exists; with a title, a bare number under 100
+  is also that episode of each season (every season in one folder, each
+  numbered from 1); an
   air date gives the episodes aired that day. The title is compared with
   every episode's titles (same similarity as movies; the show's name in
   front is ignored).
+- Title similarity (movies, shows) reads Roman numerals up to 39 as
+  numbers: `Part II` = `Part 2`.
   - Numbers, no title: one candidate is picked; several wait for the user.
   - Numbers and title: when the title's best episode scores ≥ 0.7, is not
     among the number's candidates and beats them by over 0.2, the file
     waits for the user (a conflict), suggesting the title's episode first.
     Otherwise one candidate is picked, or the best of several when it
-    scores ≥ 0.6 and leads by 0.1.
+    scores ≥ 0.6 and leads by 0.1, or is the very title (1.0) and the
+    others are not.
   - Title only: picked when it scores ≥ 0.85 and leads by 0.1; otherwise
     the episodes scoring ≥ 0.4 are suggested.
 - Marks and review as for movies (✓, ?, ✕). The review shows what was

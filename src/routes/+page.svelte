@@ -22,7 +22,7 @@
   import RuleCard from "$lib/RuleCard.svelte";
   import ShowPicker from "$lib/ShowPicker.svelte";
   import { LOCALES, MOD, t, tError } from "$lib/i18n";
-  import { RULE_TYPES, isAudio, isBook, isComic, isVideo, newRule, newStep, splitExt } from "$lib/rules";
+  import { RULE_TYPES, isAudio, isBook, isComic, isScreen, isVideo, newRule, newStep, splitExt } from "$lib/rules";
   import { loadSettings, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
     AlbumState, ApplyReport, BookCandidate, BookMatch, BookState, Candidate, ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, Copies, MbCandidate, SongMatch, EpKey, EpisodeMatch, EpisodeState, MovieMatch, MovieState, MovieStatus, HistoryEntry,
@@ -750,7 +750,7 @@
       return;
     }
     const items = preview.items
-      .filter((i) => movies[i.path]?.status !== "auto" && movies[i.path]?.status !== "chosen")
+      .filter((i) => (i.isDir || isScreen(i.original)) && movies[i.path]?.status !== "auto" && movies[i.path]?.status !== "chosen")
       .map((i) => ({ path: i.path, name: i.isDir ? readName(i) : splitExt(readName(i))[0] }));
     if (!items.length) {
       notice = t("tmdbNoFiles");
@@ -1119,8 +1119,13 @@
       if (ok) showOptions = true;
       return;
     }
-    const all = preview.items.map((i) => ({ path: i.path, name: readName(i), isDir: i.isDir }));
-    if (!all.length) return;
+    const all = preview.items
+      .filter((i) => !i.isDir && isScreen(i.original))
+      .map((i) => ({ path: i.path, name: readName(i), isDir: i.isDir }));
+    if (!all.length) {
+      notice = t("tvNoFiles");
+      return;
+    }
     const key = settings.tmdbKey;
     const lang = tmdbLang();
     const typed = rule.show.trim();
