@@ -341,8 +341,23 @@ pub struct TvDetails {
     pub poster_path: Option<String>,
     #[serde(default)]
     pub seasons: Vec<SeasonInfo>,
+    /// Asked for with `append_to_response=alternative_titles`.
+    #[serde(default)]
+    pub alternative_titles: Option<AltTitles>,
     #[serde(flatten)]
     pub appended: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct AltTitles {
+    #[serde(default)]
+    pub results: Vec<AltTitle>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AltTitle {
+    #[serde(default)]
+    pub title: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -405,6 +420,10 @@ pub struct Show {
     pub poster_path: Option<String>,
     /// Every episode, specials (season 0) included, in order.
     pub episodes: Vec<Episode>,
+    /// Its other titles (other languages, other countries), to tell its
+    /// files from another show's.
+    #[serde(default)]
+    pub aliases: Vec<String>,
 }
 
 static GENERIC: LazyLock<Regex> = LazyLock::new(|| {
@@ -422,7 +441,8 @@ fn is_generic(name: &str) -> bool {
 /// Builds the show from its details and its episodes in several
 /// languages: the user's first, then fallbacks (English, the original).
 /// Each episode is named in the first language that has a real title.
-pub fn build_show(d: &TvDetails, by_lang: &[Vec<ApiEpisode>]) -> Show {
+/// `names`: the show's name in those languages.
+pub fn build_show(d: &TvDetails, by_lang: &[Vec<ApiEpisode>], names: &[String]) -> Show {
     let mut titles: HashMap<(u16, u16), Vec<String>> = HashMap::new();
     for list in by_lang {
         for e in list {
@@ -470,6 +490,16 @@ pub fn build_show(d: &TvDetails, by_lang: &[Vec<ApiEpisode>]) -> Show {
         overview: d.overview.clone().unwrap_or_default(),
         poster_path: d.poster_path.clone(),
         episodes,
+        aliases: {
+            let mut aliases: Vec<String> = Vec::new();
+            let alt = d.alternative_titles.iter().flat_map(|a| &a.results);
+            for n in names.iter().chain(alt.map(|a| &a.title)) {
+                if !n.trim().is_empty() && *n != d.name && !aliases.contains(n) {
+                    aliases.push(n.clone());
+                }
+            }
+            aliases
+        },
     }
 }
 
@@ -646,6 +676,169 @@ pub fn find(show: &Show, g: &EpisodeGuess) -> EpisodeLookup {
     }
 }
 
+/// Whether two show names are the same show: (almost) equal, the file's
+/// holding the show's words (`Site - Show`), or the show's starting with
+/// the file's (`Show` for `Show: The Series`). Years and tags are ignored.
+fn same_show(file: &str, show: &str) -> bool {
+    let (a, b) = (tmdb::guess(file).title, tmdb::guess(show).title);
+    let (wa, wb) = (words(&a), words(&b));
+    !wa.is_empty()
+        && !wb.is_empty()
+        && (similarity(&a, &b) >= 0.8
+            || wa.windows(wb.len()).any(|w| w == wb)
+            || wb.starts_with(&wa))
+}
+
+/// The names a show's files may carry: its titles, and what the user
+/// typed to find it (unless an id or link).
+fn show_names<'a>(show: &'a Show, typed: &'a str) -> Vec<&'a str> {
+    let typed = match show_query(typed) {
+        ShowQuery::Name(_) => typed,
+        ShowQuery::Id(_) => "",
+    };
+    [show.name.as_str(), show.original_name.as_str(), typed]
+        .into_iter()
+        .chain(show.aliases.iter().map(String::as_str))
+        .filter(|s| !s.trim().is_empty())
+        .collect()
+}
+
+/// How well a title fits the given episodes (the best of them).
+fn title_sim(show: &Show, title: &str, keys: &[Key]) -> f64 {
+    show.episodes
+        .iter()
+        .filter(|e| keys.contains(&(e.season, e.number)))
+        .flat_map(|e| std::iter::once(&e.name).chain(&e.names))
+        .map(|n| similarity(title, n))
+        .fold(0.0, f64::max)
+}
+
+/// Like [`find`], for a file in `dir`, but `None` when its name is of
+/// another show: another TMDB id, or a show name that is none of this
+/// one's (nor `typed`, what the user searched for). A name without a show,
+/// outside the show's folder, is only matched on its numbers when its
+/// title fits the episode (or it has none); else the user chooses.
+pub fn find_in(show: &Show, g: &EpisodeGuess, dir: &Path, typed: &str) -> Option<EpisodeLookup> {
+    let names = show_names(show, typed);
+    match g.id {
+        Some(id) if id != show.id => return None,
+        None if !g.show.is_empty() && !names.iter().any(|n| same_show(&g.show, n)) => {
+            return None;
+        }
+        _ => {}
+    }
+    let mut found = find(show, g);
+    if g.show.is_empty() && g.id.is_none() && !found.choice.is_empty() {
+        let name = dir.file_name().unwrap_or_default().to_string_lossy();
+        let folder = if folder_season(&name).is_some() {
+            dir.parent()
+        } else {
+            Some(dir)
+        };
+        let title = without_show(&g.title, show);
+        if !folder.is_some_and(|f| folder_names(f, show.id, &names))
+            && !title.is_empty()
+            && title_sim(show, &title, &found.choice) < 0.5
+        {
+            found.choice.clear();
+        }
+    }
+    Some(found)
+}
+
+/// The folder a show's files sit in: the one above a season folder.
+fn show_root(dir: &Path) -> &Path {
+    let name = dir.file_name().unwrap_or_default().to_string_lossy();
+    match dir.parent() {
+        Some(up) if folder_season(&name).is_some() => up,
+        _ => dir,
+    }
+}
+
+/// Files grouped by show, to look each one up on its own. Items are (file
+/// name without extension, folder path). Names with the same show (or
+/// TMDB id) go together. A name without a show joins the show of most
+/// named files in its folder (the one above, for a season folder); in a
+/// folder without any, the folder's files make a group of their own
+/// (searched by the folder's name). Returns the groups (indexes into
+/// `items`) and the files left out: no show in the name, in a folder of
+/// mixed shows.
+pub fn group_shows(items: &[(String, PathBuf)]) -> (Vec<Vec<usize>>, Vec<usize>) {
+    struct Group {
+        names: Vec<String>,
+        ids: Vec<u64>,
+        items: Vec<usize>,
+    }
+    let mut groups: Vec<Group> = Vec::new();
+    let mut unnamed: Vec<(usize, &Path)> = Vec::new();
+    for (i, (name, dir)) in items.iter().enumerate() {
+        let folder = dir.file_name().unwrap_or_default().to_string_lossy();
+        let g = parse(name, &folder);
+        if g.show.is_empty() && g.id.is_none() {
+            unnamed.push((i, show_root(dir)));
+            continue;
+        }
+        let at = groups.iter().position(|grp| {
+            g.id.is_some_and(|id| grp.ids.contains(&id))
+                || (!g.show.is_empty()
+                    && grp
+                        .names
+                        .iter()
+                        .any(|n| same_show(&g.show, n) || same_show(n, &g.show)))
+        });
+        let grp = match at {
+            Some(j) => &mut groups[j],
+            None => {
+                groups.push(Group {
+                    names: Vec::new(),
+                    ids: Vec::new(),
+                    items: Vec::new(),
+                });
+                groups.last_mut().unwrap()
+            }
+        };
+        if !g.show.is_empty() && !grp.names.contains(&g.show) {
+            grp.names.push(g.show);
+        }
+        if let Some(id) = g.id.filter(|id| !grp.ids.contains(id)) {
+            grp.ids.push(id);
+        }
+        grp.items.push(i);
+    }
+    let named = groups.len();
+    let mut loose = Vec::new();
+    let mut by_folder: Vec<(&Path, Vec<usize>)> = Vec::new();
+    for (i, root) in unnamed {
+        // How many named files of each group share the folder.
+        let counts: Vec<usize> = groups[..named]
+            .iter()
+            .map(|grp| {
+                grp.items
+                    .iter()
+                    .filter(|&&k| show_root(&items[k].1) == root)
+                    .count()
+            })
+            .collect();
+        let total: usize = counts.iter().sum();
+        if total == 0 {
+            match by_folder.iter_mut().find(|(r, _)| *r == root) {
+                Some((_, list)) => list.push(i),
+                None => by_folder.push((root, vec![i])),
+            }
+        } else if let Some(j) = counts.iter().position(|&n| 2 * n > total) {
+            groups[j].items.push(i);
+        } else {
+            loose.push(i);
+        }
+    }
+    let mut out: Vec<Vec<usize>> = groups.into_iter().map(|g| g.items).collect();
+    out.extend(by_folder.into_iter().map(|(_, list)| list));
+    for list in &mut out {
+        list.sort_unstable();
+    }
+    (out, loose)
+}
+
 /// The episode chosen for a file, as the rule needs it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -712,13 +905,19 @@ pub fn season_folder(season: u16) -> String {
 /// Whether a folder is named after the show: its TMDB id, or (almost) its
 /// name or original name, with or without the year.
 fn names_show(folder: &Path, m: &EpisodeMatch) -> bool {
+    folder_names(folder, m.id, &[&m.show, &m.original_show])
+}
+
+/// Whether a folder is named after a show: its TMDB id, or (almost) one of
+/// its names, with or without the year.
+fn folder_names(folder: &Path, id: u64, names: &[&str]) -> bool {
     let name = folder.file_name().unwrap_or_default().to_string_lossy();
-    if name.contains(&format!("tmdbid-{}", m.id)) {
+    if name.contains(&format!("tmdbid-{id}")) {
         return true;
     }
     let title = tmdb::guess(&name).title;
     let w = words(&title);
-    [&m.show, &m.original_show].iter().any(|show| {
+    names.iter().any(|show| {
         let s = words(show);
         !s.is_empty() && (similarity(&title, show) >= 0.8 || w.starts_with(&s))
     })
@@ -1252,7 +1451,81 @@ mod tests {
                 ep(2, 8, "Better Call Saul"),
                 ep(0, 1, "Good Cop Bad Cop"),
             ],
+            aliases: vec!["Química Mortal".into()],
         }
+    }
+
+    #[test]
+    fn other_shows() {
+        let s = show();
+        let at = |name: &str, dir: &str| find_in(&s, &parse(name, ""), Path::new(dir), "");
+        // Its own files, also behind a site's name, with the year or
+        // under another of its titles.
+        for name in [
+            "Breaking Bad - S01E02",
+            "www.site.com - Breaking Bad S01E02",
+            "Breaking Bad (2008) - S01E02",
+            "Quimica Mortal S01E02",
+            "Show S01E02 [tmdbid-1]",
+        ] {
+            assert_eq!(at(name, "/tv").unwrap().choice, vec![(1, 2)], "{name}");
+        }
+        // Another show's files are left alone.
+        assert!(at("Thundarr - S01E02 - Title", "/tv").is_none());
+        assert!(at("Breaking Bad S01E02 [tmdbid-99]", "/tv").is_none());
+        // What the user typed counts as one of its names.
+        let typed = find_in(&s, &parse("BB S01E02", ""), Path::new("/tv"), "BB");
+        assert_eq!(typed.unwrap().choice, vec![(1, 2)]);
+        // No show in the name: the numbers decide in the show's folder;
+        // elsewhere the title has to fit too, or the user chooses.
+        assert_eq!(
+            at("05 - Unrelated Words", "/tv/Breaking Bad")
+                .unwrap()
+                .choice,
+            vec![(2, 8)]
+        );
+        assert_eq!(
+            at("05 - Unrelated Words", "/tv/Breaking Bad/Season 2")
+                .unwrap()
+                .choice,
+            vec![(2, 8)]
+        );
+        let x = at("05 - Unrelated Words", "/dl").unwrap();
+        assert!(x.choice.is_empty());
+        assert_eq!(x.alternatives[0], vec![(2, 8)]);
+        assert_eq!(
+            at("05 - Better Call Saul", "/dl").unwrap().choice,
+            vec![(2, 8)]
+        );
+        assert_eq!(at("05", "/dl").unwrap().choice, vec![(2, 8)]);
+    }
+
+    #[test]
+    fn groups() {
+        let items: Vec<(String, PathBuf)> = [
+            ("Show One - S01E01 [tmdbid-7]", "/t/one"),
+            ("Show One - S01E02 [tmdbid-7]", "/t/one"),
+            ("Two, the Show - S01E04 - Title", "/t"),
+            ("Two, the Show (1980) - S01E06 - Other", "/t"),
+            ("Three - S03E11", "/t"),
+            ("06 - No Show Here", "/t"),
+            ("01", "/u/Four/Season 1"),
+            ("Five - S01E02", "/v"),
+            ("03 - Title", "/v"),
+            ("02", "/u/Four/Season 1"),
+            ("Three - S03E12", "/t"),
+        ]
+        .iter()
+        .map(|(n, d)| (n.to_string(), PathBuf::from(d)))
+        .collect();
+        let (groups, loose) = group_shows(&items);
+        assert_eq!(
+            groups,
+            vec![vec![0, 1], vec![2, 3], vec![4, 10], vec![7, 8], vec![6, 9]]
+        );
+        // No show in the name, in a folder of several shows (none with
+        // most of its files).
+        assert_eq!(loose, vec![5]);
     }
 
     #[test]
@@ -1306,7 +1579,7 @@ mod tests {
                 {"season_number":1,"episode_number":2,"name":"Title"}]"#,
         )
         .unwrap();
-        let s = build_show(&d, &[pt, en]);
+        let s = build_show(&d, &[pt, en], &[]);
         assert_eq!(s.year, Some(2010));
         assert_eq!(s.episodes[0].name, "Pilot");
         assert_eq!(s.episodes[1].name, "Título");

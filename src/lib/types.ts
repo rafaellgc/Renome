@@ -29,7 +29,7 @@ export type Rule =
   | { type: "movie"; template: string; colon: string; sidecar: boolean; fanart: boolean; folder: boolean }
   | {
       type: "series"; template: string; colon: string; show: string;
-      folders: boolean; folderTemplate: string; sidecar: boolean; fanart: boolean;
+      folders: boolean; folderTemplate: string; sidecar: boolean; fanart: boolean; missing: boolean;
     }
   | {
       type: "music"; template: string; colon: string; discPrefix: boolean; fromName: boolean;
@@ -292,6 +292,8 @@ export interface Show {
   overview: string;
   posterPath: string | null;
   episodes: Episode[];
+  /** Its other titles. */
+  aliases: string[];
 }
 
 export interface EpisodeGuess {

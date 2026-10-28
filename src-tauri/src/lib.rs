@@ -365,8 +365,15 @@ async fn tv_lookup(
     lang: String,
     id: u64,
     items: Vec<tmdb::TvItem>,
+    typed: String,
 ) -> Result<tmdb::TvLookup, String> {
-    tmdb::lookup_episodes(&tmdb::Client::new(&key, &lang), id, items).await
+    tmdb::lookup_episodes(&tmdb::Client::new(&key, &lang), id, items, &typed).await
+}
+
+/// Groups the files by show, to look each one up.
+#[tauri::command]
+fn tv_groups(items: Vec<tmdb::TvItem>) -> tmdb::ShowGroups {
+    tmdb::group_shows(&items)
 }
 
 /// Records created metadata files in the rename's history entry, so undo
@@ -1060,6 +1067,7 @@ pub fn run() {
             tmdb_search,
             tv_search,
             tv_lookup,
+            tv_groups,
             write_sidecars,
             write_tv_sidecars,
             mb_lookup,

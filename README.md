@@ -50,9 +50,11 @@ A built-in manual (F1) explains every rule with examples.
 - TV shows: names episodes from TMDB (`Show (Year) - S01E02 - Title`),
   reading the number in many forms (`S01E02`, `1x02`, `T1 E2`,
   `Season 1 Episode 2`, absolute numbering) and checking it against the
-  title in the name; when they disagree, you choose. Optionally organizes
+  title in the name; when they disagree, you choose. A folder mixing
+  several shows is looked up show by show. Optionally organizes
   them into `Show (Year) [tmdbid-…]/Season 01` and saves `tvshow.nfo`,
-  episode `.nfo` files and images for Jellyfin, Kodi and Emby.
+  episode `.nfo` files and images for Jellyfin, Kodi and Emby. Aired
+  episodes missing from the seasons you have show up as faded rows.
 - Music: names songs from their tags (`01 - Title`, artist, album, year,
   disc…; the artist too on compilations), optionally organizing them
   into `Artist/Album (Year)` folders, with covers, lyrics and bonus

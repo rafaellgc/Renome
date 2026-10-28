@@ -105,7 +105,7 @@ export function newRule(type: RuleType): Rule {
     case "series":
       return {
         type, template: SERIES_TEMPLATE[settings.lang], colon: " - ", show: "",
-        folders: false, folderTemplate: SHOW_FOLDER[settings.lang], sidecar: false, fanart: false,
+        folders: false, folderTemplate: SHOW_FOLDER[settings.lang], sidecar: false, fanart: false, missing: true,
       };
     case "music": {
       const [template, folderTemplate] = MUSIC_TEMPLATE[settings.lang];

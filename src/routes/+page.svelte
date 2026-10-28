@@ -16,6 +16,7 @@
   import ComicReview from "$lib/ComicReview.svelte";
   import GcdLogin from "$lib/GcdLogin.svelte";
   import EpisodeReview from "$lib/EpisodeReview.svelte";
+  import { missingEpisodes, today } from "$lib/missing";
   import MovieReview from "$lib/MovieReview.svelte";
   import Options from "$lib/Options.svelte";
   import RuleCard from "$lib/RuleCard.svelte";
@@ -206,8 +207,10 @@
   let series = $state<Record<string, EpisodeState>>({});
   /** Shows fetched, by id. */
   let shows = $state<Record<number, Show>>({});
-  /** The show picked last, and the text it was found by. */
-  let pickedShow = $state<{ query: string; show: Candidate } | null>(null);
+  /** The shows picked, by the text they were found by (not asked again). */
+  let pickedShows = $state<Record<string, Candidate>>({});
+  /** The shows of the last search. */
+  let searchedShows = $state<Candidate[]>([]);
   /** Files in the episode review window; null when closed. */
   let episodeReview = $state<string[] | null>(null);
   /** The show picker, while open. */
@@ -290,6 +293,12 @@
     ),
   );
   const seriesCounts = $derived(counts(series));
+  /** Aired episodes missing from the seasons the listed videos cover. */
+  const ghosts = $derived(
+    seriesRule?.rule.type === "series" && seriesRule.rule.missing
+      ? missingEpisodes(shows, episodeMatches, preview.items, sortDesc, today())
+      : [],
+  );
   /** Episodes whose names are already right but that still get metadata. */
   const episodeMetaOnly = $derived(
     seriesRule?.rule.type === "series" && seriesRule.rule.sidecar
@@ -1102,7 +1111,8 @@
   }
 
   /** Finds the show (asking when unsure), then each visible file's episode;
-   *  doubtful files go to the review window. */
+   *  doubtful files go to the review window. With no show typed, each show
+   *  the file names (or folders) say is looked up in turn. */
   async function searchSeries(rule: Extract<Rule, { type: "series" }>) {
     if (!settings.tmdbKey.trim()) {
       const ok = await confirm({ title: t("rule.series"), text: t("tmdbNeedsKey"), ok: t("options"), cancel: t("cancel") });
@@ -1113,42 +1123,65 @@
     if (!all.length) return;
     const key = settings.tmdbKey;
     const lang = tmdbLang();
+    const typed = rule.show.trim();
     tvProgress = t("tvFinding");
     try {
-      // The same text as last time: the same show, no need to ask again.
-      let show = pickedShow && pickedShow.query === rule.show.trim() && rule.show.trim() ? pickedShow.show : null;
-      if (!show) {
-        const found = await api.tvSearch(key, lang, rule.show, all);
-        show = found.auto
-          ? found.candidates[0]
-          : await new Promise<Candidate | null>((resolve) => (showPick = { query: found.query, candidates: found.candidates, resolve }));
-        showPick = null;
-        if (!show) return;
-        pickedShow = { query: rule.show.trim(), show };
+      let groups = [all];
+      let loose = 0;
+      if (!typed) {
+        const g = await api.tvGroups(all);
+        const byPath = new Map(all.map((i) => [i.path, i]));
+        groups = g.groups.map((list) => list.map((p) => byPath.get(p)!));
+        loose = g.loose.length;
+        if (!groups.length) groups = [all];
       }
-      // Files already settled for this show keep their episode.
-      const items = all.filter((i) => {
-        const e = series[i.path];
-        return !(e && e.showId === show.id && (e.status === "auto" || e.status === "chosen"));
-      });
-      if (!items.length) {
-        notice = t("tvNoFiles");
-        return;
+      const found: Candidate[] = [];
+      let searched = false;
+      let review = false;
+      for (const group of groups) {
+        tvProgress = t("tvFinding");
+        const res = await api.tvSearch(key, lang, typed, group).catch((e) => {
+          // A group whose show cannot be told is skipped, not the others.
+          if (groups.length > 1 && String(e) === "tvNoShow") return null;
+          throw e;
+        });
+        if (!res) continue;
+        let show: Candidate | null = pickedShows[res.query] ?? null;
+        if (!show) {
+          show = res.auto
+            ? res.candidates[0]
+            : await new Promise<Candidate | null>((resolve) => (showPick = { query: res.query, candidates: res.candidates, resolve }));
+          showPick = null;
+          if (!show) continue;
+          pickedShows[res.query] = show;
+        }
+        if (!found.some((c) => c.id === show.id)) found.push(show);
+        // Files already settled for this show keep their episode.
+        const items = group.filter((i) => {
+          const e = series[i.path];
+          return !(e && e.showId === show.id && (e.status === "auto" || e.status === "chosen"));
+        });
+        if (!items.length) continue;
+        searched = true;
+        tvProgress = t("tvLoading", { show: show.title });
+        const look = await api.tvLookup(key, lang, show.id, items, typed || res.query);
+        shows[show.id] = look.show;
+        if (look.files.some((f) => !f.choice.length)) review = true;
+        for (const f of look.files) {
+          series[f.path] = {
+            showId: show.id,
+            guess: f.guess,
+            alternatives: f.alternatives,
+            conflict: f.conflict,
+            choice: f.choice.length ? f.choice : null,
+            status: f.choice.length ? "auto" : f.alternatives.length ? "choose" : "none",
+          };
+        }
       }
-      tvProgress = t("tvLoading", { show: show.title });
-      const res = await api.tvLookup(key, lang, show.id, items);
-      shows[show.id] = res.show;
-      for (const f of res.files) {
-        series[f.path] = {
-          showId: show.id,
-          guess: f.guess,
-          alternatives: f.alternatives,
-          conflict: f.conflict,
-          choice: f.choice.length ? f.choice : null,
-          status: f.choice.length ? "auto" : f.alternatives.length ? "choose" : "none",
-        };
-      }
-      if (res.files.some((f) => !f.choice.length)) openEpisodeReview();
+      if (found.length) searchedShows = found;
+      if (!searched && found.length) notice = t("tvNoFiles");
+      else if (loose) notice = t("tvLoose", { n: loose });
+      if (review) openEpisodeReview();
     } catch (e) {
       await notify({ title: t("rule.series"), text: tError(e) });
     } finally {
@@ -1539,7 +1572,7 @@
               : step.rule.type === "series"
                 ? {
                     ...seriesCounts,
-                    show: pickedShow ? `${pickedShow.show.title}${pickedShow.show.year ? ` (${pickedShow.show.year})` : ""}` : null,
+                    show: searchedShows.length ? searchedShows.map((c) => `${c.title}${c.year ? ` (${c.year})` : ""}`).join(", ") : null,
                     progress: tvProgress ?? (tmdbProgress?.kind === "saveTv" ? t("sidecarsWriting", tmdbProgress) : null),
                     onsearch: () => searchSeries(step.rule as Extract<Rule, { type: "series" }>),
                     onreview: () => openEpisodeReview(),
@@ -1604,6 +1637,7 @@
           onoverride={setOverride}
           {copies}
           {matches}
+          {ghosts}
           onmatch={(p) => {
             if (seriesRule && series[p]) openEpisodeReview(p);
             else if (movieRule && movies[p]) openReview(p);
@@ -1631,6 +1665,7 @@
     <span class="ok">{t("changed", { n: preview.changed })}</span>
     {#if preview.conflicts}<span class="bad">{t("conflicts", { n: preview.conflicts })}</span>{/if}
     {#if selected.size}<span>{t("selected", { n: selected.size })}</span>{/if}
+    {#if ghosts.length}<span class="faint">{t("missingEpisodes", { n: ghosts.length })}</span>{/if}
     {#if identicalProgress !== null}
       <span>{t("identicalScanning", { p: Math.floor(identicalProgress * 100) })}</span>
     {:else if identicalCount}
@@ -1907,6 +1942,7 @@
     color: var(--muted);
   }
   footer .ok { color: var(--accent); }
+  footer .faint { color: var(--muted); font-style: italic; }
   footer .bad { color: var(--danger); }
   footer .link {
     display: inline-flex;

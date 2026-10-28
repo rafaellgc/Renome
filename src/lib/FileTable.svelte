@@ -2,6 +2,7 @@
   import { tick } from "svelte";
   import { diff, type Seg } from "./diff";
   import { LOCALES, t } from "./i18n";
+  import { code, interleave, type Ghost, type Row } from "./missing";
   import { settings } from "./settings.svelte";
   import type { Copies, MovieStatus, PreviewItem, ViewSort } from "./types";
 
@@ -15,6 +16,7 @@
     copies = {},
     matches = {},
     onmatch,
+    ghosts = [],
   }: {
     items: PreviewItem[];
     selected: Set<string>;
@@ -28,6 +30,8 @@
      *  series rule is on. */
     matches?: Record<string, { status: MovieStatus; tip: string }>;
     onmatch?: (path: string) => void;
+    /** Missing episodes, shown faded between the files. */
+    ghosts?: Ghost[];
   } = $props();
 
   const MOVIE_MARK: Record<MovieStatus, string> = { auto: "✓", chosen: "✓", choose: "?", none: "✕" };
@@ -42,18 +46,28 @@
   let editing = $state<string | null>(null);
   let draft = $state("");
 
+  /** Files and, between them, the missing episodes (which the selection
+   *  and the arrow keys skip). */
+  const rows = $derived(interleave(items, ghosts, descending));
+  const isGhost = (r: Row): r is Ghost => "ghost" in r;
+  const keyOf = (r: Row) => (isGhost(r) ? r.key : r.path);
+
   const start = $derived(Math.max(0, Math.floor(scrollTop / ROW) - OVERSCAN));
-  const end = $derived(Math.min(items.length, Math.ceil((scrollTop + height) / ROW) + OVERSCAN));
-  const visible = $derived(items.slice(start, end));
+  const end = $derived(Math.min(rows.length, Math.ceil((scrollTop + height) / ROW) + OVERSCAN));
+  const visible = $derived(rows.slice(start, end));
   /** What changes in each visible row: removed (current name) and added (new name). */
   const diffs = $derived(
-    new Map(visible.filter((i) => i.status !== "unchanged").map((i) => [i.path, diff(i.original, i.newName)])),
+    new Map(
+      visible
+        .filter((i): i is PreviewItem => !isGhost(i) && i.status !== "unchanged")
+        .map((i) => [i.path, diff(i.original, i.newName)]),
+    ),
   );
 
   /** Scrolls to the first of the given paths (if not visible). */
   export function reveal(paths: Iterable<string>) {
     const want = new Set(paths);
-    const index = items.findIndex((i) => want.has(i.path));
+    const index = rows.findIndex((i) => !isGhost(i) && want.has(i.path));
     if (index < 0 || !viewport) return;
     const top = index * ROW;
     if (top < viewport.scrollTop || top + ROW > viewport.scrollTop + viewport.clientHeight) {
@@ -74,43 +88,63 @@
   /** The row the arrow keys move from (the last one clicked or reached). */
   let cursor = $state<number | null>(null);
 
+  /** The file row nearest to `index` going `dir` (1 down, -1 up), past
+   *  missing episodes; the other way when there is none. */
+  function fileRow(index: number, dir: 1 | -1): number {
+    for (const d of [dir, -dir]) {
+      for (let i = index; i >= 0 && i < rows.length; i += d) if (!isGhost(rows[i])) return i;
+    }
+    return -1;
+  }
+
+  /** The files between two rows, both included. */
+  function range(from: number, to: number): string[] {
+    const out: string[] = [];
+    for (let i = Math.min(from, to); i <= Math.max(from, to); i++) {
+      const r = rows[i];
+      if (!isGhost(r)) out.push(r.path);
+    }
+    return out;
+  }
+
   /** Arrows move the selection (Shift extends it), Home and End go to the
    *  first and last row: the list works without a mouse. */
   function onkeys(e: KeyboardEvent) {
     if (editing || !items.length) return;
-    const last = items.length - 1;
+    const last = rows.length - 1;
     const from = cursor ?? anchor ?? -1;
     const page = Math.max(1, Math.floor(height / ROW) - 1);
-    const to = {
-      ArrowDown: Math.min(last, from + 1),
-      ArrowUp: Math.max(0, from - 1),
-      PageDown: Math.min(last, from + page),
-      PageUp: Math.max(0, from - page),
-      Home: 0,
-      End: last,
-    }[e.key];
-    if (to === undefined) return;
+    const move: Record<string, [number, 1 | -1]> = {
+      ArrowDown: [Math.min(last, from + 1), 1],
+      ArrowUp: [Math.max(0, from - 1), -1],
+      PageDown: [Math.min(last, from + page), 1],
+      PageUp: [Math.max(0, from - page), -1],
+      Home: [0, 1],
+      End: [last, -1],
+    };
+    if (!(e.key in move)) return;
     e.preventDefault();
+    const to = fileRow(...move[e.key]);
+    if (to < 0) return;
+    const path = (rows[to] as PreviewItem).path;
     cursor = to;
     if (e.shiftKey && anchor !== null) {
-      const next = new Set<string>();
-      const [a, b] = [Math.min(anchor, to), Math.max(anchor, to)];
-      for (let i = a; i <= b; i++) next.add(items[i].path);
-      selected = next;
+      selected = new Set(range(anchor, to));
     } else {
       anchor = to;
-      selected = new Set([items[to].path]);
+      selected = new Set([path]);
     }
-    reveal([items[to].path]);
+    reveal([path]);
   }
 
   function select(e: MouseEvent, index: number) {
+    const row = rows[index];
+    if (isGhost(row)) return;
     cursor = index;
-    const path = items[index].path;
+    const path = row.path;
     const next = new Set(e.ctrlKey || e.metaKey ? selected : []);
     if (e.shiftKey && anchor !== null) {
-      const [a, b] = [Math.min(anchor, index), Math.max(anchor, index)];
-      for (let i = a; i <= b; i++) next.add(items[i].path);
+      for (const p of range(anchor, index)) next.add(p);
     } else if ((e.ctrlKey || e.metaKey) && next.has(path)) {
       next.delete(path);
       anchor = index;
@@ -156,6 +190,9 @@
 
   const fmt = $derived(new Intl.DateTimeFormat(LOCALES[settings.lang], { dateStyle: "short", timeStyle: "short" }));
   const date = (s: number | null) => (s === null ? "" : fmt.format(new Date(s * 1000)));
+  const dayFmt = $derived(new Intl.DateTimeFormat(LOCALES[settings.lang], { dateStyle: "short", timeZone: "UTC" }));
+  /** An air date (YYYY-MM-DD) in the user's format. */
+  const day = (s: string) => dayFmt.format(new Date(`${s}T00:00:00Z`));
   const home = /^\/(var\/)?home\/[^/]+/;
   // The column is right-to-left so long paths are cut at the start; the
   // left-to-right marks keep "~" and the slashes where they belong.
@@ -206,9 +243,20 @@
     aria-multiselectable="true"
     onkeydown={onkeys}
   >
-    <div class="spacer" style:height="{items.length * ROW}px">
-      {#each visible as item, k (item.path)}
+    <div class="spacer" style:height="{rows.length * ROW}px">
+      {#each visible as item, k (keyOf(item))}
         {@const index = start + k}
+        {#if isGhost(item)}
+          {@const tip = `${t("missingTip", { show: item.show })} · ${day(item.airDate)}`}
+          <div class="row ghost" style:top="{index * ROW}px" role="row" aria-disabled="true" title={tip}>
+            <span class="c-status"><span class="dot hole" aria-hidden="true">○</span></span>
+            <span class="c-orig"><span class="missing">{t("missingRow")}</span>{item.show}</span>
+            <span class="c-new"><span class="name">{code(item)}{item.title ? ` · ${item.title}` : ""}</span></span>
+            <span class="c-dir"></span>
+            <span class="c-size"></span>
+            <span class="c-date">{day(item.airDate)}</span>
+          </div>
+        {:else}
         {@const warn = item.windowsUnsafe && settings.warnWindows}
         {@const d = diffs.get(item.path)}
         <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -264,6 +312,7 @@
           <span class="c-size">{item.isDir ? "" : size(item.size)}</span>
           <span class="c-date">{date(item.modified)}</span>
         </div>
+        {/if}
       {/each}
     </div>
   </div>
@@ -330,6 +379,18 @@
   }
   .row:hover { background: var(--hover); }
   .row.sel { background: var(--selected); }
+  /* A missing episode: faded, only there to be seen. */
+  .row.ghost { color: var(--muted); opacity: 0.6; font-style: italic; }
+  .row.ghost:hover { background: none; }
+  .missing {
+    margin-right: 6px;
+    padding: 0 6px;
+    border: 1px dashed currentColor;
+    border-radius: 9px;
+    font-size: 11px;
+    font-style: normal;
+  }
+  .dot.hole { color: var(--muted); }
   .row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .c-size, .c-date { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
   .row .c-dir { color: var(--muted); direction: rtl; text-align: left; }

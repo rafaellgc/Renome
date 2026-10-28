@@ -1316,6 +1316,7 @@ mod tests {
                 folder_template: String::new(),
                 sidecar: false,
                 fanart: false,
+                missing: true,
             },
         }];
         let files = entries(d.path(), &["show.s01e02.mkv", "show.s01e02.pt-BR.srt"]);
@@ -1358,6 +1359,7 @@ mod tests {
                 folder_template: "{show} ({year}) [tmdbid-{id}]".into(),
                 sidecar: false,
                 fanart: false,
+                missing: true,
             },
         }];
         let files = entries(&old, &["show.s01e02.mkv"]);

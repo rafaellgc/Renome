@@ -288,7 +288,7 @@ ${ex("Show.Name.S01E03.720p.WEB-DL.mkv", "Show Name (2008) - S01E03 - Episode Ti
 <p>If your files are far from that, put the rules that fix the name above this one in the list (<b>Replace text</b>, <b>Rearrange parts</b>, <b>Regular expression</b>, <b>Number</b>): the search reads the name as they leave it.</p>
 </div>
 <ol>
-  <li>In the <b>Show</b> field, type the name or the TMDB id, or paste the link to the show's page (<code>themoviedb.org/tv/1396-…</code>). Left empty, the program uses the name the files share (with the year, when the names have it), or the folder's name. If most files carry <code>[tmdbid-…]</code> in their name, the show is looked up directly by that number.</li>
+  <li>In the <b>Show</b> field, type the name or the TMDB id, or paste the link to the show's page (<code>themoviedb.org/tv/1396-…</code>). Then only that show's files are looked up; those whose name says another show (or carries another's <code>[tmdbid-…]</code>) are left as they are. <b>Left empty</b>, the program sorts the files by the show each name says (with the year, when the names have it; by the number, when they carry <code>[tmdbid-…]</code>) and looks up one show at a time, asking when in doubt. A file without the show in its name goes with the show of most files in the same folder; in a folder with no show names, the folder's name counts; in a folder of several shows and no majority, it is left out (the program says how many).</li>
   <li>Click <b>Find episodes</b>. If more than one show looks alike, choose the right one. The program downloads the whole episode list and looks for each visible file's episode.</li>
   <li>Episodes found with certainty get <b>✓</b>. Doubtful ones (<b>?</b>) and those not found (<b>✕</b>) go to the review window.</li>
 </ol>
@@ -297,6 +297,7 @@ ${ex("Show.Name.S01E03.720p.WEB-DL.mkv", "Show Name (2008) - S01E03 - Episode Ti
   <li><b>By number</b>, in many forms: <code>S01E02</code>, <code>s1e2</code>, <code>1x02</code>, <code>Season 1 Episode 2</code>, <code>Ep 02</code> (the season comes from the folder, such as <code>Season 2</code>), absolute numbering (<code>Show Name - 125</code>), <code>201</code> (season 2, episode 1) and air date (<code>2024.03.15</code>). Files with two episodes (<code>S01E01E02</code>, <code>S01E01-02</code>) become <code>S01E01-E02</code>. Names made only of bracketed pieces (<code>[Group][Show Name][S03E22][Title][1080p]</code>, also with <code>【】</code>) are read too: the piece with the number, the show before it and the title after it.</li>
   <li><b>By title</b>: the text after the number is compared with the titles of every episode, in your language, in English and in the original language, ignoring accents, case and small misspellings. With no number at all, the title alone is enough when it is clear.</li>
   <li><b>When the number and the title disagree</b> (the name says S02E08, but the title is S01E03's), the file gets <b>?</b>, and the review shows both, suggesting the title's.</li>
+  <li><b>Files without the show's name</b> (<code>06 - Title.mkv</code>) outside the show's folder only get the number's episode when the title fits too (or there is no title); otherwise they go to the review.</li>
 </ul>
 <h4>Review</h4>
 <p>Shows what was read from the name, the suggestions (click, press 1–9, or <b>Enter</b> for the first) and every episode of the show by season, with a filter by title or number (<code>s01e03</code>). <b>Ctrl+click</b> marks more than one episode of the same season, for a file with several episodes. Subtitles read the same way get the same choice.</p>
@@ -304,7 +305,7 @@ ${ex("Show.Name.S01E03.720p.WEB-DL.mkv", "Show Name (2008) - S01E03 - Episode Ti
   <li><b>Template</b>: <code>{show}</code>, <code>{original}</code> (original name), <code>{year}</code> (first aired), <code>{season}</code>, <code>{episode}</code> (two digits), <code>{title}</code> and <code>{id}</code>. The default is <code>{show} ({year}) - S{season}E{episode} - {title}</code>.</li>
   <li>Untranslated episodes get the English (or original) title instead of "Episode 4".</li>
   <li>Subtitles keep their language at the end of the name: <code>….pt-BR.srt</code>.</li>
-  <li>Files not in the chosen show are left as they are. For several shows, filter the list and search one at a time: each file keeps its own.</li>
+  <li>Files not in the chosen show are left as they are. Each file keeps its own show; searching again leaves the settled ones alone.</li>
 </ul>
 <h4>Show and season folders</h4>
 <p>With <b>Organize into show and season folders</b>, each episode goes into the structure Jellyfin recommends: <code>Shows/Show Name (2008) [tmdbid-12345]/Season 01/…</code>. The show's folder is created next to the folder the show is already in (if the files are in <code>Show Name/Season 1</code>, the new folder goes next to <code>Show Name</code>, not inside it); with loose files, inside their folder. The show folder's name has its own template, with the same keys (default <code>{show} ({year}) [tmdbid-{id}]</code>; use <code>{original}</code> for the original name). Old folders left empty are deleted; those that still hold other files stay. <b>Undo</b> puts everything back, making the old folders again.</p>
@@ -316,12 +317,16 @@ ${ex("Show.Name.S01E03.720p.WEB-DL.mkv", "Show Name (2008) - S01E03 - Episode Ti
   <li>next to <b>each episode</b>: <code>….nfo</code> (title, season and number, air date, overview, runtime, rating, directors, writers and guest stars) and the thumbnail <code>…-thumb.jpg</code>.</li>
 </ul>
 <p>The show and season files are only created when the episodes are in a show folder (named after it, or with <code>[tmdbid-…]</code>), the one from before or the one the folders option makes. Episodes whose names are already right get the metadata too. Existing files are never replaced, and undo deletes what was created.</p>
+<h4>Missing episodes</h4>
+<p>With <b>Show the missing episodes</b> (on by default), after the lookup the list gets faded rows for the aired episodes that no video in the list holds, such as <code>S01E16 · Title</code>, with the air date. They sit where the episode belongs, between its neighbours, and the bottom bar says how many are missing. They are only a notice: they cannot be selected and are left out of counts, renaming and export.</p>
+<p>Only seasons the list has at least one video of are checked; whole seasons you do not have are not shown. Episodes not aired yet, or without a date, are not either. An episode with only its subtitle counts as missing.</p>
 <h4>Limitations</h4>
 <ul>
-  <li>One show at a time: for several, filter the list and look up one at a time.</li>
+  <li>A show is only recognized in a file name by the names it has on TMDB (in any language or country) or by what you typed. A nickname or acronym TMDB does not know makes the file count as another show's: type the show, or use that name in the field.</li>
   <li>Seasons are split as TMDB splits them. Anime and shows with absolute numbering are sometimes split differently there, and the numbers in the files do not match; check in the review.</li>
   <li>Specials (season 0) are often numbered differently from their releases and nearly always need a review.</li>
   <li>A file with several episodes is only recognized when they are in the same season.</li>
+  <li>Missing episodes follow TMDB's numbering: if your files use another (the DVD order, or anime's running numbers), the list of what is missing may be wrong. Episodes hidden by the filter also count as missing.</li>
 </ul>
 <p class="tip">Only the show's name is sent to TMDB, never file names or folders.</p>`,
   },

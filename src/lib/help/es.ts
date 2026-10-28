@@ -288,7 +288,7 @@ ${ex("Nombre.de.la.Serie.S01E03.720p.WEB-DL.mkv", "Nombre de la Serie (2008) - S
 <p>Si sus archivos están lejos de eso, ponga encima de esta regla, en la lista, las reglas que arreglan el nombre (<b>Reemplazar texto</b>, <b>Reorganizar partes</b>, <b>Expresión regular</b>, <b>Numerar</b>): la búsqueda lee el nombre tal como sale de ellas.</p>
 </div>
 <ol>
-  <li>En el campo <b>Serie</b>, escriba el nombre o el ID de TMDB, o pegue el enlace de la página de la serie (<code>themoviedb.org/tv/1396-…</code>). Vacío, el programa usa el nombre que los archivos tienen en común (con el año, cuando los nombres lo traen), o el de la carpeta. Si la mayoría de los archivos trae <code>[tmdbid-…]</code> en el nombre, la serie se busca directamente por ese número.</li>
+  <li>En el campo <b>Serie</b>, escriba el nombre o el ID de TMDB, o pegue el enlace de la página de la serie (<code>themoviedb.org/tv/1396-…</code>). Así solo se buscan los archivos de esa serie; los que traen en el nombre otra serie (o el <code>[tmdbid-…]</code> de otra) quedan como están. <b>Vacío</b>, el programa separa los archivos por la serie que dice el nombre de cada uno (con el año, cuando los nombres lo traen; por el número, cuando traen <code>[tmdbid-…]</code>) y busca una serie cada vez, preguntando si hay dudas. Un archivo sin el nombre de la serie va con la serie de la mayoría de los archivos de la misma carpeta; en una carpeta sin nombres de serie, vale el nombre de la carpeta; en una carpeta con varias series y sin mayoría, queda fuera (el programa avisa cuántos).</li>
   <li>Haga clic en <b>Buscar episodios</b>. Si hay más de una serie parecida, elija la correcta. El programa descarga la lista completa de episodios y busca el de cada archivo visible.</li>
   <li>Los episodios encontrados con seguridad reciben <b>✓</b>. Los dudosos (<b>?</b>) y los no encontrados (<b>✕</b>) van a la ventana de revisión.</li>
 </ol>
@@ -297,6 +297,7 @@ ${ex("Nombre.de.la.Serie.S01E03.720p.WEB-DL.mkv", "Nombre de la Serie (2008) - S
   <li><b>Por el número</b>, en varios formatos: <code>S01E02</code>, <code>s1e2</code>, <code>1x02</code>, <code>T1 E2</code>, <code>Temporada 1 Episodio 2</code>, <code>Ep 02</code> (la temporada viene de la carpeta, como <code>Season 2</code> o <code>Temporada 2</code>), numeración absoluta (<code>Nombre de la Serie - 125</code>), <code>201</code> (temporada 2, episodio 1) y fecha de emisión (<code>2024.03.15</code>). Los archivos con dos episodios (<code>S01E01E02</code>, <code>S01E01-02</code>) quedan como <code>S01E01-E02</code>. Los nombres hechos solo de bloques entre corchetes (<code>[Grupo][Nombre de la Serie][S03E22][Título][1080p]</code>, también con <code>【】</code>) también se leen: el bloque con el número, la serie antes y el título después.</li>
   <li><b>Por el título</b>: el texto después del número se compara con los títulos de todos los episodios, en su idioma, en inglés y en el idioma original, sin tener en cuenta acentos, mayúsculas ni pequeños errores. Sin número, basta el título si está claro.</li>
   <li><b>Cuando el número y el título no coinciden</b> (el nombre dice S02E08, pero el título es el de S01E03), el archivo queda con <b>?</b>, y la revisión muestra las dos opciones, sugiriendo la del título.</li>
+  <li><b>Archivos sin el nombre de la serie</b> (<code>06 - Título.mkv</code>) fuera de la carpeta de la serie solo reciben el episodio del número si el título también coincide (o si no hay título); si no, van a la revisión.</li>
 </ul>
 <h4>Revisión</h4>
 <p>Muestra lo que se leyó en el nombre, las sugerencias (clic, 1–9, o <b>Enter</b> para la primera) y todos los episodios de la serie por temporada, con un filtro por título o número (<code>s01e03</code>). <b>Ctrl+clic</b> marca más de un episodio de la misma temporada, para un archivo con varios episodios. Los subtítulos leídos igual reciben la misma elección.</p>
@@ -304,7 +305,7 @@ ${ex("Nombre.de.la.Serie.S01E03.720p.WEB-DL.mkv", "Nombre de la Serie (2008) - S
   <li><b>Plantilla</b>: <code>{serie}</code>, <code>{original}</code> (nombre original), <code>{año}</code> (estreno), <code>{temporada}</code>, <code>{episodio}</code> (dos dígitos), <code>{título}</code> e <code>{id}</code>. La predeterminada es <code>{serie} ({año}) - S{temporada}E{episodio} - {título}</code>.</li>
   <li>Los episodios sin traducción reciben el título en inglés (o en el idioma original), en lugar de "Episodio 4".</li>
   <li>Los subtítulos conservan el idioma al final del nombre: <code>….pt-BR.srt</code>.</li>
-  <li>Los archivos que no están en la serie elegida quedan como están. Para varias series, filtre la lista y busque una por vez: cada archivo guarda la suya.</li>
+  <li>Los archivos que no están en la serie elegida quedan como están. Cada archivo guarda su serie; buscar de nuevo no toca los ya resueltos.</li>
 </ul>
 <h4>Carpetas de la serie y la temporada</h4>
 <p>Con <b>Organizar en carpetas de la serie y la temporada</b>, cada episodio va a la estructura que recomienda Jellyfin: <code>Series/Nombre de la Serie (2008) [tmdbid-12345]/Season 01/…</code>. La carpeta de la serie se crea junto a la carpeta donde ya está la serie (si los archivos están en <code>Nombre de la Serie/Season 1</code>, la nueva carpeta queda junto a <code>Nombre de la Serie</code>, no dentro); con archivos sueltos, dentro de su carpeta. El nombre de la carpeta de la serie tiene su propia plantilla, con las mismas variables (predeterminada <code>{serie} ({año}) [tmdbid-{id}]</code>; use <code>{original}</code> para el nombre original). Las carpetas antiguas que quedan vacías se borran; las que aún tienen otros archivos se quedan. <b>Deshacer</b> lo devuelve todo a su sitio y vuelve a crear las carpetas antiguas.</p>
@@ -316,12 +317,16 @@ ${ex("Nombre.de.la.Serie.S01E03.720p.WEB-DL.mkv", "Nombre de la Serie (2008) - S
   <li>junto a <b>cada episodio</b>: <code>….nfo</code> (título, temporada y número, fecha de emisión, sinopsis, duración, nota, dirección, guion y actores invitados) y la miniatura <code>…-thumb.jpg</code>.</li>
 </ul>
 <p>Los archivos de la serie y la temporada solo se crean cuando los episodios están en una carpeta de la serie (con su nombre o con <code>[tmdbid-…]</code>), la de antes o la que crea la opción de carpetas. Los episodios que ya tienen el nombre correcto también reciben los metadatos. Los archivos que ya existen no se reemplazan, y deshacer borra lo creado.</p>
+<h4>Episodios que faltan</h4>
+<p>Con <b>Mostrar los episodios que faltan</b> (activada por defecto), tras la búsqueda la lista muestra filas atenuadas para los episodios ya emitidos que ningún vídeo de la lista tiene, por ejemplo <code>S01E16 · Título</code>, con la fecha de emisión. Quedan en el lugar del episodio, entre sus vecinos, y la barra inferior dice cuántos faltan. Son solo un aviso: no se pueden seleccionar y no cuentan para totales, renombrado ni exportación.</p>
+<p>Solo se revisan las temporadas de las que la lista tiene al menos un vídeo; las temporadas enteras que no tienes no aparecen. Tampoco los episodios aún no emitidos o sin fecha. Un episodio que solo tiene el subtítulo cuenta como faltante.</p>
 <h4>Limitaciones</h4>
 <ul>
-  <li>Una serie a la vez: para varias, filtre la lista y busque una cada vez.</li>
+  <li>Una serie solo se reconoce en el nombre del archivo por los nombres que tiene en TMDB (en cualquier idioma o país) o por lo que usted escribió. Un apodo o una sigla que TMDB no conoce hace que el archivo cuente como de otra serie: escriba la serie, o use ese nombre en el campo.</li>
   <li>La división en temporadas es la de TMDB. El anime y las series con numeración corrida a veces están divididos de otra forma allí, y los números del archivo no coinciden; revíselo en la revisión.</li>
   <li>Los especiales (temporada 0) suelen tener una numeración distinta de la de su emisión y casi siempre necesitan revisión.</li>
   <li>Un archivo con varios episodios solo se reconoce cuando son de la misma temporada.</li>
+  <li>Los episodios que faltan siguen la numeración de TMDB: si tus archivos usan otra (la del DVD, o la numeración corrida de los animes), la lista de lo que falta puede salir mal. Los episodios ocultos por el filtro también cuentan como faltantes.</li>
 </ul>
 <p class="tip">Solo se envía a TMDB el nombre de la serie, nunca los nombres de los archivos ni las carpetas.</p>`,
   },

@@ -243,6 +243,10 @@ pub enum Rule {
         /// Also backdrop and logo (used by the app, not here).
         #[serde(default)]
         fanart: bool,
+        /// Lists the aired episodes missing from the seasons the files
+        /// cover (used by the app, not here).
+        #[serde(default = "yes")]
+        missing: bool,
     },
     /// Names songs after their tags; files without them are left alone.
     Music {

@@ -27,8 +27,9 @@ export const api = {
     invoke<Candidate[]>("tmdb_search", { key, lang, title, year }),
   tvSearch: (key: string, lang: string, query: string, items: TvItem[]) =>
     invoke<{ query: string; candidates: Candidate[]; auto: boolean }>("tv_search", { key, lang, query, items }),
-  tvLookup: (key: string, lang: string, id: number, items: TvItem[]) =>
-    invoke<{ show: Show; files: EpisodeLookup[] }>("tv_lookup", { key, lang, id, items }),
+  tvLookup: (key: string, lang: string, id: number, items: TvItem[], typed: string) =>
+    invoke<{ show: Show; files: EpisodeLookup[] }>("tv_lookup", { key, lang, id, items, typed }),
+  tvGroups: (items: TvItem[]) => invoke<{ groups: string[][]; loose: string[] }>("tv_groups", { items }),
   mbLookup: (paths: string[], fromName: boolean, listen: boolean) =>
     invoke<AlbumLookup[]>("mb_lookup", { paths, fromName, listen }),
   mbSearch: (query: AlbumQuery) => invoke<MbCandidate[]>("mb_search", { query }),

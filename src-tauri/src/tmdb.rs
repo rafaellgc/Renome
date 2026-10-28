@@ -206,7 +206,9 @@ impl Client {
     /// for matching file names in those languages).
     pub async fn show(&self, id: u64) -> Result<Show, String> {
         let path = format!("/tv/{id}");
-        let base: TvDetails = self.get(&path, &[]).await?;
+        let base: TvDetails = self
+            .get(&path, &[("append_to_response", "alternative_titles")])
+            .await?;
         let mut langs = vec![self.lang.clone()];
         if self.lang2() != "en" {
             langs.push("en-US".into());
@@ -227,6 +229,8 @@ impl Client {
             .flat_map(|(i, _)| seasons.chunks(20).map(move |c| (i, c.join(","))))
             .collect();
         let mut by_lang: Vec<Vec<ApiEpisode>> = vec![Vec::new(); langs.len()];
+        // The show's name in each language.
+        let mut names: Vec<String> = Vec::new();
         let mut tasks = stream::iter(requests)
             .map(|(i, append)| {
                 let (path, lang) = (&path, &langs[i]);
@@ -240,13 +244,18 @@ impl Client {
             .buffer_unordered(4);
         while let Some((i, d)) = tasks.next().await {
             match d {
-                Ok(d) => by_lang[i].extend(d.appended_episodes()),
+                Ok(d) => {
+                    by_lang[i].extend(d.appended_episodes());
+                    if !names.contains(&d.name) {
+                        names.push(d.name);
+                    }
+                }
                 // The fallback languages are a bonus.
                 Err(e) if i == 0 => return Err(e),
                 Err(_) => {}
             }
         }
-        Ok(tv::build_show(&base, &by_lang))
+        Ok(tv::build_show(&base, &by_lang, &names))
     }
 
     /// A show's details for its `.nfo`.
@@ -463,25 +472,50 @@ pub struct TvLookup {
     files: Vec<TvFile>,
 }
 
-/// Fetches the show and finds each file's episode.
+/// Fetches the show and finds each file's episode; files named after
+/// another show are left out. `typed`: what the show was searched by.
 pub async fn lookup_episodes(
     client: &Client,
     id: u64,
     items: Vec<TvItem>,
+    typed: &str,
 ) -> Result<TvLookup, String> {
     let show = client.show(id).await?;
     let files = items
         .iter()
-        .map(|i| {
-            let folder = i.folder();
-            let folder = folder.file_name().unwrap_or_default().to_string_lossy();
-            TvFile {
+        .filter_map(|i| {
+            let dir = i.folder();
+            let folder = dir.file_name().unwrap_or_default().to_string_lossy();
+            let found = tv::find_in(&show, &tv::parse(i.stem(), &folder), &dir, typed)?;
+            Some(TvFile {
                 path: i.path.clone(),
-                found: tv::find(&show, &tv::parse(i.stem(), &folder)),
-            }
+                found,
+            })
         })
         .collect();
     Ok(TvLookup { show, files })
+}
+
+#[derive(Serialize)]
+pub struct ShowGroups {
+    /// The files of each show.
+    groups: Vec<Vec<PathBuf>>,
+    /// Files whose show cannot be told.
+    loose: Vec<PathBuf>,
+}
+
+/// The files grouped by the show their names (or folders) say.
+pub fn group_shows(items: &[TvItem]) -> ShowGroups {
+    let names: Vec<(String, PathBuf)> = items
+        .iter()
+        .map(|i| (i.stem().to_string(), i.folder()))
+        .collect();
+    let (groups, loose) = tv::group_shows(&names);
+    let paths = |list: Vec<usize>| list.into_iter().map(|k| items[k].path.clone()).collect();
+    ShowGroups {
+        groups: groups.into_iter().map(paths).collect(),
+        loose: paths(loose),
+    }
 }
 
 #[derive(Deserialize)]
