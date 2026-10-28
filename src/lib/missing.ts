@@ -97,3 +97,24 @@ export function interleave(items: PreviewItem[], ghosts: Ghost[], descending: bo
 
 /** Season and episode as in the file names, S01E16. */
 export const code = (g: Ghost) => `S${String(g.season).padStart(2, "0")}E${String(g.number).padStart(2, "0")}`;
+
+/** A season folder's name (as the Rust core): `Season 2`, `Temporada 02`, `S2`, `Specials`. */
+const SEASON_DIR = /\b(?:season|temporada|temp|saison|staffel)[ ._-]*\d{1,3}\b|^[st]\d{1,3}$|^(?:specials?|especiais|especiales|extras)$/i;
+
+/** The folder the missing episodes' videos share, above any season
+ *  folder: the show's folder, where their list is saved by default. */
+export function missingFolder(ghosts: Ghost[], dirOf: (path: string) => string | undefined): string | null {
+  const dirs = [...new Set(ghosts.map((g) => dirOf(g.anchor)).filter((d) => d !== undefined))];
+  if (!dirs.length) return null;
+  const sep = dirs[0].includes("/") ? "/" : "\\";
+  let common = dirs[0].split(sep);
+  for (const d of dirs.slice(1)) {
+    const parts = d.split(sep);
+    let n = 0;
+    while (n < common.length && n < parts.length && common[n] === parts[n]) n++;
+    common = common.slice(0, n);
+  }
+  if (common.length > 1 && SEASON_DIR.test(common[common.length - 1].trim())) common.pop();
+  const dir = common.join(sep);
+  return dir || (common.length ? sep : null);
+}

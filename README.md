@@ -54,7 +54,8 @@ A built-in manual (F1) explains every rule with examples.
   several shows is looked up show by show. Optionally organizes
   them into `Show (Year) [tmdbid-…]/Season 01` and saves `tvshow.nfo`,
   episode `.nfo` files and images for Jellyfin, Kodi and Emby. Aired
-  episodes missing from the seasons you have show up as faded rows.
+  episodes missing from the seasons you have show up as faded rows, and
+  can be exported to a CSV file.
 - Music: names songs from their tags (`01 - Title`, artist, album, year,
   disc…; the artist too on compilations), optionally organizing them
   into `Artist/Album (Year)` folders, with covers, lyrics and bonus

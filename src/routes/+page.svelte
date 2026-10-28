@@ -16,7 +16,7 @@
   import ComicReview from "$lib/ComicReview.svelte";
   import GcdLogin from "$lib/GcdLogin.svelte";
   import EpisodeReview from "$lib/EpisodeReview.svelte";
-  import { missingEpisodes, today } from "$lib/missing";
+  import { code, missingEpisodes, missingFolder, today } from "$lib/missing";
   import MovieReview from "$lib/MovieReview.svelte";
   import Options from "$lib/Options.svelte";
   import RuleCard from "$lib/RuleCard.svelte";
@@ -1329,8 +1329,7 @@
     }
   }
 
-  /** Saves the list as shown to a CSV file (`;` between fields where a
-   *  comma is the decimal mark, as spreadsheets there expect). */
+  /** Saves the list as shown to a CSV file. */
   async function exportCsv() {
     const path = await save({
       title: t("exportCsv"),
@@ -1338,9 +1337,7 @@
       defaultPath: t("defaultCsvName"),
     });
     if (!path) return;
-    const sep = settings.lang === "en" ? "," : ";";
-    const cell = (v: string) => (/[",;\n\r]/.test(v) ? `"${v.replaceAll('"', '""')}"` : v);
-    const rows = [
+    await saveCsv(path, t("exportCsv"), t("csvSaved"), [
       [t("csv.folder"), t("csv.original"), t("csv.new"), t("csv.dest"), t("csv.status"), t("csv.problem")],
       ...preview.items.map((i) => [
         i.dir,
@@ -1350,13 +1347,42 @@
         t(`csv.${i.status}`),
         i.problem ? t(`problem.${i.problem}`) : "",
       ]),
-    ];
+    ]);
+  }
+
+  /** Saves the missing episodes to a CSV file, by show, season and episode. */
+  async function exportMissing() {
+    // In the show's folder, named after the show when there is one.
+    const names = [...new Set(ghosts.map((g) => g.show))];
+    const file = `${names.length === 1 ? names[0].replace(/[\\/:*?"<>|]/g, " ").trim() + " - " : ""}${t("defaultMissingName")}.csv`;
+    const byPath = new Map(preview.items.map((i) => [i.path, i.dir]));
+    const dir = missingFolder(ghosts, (p) => byPath.get(p));
+    const path = await save({
+      title: t("exportMissing"),
+      filters: [{ name: t("csvFile"), extensions: ["csv"] }],
+      defaultPath: dir ? `${dir}${/[\\/]$/.test(dir) ? "" : dir.includes("/") ? "/" : "\\"}${file}` : file,
+    });
+    if (!path) return;
+    const list = [...ghosts].sort(
+      (a, b) => a.show.localeCompare(b.show) || a.season - b.season || a.number - b.number,
+    );
+    await saveCsv(path, t("exportMissing"), t("missingSaved"), [
+      [t("csv.show"), t("csv.season"), t("csv.episode"), t("csv.code"), t("csv.title"), t("csv.airDate")],
+      ...list.map((g) => [g.show, String(g.season), String(g.number), code(g), g.title, g.airDate]),
+    ]);
+  }
+
+  /** Writes rows as CSV (`;` between fields where a comma is the decimal
+   *  mark, as spreadsheets there expect). */
+  async function saveCsv(path: string, title: string, done: string, rows: string[][]) {
+    const sep = settings.lang === "en" ? "," : ";";
+    const cell = (v: string) => (/[",;\n\r]/.test(v) ? `"${v.replaceAll('"', '""')}"` : v);
     try {
       // The mark at the start tells spreadsheets the file is UTF-8.
       await api.saveText(path, "\ufeff" + rows.map((r) => r.map(cell).join(sep)).join("\r\n") + "\r\n");
-      notice = t("csvSaved");
+      notice = done;
     } catch (e) {
-      await notify({ title: t("exportCsv"), text: tError(e) });
+      await notify({ title, text: tError(e) });
     }
   }
 
@@ -1670,7 +1696,9 @@
     <span class="ok">{t("changed", { n: preview.changed })}</span>
     {#if preview.conflicts}<span class="bad">{t("conflicts", { n: preview.conflicts })}</span>{/if}
     {#if selected.size}<span>{t("selected", { n: selected.size })}</span>{/if}
-    {#if ghosts.length}<span class="faint">{t("missingEpisodes", { n: ghosts.length })}</span>{/if}
+    {#if ghosts.length}
+      <button class="link faint" title={t("exportMissingHint")} onclick={exportMissing}>{t("missingEpisodes", { n: ghosts.length })}</button>
+    {/if}
     {#if identicalProgress !== null}
       <span>{t("identicalScanning", { p: Math.floor(identicalProgress * 100) })}</span>
     {:else if identicalCount}

@@ -267,8 +267,14 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   episode of its season, else after the one with the nearest earlier
   (swapped when sorted backwards); it shows `SxxEyy · title` and the air
   date. These rows cannot be selected (clicks, arrows and Shift ranges
-  skip them) and are not counted, renamed or exported; the bottom bar
-  says how many episodes are missing. No extra request is made.
+  skip them) and are not counted, renamed or in the list's export; the
+  bottom bar says how many episodes are missing. Clicking that count
+  saves them to a CSV file (same separator and UTF-8 mark as the list
+  export): show (with year), season, episode, code (`S02E04`), title and
+  air date (`YYYY-MM-DD`), sorted by show, season and episode. The save
+  window starts in the folder the videos share, above a season folder,
+  as `Show (Year) - missing episodes.csv` (one show). No extra
+  request is made.
 - Only the show's name (or id) is sent to TMDB.
 
 ### 2.3 Music (tags)
