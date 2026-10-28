@@ -127,10 +127,16 @@ The installers are not signed, so Windows (SmartScreen) and macOS
 (Gatekeeper) will show a warning the first time. On macOS, right-click the
 app and choose *Open*.
 
-The Flatpak is not on Flathub; install the downloaded file with a double
-click or `flatpak install --user Renome_<version>_x86_64.flatpak`. The
-GNOME runtime it needs comes from Flathub. It does not update itself:
-install the new file when a release comes out.
+The Flatpak is not on Flathub but has its own repository, so updates arrive
+through `flatpak update` or the software center:
+
+```
+flatpak install --user https://rafaellgc.github.io/Renome/io.github.rafaellgc.Renome.flatpakref
+```
+
+The downloaded `.flatpak` file (double click, or `flatpak install --user
+Renome_<version>_x86_64.flatpak`) also takes updates from that repository.
+The GNOME runtime it needs comes from Flathub.
 
 ## Layout
 
@@ -182,7 +188,9 @@ The given paths go into the initial list.
 - pushing a tag (`git tag v0.2.0 && git push --tags`) creates a draft
   *Release* with all of them attached, and a Flatpak bundle built from
   `flatpak/io.github.rafaellgc.Renome.yml` (also made when the workflow is
-  run by hand).
+  run by hand). The tag also refreshes the signed Flatpak repository on the
+  `gh-pages` branch (`flatpak/publish-repo.sh`), signed with the GPG key in
+  the `FLATPAK_GPG_KEY` secret.
 
 ## Credits
 
