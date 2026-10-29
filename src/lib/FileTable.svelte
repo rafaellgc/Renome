@@ -2,7 +2,7 @@
   import { tick } from "svelte";
   import { diff, type Seg } from "./diff";
   import { LOCALES, t } from "./i18n";
-  import { code, interleave, type Ghost, type Row } from "./missing";
+  import { interleave, type Ghost, type Row } from "./missing";
   import { settings } from "./settings.svelte";
   import type { Copies, MovieStatus, PreviewItem, ViewSort } from "./types";
 
@@ -191,8 +191,11 @@
   const fmt = $derived(new Intl.DateTimeFormat(LOCALES[settings.lang], { dateStyle: "short", timeStyle: "short" }));
   const date = (s: number | null) => (s === null ? "" : fmt.format(new Date(s * 1000)));
   const dayFmt = $derived(new Intl.DateTimeFormat(LOCALES[settings.lang], { dateStyle: "short", timeZone: "UTC" }));
-  /** An air date (YYYY-MM-DD) in the user's format. */
-  const day = (s: string) => dayFmt.format(new Date(`${s}T00:00:00Z`));
+  /** An air or cover date (YYYY-MM-DD) in the user's format. */
+  const day = (s: string) => {
+    const d = new Date(`${s}T00:00:00Z`);
+    return Number.isNaN(d.getTime()) ? s : dayFmt.format(d);
+  };
   const home = /^\/(var\/)?home\/[^/]+/;
   // The column is right-to-left so long paths are cut at the start; the
   // left-to-right marks keep "~" and the slashes where they belong.
@@ -247,14 +250,14 @@
       {#each visible as item, k (keyOf(item))}
         {@const index = start + k}
         {#if isGhost(item)}
-          {@const tip = `${t("missingTip", { show: item.show })} · ${day(item.airDate)}`}
+          {@const tip = `${t(item.kind === "issue" ? "missingIssueTip" : "missingTip", { show: item.group })}${item.date ? ` · ${day(item.date)}` : ""}`}
           <div class="row ghost" style:top="{index * ROW}px" role="row" aria-disabled="true" title={tip}>
             <span class="c-status"><span class="dot hole" aria-hidden="true">○</span></span>
-            <span class="c-orig"><span class="missing">{t("missingRow")}</span>{item.show}</span>
-            <span class="c-new"><span class="name">{code(item)}{item.title ? ` · ${item.title}` : ""}</span></span>
+            <span class="c-orig"><span class="missing">{t("missingRow")}</span>{item.group}</span>
+            <span class="c-new"><span class="name">{item.code}{item.title ? ` · ${item.title}` : ""}</span></span>
             <span class="c-dir"></span>
             <span class="c-size"></span>
-            <span class="c-date">{day(item.airDate)}</span>
+            <span class="c-date">{item.date ? day(item.date) : ""}</span>
           </div>
         {:else}
         {@const warn = item.windowsUnsafe && settings.warnWindows}

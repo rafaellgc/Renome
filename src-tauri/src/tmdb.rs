@@ -552,6 +552,10 @@ pub async fn sidecars(
     let total = items.len();
     let mut report = SidecarReport::default();
     let _ = app.emit("tmdb-progress", Progress { done: 0, total });
+    // Two videos of one movie (an .mkv and an .mp4) share its folder's
+    // images: the first to come writes them, the other leaves them.
+    let claimed = std::sync::Mutex::new(std::collections::HashSet::new());
+    let claimed = &claimed;
     let mut tasks = stream::iter(items)
         .map(|item| {
             let client = client.clone();
@@ -592,7 +596,9 @@ pub async fn sidecars(
                             }
                         }
                         for (path, source) in files {
-                            if std::fs::symlink_metadata(&path).is_ok() {
+                            if std::fs::symlink_metadata(&path).is_ok()
+                                || !claimed.lock().unwrap().insert(path.clone())
+                            {
                                 continue;
                             }
                             let data = match source {

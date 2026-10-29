@@ -331,6 +331,10 @@ pub enum Rule {
         /// The series is the name of the folder each file is in.
         #[serde(default)]
         by_folder: bool,
+        /// Lists the issues missing from the series the files are from
+        /// (used by the app, not here).
+        #[serde(default = "yes")]
+        missing: bool,
     },
 }
 

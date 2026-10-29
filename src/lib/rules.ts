@@ -120,7 +120,7 @@ export function newRule(type: RuleType): Rule {
     }
     case "comic": {
       const [template, folderTemplate] = COMIC_TEMPLATE[settings.lang];
-      return { type, template, colon: " - ", series: "", source: "gcd", folders: false, folderTemplate, byFolder: false };
+      return { type, template, colon: " - ", series: "", source: "gcd", folders: false, folderTemplate, byFolder: false, missing: true };
     }
   }
 }

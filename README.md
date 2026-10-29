@@ -81,7 +81,9 @@ A built-in manual (F1) explains every rule with examples.
   Optionally looks the series up on the Grand Comics Database (editions
   from many countries; a free account, signed in for the session only),
   MangaDex (manga, no account) or Comic Vine (your own key), and organizes
-  series folders (with ready-made templates for Komga and Kavita).
+  series folders (with ready-made templates for Komga and Kavita). Issues
+  missing from your series show up as faded rows, and can be exported to
+  a CSV file.
 - Movie, TV show, book and comic lookups read the name as the rules above
   them leave it, so a "Replace text" can fix an abbreviation first.
 - Edit any new name by hand right in the preview (double-click or F2).

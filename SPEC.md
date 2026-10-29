@@ -34,7 +34,10 @@ This document describes **what** the program does, not **how**.
   (default; the list re-sorts as the rules change), current name (natural
   order, `2 < 10`), folder, size, date.
 - Move items up/down (manual order; unavailable when sorting by new name),
-  remove selected, clear all.
+  remove selected, clear all. What the lookups found (movie, episode,
+  book, comic, album) goes with the files taken out, and clearing also
+  forgets the shows and series picked, so files added again start fresh;
+  Ctrl+Z brings it all back with the files.
 - Numbering follows the list order (in "new name" mode, the current name order).
 
 ## 2. Rules (pipeline)
@@ -607,6 +610,17 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   it (`v`, `#`, `c`) or ending in a dot (`Vol. `). Optional series
   folders (default `{series} ({series year})`) reuse folders already
   named after the series.
+- "Show the missing issues" (on by default; old saved rules get it on):
+  for each series (GCD or Comic Vine) with a listed file matched to an
+  issue, the issues no listed file holds become faded rows, like the
+  missing episodes (`#7 · title`, cover date), leaving out cover dates
+  still to come. Issues are put in order by number (non-numbers last,
+  then as the catalogue lists them); each row sits before the file with
+  the nearest later issue, else after the nearest earlier one. The
+  bottom bar counts them; clicking saves a CSV (series with start year,
+  number, title, cover date) in the series' folder. With both missing
+  episodes and issues, one count ("N missing") and the TV columns.
+  MangaDex has no list of issues: nothing is shown.
 - Only the series name and the series' and issues' ids go to the
   catalogues; the GCD sign-in only to comics.org.
   Files are never changed.

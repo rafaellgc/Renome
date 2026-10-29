@@ -16,7 +16,7 @@
   import ComicReview from "$lib/ComicReview.svelte";
   import GcdLogin from "$lib/GcdLogin.svelte";
   import EpisodeReview from "$lib/EpisodeReview.svelte";
-  import { code, missingEpisodes, missingFolder, today } from "$lib/missing";
+  import { missingEpisodes, missingFolder, missingIssues, today } from "$lib/missing";
   import MovieReview from "$lib/MovieReview.svelte";
   import Options from "$lib/Options.svelte";
   import RuleCard from "$lib/RuleCard.svelte";
@@ -293,12 +293,21 @@
     ),
   );
   const seriesCounts = $derived(counts(series));
-  /** Aired episodes missing from the seasons the listed videos cover. */
-  const ghosts = $derived(
-    seriesRule?.rule.type === "series" && seriesRule.rule.missing
+  /** Aired episodes missing from the seasons the listed videos cover, and
+   *  issues missing from the series the listed comics are from. */
+  const ghosts = $derived([
+    ...(seriesRule?.rule.type === "series" && seriesRule.rule.missing
       ? missingEpisodes(shows, episodeMatches, preview.items, sortDesc, today())
-      : [],
-  );
+      : []),
+    ...(comicRule?.rule.type === "comic" && comicRule.rule.missing
+      ? missingIssues(comicVolumes, comics, preview.items, sortDesc, today())
+      : []),
+  ]);
+  const missingCount = $derived.by(() => {
+    const kinds = new Set(ghosts.map((g) => g.kind));
+    const key = kinds.size > 1 ? "missingItems" : kinds.has("issue") ? "missingIssues" : "missingEpisodes";
+    return t(key, { n: ghosts.length });
+  });
   /** Episodes whose names are already right but that still get metadata. */
   const episodeMetaOnly = $derived(
     seriesRule?.rule.type === "series" && seriesRule.rule.sidecar
@@ -449,7 +458,7 @@
     try {
       await remember();
       const r = await api.addPaths(paths, { recursive: true, includeHidden: settings.includeHidden, foldersAsItems });
-      if (!r.added.length) await api.dropCheckpoint();
+      if (!r.added.length) await dropCheckpoint();
       await applySort();
       await refresh();
       checkIdentical();
@@ -481,16 +490,18 @@
 
   async function removeSelected() {
     if (!selected.size) return;
-    await remember();
+    await remember(found());
     await api.removeFiles([...selected]);
+    forget(selected);
     selected = new Set();
     await refresh();
     checkIdentical();
   }
 
   async function clearAll() {
-    await remember();
+    await remember(found());
     await api.clearFiles();
+    forget(null);
     selected = new Set();
     overrides = {};
     await refresh();
@@ -582,6 +593,8 @@
       let keptLists = 0;
       // Renamed without a history entry (it could not be written): nothing
       // more is written, or undo could not take it back.
+      // The list's undo starts over (as the core's, when it renamed).
+      if (preview.changed) foundUndo = [];
       const recorded = !r.done.length || !!r.historyId;
       if (recorded && rule?.type === "movie" && rule.sidecar) {
         const items = r.done
@@ -702,6 +715,7 @@
     task = "undo";
     try {
       const r = await api.undo(id);
+      foundUndo = [];
       followMatches(r);
       notice = t("restoredN", { n: r.done.length });
       if (history) history = await api.history();
@@ -1268,15 +1282,55 @@
   }
 
   /** Saves the list and the hand-edited names before an edit, for Ctrl+Z. */
-  const remember = () => api.checkpoint($state.snapshot(overrides));
+  /** What the lookups found per file, kept along each list checkpoint
+   *  that takes files out (null: the edit left them as they were). */
+  type Found = { movies: typeof movies; books: typeof books; comics: typeof comics; series: typeof series; albums: AlbumState[]; pickedShows: typeof pickedShows; pickedComics: typeof pickedComics; searchedShows: Candidate[] };
+  let foundUndo: (Found | null)[] = [];
+  const found = (): Found => ({ movies, books, comics, series, albums, pickedShows, pickedComics, searchedShows });
+  const remember = (keep: Found | null = null) => {
+    if (foundUndo.length === 100) foundUndo.shift();
+    foundUndo.push(keep);
+    return api.checkpoint($state.snapshot(overrides));
+  };
+  const dropCheckpoint = () => {
+    foundUndo.pop();
+    return api.dropCheckpoint();
+  };
+  /** Forgets what was found for files taken out of the list (all of it,
+   *  with the shows and series picked, when the list is cleared), so a
+   *  file added again starts fresh. */
+  function forget(paths: Set<string> | null) {
+    if (!paths) {
+      movies = {};
+      books = {};
+      comics = {};
+      series = {};
+      albums = [];
+      pickedShows = {};
+      pickedComics = {};
+      searchedShows = [];
+      return;
+    }
+    const keep = <T,>(m: Record<string, T>) => Object.fromEntries(Object.entries(m).filter(([p]) => !paths.has(p)));
+    movies = keep(movies);
+    books = keep(books);
+    comics = keep(comics);
+    series = keep(series);
+    albums = albums
+      .map((a) => ({ ...a, files: a.files.filter((p) => !paths.has(p)), matches: keep(a.matches) }))
+      .filter((a) => a.files.length);
+  }
 
   /** Undoes the last edit to the list (Ctrl+Z). Renames are undone in the History. */
   async function undoListEdit() {
     const prev = await api.undoList();
     if (prev === null) {
+      foundUndo = [];
       notice = t("nothingToUndo");
       return;
     }
+    const was = foundUndo.pop();
+    if (was) ({ movies, books, comics, series, albums, pickedShows, pickedComics, searchedShows } = was);
     overrides = prev;
     await refresh();
     checkIdentical();
@@ -1350,11 +1404,14 @@
     ]);
   }
 
-  /** Saves the missing episodes to a CSV file, by show, season and episode. */
+  /** Saves the missing episodes and issues to a CSV file, by show (or
+   *  series), season and number. */
   async function exportMissing() {
     // In the show's folder, named after the show when there is one.
-    const names = [...new Set(ghosts.map((g) => g.show))];
-    const file = `${names.length === 1 ? names[0].replace(/[\\/:*?"<>|]/g, " ").trim() + " - " : ""}${t("defaultMissingName")}.csv`;
+    const names = [...new Set(ghosts.map((g) => g.group))];
+    const kinds = new Set(ghosts.map((g) => g.kind));
+    const base = t(kinds.size > 1 ? "defaultMissingItemsName" : kinds.has("issue") ? "defaultMissingIssuesName" : "defaultMissingName");
+    const file = `${names.length === 1 ? names[0].replace(/[\\/:*?"<>|]/g, " ").trim() + " - " : ""}${base}.csv`;
     const byPath = new Map(preview.items.map((i) => [i.path, i.dir]));
     const dir = missingFolder(ghosts, (p) => byPath.get(p));
     const path = await save({
@@ -1364,12 +1421,28 @@
     });
     if (!path) return;
     const list = [...ghosts].sort(
-      (a, b) => a.show.localeCompare(b.show) || a.season - b.season || a.number - b.number,
+      (a, b) => a.group.localeCompare(b.group) || a.season - b.season || a.number - b.number,
     );
-    await saveCsv(path, t("exportMissing"), t("missingSaved"), [
-      [t("csv.show"), t("csv.season"), t("csv.episode"), t("csv.code"), t("csv.title"), t("csv.airDate")],
-      ...list.map((g) => [g.show, String(g.season), String(g.number), code(g), g.title, g.airDate]),
-    ]);
+    // Issues alone have no season: series, number, title and cover date.
+    const issues = list.every((g) => g.kind === "issue");
+    await saveCsv(
+      path,
+      t("exportMissing"),
+      t("missingSaved"),
+      issues
+        ? [
+            [t("csv.series"), t("csv.number"), t("csv.title"), t("csv.coverDate")],
+            ...list.map((g) => [g.group, g.code.replace(/^#/, ""), g.title, g.date]),
+          ]
+        : [
+            [t("csv.show"), t("csv.season"), t("csv.episode"), t("csv.code"), t("csv.title"), t("csv.airDate")],
+            ...list.map((g) =>
+              g.kind === "issue"
+                ? [g.group, "", g.code.replace(/^#/, ""), g.code, g.title, g.date]
+                : [g.group, String(g.season), String(g.number), g.code, g.title, g.date],
+            ),
+          ],
+    );
   }
 
   /** Writes rows as CSV (`;` between fields where a comma is the decimal
@@ -1697,7 +1770,7 @@
     {#if preview.conflicts}<span class="bad">{t("conflicts", { n: preview.conflicts })}</span>{/if}
     {#if selected.size}<span>{t("selected", { n: selected.size })}</span>{/if}
     {#if ghosts.length}
-      <button class="link faint" title={t("exportMissingHint")} onclick={exportMissing}>{t("missingEpisodes", { n: ghosts.length })}</button>
+      <button class="link faint" title={t("exportMissingHint")} onclick={exportMissing}>{missingCount}</button>
     {/if}
     {#if identicalProgress !== null}
       <span>{t("identicalScanning", { p: Math.floor(identicalProgress * 100) })}</span>
