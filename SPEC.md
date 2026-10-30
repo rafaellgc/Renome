@@ -232,12 +232,27 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   the show when it holds `tmdbid-<id>`, or its title, without year and
   tags, has similarity ≥ 0.8 with the show's name or original name, or
   starts with its words); else the parent of a loose season folder; else
-  the file's own folder. A file already there stays. The preview shows
-  `<show folder>/Season NN` before the new name; each folder name is
-  checked like a file name.
+  the file's own folder. A folder also counts as the show's, whatever its
+  name, when every video in it (four levels down) is a listed episode of
+  that show; never the user's own folders (home, Downloads, Desktop,
+  Documents, Videos, Music, Pictures, Public), a disk's top folder (another
+  device than its parent) or one right under `/`. A file already there
+  stays. The preview shows `<show folder>/Season NN` before the new name;
+  each folder name is checked like a file name.
+- A show's old folder (by name or content) that keeps files after its
+  episodes leave (extras, a file in conflict or hidden by the filter) is
+  renamed `<show folder> (<suffix>)` next to the new one (suffix in the UI
+  language: "arquivos adicionais", "additional files", "archivos
+  adicionales"; skipped if that name exists). It is an operation of the
+  rename, run after the files leave it (shallower), undone with it. The
+  bottom bar shows "N folder(s) with leftovers" (tooltip: each folder),
+  and applying always asks first, naming the folder and the count, even
+  with confirmation off. The result counts files and those folders
+  apart.
 - After any rename, the folders files were moved out of are deleted when
-  left empty, up to the folder the move happened within. Undo makes them
-  again when moving the files back.
+  left empty, up to the folder the move happened within (inside a folder
+  renamed in the same batch, under its new name). Undo makes them again
+  when moving the files back.
 - With "save .nfo and images", renaming also writes, for renamed episode
   videos and for unchanged ones with an episode (counted by the Rename
   button and the confirmation, like movies):
@@ -246,8 +261,10 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
     episode, aired, premiered, plot, runtime, rating, votes, uniqueid
     tmdb, director, writer, thumb, guest stars as `GuestStar`), and
     `<name>-thumb.jpg` (the first episode's still);
-  - in the show's folder (the one the folders option made, or the
-    current show folder as above; none for loose files): `tvshow.nfo`
+  - in the show's folder (the one above the episode's season folder when
+    the folders option moved it there, else the current show folder as
+    above, never just whatever folder holds the file; none for loose
+    files): `tvshow.nfo`
     (title, originaltitle, showtitle, year, premiered, plot, tagline,
     runtime, rating, votes, mpaa as for movies, status Continuing/Ended/
     Unreleased, genre, tag, studio (networks, then companies), credits
@@ -649,8 +666,16 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
 ## 3. Preview
 
 - Table: original name → new name, with a status per row:
-  unchanged, ok, conflict (with the reason).
-- The new name can be edited by hand in the table (overrides the rules for that row).
+  unchanged, ok, conflict (with the reason). The Folder column shows the
+  file's folder (home as `~`), or, in blue, `→ ` and the whole folder it
+  moves to, written the same way.
+- With a lookup rule on (movie, TV show, music, book, comic), a file none
+  of them handles (movie: videos, subtitles, folders; TV: videos and
+  subtitles; music: songs and their lyrics, cue sheets, playlists and
+  covers; book: books; comic: comics) and that no other rule renames gets
+  a grey "outside the rule" tag before its name, with why in a tooltip;
+  the row is otherwise normal and can be named by hand.
+- The new name can be edited by hand in the table (overrides the rules' name for that row; the folder the rules move it into still applies).
 - Checks: empty name (including a name the rules emptied, leaving only
   the extension, which would make a hidden file), `/` or null character,
   longer than 255 bytes,

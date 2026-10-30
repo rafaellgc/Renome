@@ -21,7 +21,7 @@
   import Options from "$lib/Options.svelte";
   import RuleCard from "$lib/RuleCard.svelte";
   import ShowPicker from "$lib/ShowPicker.svelte";
-  import { LOCALES, MOD, t, tError } from "$lib/i18n";
+  import { LOCALES, MOD, t, tError, type Key } from "$lib/i18n";
   import { RULE_TYPES, byFit, isAudio, isBook, isComic, isScreen, isVideo, newRule, newStep, splitExt } from "$lib/rules";
   import { loadSettings, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
@@ -32,7 +32,7 @@
   let ready = $state(false);
   let steps = $state<Step[]>([]);
   let overrides = $state<Record<string, string>>({});
-  let preview = $state<Preview>({ items: [], ruleErrors: [], filterError: null, total: 0, changed: 0, conflicts: 0 });
+  let preview = $state<Preview>({ items: [], ruleErrors: [], filterError: null, total: 0, changed: 0, conflicts: 0, leftFolders: [] });
   let selected = $state(new Set<string>());
   let filter = $state("");
   let sortKey = $state<ViewSort>("newName");
@@ -361,7 +361,29 @@
   let ruleMenu = $state(false);
   let table = $state<FileTable>();
 
-  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, movies: movieMatches, episodes: episodeMatches, songs: songMatches, books: bookMatches, comics: comicMatches });
+  /** Files the lookup rules on leave alone (a `.zip` in a show's folder),
+   *  with why: tagged in the list, which can still name them by hand. */
+  const outside = $derived.by(() => {
+    const kinds: [boolean, (i: PreviewItem) => boolean, Key][] = [
+      [!!movieRule, (i) => i.isDir || isScreen(i.original), "outsideMovie"],
+      [!!seriesRule, (i) => !i.isDir && isScreen(i.original), "outsideSeries"],
+      // Songs bring their lyrics, cue sheets, playlists and covers along.
+      [!!musicRule, (i) => !i.isDir && (isAudio(i.original) || /\.(lrc|cue|m3u8?|pls|jpe?g|png|webp)$/i.test(i.original)), "outsideMusic"],
+      [!!bookRule, (i) => !i.isDir && isBook(i.original), "outsideBook"],
+      [!!comicRule, (i) => !i.isDir && isComic(i.original), "outsideComic"],
+    ];
+    const on = kinds.filter(([enabled]) => enabled);
+    if (!on.length) return {};
+    const out: Record<string, string> = {};
+    for (const i of preview.items) {
+      // Renamed by another rule: nothing to tell.
+      if ((i.status === "ok" && !i.manual) || on.some(([, takes]) => takes(i))) continue;
+      out[i.path] = on.length === 1 ? t(on[0][2]) : t("outsideAny");
+    }
+    return out;
+  });
+
+  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, movies: movieMatches, episodes: episodeMatches, songs: songMatches, books: bookMatches, comics: comicMatches, leftoverSuffix: t("leftoverSuffix") });
   /** Example name for rule cards: the first file in natural name order, so
    *  it does not jump around while the preview re-sorts. */
   const collator = new Intl.Collator(undefined, { numeric: true });
@@ -563,8 +585,11 @@
     const retagOnly = tagsOnly.map((i) => i.path);
     const bookMeta = bookMetaOnly.map((i) => bookSidecarItem(i.path, i.path));
     if (!preview.changed && !meta.length && !tvMeta.length && !bookMeta.length && !coverOnly && !listOnly.length && !retagOnly.length) return;
-    if (settings.confirmApply) {
+    // Files left behind in a show's old folder are always told first.
+    const left = preview.leftFolders.map((f) => t("confirmLeftover", { n: f.files, from: basename(f.from), to: basename(f.to) }));
+    if (settings.confirmApply || left.length) {
       const lines = [
+        ...left,
         preview.changed ? t("confirmText", { n: preview.changed }) : "",
         meta.length + tvMeta.length ? t("confirmMeta", { n: meta.length + tvMeta.length }) : "",
         bookMeta.length ? t("confirmBookMeta", { n: bookMeta.length }) : "",
@@ -585,6 +610,8 @@
     task = "rename";
     try {
       const rule = movieRule?.rule;
+      // Old show folders renamed for their leftovers: not files.
+      const leftFrom = new Set(preview.leftFolders.map((f) => f.from));
       const r: ApplyReport = preview.changed
         ? await api.apply(payload(), $state.snapshot(overrides), $state.snapshot(view))
         : { done: [], errors: [], historyId: null, lists: 0, listsRemoved: 0 };
@@ -686,7 +713,8 @@
       if (settings.disableRulesAfterApply) for (const s of steps) s.enabled = false;
       overrides = {};
       notice = [
-        preview.changed ? t("renamedN", { n: r.done.length }) : "",
+        preview.changed ? t("renamedN", { n: r.done.filter((op) => !leftFrom.has(op.from)).length }) : "",
+        r.done.some((op) => leftFrom.has(op.from)) ? t("leftFoldersN", { n: r.done.filter((op) => leftFrom.has(op.from)).length }) : "",
         r.lists ? t("listsN", { n: r.lists }) : "",
         r.listsRemoved ? t("listsRemovedN", { n: r.listsRemoved }) : "",
         saved ? t("sidecarsN", { n: saved }) : "",
@@ -1746,6 +1774,7 @@
           {copies}
           {matches}
           {ghosts}
+          {outside}
           onmatch={(p) => {
             if (seriesRule && series[p]) openEpisodeReview(p);
             else if (movieRule && movies[p]) openReview(p);
@@ -1772,6 +1801,12 @@
     </span>
     <span class="ok">{t("changed", { n: preview.changed })}</span>
     {#if preview.conflicts}<span class="bad">{t("conflicts", { n: preview.conflicts })}</span>{/if}
+    {#if preview.leftFolders.length}
+      <span
+        class="warn"
+        title={preview.leftFolders.map((f) => t("confirmLeftover", { n: f.files, from: basename(f.from), to: basename(f.to) })).join("\n")}
+      >{t("leftoverCount", { n: preview.leftFolders.length })}</span>
+    {/if}
     {#if selected.size}<span>{t("selected", { n: selected.size })}</span>{/if}
     {#if ghosts.length}
       <button class="link faint" title={t("exportMissingHint")} onclick={exportMissing}>{missingCount}</button>
@@ -2053,6 +2088,7 @@
   footer .ok { color: var(--accent); }
   footer .faint { color: var(--muted); font-style: italic; }
   footer .bad { color: var(--danger); }
+  footer .warn { padding: 0 6px; border-radius: 4px; background: var(--warn); color: black; cursor: help; }
   footer .link {
     display: inline-flex;
     align-items: center;

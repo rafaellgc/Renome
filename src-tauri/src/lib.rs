@@ -97,6 +97,24 @@ fn undo_list(state: State<AppState>) -> Option<Overrides> {
     Some(overrides)
 }
 
+/// The user's own folders (home, Downloads, Videos…), never taken for a
+/// show's folder to rename.
+fn protected_dirs() -> Vec<PathBuf> {
+    [
+        dirs::home_dir(),
+        dirs::download_dir(),
+        dirs::desktop_dir(),
+        dirs::document_dir(),
+        dirs::video_dir(),
+        dirs::audio_dir(),
+        dirs::picture_dir(),
+        dirs::public_dir(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
 /// Runs `work` away from the window's thread (commands without `async`
 /// run on it and freeze the window while they last).
 async fn in_background<T: Send + 'static>(
@@ -181,6 +199,7 @@ async fn preview(
     in_background(app, move |state| {
         let s = state.session.lock().unwrap();
         view.identical = s.identical.clone();
+        view.protected = protected_dirs();
         renome_core::preview(&s.files, &steps, &overrides, &view)
     })
     .await
@@ -292,6 +311,7 @@ async fn apply(
     in_background(app, move |state| {
         let mut s = state.session.lock().unwrap();
         view.identical = s.identical.clone();
+        view.protected = protected_dirs();
         // Recompute the preview here to apply exactly what is visible and valid right now.
         let ops = renome_core::preview(&s.files, &steps, &overrides, &view).operations();
         let report = state.history.apply(&ops);

@@ -17,6 +17,7 @@
     matches = {},
     onmatch,
     ghosts = [],
+    outside = {},
   }: {
     items: PreviewItem[];
     selected: Set<string>;
@@ -32,6 +33,8 @@
     onmatch?: (path: string) => void;
     /** Missing episodes, shown faded between the files. */
     ghosts?: Ghost[];
+    /** Files the lookup rules leave alone, with why. */
+    outside?: Record<string, string>;
   } = $props();
 
   const MOVIE_MARK: Record<MovieStatus, string> = { auto: "✓", chosen: "✓", choose: "?", none: "✕" };
@@ -278,7 +281,7 @@
             {:else if item.status === "ok"}<span class="dot good">●</span>{/if}
           </span>
           <span class="c-orig" title={item.path}>
-            {#if copies[item.path]}{@const c = copies[item.path]}{@const same = t("identicalTo", { names: c.others.map(base).join(", ") })}<span class="copy g{c.group % 6}" title={same} role="img" aria-label={same}><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M5 1.5h7A1.5 1.5 0 0 1 13.5 3v8.5H12V3H5zM2.5 4.5A1.5 1.5 0 0 1 4 3h6a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 10 15H4a1.5 1.5 0 0 1-1.5-1.5zM4 4.5v9h6v-9z" /></svg>{c.group + 1}</span>{/if}{#if item.isDir}<svg class="folder" viewBox="0 0 16 16" aria-label={t("isFolder")}><path fill="currentColor" d="M1.5 3.5A1 1 0 0 1 2.5 2.5h3.6l1.5 1.5h5.9a1 1 0 0 1 1 1v7.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" /></svg>{/if}{#if d}{@render segs(d[0], "del")}{:else}{item.original}{/if}
+            {#if copies[item.path]}{@const c = copies[item.path]}{@const same = t("identicalTo", { names: c.others.map(base).join(", ") })}<span class="copy g{c.group % 6}" title={same} role="img" aria-label={same}><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M5 1.5h7A1.5 1.5 0 0 1 13.5 3v8.5H12V3H5zM2.5 4.5A1.5 1.5 0 0 1 4 3h6a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 10 15H4a1.5 1.5 0 0 1-1.5-1.5zM4 4.5v9h6v-9z" /></svg>{c.group + 1}</span>{/if}{#if outside[item.path]}<span class="outside" title={outside[item.path]}>{t("outsideRow")}</span>{/if}{#if item.isDir}<svg class="folder" viewBox="0 0 16 16" aria-label={t("isFolder")}><path fill="currentColor" d="M1.5 3.5A1 1 0 0 1 2.5 2.5h3.6l1.5 1.5h5.9a1 1 0 0 1 1 1v7.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" /></svg>{/if}{#if d}{@render segs(d[0], "del")}{:else}{item.original}{/if}
           </span>
           <span class="c-new" role="gridcell" tabindex="-1" ondblclick={() => startEdit(item)} title={note(item) || t("editHint")}>
             {#if editing === item.path}
@@ -308,7 +311,7 @@
           </span>
           <!-- Moving: where to, without hovering over the folder icon. -->
           {#if item.folder}
-            <span class="c-dir into-dir" title={t("intoFolder", { folder: item.folder })}>{`→ ${item.folder}`}</span>
+            <span class="c-dir into-dir" title={item.dest ?? item.folder}><span class="arrow">→</span><span class="path">{item.dest ? dir(item.dest) : item.folder}</span></span>
           {:else}
             <span class="c-dir" title={item.dir}>{dir(item.dir)}</span>
           {/if}
@@ -393,12 +396,24 @@
     font-size: 11px;
     font-style: normal;
   }
+  /* Left alone by the lookup rules: the row stays as it is. */
+  .outside {
+    margin-right: 6px;
+    padding: 0 6px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    color: var(--muted);
+    font-size: 11px;
+  }
   .dot.hole { color: var(--muted); }
   .row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .c-size, .c-date { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
   .row .c-dir { color: var(--muted); direction: rtl; text-align: left; }
-  /* Where it goes reads from its start (the artist, the show). */
-  .row .c-dir.into-dir { color: var(--accent); direction: ltr; }
+  /* Where it goes: the arrow stays, the path is cut at its start, like
+     the others' (its end, the new folders, is what tells). */
+  .row .c-dir.into-dir { color: var(--accent); direction: ltr; display: flex; gap: 4px; }
+  .into-dir .arrow { flex: none; }
+  .into-dir .path { flex: 1; min-width: 0; direction: rtl; text-align: left; }
   .c-new { display: flex; align-items: center; gap: 4px; }
   .name { overflow: hidden; text-overflow: ellipsis; }
   .row.conflict .name { color: var(--danger); }

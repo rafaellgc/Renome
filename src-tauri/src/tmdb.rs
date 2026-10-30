@@ -738,7 +738,10 @@ pub async fn tv_sidecars(
             episodes: item.episodes.clone(),
             titles: Vec::new(),
         };
-        let show_dir = if folders {
+        // Moved into `Show/Season NN`: the show's folder is the one above.
+        // A file that stayed out of one (hand-named, or already in place)
+        // only uses a folder named after the show, never whatever holds it.
+        let show_dir = if folders && in_season {
             dir.parent().map(Path::to_path_buf)
         } else {
             tv::show_dir(dir, &m)

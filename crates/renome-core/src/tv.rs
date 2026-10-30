@@ -756,7 +756,7 @@ pub fn find_in(show: &Show, g: &EpisodeGuess, dir: &Path, typed: &str) -> Option
 }
 
 /// The folder a show's files sit in: the one above a season folder.
-fn show_root(dir: &Path) -> &Path {
+pub fn show_root(dir: &Path) -> &Path {
     let name = dir.file_name().unwrap_or_default().to_string_lossy();
     match dir.parent() {
         Some(up) if folder_season(&name).is_some() => up,
@@ -913,7 +913,7 @@ pub fn season_folder(season: u16) -> String {
 
 /// Whether a folder is named after the show: its TMDB id, or (almost) its
 /// name or original name, with or without the year.
-fn names_show(folder: &Path, m: &EpisodeMatch) -> bool {
+pub fn names_show(folder: &Path, m: &EpisodeMatch) -> bool {
     folder_names(folder, m.id, &[&m.show, &m.original_show])
 }
 

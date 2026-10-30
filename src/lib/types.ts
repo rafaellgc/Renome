@@ -59,6 +59,8 @@ export interface PreviewItem {
   newName: string;
   /** Folder (inside dir) the file moves into. */
   folder: string | null;
+  /** The folder it ends up in, when it moves. */
+  dest: string | null;
   status: Status;
   problem: Problem | null;
   windowsUnsafe: boolean;
@@ -81,6 +83,8 @@ export interface Preview {
   total: number;
   changed: number;
   conflicts: number;
+  /** A show's old folders renamed for the files that stay in them. */
+  leftFolders: { from: string; to: string; files: number }[];
 }
 
 export interface ScanOptions {
@@ -105,6 +109,8 @@ export interface View {
   books: Record<string, BookMatch>;
   /** The issue chosen for each file (Comic Vine), for the comic rule. */
   comics: Record<string, ComicMatch>;
+  /** What a show's old folder is called after when files stay in it. */
+  leftoverSuffix: string;
 }
 
 /** A MusicBrainz release offered for an album, best first. */

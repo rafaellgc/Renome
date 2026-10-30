@@ -217,11 +217,23 @@ fn make_parent(to: &Path, report: &mut ApplyReport) -> std::io::Result<Vec<PathB
 
 /// Removes the folders files were moved out of when nothing is left in
 /// them (`Show/Season 1` after the episodes went to `Show (2008)/Season
-/// 01`), up to the folder the move happened within. Undo makes them again
+/// 01`), up to the folder the move happened within; inside a folder that
+/// was renamed afterwards, under its new name. Undo makes them again
 /// when moving the files back.
 fn remove_emptied(done: &[Operation]) {
+    let folders: Vec<&Operation> = done.iter().filter(|op| op.to.is_dir()).collect();
     for op in done {
-        let mut dir = op.from.parent();
+        let from = folders
+            .iter()
+            .find_map(|f| {
+                op.from
+                    .strip_prefix(&f.from)
+                    .ok()
+                    .filter(|rest| !rest.as_os_str().is_empty())
+                    .map(|rest| f.to.join(rest))
+            })
+            .unwrap_or_else(|| op.from.clone());
+        let mut dir = from.parent();
         while let Some(d) = dir {
             if d.as_os_str().is_empty() || op.to.starts_with(d) || fs::remove_dir(d).is_err() {
                 break;

@@ -16,7 +16,7 @@ use crate::musicbrainz::SongMatch;
 use crate::rules::{Ctx, Move, Pipeline, Rule, RuleError, Step, any_song_tags, song_tags};
 use crate::text;
 use crate::tmdb::{self, MovieMatch};
-use crate::tv::EpisodeMatch;
+use crate::tv::{self, EpisodeMatch};
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -72,6 +72,26 @@ pub struct View {
     /// other comics are named from what they say about themselves.
     #[serde(default)]
     pub comics: HashMap<PathBuf, crate::comics::ComicMatch>,
+    /// What a show's old folder is called after when files stay in it
+    /// (`Show (2010) [tmdbid-7] (additional files)`), in the UI's language.
+    #[serde(default)]
+    pub leftover_suffix: String,
+    /// Folders never taken for a show's own (home, Downloads…; filled in
+    /// by the app).
+    #[serde(skip)]
+    pub protected: Vec<PathBuf>,
+}
+
+/// A show's old folder that keeps files after its episodes moved to the
+/// show's new folder (extras, a file in conflict): renamed to sit next to
+/// it, so both are found together.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeftFolder {
+    pub from: PathBuf,
+    pub to: PathBuf,
+    /// Files left in it.
+    pub files: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -88,7 +108,6 @@ pub struct PreviewItem {
     /// user; it is inside `dest`'s root, not always inside `dir`.
     pub folder: Option<String>,
     /// The folder the file ends up in, when it moves.
-    #[serde(skip)]
     pub dest: Option<PathBuf>,
     pub status: Status,
     pub problem: Option<Problem>,
@@ -118,6 +137,8 @@ pub struct Preview {
     pub total: usize,
     pub changed: usize,
     pub conflicts: usize,
+    /// Old show folders renamed for what stays in them.
+    pub left_folders: Vec<LeftFolder>,
 }
 
 impl PreviewItem {
@@ -137,6 +158,11 @@ impl Preview {
                 from: i.path.clone(),
                 to: i.target(),
             })
+            // Shallower than the files leaving them: renamed after.
+            .chain(self.left_folders.iter().map(|l| Operation {
+                from: l.from.clone(),
+                to: l.to.clone(),
+            }))
             .collect()
     }
 }
@@ -745,41 +771,44 @@ pub fn preview(
                 .filter(|n| *n != original);
             // The rules emptied the name but left the extension: `.txt` would
             // be a hidden file with no name.
-            let mut empty_stem = false;
+            let empty_stem;
             let mut folders: Vec<String> = Vec::new();
             let mut dest = None;
-            let (new_name, manual) = match overrides.get(&file.path) {
-                Some(name) => (name.clone(), true),
-                None => {
-                    let ctx = Ctx {
-                        comic: comics
-                            .get(file.path.as_path())
-                            .map(|(m, _)| m)
-                            .or_else(|| view.comics.get(&file.path)),
-                        comic_folder: comics
-                            .get(file.path.as_path())
-                            .and_then(|(_, f)| f.as_ref()),
-                        ..ctx_of(index, folder_index, file)
-                    };
-                    let (stem, ext, moved) = pipeline.run_full(&ctx);
-                    empty_stem = stem.is_empty() && !file.stem.is_empty();
-                    // A movie already in a folder with its name stays there.
-                    let inside = file
-                        .dir
-                        .file_name()
-                        .is_some_and(|d| d.to_string_lossy() == stem);
-                    let (root, names) = match moved {
-                        Some(Move::OwnFolder) if !inside => (file.dir.clone(), vec![stem.clone()]),
-                        Some(Move::Into { root, folders }) => (root, folders),
-                        _ => (file.dir.clone(), Vec::new()),
-                    };
-                    let to = names.iter().fold(root, |p, n| p.join(n));
-                    // Already in that folder: stay there.
-                    if to != file.dir {
-                        folders = names;
-                        dest = Some(to);
-                    }
-                    (join_name(&stem, &ext), false)
+            // A name typed by hand replaces the rules' name, not the folder
+            // they move the file into.
+            let (new_name, manual) = {
+                let ctx = Ctx {
+                    comic: comics
+                        .get(file.path.as_path())
+                        .map(|(m, _)| m)
+                        .or_else(|| view.comics.get(&file.path)),
+                    comic_folder: comics
+                        .get(file.path.as_path())
+                        .and_then(|(_, f)| f.as_ref()),
+                    ..ctx_of(index, folder_index, file)
+                };
+                let (stem, ext, moved) = pipeline.run_full(&ctx);
+                empty_stem =
+                    stem.is_empty() && !file.stem.is_empty() && !overrides.contains_key(&file.path);
+                // A movie already in a folder with its name stays there.
+                let inside = file
+                    .dir
+                    .file_name()
+                    .is_some_and(|d| d.to_string_lossy() == stem);
+                let (root, names) = match moved {
+                    Some(Move::OwnFolder) if !inside => (file.dir.clone(), vec![stem.clone()]),
+                    Some(Move::Into { root, folders }) => (root, folders),
+                    _ => (file.dir.clone(), Vec::new()),
+                };
+                let to = names.iter().fold(root, |p, n| p.join(n));
+                // Already in that folder: stay there.
+                if to != file.dir {
+                    folders = names;
+                    dest = Some(to);
+                }
+                match overrides.get(&file.path) {
+                    Some(name) => (name.clone(), true),
+                    None => (join_name(&stem, &ext), false),
                 }
             };
             let problem = if empty_stem {
@@ -828,6 +857,7 @@ pub fn preview(
         .collect();
     climb_shared_roots(&mut items);
     unify_folders(&mut items);
+    place_show_folders(&mut items, view);
     if let Some((_, folders)) = music {
         if folders {
             keep_collections(&mut items, &songs);
@@ -910,6 +940,7 @@ pub fn preview(
         .iter()
         .filter(|i| i.status == Status::Conflict)
         .count();
+    let left_folders = left_folders(&items, view);
     Preview {
         items,
         rule_errors: pipeline.errors,
@@ -917,7 +948,166 @@ pub fn preview(
         total: files.len(),
         changed,
         conflicts,
+        left_folders,
     }
+}
+
+/// Episodes moving into show folders, by show and by the folder they come
+/// from (the one above a season folder): (show, old folder, items).
+fn show_moves<'a>(
+    items: &[PreviewItem],
+    view: &'a View,
+) -> Vec<(&'a EpisodeMatch, PathBuf, Vec<usize>)> {
+    let mut groups: Vec<(&EpisodeMatch, PathBuf, Vec<usize>)> = Vec::new();
+    for (i, item) in items.iter().enumerate() {
+        let Some(m) = view.episodes.get(&item.path) else {
+            continue;
+        };
+        if item.is_dir || item.dest.is_none() {
+            continue;
+        }
+        let old = tv::show_root(&item.dir).to_path_buf();
+        match groups.iter_mut().find(|g| g.0.id == m.id && g.1 == old) {
+            Some(g) => g.2.push(i),
+            None => groups.push((m, old, vec![i])),
+        }
+    }
+    groups
+}
+
+/// The show's folder in a destination (`Show/Season 01`: `Show`).
+fn show_folder_of(dest: &Path) -> &Path {
+    let season = dest
+        .file_name()
+        .is_some_and(|n| tv::folder_season(&n.to_string_lossy()).is_some());
+    match dest.parent() {
+        Some(up) if season => up,
+        _ => dest,
+    }
+}
+
+/// A folder that may not be taken for one show's: the user's own folders,
+/// a disk's top folder, the file system's.
+fn protected(dir: &Path, view: &View) -> bool {
+    let Some(up) = dir.parent().filter(|u| u.parent().is_some()) else {
+        return true;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if let (Ok(a), Ok(b)) = (std::fs::metadata(dir), std::fs::metadata(up))
+            && a.dev() != b.dev()
+        {
+            return true;
+        }
+    }
+    view.protected.iter().any(|p| p == dir)
+}
+
+/// Whether every video in a folder (and its subfolders) is a listed episode
+/// of the show: a show's folder, whatever its name.
+fn only_show_videos(dir: &Path, id: u64, view: &View) -> bool {
+    let mut any = false;
+    for e in walkdir::WalkDir::new(dir).max_depth(4).into_iter() {
+        let Ok(e) = e else { return false };
+        let ext = e
+            .path()
+            .extension()
+            .map(|x| x.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        if e.file_type().is_dir() || !tmdb::is_video(&ext) {
+            continue;
+        }
+        if view.episodes.get(e.path()).is_none_or(|m| m.id != id) {
+            return false;
+        }
+        any = true;
+    }
+    any
+}
+
+/// A show's folder found by what it holds, not by its name (`Série ABC
+/// Completa 1080p`): the show's new folder goes next to it, not inside.
+fn place_show_folders(items: &mut [PreviewItem], view: &View) {
+    for (m, old, idx) in show_moves(items, view) {
+        let Some(dest) = items[idx[0]].dest.clone() else {
+            continue;
+        };
+        let new = show_folder_of(&dest).to_path_buf();
+        let (Some(name), Some(up)) = (new.file_name(), old.parent()) else {
+            continue;
+        };
+        if new.parent() != Some(old.as_path())
+            || tv::names_show(&old, m)
+            || protected(&old, view)
+            || !only_show_videos(&old, m.id, view)
+        {
+            continue;
+        }
+        let to = up.join(name);
+        for i in idx {
+            if let Some(rest) = items[i]
+                .dest
+                .as_ref()
+                .and_then(|d| d.strip_prefix(&new).ok())
+            {
+                items[i].dest = Some(to.join(rest));
+            }
+        }
+    }
+}
+
+/// The show folders episodes leave that still hold files afterwards
+/// (extras, a file in conflict, one hidden by the filter): renamed
+/// `<new folder> (<suffix>)`, next to the new one. Without anything left,
+/// the old folder is removed after the move instead.
+fn left_folders(items: &[PreviewItem], view: &View) -> Vec<LeftFolder> {
+    let mut left: Vec<LeftFolder> = Vec::new();
+    for (m, old, idx) in show_moves(items, view) {
+        let Some(dest) = items[idx[0]].dest.as_ref() else {
+            continue;
+        };
+        let new = show_folder_of(dest);
+        let (Some(name), Some(up)) = (new.file_name(), old.parent()) else {
+            continue;
+        };
+        // Only a show's own folder, next to its new one.
+        if new == old
+            || new.parent() != Some(up)
+            || left.iter().any(|l| l.from == old)
+            || protected(&old, view)
+            || !(tv::names_show(&old, m) || only_show_videos(&old, m.id, view))
+        {
+            continue;
+        }
+        let leaving: HashSet<&Path> = items
+            .iter()
+            .filter(|i| i.status == Status::Ok && !i.target().starts_with(&old))
+            .map(|i| i.path.as_path())
+            .collect();
+        let files = walkdir::WalkDir::new(&old)
+            .min_depth(1)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|e| !e.file_type().is_dir() && !leaving.contains(e.path()))
+            .count();
+        if files == 0 {
+            continue;
+        }
+        let suffix = match view.leftover_suffix.trim() {
+            "" => "extras",
+            s => s,
+        };
+        let to = up.join(format!("{} ({suffix})", name.to_string_lossy()));
+        if std::fs::symlink_metadata(&to).is_err() {
+            left.push(LeftFolder {
+                from: old,
+                to,
+                files,
+            });
+        }
+    }
+    left
 }
 
 #[cfg(test)]
@@ -1390,6 +1580,117 @@ mod tests {
             d.path()
                 .join("Show (2010) [tmdbid-7]/Season 01/Show - S01E02.mkv")
         );
+    }
+
+    fn series_steps() -> Vec<Step> {
+        vec![Step {
+            enabled: true,
+            rule: Rule::Series {
+                template: "{show} - S{season}E{episode}".into(),
+                colon: " - ".into(),
+                show: String::new(),
+                folders: true,
+                folder_template: "{show} ({year}) [tmdbid-{id}]".into(),
+                sidecar: false,
+                fanart: false,
+                missing: true,
+            },
+        }]
+    }
+
+    fn episode(n: u16) -> EpisodeMatch {
+        EpisodeMatch {
+            id: 7,
+            show: "Show".into(),
+            original_show: String::new(),
+            year: Some(2010),
+            season: 1,
+            episodes: vec![n],
+            titles: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn hand_named_episode_keeps_its_folder() {
+        let d = tempfile::tempdir().unwrap();
+        let old = d.path().join("Show/Season 1");
+        fs::create_dir_all(&old).unwrap();
+        let files = entries(&old, &["show.s01e02.mkv"]);
+        let mut view = View::default();
+        view.episodes.insert(files[0].path.clone(), episode(2));
+        let overrides = HashMap::from([(files[0].path.clone(), "Mine.mkv".to_string())]);
+        let p = preview(&files, &series_steps(), &overrides, &view);
+        assert_eq!(
+            p.operations()[0].to,
+            d.path().join("Show (2010) [tmdbid-7]/Season 01/Mine.mkv")
+        );
+    }
+
+    #[test]
+    fn show_folder_known_by_what_it_holds() {
+        // A folder named nothing like the show, holding only its episodes:
+        // the new folder goes next to it, not inside.
+        let d = tempfile::tempdir().unwrap();
+        let old = d.path().join("Complete Box 1080p");
+        fs::create_dir_all(&old).unwrap();
+        let files = entries(&old, &["e01.mkv", "e02.mkv"]);
+        let mut view = View::default();
+        for (n, f) in files.iter().enumerate() {
+            view.episodes.insert(f.path.clone(), episode(n as u16 + 1));
+        }
+        let p = preview(&files, &series_steps(), &HashMap::new(), &view);
+        assert_eq!(
+            p.operations()[0].to,
+            d.path()
+                .join("Show (2010) [tmdbid-7]/Season 01/Show - S01E01.mkv")
+        );
+        assert!(p.left_folders.is_empty());
+
+        // Another video in it (not this show's): a folder like any other.
+        fs::write(old.join("other.mkv"), "x").unwrap();
+        let p = preview(&files, &series_steps(), &HashMap::new(), &view);
+        assert_eq!(
+            p.operations()[0].to,
+            old.join("Show (2010) [tmdbid-7]/Season 01/Show - S01E01.mkv")
+        );
+        assert!(p.left_folders.is_empty());
+    }
+
+    #[test]
+    fn show_folder_with_leftovers_is_renamed_beside() {
+        let d = tempfile::tempdir().unwrap();
+        let old = d.path().join("Show/Season 1");
+        fs::create_dir_all(&old).unwrap();
+        fs::write(d.path().join("Show/notes.txt"), "x").unwrap();
+        let files = entries(&old, &["show.s01e01.mkv", "show.s01e02.mkv"]);
+        let mut view = View {
+            leftover_suffix: "additional files".into(),
+            ..View::default()
+        };
+        for (n, f) in files.iter().enumerate() {
+            view.episodes.insert(f.path.clone(), episode(n as u16 + 1));
+        }
+        let p = preview(&files, &series_steps(), &HashMap::new(), &view);
+        assert_eq!(p.left_folders.len(), 1);
+        assert_eq!(p.left_folders[0].files, 1);
+        let left = d.path().join("Show (2010) [tmdbid-7] (additional files)");
+        assert_eq!(p.left_folders[0].to, left);
+
+        let h = crate::apply::History::new(d.path().join("hist"));
+        let r = h.apply(&p.operations());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        let new = d.path().join("Show (2010) [tmdbid-7]/Season 01");
+        assert!(new.join("Show - S01E01.mkv").exists());
+        assert!(new.join("Show - S01E02.mkv").exists());
+        assert!(left.join("notes.txt").exists());
+        // The emptied season folder goes, under the folder's new name too.
+        assert!(!left.join("Season 1").exists());
+        assert!(!d.path().join("Show").exists());
+
+        h.undo(r.history_id.as_deref().unwrap()).unwrap();
+        assert!(old.join("show.s01e01.mkv").exists());
+        assert!(d.path().join("Show/notes.txt").exists());
+        assert!(!left.exists());
     }
 
     use crate::music::flac;
