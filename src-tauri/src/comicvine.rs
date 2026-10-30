@@ -152,10 +152,19 @@ impl Client {
         self.get(key, "types", &[]).await.map(|_| ())
     }
 
-    /// Series with a name, best first: the search finds them, a second
-    /// request gives their publishers and issue counts (the search's are
-    /// empty).
-    pub async fn search(&self, key: &str, query: &str, lang: &str) -> Result<Vec<Volume>, String> {
+    /// Series with a name, from `year` and by `publisher` when given,
+    /// best first: the search finds them (more of them to pick from when
+    /// filtered), a second request gives their publishers and issue
+    /// counts (the search's are empty).
+    pub async fn search(
+        &self,
+        key: &str,
+        query: &str,
+        year: Option<u16>,
+        publisher: &str,
+        lang: &str,
+    ) -> Result<Vec<Volume>, String> {
+        let filtered = year.is_some() || !publisher.trim().is_empty();
         let found = self
             .get(
                 key,
@@ -163,7 +172,7 @@ impl Client {
                 &[
                     ("resources", "volume"),
                     ("query", query),
-                    ("limit", "20"),
+                    ("limit", if filtered { "50" } else { "20" }),
                     ("field_list", "id"),
                 ],
             )
@@ -198,6 +207,7 @@ impl Client {
             .map(|v| (v.id.clone(), v))
             .collect();
         let found = ids.iter().filter_map(|id| by_id.get(id).cloned()).collect();
+        let found = renome_core::comics::filter_volumes(found, year, publisher);
         Ok(renome_core::comics::rank_volumes(query, found, lang))
     }
 

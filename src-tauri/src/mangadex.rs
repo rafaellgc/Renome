@@ -128,9 +128,14 @@ fn volume(m: &Value, lang: &str) -> Volume {
 }
 
 impl Client {
-    /// Manga with a title, the closest first.
-    pub async fn search(&self, query: &str, lang: &str) -> Result<Vec<Volume>, String> {
-        let key = format!("{lang}:{query}");
+    /// Manga with a title, from `year` when given, the closest first.
+    pub async fn search(
+        &self,
+        query: &str,
+        year: Option<u16>,
+        lang: &str,
+    ) -> Result<Vec<Volume>, String> {
+        let key = format!("{lang}:{year:?}:{query}");
         if let Some(v) = self.cache.lock().await.get(&key) {
             return Ok(v.clone());
         }
@@ -138,9 +143,16 @@ impl Client {
         if let Some(t) = *last {
             tokio::time::sleep(Duration::from_millis(500).saturating_sub(t.elapsed())).await;
         }
+        let year = year.map(|y| y.to_string());
         let res = self
             .http
             .get(format!("{}/manga", api_base()))
+            .query(
+                &year
+                    .iter()
+                    .map(|y| ("year", y.as_str()))
+                    .collect::<Vec<_>>(),
+            )
             .query(&[
                 ("title", query),
                 ("limit", "20"),

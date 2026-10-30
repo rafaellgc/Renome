@@ -593,9 +593,26 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   chapters are not looked up (but on MangaDex). A search that finds
   nothing for `Series: Story` tries `Series`. Found series are ranked by
   name (equal, then starting alike, then similarity), the reader's
-  language first; one with the name (and year, when known) that can hold
-  the highest number among the files is picked by itself, else a picker
-  lists them, those that can hold the numbers first. The series' issues
+  language first; one with the name and the files' year (or the only one
+  found) that can hold the highest number among the files is picked by
+  itself (without a year a name alone does not tell runs apart), else a
+  picker
+  lists them, those that can hold the numbers first. The picker searches
+  again with another name, narrowed by the year the series began and
+  its publisher (part of the name, case and accents ignored; not on
+  MangaDex; one of the names typed, split at `;`, `/` or `,`, holds the
+  catalogue's whole words or is part of it: `Titan Comics` finds
+  `Titan`); a progress bar shows while it searches. The GCD asks the
+  name as typed and without its punctuation (`:`, `,`, `;`, `.`, `!`,
+  `?`, dashes; hyphens stay); with a year, it asks the name's longest word
+  from that year instead (`/series/name/<word>/year/<year>/`), which
+  finds the name however punctuated; for a publisher, it asks the
+  publishers of what was found, the most frequent first (12 at most,
+  cached). GCD variant covers (`1 [Variant Cover]`, listed as issues of
+  their own) are left out: one issue a number, the plain one when there
+  is one, in the count, the issues and the missing ones;
+  Comic Vine takes 50 results instead of 20 when narrowed and filters
+  them; MangaDex takes the year in the request. The series' issues
   (GCD: its issue descriptors, their first number; Comic Vine: 100 a
   page) are matched by number (`012` = `12`, `12.10` = `12.1`), or by
   volume for a book without a number, or, for a one-shot, the series' only
@@ -620,7 +637,11 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   bottom bar counts them; clicking saves a CSV (series with start year,
   number, title, cover date) in the series' folder. With both missing
   episodes and issues, one count ("N missing") and the TV columns.
-  MangaDex has no list of issues: nothing is shown.
+  MangaDex has no list of a manga's volumes (only uploaded chapters,
+  often taken down for licensed manga): for its series the rows are the
+  numbers missing between the files, from 1 to the highest (by volume
+  when every file has one, else by issue number, else by chapter;
+  `v03`, `#3`, `c003`), without title or date.
 - Only the series name and the series' and issues' ids go to the
   catalogues; the GCD sign-in only to comics.org.
   Files are never changed.

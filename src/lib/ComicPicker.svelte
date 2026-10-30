@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from "./api";
   import { t, tError } from "./i18n";
+  import { byFit } from "./rules";
   import { settings } from "./settings.svelte";
   import type { ComicSource, ComicVolume } from "./types";
 
@@ -8,6 +9,7 @@
     source,
     query: initial,
     files,
+    highest,
     candidates: found,
     onpick,
   }: {
@@ -16,6 +18,8 @@
     query: string;
     /** How many files are of this series. */
     files: number;
+    /** The highest issue number among them. */
+    highest: number;
     candidates: ComicVolume[];
     /** `null`: skip this series. */
     onpick: (v: ComicVolume | null) => void;
@@ -25,6 +29,8 @@
   let query = $state(initial);
   // svelte-ignore state_referenced_locally
   let candidates = $state(found);
+  let year = $state("");
+  let publisher = $state("");
   let searching = $state(false);
   let searchError = $state("");
 
@@ -33,8 +39,11 @@
     if (!query.trim()) return;
     searching = true;
     searchError = "";
+    const y = Number.parseInt(year, 10);
     try {
-      candidates = await api.comicSearch(source, settings.comicVineKey.trim(), query.trim(), settings.lang === "pt" ? "pt-br" : settings.lang);
+      const lang = settings.lang === "pt" ? "pt-br" : settings.lang;
+      const found = await api.comicSearch(source, settings.comicVineKey.trim(), query.trim(), lang, y >= 1800 && y <= 2200 ? y : null, publisher.trim());
+      candidates = byFit(found, highest);
     } catch (err) {
       searchError = tError(err);
     } finally {
@@ -67,11 +76,20 @@
 
     <form class="search" onsubmit={search}>
       <input bind:value={query} placeholder={t("comicSeriesPlaceholder")} spellcheck="false" />
+      <input class="year" bind:value={year} inputmode="numeric" maxlength="4" placeholder={t("comicPickYear")} title={t("comicPickYearHint")} />
+      {#if source !== "mangadex"}
+        <input class="publisher" bind:value={publisher} placeholder={t("comicPickPublisher")} title={t(source === "gcd" ? "comicPickPublisherGcd" : "comicPickPublisherHint")} spellcheck="false" />
+      {/if}
       <button type="submit" disabled={searching}>{t("reviewSearch")}</button>
     </form>
     {#if searchError}<p class="error">{searchError}</p>{/if}
 
-    {#if candidates.length}
+    {#if searching}
+      <div class="searching" role="status">
+        <span class="muted">{t("comicSearching", { series: query.trim() })}</span>
+        <progress></progress>
+      </div>
+    {:else if candidates.length}
       <p class="muted hint">{t("comicPickHint")}</p>
       <div class="grid">
         {#each candidates as c, i (c.id)}
@@ -93,7 +111,7 @@
           </button>
         {/each}
       </div>
-    {:else if !searching}
+    {:else}
       <p class="muted empty">{t("reviewNoResults")}</p>
     {/if}
 
@@ -112,10 +130,14 @@
   h2 { margin: 0; font-size: 16px; }
   .sub { margin: 2px 0 0; font-size: 13px; }
   .search { display: flex; gap: 8px; }
-  .search input { flex: 1; }
+  .search input { flex: 1; min-width: 0; }
+  .search .year { flex: none; width: 70px; }
+  .search .publisher { flex: none; width: 170px; }
   .hint { margin: 0; font-size: 12px; }
   .error { margin: 0; color: var(--danger); font-size: 13px; }
   .empty { margin: 20px 0; text-align: center; }
+  .searching { display: flex; flex-direction: column; gap: 8px; align-items: center; margin: 40px auto; width: min(360px, 80%); font-size: 13px; }
+  .searching progress { width: 100%; accent-color: var(--accent); }
   .grid {
     flex: 1;
     overflow-y: auto;

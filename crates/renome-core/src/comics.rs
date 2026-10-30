@@ -981,6 +981,95 @@ pub fn rank_volumes(query: &str, found: Vec<Volume>, lang: &str) -> Vec<Volume> 
     scored.into_iter().map(|(_, _, v)| v).collect()
 }
 
+/// The names to ask a catalogue that matches names letter by letter
+/// (the Grand Comics Database): the text as typed, and without its
+/// punctuation (`Conan: The Barbarian` finds `Conan the Barbarian` too).
+pub fn search_names(query: &str) -> Vec<String> {
+    let typed = query.split_whitespace().collect::<Vec<_>>().join(" ");
+    let bare = typed
+        .split([':', ',', ';', '.', '!', '?', '–', '—'])
+        .flat_map(str::split_whitespace)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut names = vec![typed];
+    if !bare.is_empty() && bare != names[0] {
+        names.push(bare);
+    }
+    names
+}
+
+/// The longest word of a name: asked alone (with a year, which keeps
+/// the answer short), it finds the name however it is punctuated
+/// (`Conan the Barbarian` and `Conan: The Barbarian`).
+pub fn longest_word(query: &str) -> String {
+    query
+        .split(|c: char| !c.is_alphanumeric())
+        .fold("", |best, w| {
+            if w.chars().count() > best.chars().count() {
+                w
+            } else {
+                best
+            }
+        })
+        .to_string()
+}
+
+/// The series from `year` (when given) by `publisher` (when given): one
+/// of the names typed (`Heroic Signatures; Titan Comics`) holds the
+/// catalogue's (`Titan`), or is part of it; case and accents ignored.
+pub fn filter_volumes(found: Vec<Volume>, year: Option<u16>, publisher: &str) -> Vec<Volume> {
+    let fold = |s: &str| {
+        text::strip_accents(&s.to_lowercase())
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let typed: Vec<String> = publisher
+        .split([';', '/', ','])
+        .map(fold)
+        .filter(|p| !p.is_empty())
+        .collect();
+    let words = |s: &str| format!(" {s} ");
+    let by = |v: &Volume| {
+        let name = fold(&v.publisher);
+        !name.is_empty()
+            && typed
+                .iter()
+                .any(|t| words(t).contains(&words(&name)) || name.contains(t.as_str()))
+    };
+    found
+        .into_iter()
+        .filter(|v| year.is_none() || v.start_year == year)
+        .filter(|v| typed.is_empty() || by(v))
+        .collect()
+}
+
+/// Which of a series' issues are its own, not another cover of one
+/// (the Grand Comics Database lists each variant cover apart: `1`,
+/// `1 [Variant Cover]`): one a number, the plain one when there is one;
+/// those without a number all stay.
+pub fn main_issues(descriptors: &[&str]) -> Vec<usize> {
+    let mut first: HashMap<String, usize> = HashMap::new();
+    let mut keep = Vec::new();
+    for (i, d) in descriptors.iter().enumerate() {
+        let number = issue_number(d);
+        if number.is_empty() {
+            keep.push(i);
+            continue;
+        }
+        match first.get(&number) {
+            None => {
+                first.insert(number, keep.len());
+                keep.push(i);
+            }
+            Some(&at) if descriptors[keep[at]].contains('[') && !d.contains('[') => keep[at] = i,
+            Some(_) => {}
+        }
+    }
+    keep
+}
+
 /// The number in how a catalogue writes an issue: `12`, `12.1`; empty
 /// for none (`[nn]`, `[2ª Edição]`, a reprint without one).
 pub fn issue_number(descriptor: &str) -> String {
@@ -1091,6 +1180,85 @@ pub fn with_issue(own: &ComicMatch, volume: &Volume, issue: Option<&Issue>) -> C
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn search_names_without_punctuation() {
+        assert_eq!(
+            search_names(" Conan:  The Barbarian "),
+            ["Conan: The Barbarian", "Conan The Barbarian"]
+        );
+        assert_eq!(
+            search_names("Conan, o Bárbaro"),
+            ["Conan, o Bárbaro", "Conan o Bárbaro"]
+        );
+        // Hyphens are part of names.
+        assert_eq!(search_names("Spider-Man"), ["Spider-Man"]);
+    }
+
+    #[test]
+    fn variant_covers_are_one_issue() {
+        let d = [
+            "1",
+            "1 [Artist Cover]",
+            "2 [Foil Cover]",
+            "2",
+            "[nn]",
+            "[nn]",
+            "3",
+        ];
+        assert_eq!(main_issues(&d), [0, 3, 4, 5, 6]);
+    }
+
+    #[test]
+    fn longest_word_of_a_name() {
+        assert_eq!(longest_word("Conan: The Barbarian"), "Barbarian");
+        assert_eq!(longest_word("A Odisséia"), "Odisséia");
+    }
+
+    #[test]
+    fn filter_by_year_and_publisher() {
+        let v = |name: &str, year: u16, publisher: &str| Volume {
+            name: name.into(),
+            start_year: Some(year),
+            publisher: publisher.into(),
+            ..Default::default()
+        };
+        let found = vec![
+            v("Conan the Barbarian", 1970, "Marvel"),
+            v("Conan the Barbarian", 2019, "Marvel"),
+            v("Conan the Barbarian", 2024, "Titan Comics"),
+            v("Conan, o Bárbaro", 1992, "Editora Abril"),
+        ];
+        let names = |f: Vec<Volume>| {
+            f.into_iter()
+                .map(|v| (v.name, v.start_year))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            names(filter_volumes(found.clone(), Some(1970), "")),
+            [("Conan the Barbarian".to_string(), Some(1970))]
+        );
+        assert_eq!(
+            names(filter_volumes(found.clone(), None, "marvel")).len(),
+            2
+        );
+        assert_eq!(names(filter_volumes(found.clone(), None, "abril")).len(), 1);
+        assert_eq!(
+            names(filter_volumes(found.clone(), Some(2024), "Marvel")).len(),
+            0
+        );
+        assert_eq!(filter_volumes(found.clone(), None, " ").len(), 4);
+        // The catalogue's short name, in what was typed.
+        let titan = vec![v("Conan: The Barbarian", 2023, "Titan")];
+        assert_eq!(filter_volumes(titan.clone(), None, "Titan Comics").len(), 1);
+        assert_eq!(
+            filter_volumes(titan.clone(), None, "Heroic Signatures; Titan Comics").len(),
+            1
+        );
+        assert_eq!(filter_volumes(titan.clone(), None, "tit").len(), 1);
+        assert_eq!(filter_volumes(titan, None, "Panini").len(), 0);
+        assert_eq!(filter_volumes(found, None, "Marvel Comics").len(), 2);
+    }
+
     use super::*;
 
     fn g(name: &str) -> ComicGuess {

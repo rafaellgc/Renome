@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use renome_core::comics::{Issue, Volume, issue_number};
+use renome_core::comics::{Issue, Volume, issue_number, main_issues};
 use serde_json::Value;
 
 const API: &str = "https://www.comics.org/api";
@@ -65,8 +65,22 @@ fn id_of(url: &str) -> String {
         .to_string()
 }
 
+/// A series' issue descriptors (`1`, `1 [Variant Cover]`).
+fn descriptors(v: &Value) -> Vec<&str> {
+    v["issue_descriptors"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|d| d.as_str().unwrap_or_default())
+        .collect()
+}
+
 fn volume(v: &Value) -> Volume {
-    let issues = v["active_issues"].as_array().map_or(0, Vec::len);
+    // Variant covers are listed apart: they are not more issues.
+    let issues = match descriptors(v) {
+        d if d.is_empty() => v["active_issues"].as_array().map_or(0, Vec::len),
+        d => main_issues(&d).len(),
+    };
     Volume {
         id: id_of(v["api_url"].as_str().unwrap_or_default()),
         name: v["name"].as_str().unwrap_or_default().trim().to_string(),
@@ -132,28 +146,80 @@ impl Client {
             .map(|_| ())
     }
 
-    /// Series whose names contain the words, best first (two pages at
-    /// most: a name that common needs more words).
-    pub async fn search(&self, query: &str, lang: &str) -> Result<Vec<Volume>, String> {
-        let mut first = reqwest::Url::parse(&format!("{}/series/name/", api_base()))
-            .map_err(|e| format!("gcdNetwork: {e}"))?;
-        first
-            .path_segments_mut()
-            .map_err(|_| "gcdNetwork: URL".to_string())?
-            .pop_if_empty()
-            .push(query.trim())
-            .push("");
-        first.set_query(Some("format=json"));
-        let mut url = first.to_string();
-        let mut found = Vec::new();
-        for _ in 0..2 {
-            let page = self.get(&url).await?;
-            found.extend(page["results"].as_array().into_iter().flatten().map(volume));
-            match page["next"].as_str() {
-                Some(next) if !next.is_empty() => url = next.to_string(),
-                _ => break,
+    /// Series whose names contain the words (as typed, and without
+    /// punctuation), best first (two pages a name at most: a name that
+    /// common needs more words). With a `year`, those from it whose names
+    /// have the name's longest word (the GCD matches punctuation: this
+    /// way `Conan the Barbarian` finds `Conan: The Barbarian`). With a
+    /// `publisher`, only that publisher's (the publishers of what was
+    /// found are asked, the most frequent first, a dozen at most).
+    pub async fn search(
+        &self,
+        query: &str,
+        year: Option<u16>,
+        publisher: &str,
+        lang: &str,
+    ) -> Result<Vec<Volume>, String> {
+        let mut found: Vec<(Volume, String)> = Vec::new();
+        let longest = renome_core::comics::longest_word(query);
+        let names = match year {
+            Some(_) if !longest.is_empty() => vec![longest],
+            _ => renome_core::comics::search_names(query),
+        };
+        for name in names {
+            let mut first = reqwest::Url::parse(&format!("{}/series/name/", api_base()))
+                .map_err(|e| format!("gcdNetwork: {e}"))?;
+            {
+                let mut path = first
+                    .path_segments_mut()
+                    .map_err(|_| "gcdNetwork: URL".to_string())?;
+                path.pop_if_empty().push(&name);
+                if let Some(y) = year {
+                    path.push("year").push(&y.to_string());
+                }
+                path.push("");
+            }
+            first.set_query(Some("format=json"));
+            let mut url = first.to_string();
+            for _ in 0..2 {
+                let page = self.get(&url).await?;
+                for v in page["results"].as_array().into_iter().flatten() {
+                    let vol = volume(v);
+                    if !found.iter().any(|(f, _)| f.id == vol.id) {
+                        let by = v["publisher"].as_str().unwrap_or_default().to_string();
+                        found.push((vol, by));
+                    }
+                }
+                match page["next"].as_str() {
+                    Some(next) if !next.is_empty() => url = next.to_string(),
+                    _ => break,
+                }
             }
         }
+        if !publisher.trim().is_empty() {
+            let mut often: Vec<(&String, usize)> = Vec::new();
+            for (_, by) in &found {
+                match often.iter_mut().find(|(p, _)| *p == by) {
+                    Some((_, n)) => *n += 1,
+                    None if !by.is_empty() => often.push((by, 1)),
+                    None => {}
+                }
+            }
+            often.sort_by_key(|p| std::cmp::Reverse(p.1));
+            let mut names: HashMap<String, String> = HashMap::new();
+            for (by, _) in often.into_iter().take(12) {
+                let p = self.get(by).await?;
+                names.insert(
+                    by.clone(),
+                    p["name"].as_str().unwrap_or_default().trim().to_string(),
+                );
+            }
+            for (v, by) in &mut found {
+                v.publisher = names.get(by.as_str()).cloned().unwrap_or_default();
+            }
+        }
+        let found = found.into_iter().map(|(v, _)| v).collect();
+        let found = renome_core::comics::filter_volumes(found, year, publisher);
         Ok(renome_core::comics::rank_volumes(query, found, lang))
     }
 
@@ -172,24 +238,18 @@ impl Client {
             vol.publisher = p["name"].as_str().unwrap_or_default().trim().to_string();
         }
         let urls = v["active_issues"].as_array().cloned().unwrap_or_default();
-        let descriptors = v["issue_descriptors"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
-        let issues = urls
-            .iter()
-            .enumerate()
-            .map(|(i, u)| Issue {
-                id: id_of(u.as_str().unwrap_or_default()),
-                number: issue_number(
-                    descriptors
-                        .get(i)
-                        .and_then(Value::as_str)
-                        .unwrap_or_default(),
-                ),
-                ..Default::default()
-            })
-            .collect();
+        let descriptors = descriptors(&v);
+        let issue = |i: usize| Issue {
+            id: id_of(urls[i].as_str().unwrap_or_default()),
+            number: issue_number(descriptors.get(i).copied().unwrap_or_default()),
+            ..Default::default()
+        };
+        // One issue a number: the other covers of it are left out.
+        let issues = if descriptors.len() == urls.len() {
+            main_issues(&descriptors).into_iter().map(issue).collect()
+        } else {
+            (0..urls.len()).map(issue).collect()
+        };
         Ok((vol, issues))
     }
 }

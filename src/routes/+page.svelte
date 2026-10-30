@@ -22,7 +22,7 @@
   import RuleCard from "$lib/RuleCard.svelte";
   import ShowPicker from "$lib/ShowPicker.svelte";
   import { LOCALES, MOD, t, tError } from "$lib/i18n";
-  import { RULE_TYPES, isAudio, isBook, isComic, isScreen, isVideo, newRule, newStep, splitExt } from "$lib/rules";
+  import { RULE_TYPES, byFit, isAudio, isBook, isComic, isScreen, isVideo, newRule, newStep, splitExt } from "$lib/rules";
   import { loadSettings, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
     AlbumState, ApplyReport, BookCandidate, BookMatch, BookState, Candidate, ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, Copies, MbCandidate, SongMatch, EpKey, EpisodeMatch, EpisodeState, MovieMatch, MovieState, MovieStatus, HistoryEntry,
@@ -151,7 +151,7 @@
   /** Files in the comic review window; null when closed. */
   let comicReview = $state<string[] | null>(null);
   /** The series picker, while open. */
-  let comicPick = $state<{ source: ComicSource; query: string; files: number; candidates: ComicVolume[]; resolve: (v: ComicVolume | null) => void } | null>(null);
+  let comicPick = $state<{ source: ComicSource; query: string; files: number; highest: number; candidates: ComicVolume[]; resolve: (v: ComicVolume | null) => void } | null>(null);
   /** The Grand Comics Database sign-in, while asked. */
   let gcdLogin = $state<{ resolve: (how: "in" | "anonymous" | null) => void } | null>(null);
   /** How this session uses the GCD: signed in, without an account, or not asked yet. */
@@ -959,17 +959,21 @@
             ...g.owns.map((o) => Number.parseFloat(o.number || (o.chapter ? "" : String(o.volume ?? ""))) || 0),
           );
           const fits = (v: ComicVolume) => !v.count || v.count >= Math.floor(highest);
-          const sorted = [...found.filter(fits), ...found.filter((v) => !fits(v))];
+          const sorted = byFit(found, highest);
           const same = sorted.filter((v) => fold(v.name) === k && (year == null || v.startYear === year) && fits(v));
           // The same name in another language (a French edition for a
           // Brazilian reader, when there is one in Portuguese) is not
           // picked by itself.
           const mine = (v: ComicVolume) => !v.language || v.language.toLowerCase().startsWith(settings.lang);
           const foreign = same.length === 1 && !mine(same[0]) && found.some(mine);
+          // Without the files' year, the name alone does not tell one
+          // run from another (a translation of a newer series under an
+          // older one's name): asked when there is anything else to pick.
+          const sure = year != null || found.length === 1;
           volume =
-            same.length === 1 && !foreign
+            same.length === 1 && !foreign && sure
               ? same[0]
-              : await new Promise<ComicVolume | null>((resolve) => (comicPick = { source, query: g.query, files: g.paths.length, candidates: sorted, resolve }));
+              : await new Promise<ComicVolume | null>((resolve) => (comicPick = { source, query: g.query, files: g.paths.length, highest, candidates: sorted, resolve }));
           comicPick = null;
           if (!volume) continue;
         }
@@ -1892,7 +1896,7 @@
 {/if}
 
 {#if comicPick}
-  <ComicPicker source={comicPick.source} query={comicPick.query} files={comicPick.files} candidates={comicPick.candidates} onpick={(v) => comicPick?.resolve(v)} />
+  <ComicPicker source={comicPick.source} query={comicPick.query} files={comicPick.files} highest={comicPick.highest} candidates={comicPick.candidates} onpick={(v) => comicPick?.resolve(v)} />
 {/if}
 
 {#if gcdLogin}

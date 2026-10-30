@@ -42,8 +42,8 @@ export const api = {
   comicGuesses: (paths: string[], names: (string | null)[], byFolder: boolean) =>
     invoke<(ComicMatch | null)[]>("comic_guesses", { paths, names, byFolder }),
   comicCheck: (key: string) => invoke<void>("comic_check", { key }),
-  comicSearch: (source: ComicSource, key: string, query: string, lang: string) =>
-    invoke<ComicVolume[]>("comic_search", { source, key, query, lang }),
+  comicSearch: (source: ComicSource, key: string, query: string, lang: string, year: number | null = null, publisher = "") =>
+    invoke<ComicVolume[]>("comic_search", { source, key, query, year, publisher, lang }),
   comicIssues: (source: ComicSource, key: string, id: string, comics: ComicMatch[]) =>
     invoke<{ volume: ComicVolume; issues: ComicIssue[]; found: (string | null)[] }>("comic_issues", { source, key, id, comics }),
   comicVolumeOf: (key: string, issue: string) => invoke<string>("comic_volume_of", { key, issue }),

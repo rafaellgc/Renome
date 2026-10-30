@@ -1,5 +1,5 @@
 import { isVideo } from "./rules";
-import type { ComicIssue, ComicState, ComicVolume, EpisodeMatch, PreviewItem, Show } from "./types";
+import type { ComicIssue, ComicMatch, ComicState, ComicVolume, EpisodeMatch, PreviewItem, Show } from "./types";
 
 /** An aired episode or a published issue that no file in the list
  *  holds: a faded row that only informs, never selected, renamed or
@@ -98,8 +98,32 @@ function inOrder(issues: ComicIssue[]): ComicIssue[] {
   return issues.map((i, k) => ({ i, k })).sort((a, b) => n(a.i) - n(b.i) || a.k - b.k).map((x) => x.i);
 }
 
+/** The numbers missing between a series' own files, from 1 to the
+ *  highest they have, for a catalogue without a list of issues
+ *  (MangaDex): by volume when every file has one, else by issue
+ *  number, else by chapter. */
+function gaps(name: string, vkey: string, files: { path: string; own: ComicMatch }[], descending: boolean): Ghost[] {
+  const by: [(o: ComicMatch) => number, (n: number) => string][] = [
+    [(o) => o.volume ?? NaN, (n) => `v${String(n).padStart(2, "0")}`],
+    [(o) => (o.number ? Number.parseFloat(o.number) : NaN), (n) => `#${n}`],
+    [(o) => (o.chapter ? Number.parseFloat(o.chapter) : NaN), (n) => `c${String(n).padStart(3, "0")}`],
+  ];
+  const kind = by.find(([of]) => files.every((f) => !Number.isNaN(of(f.own))));
+  if (!kind) return [];
+  const [of, code] = kind;
+  const spans = files.map((f) => ({ path: f.path, from: of(f.own), to: of(f.own) }));
+  const have = new Set(spans.map((s) => s.from));
+  const out: Ghost[] = [];
+  for (let n = 1; n < Math.max(...have); n++) {
+    if (have.has(n)) continue;
+    out.push({ ghost: true, key: `ghost:${vkey}:${n}`, kind: "issue", group: name, season: 0, number: n, code: code(n), title: "", date: "", ...place(n, spans, descending) });
+  }
+  return out;
+}
+
 /** The issues missing from each series some listed comic has (issues
- *  with a cover date still to come are left out). */
+ *  with a cover date still to come are left out); for a series without
+ *  a list of issues, the gaps between its files. */
 export function missingIssues(
   volumes: Record<string, { volume: ComicVolume; issues: ComicIssue[] }>,
   comics: Record<string, ComicState>,
@@ -108,8 +132,15 @@ export function missingIssues(
   day: string,
 ): Ghost[] {
   const series = new Map<string, { order: ComicIssue[]; files: { path: string; from: number; to: number }[] }>();
+  const unlisted = new Map<string, { path: string; own: ComicMatch }[]>();
   for (const i of items) {
     const c = comics[i.path];
+    if (c?.choice === "" && volumes[c.volumeKey] && !volumes[c.volumeKey].issues.length) {
+      const list = unlisted.get(c.volumeKey);
+      if (list) list.push({ path: i.path, own: c.own });
+      else unlisted.set(c.volumeKey, [{ path: i.path, own: c.own }]);
+      continue;
+    }
     const v = c?.choice && volumes[c.volumeKey];
     if (!v || !v.issues.length) continue;
     let s = series.get(c.volumeKey);
@@ -118,6 +149,10 @@ export function missingIssues(
     if (at >= 0) s.files.push({ path: i.path, from: at, to: at });
   }
   const out: Ghost[] = [];
+  for (const [vkey, files] of unlisted) {
+    const { volume } = volumes[vkey];
+    out.push(...gaps(named(volume.name, volume.startYear), vkey, files, descending));
+  }
   for (const [vkey, { order, files }] of series) {
     if (!files.length) continue;
     const { volume } = volumes[vkey];

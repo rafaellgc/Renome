@@ -143,3 +143,10 @@ export function newStep(rule: Rule, enabled = true): Step {
   const full = { ...newRule(rule.type), ...rule } as Rule;
   return { id: `s${Date.now().toString(36)}${counter++}`, enabled, rule: full };
 }
+
+/** Series that could hold issue `highest` first: one with fewer issues
+ *  (when the catalogue says how many) is not the files' series. */
+export function byFit<T extends { count: number }>(found: T[], highest: number): T[] {
+  const fits = (v: T) => !v.count || v.count >= Math.floor(highest);
+  return [...found.filter(fits), ...found.filter((v) => !fits(v))];
+}

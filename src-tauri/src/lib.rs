@@ -756,20 +756,23 @@ fn gcd_sign_out(app: AppHandle) {
 }
 
 /// Series with a name in a catalogue (`gcd`, `comicvine`, `mangadex`),
-/// best first.
+/// from a year and by a publisher when given (MangaDex has no
+/// publishers), best first.
 #[tauri::command]
 async fn comic_search(
     app: AppHandle,
     source: String,
     key: String,
     query: String,
+    year: Option<u16>,
+    publisher: String,
     lang: String,
 ) -> Result<Vec<renome_core::comics::Volume>, String> {
     let state = app.state::<AppState>();
     match source.as_str() {
-        "comicvine" => state.cv.search(&key, &query, &lang).await,
-        "mangadex" => state.md.search(&query, &lang).await,
-        _ => state.gcd.search(&query, &lang).await,
+        "comicvine" => state.cv.search(&key, &query, year, &publisher, &lang).await,
+        "mangadex" => state.md.search(&query, year, &lang).await,
+        _ => state.gcd.search(&query, year, &publisher, &lang).await,
     }
 }
 
