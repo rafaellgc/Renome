@@ -63,6 +63,11 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.17.0" date="2026-10-30">
+      <description>
+        <p>Online searches can be stopped, keeping what was found. If the program stops while writing tags, the next start cleans up and keeps the songs written undoable. On Linux, names a USB stick formatted for Windows refuses are flagged before renaming. AcoustID retries a dropped connection.</p>
+      </description>
+    </release>
     <release version="0.16.0" date="2026-10-30">
       <description>
         <p>Folders: when files move to a new folder next to their old one, the old folder is deleted if empty or renamed "(additional files)" if files stay, for movies, shows, music, books and comics. A folder holding one movie, album, comic series or book is taken as its own, whatever its name. The Folder column shows where each file goes, and files a lookup rule does not handle are tagged.</p>
