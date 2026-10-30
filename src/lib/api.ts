@@ -14,6 +14,8 @@ export const api = {
   clearFiles: () => invoke<void>("clear_files"),
   moveFiles: (paths: string[], delta: -1 | 1) => invoke<void>("move_files", { paths, delta }),
   sortFiles: (key: SortKey, descending: boolean) => invoke<void>("sort_files", { key, descending }),
+  /** Stops the searches under way; they keep what they found. */
+  stopSearch: () => invoke<void>("stop_search"),
   findIdentical: () => invoke<string[][] | null>("find_identical"),
   preview: (steps: Step[], overrides: Overrides, view: View) =>
     invoke<Preview>("preview", { steps, overrides, view }),
@@ -85,7 +87,7 @@ export const api = {
   ) => invoke<{ created: string[]; errors: [string, string][] }>("write_tv_sidecars", { key, lang, historyId, items, fanart, folders }),
   undo: (id: string) => invoke<ApplyReport>("undo", { id }),
   /** Puts back renames a stopped program left halfway. */
-  recover: () => invoke<{ restored: number; renamed: number; undone: number; stuck: { from: string; to: string }[] }>("recover"),
+  recover: () => invoke<{ restored: number; renamed: number; undone: number; tagged: number; stuck: { from: string; to: string }[] }>("recover"),
   deleteHistory: (id: string) => invoke<void>("delete_history", { id }),
   clearHistory: () => invoke<number>("clear_history"),
   savePreset: (path: string, steps: Step[]) => invoke<void>("save_preset", { path, steps }),

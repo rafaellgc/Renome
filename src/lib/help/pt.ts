@@ -57,6 +57,7 @@ export const pt: Section[] = [
   <li>A <b>caixa de seleção</b> no título liga e desliga a regra sem apagá-la. Desligada, ela fica travada: para mudar as opções ou buscar, ligue-a antes.</li>
   <li><b>↑ ↓</b> mudam a ordem; <b>✕</b> remove a regra; clicar no título recolhe o card.</li>
   <li>Uma regra com erro (expressão inválida, por exemplo) fica com borda vermelha e é ignorada até ser corrigida.</li>
+  <li>Uma busca na internet (filme, série, música, livro, quadrinho) pode ser interrompida com <b>Parar</b>, no quadro de progresso. O que já foi encontrado fica, e buscar de novo continua com o resto. A consulta em andamento termina antes, o que pode levar alguns segundos.</li>
 </ul>
 <h4>Aplicar em</h4>
 <p>Várias regras perguntam onde agir:</p>
@@ -375,7 +376,7 @@ ${ex("01.mp3", "01 - Título da Música.mp3")}
   <li><b>Gravar as tags nos arquivos</b>: depois de renomear, grava nas músicas identificadas tudo o que o MusicBrainz sabe delas: título, artistas (também cada um em separado), artista do álbum, álbum, data e data original, faixa e disco (com os totais), gravadora, número de catálogo, código de barras, país, tipo de lançamento, mídia, ISRC, gêneros, idioma, compositor, letrista, produtor, arranjador, mixagem e os IDs do MusicBrainz, que o Jellyfin, o Navidrome e o Plex usam. Para isso, cada álbum é consultado mais uma vez (uns 2 segundos). Vale também para as músicas que já estão com o nome certo (elas contam no botão <b>Renomear</b>). Uma música que já tem tudo isso não é regravada. Funciona com MP3 (gravado em ID3v2.3), FLAC, OGG, Opus e M4A.</li>
   <li><b>Apagar as outras tags</b>: tira o que não vem do MusicBrainz (comentários, endereços de sites, dados de quem ripou, "codificado por"), e no MP3 também as tags secundárias (ID3v1 e APE). Ficam as letras, o ReplayGain, o BPM, a folha de faixas embutida (CUESHEET) e o gênero e o compositor quando o MusicBrainz não os tiver. Desmarcada, as outras tags ficam como estão.</li>
   <li><b>Incluir a capa nos arquivos</b>: tira as imagens que já estão dentro de cada música e coloca a capa do álbum (do Cover Art Archive ou, se não houver, a <code>cover.jpg</code> da pasta).</li>
-  <li>A gravação é feita numa cópia, que só toma o lugar do arquivo no fim; uma queda no meio não estraga a música. Desfazer devolve as tags e as imagens antigas (no MP3 e no M4A, campos raros que a limpeza tirou e as tags ID3v1 e APE não voltam). A data de modificação muda, para que os players releiam as tags. Como o conteúdo muda, um torrent não reconhece mais esses arquivos.</li>
+  <li>A gravação é feita numa cópia, que só toma o lugar do arquivo no fim; uma queda no meio não estraga a música. Se o programa for fechado ou o computador desligar durante a gravação, na próxima vez que o Renome abrir as músicas já gravadas vão para o <b>Histórico</b>, para desfazer, e a cópia que estava sendo gravada é apagada. Desfazer devolve as tags e as imagens antigas (no MP3 e no M4A, campos raros que a limpeza tirou e as tags ID3v1 e APE não voltam). A data de modificação muda, para que os players releiam as tags. Como o conteúdo muda, um torrent não reconhece mais esses arquivos.</li>
   <li>As consultas são espaçadas (uma a cada 2 segundos), como o MusicBrainz pede; cada álbum leva uns 4 segundos.</li>
 </ul>
 <h4>Identificar pelo som (AcoustID)</h4>
@@ -538,7 +539,7 @@ ${ex("Nome_da_Serie_012_(2019)_(Digital)_(grupo).cbz", "Nome da Série #012 (201
 <p>Arquivos com conflito não são renomeados. Os motivos são:</p>
 <ul>
   <li>nome vazio, ou contendo <code>/</code>;</li>
-  <li>nome com mais de 255 bytes;</li>
+  <li>nome com mais de 255 bytes (no Windows, mais de 255 caracteres);</li>
   <li>dois arquivos ficariam com o mesmo nome na mesma pasta;</li>
   <li>já existe um arquivo com esse nome fora da lista (nada é sobrescrito);</li>
   <li>no Windows: os caracteres <code>\\ : * ? " &lt; &gt; |</code>, ou ponto ou espaço no fim do nome.</li>
@@ -629,7 +630,7 @@ ${ex("Serie.S01E02.720p.WEB.mkv", "Serie S01E02.mkv")}
   <li><b>Incluir arquivos ocultos ao adicionar pastas</b>.</li>
   <li><b>Pedir confirmação antes de renomear</b>.</li>
   <li><b>Desligar as regras depois de renomear</b>.</li>
-  <li><b>Avisar sobre nomes que o Windows não aceita</b>: caracteres como <code>:</code> e <code>?</code>, ponto ou espaço no fim, e nomes reservados como <code>CON</code> e <code>NUL</code>. Útil para arquivos que vão para um pendrive ou para o Windows.</li>
+  <li><b>Avisar sobre nomes que o Windows não aceita</b>: caracteres como <code>:</code> e <code>?</code>, ponto ou espaço no fim, e nomes reservados como <code>CON</code> e <code>NUL</code>. Útil para arquivos que vão para o Windows. Num pendrive ou disco formatado para Windows (FAT, exFAT), esses nomes não são aceitos de jeito nenhum: lá eles são erro, com ou sem esta opção.</li>
 </ul>
 <p>As opções ficam em <code>~/.config/renome</code> (Linux), <code>%APPDATA%\\renome</code> (Windows) ou <code>~/Library/Application Support/renome</code> (macOS). O histórico fica em <code>~/.local/share/renome/history</code> no Linux e na mesma pasta das opções nos outros sistemas.</p>`,
   },

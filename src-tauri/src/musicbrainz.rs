@@ -264,8 +264,10 @@ pub async fn lookup(
     unnamed: Vec<Song>,
     listen: bool,
 ) -> Vec<AlbumLookup> {
-    let looked = by_tags(app, s.mb, albums).await;
-    if !listen {
+    // What is not looked up before Stop is left out: it is still to do.
+    let stopped = crate::stop_signal(app);
+    let looked = by_tags(app, s.mb, albums, &stopped).await;
+    if !listen || stopped() {
         return looked.into_iter().map(|(a, _)| a).collect();
     }
     let mut out = Vec::new();
@@ -284,15 +286,21 @@ pub async fn lookup(
         return out;
     }
     let mut all: Vec<Song> = pending.iter().flat_map(|(_, s)| s.clone()).collect();
-    let (heard, error) = hear(app, s, &mut all).await;
+    let (heard, error) = hear(app, s, &mut all, &stopped).await;
     let recordings: HashMap<PathBuf, Vec<String>> =
         all.into_iter().map(|(p, t)| (p, t.recordings)).collect();
     let mut releases = HashMap::new();
     for (by_name, mut songs) in pending {
+        // Songs not listened to before Stop.
+        songs.retain(|(p, _)| heard.contains_key(p));
+        if songs.is_empty() {
+            out.extend(by_name);
+            continue;
+        }
         for (p, t) in &mut songs {
             t.recordings = recordings.get(p).cloned().unwrap_or_default();
         }
-        let groups = by_sound(app, s, &songs, &heard, &error, &mut releases).await;
+        let groups = by_sound(app, s, &songs, &heard, &error, &mut releases, &stopped).await;
         match by_name {
             Some(a) if !a.candidates.is_empty() && groups.iter().all(|g| g.choice.is_none()) => {
                 out.push(a)
@@ -308,11 +316,15 @@ async fn by_tags(
     app: &AppHandle,
     client: &Client,
     albums: Vec<Vec<Song>>,
+    stopped: &impl Fn() -> bool,
 ) -> Vec<(AlbumLookup, Vec<Song>)> {
     let total = albums.len();
     progress(app, 0, total, None);
     let mut out = Vec::new();
     for (done, songs) in albums.into_iter().enumerate() {
+        if stopped() {
+            break;
+        }
         let query = query_of(&songs);
         let mut found = AlbumLookup {
             files: songs.iter().map(|(p, _)| p.clone()).collect(),
@@ -376,12 +388,16 @@ async fn hear(
     app: &AppHandle,
     s: &Services<'_>,
     songs: &mut [Song],
+    stopped: &impl Fn() -> bool,
 ) -> (HashMap<PathBuf, Heard>, Option<String>) {
     let total = songs.len();
     progress(app, 0, total, Some("listen"));
     let mut heard = HashMap::new();
     let mut error = None;
     for (done, (path, tags)) in songs.iter_mut().enumerate() {
+        if stopped() {
+            break;
+        }
         let print = match &error {
             Some(_) => None,
             None => {
@@ -418,7 +434,8 @@ async fn hear(
 
 /// Splits each folder's songs among the releases they were heard on and
 /// checks each album against its release, as [`lookup`] does. `releases`
-/// keeps those fetched.
+/// keeps those fetched. After Stop, no more releases are fetched: the
+/// albums heard go to the review with their candidates.
 async fn by_sound(
     app: &AppHandle,
     s: &Services<'_>,
@@ -426,6 +443,7 @@ async fn by_sound(
     heard: &HashMap<PathBuf, Heard>,
     error: &Option<String>,
     releases: &mut HashMap<String, Result<Release, String>>,
+    stopped: &impl Fn() -> bool,
 ) -> Vec<AlbumLookup> {
     // Each folder (with its disc folders) on its own.
     let mut folders: Vec<(PathBuf, Vec<usize>)> = Vec::new();
@@ -453,6 +471,7 @@ async fn by_sound(
         if let Some(best) = groups.first().and_then(|g| g.candidates.first())
             && part.len() > 1
             && groups[0].songs.len() * 2 >= part.len()
+            && !stopped()
         {
             let id = best.id.clone();
             if !releases.contains_key(&id) {
@@ -512,7 +531,9 @@ async fn by_sound(
             error: failed,
             heard: true,
         };
-        if let Some(best) = lookup.candidates.first() {
+        if let Some(best) = lookup.candidates.first()
+            && !stopped()
+        {
             if !releases.contains_key(&best.id) {
                 releases.insert(best.id.clone(), s.mb.release(&best.id).await);
             }

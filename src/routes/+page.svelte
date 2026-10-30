@@ -91,20 +91,39 @@
   let bookReview = $state<string[] | null>(null);
   let bookProgress = $state<{ done: number; total: number; kind: "search" | "save" } | null>(null);
   /** A long operation under way: the list waits for it, with what it is
-   *  doing and how far it got (no count: still finding out). */
-  const working = $derived.by((): { label: string; done?: number; total?: number } | null => {
-    const counted = (label: string, p: { done: number; total: number }) => ({ label, done: p.done, total: p.total });
-    if (bookProgress) return counted(t(bookProgress.kind === "search" ? "olSearching" : "sidecarsWriting", bookProgress), bookProgress);
-    if (tmdbProgress) return counted(t(tmdbProgress.kind === "search" ? "tmdbSearching" : "sidecarsWriting", tmdbProgress), tmdbProgress);
+   *  doing and how far it got (no count: still finding out). Searches can
+   *  be stopped (`stop`). */
+  const working = $derived.by((): { label: string; done?: number; total?: number; stop?: boolean } | null => {
+    const counted = (label: string, p: { done: number; total: number }, stop: boolean) => ({ label, done: p.done, total: p.total, stop });
+    if (bookProgress)
+      return counted(t(bookProgress.kind === "search" ? "olSearching" : "sidecarsWriting", bookProgress), bookProgress, bookProgress.kind === "search");
+    if (tmdbProgress)
+      return counted(t(tmdbProgress.kind === "search" ? "tmdbSearching" : "sidecarsWriting", tmdbProgress), tmdbProgress, tmdbProgress.kind === "search");
     if (mbProgress)
       return counted(
         t({ search: "mbSearching", listen: "mbListening", save: "coversWriting", tags: "tagsWriting" }[mbProgress.kind] as "mbSearching", mbProgress),
         mbProgress,
+        mbProgress.kind === "search" || mbProgress.kind === "listen",
       );
-    if (tvProgress) return { label: tvProgress };
-    if (comicProgress && !comicPick && !gcdLogin) return { label: comicProgress };
+    if (tvProgress) return { label: tvProgress, stop: true };
+    if (comicProgress && !comicPick && !gcdLogin) return { label: comicProgress, stop: true };
     if (task) return { label: t({ add: "workingAdd", rename: "workingRename", undo: "workingUndo" }[task] as "workingAdd") };
     return null;
+  });
+  /** Bumped by Stop: a search loop that sees a newer number stops. */
+  let stopRun = 0;
+  let stopping = $state(false);
+  function stopSearch() {
+    stopRun++;
+    stopping = true;
+    api.stopSearch();
+  }
+  // Once the stopped search is over, say what became of it.
+  $effect(() => {
+    if (!working && stopping) {
+      stopping = false;
+      done(t("searchStopped"));
+    }
   });
   const bookRule = $derived(steps.find((s) => s.enabled && s.rule.type === "book"));
   /** What the rule uses of each chosen book: the edition's publisher and
@@ -958,7 +977,9 @@
         notice = t("comicNoFiles");
         return;
       }
+      const run = stopRun;
       for (const [k, g] of groups) {
+        if (stopRun !== run) break;
         // Loose chapters are no issues in the catalogues of issues.
         if (source !== "mangadex" && g.owns.every((o) => !o.number && o.volume == null && !!o.chapter)) continue;
         const picked = `${source}:${k}`;
@@ -979,6 +1000,7 @@
           // `Series: Story` may be a story in `Series`: the series alone.
           const head = g.query.split(/\s*[:–]\s*|\s+-\s+/)[0].trim();
           if (!found.length && head && head !== g.query.trim()) found = await api.comicSearch(source, key, head, lang);
+          if (stopRun !== run) break;
           const year = g.owns.find((o) => o.seriesYear)?.seriesYear ?? null;
           // The highest number among the files: a series with fewer issues
           // is not theirs.
@@ -1014,6 +1036,7 @@
           for (const [i, p] of g.paths.entries()) comics[p] = { volumeKey: vkey, own: g.owns[i], choice: "", status: "auto" };
           continue;
         }
+        if (stopRun !== run) break;
         comicProgress = t("comicLoading", { series: volume.name });
         const res = await api.comicIssues(source, key, volume.id, g.owns);
         const vkey = `${source}:${res.volume.id}`;
@@ -1189,7 +1212,9 @@
       const found: Candidate[] = [];
       let searched = false;
       let review = false;
+      const run = stopRun;
       for (const group of groups) {
+        if (stopRun !== run) break;
         tvProgress = t("tvFinding");
         const res = await api.tvSearch(key, lang, typed, group).catch((e) => {
           // A group whose show cannot be told is skipped, not the others.
@@ -1197,6 +1222,7 @@
           throw e;
         });
         if (!res) continue;
+        if (stopRun !== run) break;
         let show: Candidate | null = pickedShows[res.query] ?? null;
         if (!show) {
           show = res.auto
@@ -1213,6 +1239,7 @@
           return !(e && e.showId === show.id && (e.status === "auto" || e.status === "chosen"));
         });
         if (!items.length) continue;
+        if (stopRun !== run) break;
         searched = true;
         tvProgress = t("tvLoading", { show: show.title });
         const look = await api.tvLookup(key, lang, show.id, items, typed || res.query);
@@ -1594,12 +1621,14 @@
       // computer went off) is put back first.
       try {
         const r = await api.recover();
-        if (r.restored || r.renamed || r.undone || r.stuck.length)
+        const renames = r.restored || r.renamed || r.stuck.length;
+        if (renames || r.undone || r.tagged)
           await notify({
-            title: t("recoverTitle"),
+            title: t(renames || r.undone ? "recoverTitle" : "recoverTagsTitle"),
             text: [
-              t("recoverText", { restored: r.restored, renamed: r.renamed }),
+              renames ? t("recoverText", { restored: r.restored, renamed: r.renamed }) : "",
               r.undone ? t("recoverUndone", { undone: r.undone }) : "",
+              r.tagged ? t("recoverTags", { n: r.tagged }) : "",
               r.stuck.length ? t("recoverStuck") : "",
             ].filter(Boolean).join("\n\n"),
             items: r.stuck.map((s) => `${s.from} → ${s.to}`),
@@ -1758,6 +1787,9 @@
               <progress max={working.total} value={working.done}></progress>
             {:else}
               <progress></progress>
+            {/if}
+            {#if working.stop}
+              <button disabled={stopping} onclick={stopSearch}>{stopping ? t("stopping") : t("stop")}</button>
             {/if}
           </div>
         </div>

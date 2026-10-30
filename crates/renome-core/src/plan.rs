@@ -34,10 +34,13 @@ pub enum Problem {
     Empty,
     /// Contains `/` or a null character.
     Slash,
-    /// Longer than 255 bytes.
+    /// Longer than the file system takes: 255 bytes (UTF-8), or on
+    /// Windows 255 UTF-16 units.
     TooLong,
     /// On Windows: contains `\ : * ? " < > |` or ends in a dot or space.
     WindowsChars,
+    /// The same, on a Linux disk formatted for Windows (FAT, exFAT).
+    DiskChars,
     /// Another file in the batch would get the same name.
     Duplicate,
     /// An identical copy of a file that gets that name: it stays put.
@@ -187,6 +190,15 @@ fn windows_bad(name: &str) -> bool {
     name.contains(WINDOWS_UNSAFE) || name.ends_with(['.', ' ']) || device
 }
 
+/// A name's length as the system counts it against its limit of 255.
+fn name_length(name: &str) -> usize {
+    if cfg!(windows) {
+        name.encode_utf16().count()
+    } else {
+        name.len()
+    }
+}
+
 fn validate(name: &str) -> Option<Problem> {
     if name.is_empty() || name == "." || name == ".." {
         Some(Problem::Empty)
@@ -194,7 +206,7 @@ fn validate(name: &str) -> Option<Problem> {
         Some(Problem::Slash)
     } else if cfg!(windows) && windows_bad(name) {
         Some(Problem::WindowsChars)
-    } else if name.len() > 255 {
+    } else if name_length(name) > 255 {
         Some(Problem::TooLong)
     } else {
         None
@@ -1007,6 +1019,23 @@ pub fn preview(
             } else {
                 Problem::Duplicate
             });
+        }
+    }
+
+    // On Linux, disks formatted for Windows (FAT, exFAT: found by their
+    // ignoring case) refuse what Windows refuses, so it is an error there.
+    if cfg!(target_os = "linux") {
+        for item in items.iter_mut().filter(|i| i.status == Status::Ok) {
+            let bad = item.windows_unsafe
+                || item
+                    .folder
+                    .as_deref()
+                    .is_some_and(|f| f.split('/').any(windows_bad));
+            let target = item.target();
+            if bad && keys.ignores_case(target.parent().unwrap_or(&target)) {
+                item.status = Status::Conflict;
+                item.problem = Some(Problem::DiskChars);
+            }
         }
     }
 

@@ -452,6 +452,12 @@ pub struct Backup {
     pub raw: Vec<(String, String)>,
 }
 
+/// The copy a song's tags are written in before it takes the song's place.
+pub fn temp_of(path: &Path) -> PathBuf {
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    path.with_file_name(format!(".{name}.renome-tags"))
+}
+
 /// The formats whose tags can be written.
 pub fn writable(path: &Path) -> bool {
     matches!(
@@ -508,8 +514,7 @@ fn edit(
     if !writable(path) {
         return Err("tagsUnsupported".into());
     }
-    let name = path.file_name().unwrap_or_default().to_string_lossy();
-    let tmp = path.with_file_name(format!(".{name}.renome-tags"));
+    let tmp = temp_of(path);
     fs::copy(path, &tmp).map_err(|e| e.to_string())?;
     let written = (|| -> Result<bool, String> {
         let mut file = OpenOptions::new()

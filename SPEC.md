@@ -455,8 +455,9 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   (`rusty-chromaprint`, Chromaprint's default algorithm, compressed and
   base64url-encoded as `fpcalc` does); fingerprint and length go to
   AcoustID (`/v2/lookup`, POST, Renome's application key, one request
-  every 0.4 s; 429/503 retried 3 times after 3 s; an invalid key or a
-  network error stops the listening and is reported). Answers with a
+  every 0.4 s; 429/503, a failed connection and a timeout retried 3
+  times after 3 s; an invalid key, or a network error that lasts, stops
+  the listening and is reported). Answers with a
   score ≥ 0.5 count; of their recordings, those linked by at least half
   as many submissions (`sources`) as the most linked one (a fingerprint
   is sometimes linked to other songs too), with the releases they are on.
@@ -528,6 +529,11 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   (kept once each, by content hash, in the entry's `<id>.files/`) go to
   the rename's history entry (or one of their own); undo puts them back
   before moving files back, and keeps the entry pending if that fails.
+  Each song is noted next to the entry before it is written and, with
+  what it held, after; if the program stops in between, the next start
+  deletes the copies left beside songs and puts the songs written into
+  the entry, to undo (an undo of tags is noted the same way, for its
+  copies).
 - Only the album and artist names (and release ids) are sent to
   MusicBrainz; to AcoustID, only each song's fingerprint and length.
 - The files' audio is never changed, nor their tags unless "Write the
@@ -708,16 +714,22 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
 - The new name can be edited by hand in the table (overrides the rules' name for that row; the folder the rules move it into still applies).
 - Checks: empty name (including a name the rules emptied, leaving only
   the extension, which would make a hidden file), `/` or null character,
-  longer than 255 bytes,
+  longer than 255 bytes (on Windows, 255 UTF-16 units),
   two files with the same target, target already exists outside the batch.
   On Windows, `\ : * ? " < > |` and a trailing dot or space are errors;
-  elsewhere they are a non-blocking warning. On Windows and macOS, names
-  that differ only in case count as the same name.
+  so they are on Linux when the target is on a disk that ignores case
+  (FAT, exFAT, NTFS mounted so: formatted for Windows); elsewhere they
+  are a non-blocking warning. Names that differ only in case count as
+  the same name where the file system ignores case (see 4).
 - Counters: total, changed, conflicts.
 - While a long task runs (a search, reading added files, renaming and
   writing sidecar files, undoing), a box over the list says what it is
   doing, with a progress bar (moving when the total is not known yet);
-  the list, the rules and the list's buttons and shortcuts wait.
+  the list, the rules and the list's buttons and shortcuts wait. An
+  online search (movie, TV show, music, book, comic) has a Stop button
+  there: the request under way finishes, what was found is kept, the
+  files not reached are left as they were (searching again goes on with
+  them), and a note says the search was stopped.
 
 ### Identical copies
 
@@ -760,6 +772,9 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   they went into, removed by undo when empty), and lists the temporaries
   whose old name is taken. An undo is written down the same way; one
   stopped halfway takes what it had already undone out of its entry.
+  History files are written through a copy that takes their place and
+  synced to the disk, so a power cut leaves neither an empty entry nor a
+  lost note.
 - A move to another disk is refused ("other disk"); the file stays.
 - Renaming, undoing, adding folders and the preview run away from the
   window's thread; a preview that comes back after a newer one is dropped.

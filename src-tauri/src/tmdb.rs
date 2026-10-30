@@ -337,6 +337,7 @@ pub async fn lookup(app: &AppHandle, client: &Client, items: Vec<LookupItem>) ->
             unique.push(g.clone());
         }
     }
+    let stopped = crate::stop_signal(app);
     let total = unique.len();
     let _ = app.emit("tmdb-progress", Progress { done: 0, total });
     let mut done = 0;
@@ -351,26 +352,31 @@ pub async fn lookup(app: &AppHandle, client: &Client, items: Vec<LookupItem>) ->
         found.insert(i, r);
         done += 1;
         let _ = app.emit("tmdb-progress", Progress { done, total });
+        if stopped() {
+            break;
+        }
     }
+    // Files not searched before Stop are left out: they are still to do.
     guesses
         .into_iter()
-        .map(|(path, guess)| {
+        .filter_map(|(path, guess)| {
             let hit = unique
                 .iter()
                 .position(|g| *g == guess)
-                .and_then(|i| found.get(&i));
+                .map(|i| found.get(&i));
             let (candidates, auto, error) = match hit {
-                Some(Ok((c, auto))) => (c.clone(), *auto, None),
-                Some(Err(e)) => (Vec::new(), false, Some(e.clone())),
+                Some(Some(Ok((c, auto)))) => (c.clone(), *auto, None),
+                Some(Some(Err(e))) => (Vec::new(), false, Some(e.clone())),
+                Some(None) => return None,
                 None => (Vec::new(), false, None),
             };
-            Lookup {
+            Some(Lookup {
                 path,
                 guess,
                 candidates,
                 auto,
                 error,
-            }
+            })
         })
         .collect()
 }

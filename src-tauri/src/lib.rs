@@ -44,6 +44,9 @@ struct AppState {
     /// Bumped by each search for identical files; an older search that sees
     /// a newer number stops.
     identical_run: AtomicU64,
+    /// Bumped by Stop; a search that sees a newer number than it started
+    /// with stops, keeping what it found.
+    stop_run: AtomicU64,
     /// MusicBrainz, paced for all lookups together.
     mb: musicbrainz::Client,
     /// AcoustID, likewise.
@@ -209,6 +212,19 @@ async fn preview(
 struct IdenticalProgress {
     done: u64,
     total: u64,
+}
+
+/// Whether Stop was pressed since this was called.
+fn stop_signal(app: &AppHandle) -> impl Fn() -> bool + Send + Sync + 'static {
+    let app = app.clone();
+    let run = app.state::<AppState>().stop_run.load(Ordering::SeqCst);
+    move || app.state::<AppState>().stop_run.load(Ordering::SeqCst) != run
+}
+
+/// Stops the searches under way (see [`stop_signal`]).
+#[tauri::command]
+fn stop_search(state: State<AppState>) {
+    state.stop_run.fetch_add(1, Ordering::SeqCst);
 }
 
 /// Searches the list for files with identical content, in the background.
@@ -605,6 +621,8 @@ async fn write_tags(
         None => state.history.record_files(&[])?,
     };
     let store = state.history.files_dir(&id)?;
+    // Each song noted before and after, for a stop halfway.
+    let mut note = state.history.tagging(&id)?;
     // One cover per release: the archive's, else the album folder's own.
     let mut covers: HashMap<String, Option<Vec<u8>>> = HashMap::new();
     let mut full: HashMap<String, Option<renome_core::musicbrainz::Release>> = HashMap::new();
@@ -637,6 +655,7 @@ async fn write_tags(
             fields.extend(tagwrite::details(r, &job.song.track_id));
         }
         let (path, store) = (job.path.clone(), store.clone());
+        note.start(&path);
         let result = tauri::async_runtime::spawn_blocking(move || {
             tagwrite::write(&path, &fields, image.as_deref(), clean, &store)
         })
@@ -645,6 +664,7 @@ async fn write_tags(
         .and_then(|r| r);
         match result {
             Ok(Some(b)) => {
+                note.done(&b);
                 backups.push(b);
                 written.push(job.path);
             }
@@ -665,10 +685,12 @@ async fn write_tags(
     } else {
         state.history.add_tags(&id, backups)
     };
-    if let Err(e) = saved {
-        report
+    match saved {
+        Ok(()) => note.finish(),
+        // The note stays: the next start puts the songs in the entry.
+        Err(e) => report
             .errors
-            .push((String::new(), format!("err.history: {e}")));
+            .push((String::new(), format!("err.history: {e}"))),
     }
     // The list reads the new tags.
     let written: HashSet<PathBuf> = written.into_iter().collect();
@@ -1066,6 +1088,7 @@ pub fn run() {
             history: History::new(history_dir),
             hashes: Mutex::default(),
             identical_run: AtomicU64::new(0),
+            stop_run: AtomicU64::new(0),
             mb: musicbrainz::Client::default(),
             acoustid: acoustid::Client::default(),
             heard: Mutex::new(HashMap::new()),
@@ -1080,6 +1103,7 @@ pub fn run() {
             undo_list,
             add_paths,
             remove_files,
+            stop_search,
             clear_files,
             move_files,
             sort_files,

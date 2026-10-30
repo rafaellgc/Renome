@@ -69,7 +69,16 @@ impl Client {
             let res = self.http.post(api()).form(&form).send().await;
             *last = Some(Instant::now());
             drop(last);
-            let res = res.map_err(net_error)?;
+            let res = match res {
+                Ok(r) => r,
+                // A dropped connection or a slow answer may pass: the
+                // listening stops only if it lasts.
+                Err(e) if attempt < 3 && (e.is_connect() || e.is_timeout() || e.is_request()) => {
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    continue;
+                }
+                Err(e) => return Err(net_error(e)),
+            };
             let code = res.status().as_u16();
             if matches!(code, 429 | 503) && attempt < 3 {
                 tokio::time::sleep(Duration::from_secs(3)).await;

@@ -10,7 +10,8 @@
 //! place before its contents are restored).
 
 use std::collections::HashSet;
-use std::fs;
+use std::fs::{self, File};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Local};
@@ -105,6 +106,30 @@ fn rename_new(from: &Path, to: &Path) -> Result<(), (ErrorKind, String)> {
         return Err((ErrorKind::TargetExists, String::new()));
     }
     fs::rename(from, to).map_err(|e| io_kind(&e))
+}
+
+/// Writes a file through a copy that takes its place, and waits until it
+/// is on the disk: a power cut does not leave it empty or half written
+/// while what comes next (removing the [`Pending`] note) is saved.
+fn write_synced(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let tmp = path.with_file_name(format!(".{name}.tmp"));
+    let mut f = File::create(&tmp)?;
+    f.write_all(data)?;
+    f.sync_all()?;
+    fs::rename(&tmp, path)?;
+    sync_dir(path);
+    Ok(())
+}
+
+/// Saves a folder's list of names to the disk (where a folder can be
+/// opened as a file; elsewhere the system does it on its own).
+fn sync_dir(path: &Path) {
+    if let Some(dir) = path.parent()
+        && let Ok(d) = File::open(dir)
+    {
+        let _ = d.sync_all();
+    }
 }
 
 fn temp_path(from: &Path, i: usize) -> PathBuf {
@@ -325,6 +350,46 @@ pub struct Recovered {
     /// Temporary files that could not be put back (their old name is
     /// taken), with the name each should have.
     pub stuck: Vec<Operation>,
+    /// Songs whose tags had been written: kept so, in their entry to undo.
+    pub tagged: usize,
+}
+
+/// One line of a [`Tagging`] note.
+#[derive(Deserialize)]
+enum TagStep {
+    /// A song is about to be written.
+    Start(PathBuf),
+    /// It was: what it held, for undo.
+    Done(crate::tagwrite::Backup),
+}
+
+/// Songs whose tags are being written for a history entry. Each is noted
+/// in a file next to the entry before (so the copy it is written in can
+/// be removed) and after (so undo keeps what it held); the end removes the
+/// file. A stop halfway is recovered from it (see [`History::recover`]).
+pub struct Tagging {
+    path: PathBuf,
+    file: File,
+}
+
+impl Tagging {
+    pub fn start(&mut self, song: &Path) {
+        self.note(&serde_json::json!({ "Start": song }));
+    }
+
+    pub fn done(&mut self, backup: &crate::tagwrite::Backup) {
+        self.note(&serde_json::json!({ "Done": backup }));
+    }
+
+    fn note(&mut self, step: &serde_json::Value) {
+        let _ = writeln!(self.file, "{step}");
+        let _ = self.file.sync_data();
+    }
+
+    /// The songs are in their entry: the note goes.
+    pub fn finish(self) {
+        let _ = fs::remove_file(&self.path);
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -430,6 +495,10 @@ impl History {
         };
         for e in rd.flatten() {
             let name = e.file_name().to_string_lossy().into_owned();
+            if let Some(id) = name.strip_suffix(".tagging") {
+                out.tagged += self.recover_tags(id, &e.path());
+                continue;
+            }
             let Some(id) = name.strip_suffix(".pending") else {
                 continue;
             };
@@ -502,6 +571,45 @@ impl History {
         out
     }
 
+    /// Tags left halfway (see [`Tagging`]): the copies left beside songs
+    /// are removed, and the songs written join entry `id`, for undo (an
+    /// entry left with nothing goes). Returns how many joined.
+    fn recover_tags(&self, id: &str, note: &Path) -> usize {
+        let Ok(text) = fs::read_to_string(note) else {
+            return 0;
+        };
+        let mut done = Vec::new();
+        // A line cut short by the stop is skipped.
+        for step in text.lines().filter_map(|l| serde_json::from_str(l).ok()) {
+            match step {
+                TagStep::Start(song) => {
+                    let _ = fs::remove_file(crate::tagwrite::temp_of(&song));
+                }
+                TagStep::Done(b) => done.push(b),
+            }
+        }
+        let Ok(mut j) = self.read(id) else {
+            let _ = fs::remove_file(note);
+            return 0;
+        };
+        // Already there when the stop came after the entry was written.
+        done.retain(|b| !j.tags.iter().any(|t| t.path == b.path));
+        let joined = done.len();
+        j.tagged += joined;
+        j.tags.extend(done);
+        let empty =
+            j.ops.is_empty() && j.extra_files.is_empty() && j.lists.is_empty() && j.tags.is_empty();
+        let kept = if empty {
+            self.delete(id).is_ok()
+        } else {
+            self.write(id, &j).is_ok()
+        };
+        if kept {
+            let _ = fs::remove_file(note);
+        }
+        joined
+    }
+
     /// Takes out of entry `id` the renames an undo took back (`back` are
     /// the undo's operations), as the undo would have.
     fn settle_undo(&self, id: &str, back: &[Operation]) -> Result<(), String> {
@@ -527,7 +635,7 @@ impl History {
     fn write(&self, id: &str, j: &Journal) -> Result<(), String> {
         fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
         let text = serde_json::to_string_pretty(j).map_err(|e| e.to_string())?;
-        fs::write(self.path(id)?, text).map_err(|e| e.to_string())
+        write_synced(&self.path(id)?, text.as_bytes()).map_err(|e| e.to_string())
     }
 
     /// Runs and records in the history. What is about to happen is written
@@ -547,7 +655,7 @@ impl History {
                 undoing: false,
             };
             fs::create_dir_all(&self.dir).is_ok()
-                && serde_json::to_vec(&p).is_ok_and(|t| fs::write(path, t).is_ok())
+                && serde_json::to_vec(&p).is_ok_and(|t| write_synced(path, &t).is_ok())
         });
         let mut report = execute(ops, Depth::DeepestFirst);
         if !report.done.is_empty() {
@@ -654,6 +762,18 @@ impl History {
         self.write(id, &j)
     }
 
+    /// Starts writing tags for entry `id` (see [`Tagging`]).
+    pub fn tagging(&self, id: &str) -> Result<Tagging, String> {
+        let path = self.path(id)?.with_extension("tagging");
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|e| e.to_string())?;
+        sync_dir(&path);
+        Ok(Tagging { path, file })
+    }
+
     /// Deletes a history entry (the files are left as they are).
     pub fn delete(&self, id: &str) -> Result<(), String> {
         let _ = fs::remove_dir_all(self.backups(id)?);
@@ -686,8 +806,15 @@ impl History {
         // Songs get their old tags back where they are now, before the
         // renames take them back.
         let mut errors = Vec::new();
-        j.tags
-            .retain(|b| match crate::tagwrite::restore(b, &backups) {
+        // Noted like writing them, for the copies a stop would leave.
+        let mut note = (!j.tags.is_empty())
+            .then(|| self.tagging(id).ok())
+            .flatten();
+        j.tags.retain(|b| {
+            if let Some(n) = note.as_mut() {
+                n.start(&b.path);
+            }
+            match crate::tagwrite::restore(b, &backups) {
                 Ok(()) => false,
                 Err(e) => {
                     errors.push(OpError {
@@ -698,7 +825,11 @@ impl History {
                     });
                     true
                 }
-            });
+            }
+        });
+        if let Some(n) = note {
+            n.finish();
+        }
         // Rewritten lists get their content back where they are now; the
         // renames below then take them back.
         j.lists.retain(|(path, name)| {
@@ -734,7 +865,7 @@ impl History {
                     .collect(),
                 undoing: true,
             };
-            serde_json::to_vec(&p).is_ok_and(|t| fs::write(path, t).is_ok())
+            serde_json::to_vec(&p).is_ok_and(|t| write_synced(path, &t).is_ok())
         });
         let mut report = execute(&reverse, Depth::ShallowestFirst);
         j.reverted += report.done.len();
@@ -874,6 +1005,46 @@ mod tests {
         assert!(h.list()[0].undone);
         // The pictures kept for undo are gone with it.
         assert!(!h.files_dir(&id).unwrap().exists());
+    }
+
+    #[test]
+    fn tags_left_halfway_are_recovered() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        fs::copy("tests/fixtures/song.mp3", p.join("a.mp3")).unwrap();
+        fs::copy("tests/fixtures/song.mp3", p.join("b.mp3")).unwrap();
+        let h = History::new(p.join("hist"));
+        let id = h.apply(&[op(p, "a.mp3", "a2.mp3")]).history_id.unwrap();
+        let m = crate::musicbrainz::SongMatch {
+            title: "Take On Me".into(),
+            track: 1,
+            ..Default::default()
+        };
+        // One song written, the next stopped while in its copy.
+        let mut note = h.tagging(&id).unwrap();
+        let song = p.join("a2.mp3");
+        note.start(&song);
+        let fields = crate::tagwrite::fields_of(&m);
+        let b = crate::tagwrite::write(&song, &fields, None, false, &h.files_dir(&id).unwrap())
+            .unwrap()
+            .unwrap();
+        note.done(&b);
+        let other = p.join("b.mp3");
+        note.start(&other);
+        let copy = crate::tagwrite::temp_of(&other);
+        fs::copy(&other, &copy).unwrap();
+        drop(note);
+
+        let r = h.recover();
+        assert_eq!(r.tagged, 1);
+        assert!(!copy.exists());
+        assert!(!p.join(format!("hist/{id}.tagging")).exists());
+        assert_eq!(h.list()[0].tagged, 1);
+        // Recovering again adds nothing.
+        assert_eq!(h.recover().tagged, 0);
+        let u = h.undo(&id).unwrap();
+        assert!(u.errors.is_empty(), "{:?}", u.errors);
+        assert_eq!(crate::music::read(&p.join("a.mp3")).unwrap().title, "Old");
     }
 
     #[test]

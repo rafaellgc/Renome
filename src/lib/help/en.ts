@@ -57,6 +57,7 @@ export const en: Section[] = [
   <li>The <b>checkbox</b> in the title turns the rule on and off without deleting it. While off, it is locked: turn it on to change its options or search.</li>
   <li><b>↑ ↓</b> change the order; <b>✕</b> removes the rule; clicking the title collapses the card.</li>
   <li>A rule with an error (an invalid expression, say) gets a red border and is skipped until it is fixed.</li>
+  <li>An online search (movie, TV show, music, book, comic) can be stopped with <b>Stop</b>, in the progress box. What was found stays, and searching again goes on with the rest. The request under way finishes first, which can take a few seconds.</li>
 </ul>
 <h4>Apply to</h4>
 <p>Several rules ask where to act:</p>
@@ -375,7 +376,7 @@ ${ex("01.mp3", "01 - Song Title.mp3")}
   <li><b>Write the tags into the files</b>: after renaming, writes into the identified songs all MusicBrainz knows of them: title, artists (each one on its own too), album artist, album, date and original date, track and disc (with totals), label, catalog number, barcode, country, release type, medium, ISRC, genres, language, composer, lyricist, producer, arranger, mixer and the MusicBrainz ids, which Jellyfin, Navidrome and Plex use. For that, each album is looked up once more (about 2 seconds). Songs whose names are already right get them too (they count in the <b>Rename</b> button). A song that already has all of this is not written again. Works with MP3 (written as ID3v2.3), FLAC, OGG, Opus and M4A.</li>
   <li><b>Delete the other tags</b>: takes out what does not come from MusicBrainz (comments, site addresses, ripper notes, "encoded by"), and in MP3 also the secondary tags (ID3v1 and APE). Lyrics, ReplayGain, BPM, an embedded cue sheet (CUESHEET) stay, and genre and composer when MusicBrainz does not have them. Unchecked, the other tags stay as they are.</li>
   <li><b>Include the cover in the files</b>: takes out the pictures already inside each song and puts in the album's cover (from the Cover Art Archive or, if there is none, the folder's <code>cover.jpg</code>).</li>
-  <li>The writing is done on a copy, which only takes the file's place at the end; a crash midway does not spoil the song. Undo puts the old tags and pictures back (in MP3 and M4A, rare fields cleaning took out and the ID3v1 and APE tags do not come back). The modification date changes, so players read the tags again. Since the content changes, a torrent no longer recognises these files.</li>
+  <li>The writing is done on a copy, which only takes the file's place at the end; a crash midway does not spoil the song. If the program is closed or the computer goes off while writing, the next time Renome opens the songs already written go into the <b>History</b>, to undo, and the copy being written is deleted. Undo puts the old tags and pictures back (in MP3 and M4A, rare fields cleaning took out and the ID3v1 and APE tags do not come back). The modification date changes, so players read the tags again. Since the content changes, a torrent no longer recognises these files.</li>
   <li>Lookups are spaced out (one every 2 seconds), as MusicBrainz asks; each album takes about 4 seconds.</li>
 </ul>
 <h4>Identify by sound (AcoustID)</h4>
@@ -538,7 +539,7 @@ ${ex("Series_Name_012_(2019)_(Digital)_(group).cbz", "Series Name #012 (2019).cb
 <p>Files with a conflict are not renamed. The reasons are:</p>
 <ul>
   <li>an empty name, or one containing <code>/</code>;</li>
-  <li>a name longer than 255 bytes;</li>
+  <li>a name longer than 255 bytes (on Windows, 255 characters);</li>
   <li>two files would get the same name in the same folder;</li>
   <li>a file with that name already exists outside the list (nothing is overwritten);</li>
   <li>on Windows: the characters <code>\\ : * ? " &lt; &gt; |</code>, or a dot or space at the end of the name.</li>
@@ -629,7 +630,7 @@ ${ex("Show.S01E02.720p.WEB.mkv", "Show S01E02.mkv")}
   <li><b>Include hidden files when adding folders</b>.</li>
   <li><b>Ask for confirmation before renaming</b>.</li>
   <li><b>Turn rules off after renaming</b>.</li>
-  <li><b>Warn about names Windows does not accept</b>: characters such as <code>:</code> and <code>?</code>, a dot or space at the end, and reserved names such as <code>CON</code> and <code>NUL</code>. Useful for files headed to a USB stick or to Windows.</li>
+  <li><b>Warn about names Windows does not accept</b>: characters such as <code>:</code> and <code>?</code>, a dot or space at the end, and reserved names such as <code>CON</code> and <code>NUL</code>. Useful for files headed to Windows. On a USB stick or disk formatted for Windows (FAT, exFAT), such names are not accepted at all: there they are an error, with or without this option.</li>
 </ul>
 <p>Options are stored in <code>~/.config/renome</code> (Linux), <code>%APPDATA%\\renome</code> (Windows) or <code>~/Library/Application Support/renome</code> (macOS). The history is in <code>~/.local/share/renome/history</code> on Linux and in the same folder as the options on the other systems.</p>`,
   },
