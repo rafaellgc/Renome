@@ -62,8 +62,7 @@
 
 <svelte:window {onkeydown} />
 
-<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<div class="overlay" onclick={() => onpick(null)}>
+<div class="overlay">
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <div class="modal review" onclick={(e) => e.stopPropagation()}>
     <header>
@@ -76,7 +75,7 @@
 
     <form class="search" onsubmit={search}>
       <input bind:value={query} placeholder={t("comicSeriesPlaceholder")} spellcheck="false" />
-      <input class="year" bind:value={year} inputmode="numeric" maxlength="4" placeholder={t("comicPickYear")} title={t("comicPickYearHint")} />
+      <input class="year" bind:value={year} oninput={() => (year = year.replace(/\D/g, ""))} inputmode="numeric" maxlength="4" placeholder={t("comicPickYear")} title={t("comicPickYearHint")} />
       {#if source !== "mangadex"}
         <input class="publisher" bind:value={publisher} placeholder={t("comicPickPublisher")} title={t(source === "gcd" ? "comicPickPublisherGcd" : "comicPickPublisherHint")} spellcheck="false" />
       {/if}

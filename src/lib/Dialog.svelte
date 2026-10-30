@@ -16,8 +16,7 @@
 
 {#if dialog.current}
   {@const d = dialog.current}
-  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="overlay top" onclick={() => closeDialog(false)}>
+  <div class="overlay top">
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dialog-title" tabindex="-1" bind:this={box} onclick={(e) => e.stopPropagation()}>
       <h2 id="dialog-title">{d.title}</h2>

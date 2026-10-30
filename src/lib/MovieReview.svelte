@@ -85,8 +85,7 @@
 
 <svelte:window {onkeydown} />
 
-<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<div class="overlay" onclick={onclose}>
+<div class="overlay">
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <div class="modal review" onclick={(e) => e.stopPropagation()}>
     <header>
@@ -101,7 +100,7 @@
     <form class="search" onsubmit={search}>
       <span class="muted">{t("reviewGuess")}</span>
       <input class="title" bind:value={title} placeholder={t("reviewTitleField")} spellcheck="false" />
-      <input class="year" bind:value={year} placeholder={t("reviewYear")} inputmode="numeric" maxlength="4" />
+      <input class="year" bind:value={year} oninput={() => (year = year.replace(/\D/g, ""))} placeholder={t("reviewYear")} inputmode="numeric" maxlength="4" />
       <button type="submit" disabled={searching}>{t("reviewSearch")}</button>
     </form>
 
