@@ -72,19 +72,19 @@ pub struct View {
     /// other comics are named from what they say about themselves.
     #[serde(default)]
     pub comics: HashMap<PathBuf, crate::comics::ComicMatch>,
-    /// What a show's old folder is called after when files stay in it
+    /// What an old folder is called after when files stay in it
     /// (`Show (2010) [tmdbid-7] (additional files)`), in the UI's language.
     #[serde(default)]
     pub leftover_suffix: String,
-    /// Folders never taken for a show's own (home, Downloads…; filled in
-    /// by the app).
+    /// Folders never taken for a show's or movie's own, nor renamed for
+    /// leftovers (home, Downloads…; filled in by the app).
     #[serde(skip)]
     pub protected: Vec<PathBuf>,
 }
 
-/// A show's old folder that keeps files after its episodes moved to the
-/// show's new folder (extras, a file in conflict): renamed to sit next to
-/// it, so both are found together.
+/// An old folder (a show's, movie's, album's…) that keeps files after the
+/// others moved to its new folder next to it (extras, a file in conflict):
+/// renamed after the new one, so both are found together.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LeftFolder {
@@ -137,7 +137,7 @@ pub struct Preview {
     pub total: usize,
     pub changed: usize,
     pub conflicts: usize,
-    /// Old show folders renamed for what stays in them.
+    /// Old folders renamed for what stays in them.
     pub left_folders: Vec<LeftFolder>,
 }
 
@@ -493,6 +493,88 @@ fn skip_artist_level(items: &mut [PreviewItem], songs: &HashMap<&Path, AudioTags
                 }
             } else {
                 i.folder = Some(rest.join("/"));
+                i.dest = Some(dest);
+            }
+        }
+    }
+}
+
+/// A folder holding one work and nothing else of its kind, whatever its
+/// name (`New folder`, `Downloads/stuff`): one album of songs, one series
+/// of comics, one book in several formats. It is the work's own folder, so the new folders go next to
+/// it, not inside. `keys`: each file's work; `kind`: the extensions
+/// counted; `sub`: subfolders that are part of it (disc folders).
+fn place_own_folders(
+    items: &mut [PreviewItem],
+    keys: &HashMap<&Path, String>,
+    kind: fn(&str) -> bool,
+    sub: fn(&str) -> bool,
+    view: &View,
+) {
+    let root_of = |i: &PreviewItem| -> Option<PathBuf> {
+        let n = i.folder.as_ref()?.split('/').count();
+        Some(i.dest.as_ref()?.ancestors().nth(n)?.to_path_buf())
+    };
+    let mut roots: HashMap<PathBuf, Option<&String>> = HashMap::new();
+    for i in items.iter() {
+        let (Some(key), Some(root)) = (keys.get(i.path.as_path()), root_of(i)) else {
+            continue;
+        };
+        // Its files' own folder (or the one above disc folders), not one
+        // reached by names (`Music` above `Artist/Album`).
+        let own = i.dir == root
+            || (i.dir.parent() == Some(root.as_path())
+                && sub(&i.dir.file_name().unwrap_or_default().to_string_lossy()));
+        let key = own.then_some(key);
+        roots
+            .entry(root)
+            .and_modify(|r| {
+                if *r != key {
+                    *r = None;
+                }
+            })
+            .or_insert(key);
+    }
+    for (root, key) in roots {
+        let (Some(key), Some(up)) = (key, root.parent()) else {
+            continue;
+        };
+        if protected(&root, view) {
+            continue;
+        }
+        // Every file of its kind in it (and in its subfolders) is that work.
+        let only = walkdir::WalkDir::new(&root)
+            .max_depth(3)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|e| {
+                !e.file_type().is_dir()
+                    && kind(
+                        &e.path()
+                            .extension()
+                            .map(|x| x.to_string_lossy().to_lowercase())
+                            .unwrap_or_default(),
+                    )
+            })
+            .all(|e| keys.get(e.path()) == Some(key));
+        if !only {
+            continue;
+        }
+        for i in items.iter_mut() {
+            if root_of(i).as_ref() != Some(&root) {
+                continue;
+            }
+            let Some(rest) = i.dest.as_ref().and_then(|d| d.strip_prefix(&root).ok()) else {
+                continue;
+            };
+            let dest = up.join(rest);
+            if dest == i.dir {
+                i.dest = None;
+                i.folder = None;
+                if i.new_name == i.original && i.status == Status::Ok {
+                    i.status = Status::Unchanged;
+                }
+            } else {
                 i.dest = Some(dest);
             }
         }
@@ -858,10 +940,45 @@ pub fn preview(
     climb_shared_roots(&mut items);
     unify_folders(&mut items);
     place_show_folders(&mut items, view);
+    place_movie_folders(&mut items, view);
+    let series: HashMap<&Path, String> = comics
+        .iter()
+        .map(|(p, (m, folder))| (*p, folder.as_ref().unwrap_or(m).series.to_lowercase()))
+        .filter(|(_, s)| !s.is_empty())
+        .collect();
+    place_own_folders(&mut items, &series, comics::is_comic, |_| false, view);
+    let books: HashMap<&Path, String> = view
+        .books
+        .iter()
+        .map(|(p, m)| {
+            (
+                p.as_path(),
+                format!("{}\0{}", m.authors.join("\0"), m.title).to_lowercase(),
+            )
+        })
+        .collect();
+    place_own_folders(&mut items, &books, crate::ebook::is_book, |_| false, view);
     if let Some((_, folders)) = music {
         if folders {
             keep_collections(&mut items, &songs);
             skip_artist_level(&mut items, &songs);
+            let albums: HashMap<&Path, String> = songs
+                .iter()
+                .filter(|(_, t)| !t.album.is_empty())
+                .map(|(p, t)| {
+                    (
+                        *p,
+                        format!("{}\0{}", t.album_artist(), t.album).to_lowercase(),
+                    )
+                })
+                .collect();
+            place_own_folders(
+                &mut items,
+                &albums,
+                music::is_audio,
+                |n| music::disc_folder(n).is_some(),
+                view,
+            );
         }
         follow_songs(&mut items, folders, &view.identical);
     }
@@ -1057,35 +1174,138 @@ fn place_show_folders(items: &mut [PreviewItem], view: &View) {
     }
 }
 
-/// The show folders episodes leave that still hold files afterwards
-/// (extras, a file in conflict, one hidden by the filter): renamed
-/// `<new folder> (<suffix>)`, next to the new one. Without anything left,
-/// the old folder is removed after the move instead.
+/// Whether a folder holds a movie and only what goes with one: its videos
+/// (no other), subtitles, images, `.nfo` and `.txt` files.
+fn only_movie_files(dir: &Path, id: u64, view: &View) -> bool {
+    let mut any = false;
+    for e in walkdir::WalkDir::new(dir).max_depth(3).into_iter() {
+        let Ok(e) = e else { return false };
+        if e.file_type().is_dir() {
+            continue;
+        }
+        let ext = e
+            .path()
+            .extension()
+            .map(|x| x.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        if tmdb::is_video(&ext) {
+            if view.movies.get(e.path()).is_none_or(|m| m.id != id) {
+                return false;
+            }
+            any = true;
+        } else if !(tmdb::is_subtitle(&ext)
+            || matches!(
+                ext.as_str(),
+                "jpg" | "jpeg" | "png" | "webp" | "gif" | "bmp" | "nfo" | "txt"
+            ))
+        {
+            return false;
+        }
+    }
+    any
+}
+
+/// A movie's own folder under another name: named after it
+/// (`Movie.2010.1080p.BluRay`), or holding only it and what goes with it.
+/// The movie's new folder goes next to it, not inside.
+fn place_movie_folders(items: &mut [PreviewItem], view: &View) {
+    // The movies in each folder: a folder of several is no movie's own.
+    let mut movies: HashMap<PathBuf, HashSet<u64>> = HashMap::new();
+    for i in items.iter().filter(|i| !i.is_dir) {
+        if let Some(m) = view.movies.get(&i.path) {
+            movies.entry(i.dir.clone()).or_default().insert(m.id);
+        }
+    }
+    let mut own: HashMap<PathBuf, bool> = HashMap::new();
+    for i in items.iter_mut() {
+        let Some(m) = view.movies.get(&i.path) else {
+            continue;
+        };
+        let (Some(dest), Some(up)) = (&i.dest, i.dir.parent()) else {
+            continue;
+        };
+        let Some(name) = dest.file_name().filter(|_| dest.parent() == Some(&i.dir)) else {
+            continue;
+        };
+        // A video alone tells nothing about a folder holding other things
+        // (`Videos 2024` with a film and the family's documents).
+        let is_own = *own.entry(i.dir.clone()).or_insert_with(|| {
+            movies.get(&i.dir).is_some_and(|ids| ids.len() == 1)
+                && !protected(&i.dir, view)
+                && (tmdb::names_movie(&i.dir, m) || only_movie_files(&i.dir, m.id, view))
+        });
+        if is_own {
+            i.dest = Some(up.join(name));
+        }
+    }
+}
+
+/// The folders files leave for a new one next to them (a show's, movie's,
+/// album's, author's or series' folder named anew by the rules) that still
+/// hold files afterwards (extras, a file in conflict, one hidden by the
+/// filter): renamed `<new folder> (<suffix>)`, next to the new one. Without
+/// anything left, the old folder is removed after the move instead.
 fn left_folders(items: &[PreviewItem], view: &View) -> Vec<LeftFolder> {
-    let mut left: Vec<LeftFolder> = Vec::new();
-    for (m, old, idx) in show_moves(items, view) {
-        let Some(dest) = items[idx[0]].dest.as_ref() else {
+    // Each old folder and the new one its files go to (None: several).
+    let mut pairs: Vec<(PathBuf, Option<PathBuf>)> = Vec::new();
+    for i in items.iter().filter(|i| i.status == Status::Ok && !i.is_dir) {
+        let (Some(folder), Some(dest)) = (&i.folder, &i.dest) else {
             continue;
         };
-        let new = show_folder_of(dest);
-        let (Some(name), Some(up)) = (new.file_name(), old.parent()) else {
+        let Some(root) = dest.ancestors().nth(folder.split('/').count()) else {
             continue;
         };
-        // Only a show's own folder, next to its new one.
-        if new == old
-            || new.parent() != Some(up)
-            || left.iter().any(|l| l.from == old)
-            || protected(&old, view)
-            || !(tv::names_show(&old, m) || only_show_videos(&old, m.id, view))
+        let (Ok(old), Ok(new)) = (i.dir.strip_prefix(root), dest.strip_prefix(root)) else {
+            continue;
+        };
+        let old: Vec<_> = old.components().collect();
+        let new: Vec<_> = new.components().collect();
+        // A folder that becomes several (`Title` → `Author/Title`) is not
+        // one of them; a show's folder is its new one's, season apart.
+        if old.len() < new.len() && !view.episodes.contains_key(&i.path) {
+            continue;
+        }
+        // The first level where they part.
+        let Some(k) = (0..old.len().min(new.len())).find(|&k| old[k] != new[k]) else {
+            continue;
+        };
+        let fold = |levels: &[std::path::Component]| {
+            levels.iter().fold(root.to_path_buf(), |p, c| p.join(c))
+        };
+        let (from, to) = (fold(&old[..=k]), fold(&new[..=k]));
+        // Only the case differs: one folder where case is ignored.
+        let lower =
+            |c: &std::path::Component| text::nfc(&c.as_os_str().to_string_lossy().to_lowercase());
+        let to = (lower(&old[k]) != lower(&new[k])).then_some(to);
+        match pairs.iter_mut().find(|p| p.0 == from) {
+            Some(p) if p.1 != to => p.1 = None,
+            Some(_) => {}
+            None => pairs.push((from, to)),
+        }
+    }
+    let suffix = match view.leftover_suffix.trim() {
+        "" => "extras",
+        s => s,
+    };
+    let mut left = Vec::new();
+    for (from, to) in pairs {
+        let Some(name) = to.as_ref().and_then(|t| t.file_name()) else {
+            continue;
+        };
+        // A folder renamed itself, or still where some files go.
+        if protected(&from, view)
+            || items.iter().any(|i| {
+                i.path == from || (i.status == Status::Ok && i.target().starts_with(&from))
+            })
         {
             continue;
         }
         let leaving: HashSet<&Path> = items
             .iter()
-            .filter(|i| i.status == Status::Ok && !i.target().starts_with(&old))
+            .filter(|i| i.status == Status::Ok)
             .map(|i| i.path.as_path())
             .collect();
-        let files = walkdir::WalkDir::new(&old)
+        let files = walkdir::WalkDir::new(&from)
             .min_depth(1)
             .into_iter()
             .filter_map(Result::ok)
@@ -1094,17 +1314,10 @@ fn left_folders(items: &[PreviewItem], view: &View) -> Vec<LeftFolder> {
         if files == 0 {
             continue;
         }
-        let suffix = match view.leftover_suffix.trim() {
-            "" => "extras",
-            s => s,
-        };
+        let Some(up) = from.parent() else { continue };
         let to = up.join(format!("{} ({suffix})", name.to_string_lossy()));
         if std::fs::symlink_metadata(&to).is_err() {
-            left.push(LeftFolder {
-                from: old,
-                to,
-                files,
-            });
+            left.push(LeftFolder { from, to, files });
         }
     }
     left
@@ -1419,6 +1632,8 @@ mod tests {
                 folder: true,
             },
         }];
+        // With something else in the folder: not the movie's own.
+        fs::write(d.path().join("notes.ods"), "n").unwrap();
         let files = entries(d.path(), &["f.2001.mkv"]);
         let mut view = View::default();
         view.movies.insert(files[0].path.clone(), m.clone());
@@ -1865,6 +2080,311 @@ mod tests {
                 "missing {want} in {targets:?}"
             );
         }
+    }
+
+    #[test]
+    fn movie_release_folder_is_renamed_beside() {
+        let d = tempfile::tempdir().unwrap();
+        let m = MovieMatch {
+            id: 1,
+            title: "Filme".into(),
+            original_title: String::new(),
+            year: Some(2001),
+        };
+        let steps = vec![Step {
+            enabled: true,
+            rule: Rule::Movie {
+                template: "{title} ({year})".into(),
+                colon: " - ".into(),
+                sidecar: false,
+                fanart: false,
+                folder: true,
+            },
+        }];
+        let old = d.path().join("Filme.2001.1080p.BluRay");
+        fs::create_dir(&old).unwrap();
+        fs::write(old.join("info.txt"), "x").unwrap();
+        let files = entries(&old, &["f.2001.mkv"]);
+        let mut view = View {
+            leftover_suffix: "additional files".into(),
+            ..View::default()
+        };
+        view.movies.insert(files[0].path.clone(), m.clone());
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        let ops = p.operations();
+        assert_eq!(ops[0].to, d.path().join("Filme (2001)/Filme (2001).mkv"));
+        assert_eq!(p.left_folders.len(), 1);
+        assert_eq!(
+            p.left_folders[0].to,
+            d.path().join("Filme (2001) (additional files)")
+        );
+
+        // Nothing else in it: the folder goes after the move.
+        fs::remove_file(old.join("info.txt")).unwrap();
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        assert!(p.left_folders.is_empty());
+        let h = crate::apply::History::new(d.path().join("hist"));
+        let r = h.apply(&p.operations());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        assert!(d.path().join("Filme (2001)/Filme (2001).mkv").exists());
+        assert!(!old.exists());
+
+        // Another name, holding only the movie (and a subtitle): its own.
+        fs::remove_dir_all(d.path().join("Filme (2001)")).unwrap();
+        let other = d.path().join("Videos");
+        fs::create_dir(&other).unwrap();
+        let files = entries(&other, &["f.2001.mkv", "f.2001.srt"]);
+        let mut view = View::default();
+        for f in &files {
+            view.movies.insert(f.path.clone(), m.clone());
+        }
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        let ops = p.operations();
+        let video = ops.iter().find(|o| o.from == files[0].path).unwrap();
+        assert_eq!(video.to, d.path().join("Filme (2001)/Filme (2001).mkv"));
+
+        // Something else in it: the movie's folder goes inside.
+        fs::write(other.join("budget.ods"), "x").unwrap();
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        let ops = p.operations();
+        let video = ops.iter().find(|o| o.from == files[0].path).unwrap();
+        assert_eq!(video.to, other.join("Filme (2001)/Filme (2001).mkv"));
+        assert!(p.left_folders.is_empty());
+    }
+
+    #[test]
+    fn album_folder_with_leftovers_is_renamed_beside() {
+        let d = tempfile::tempdir().unwrap();
+        let album = d.path().join("A-Ha/Analogue");
+        fs::create_dir_all(&album).unwrap();
+        for (file, track) in [("a", "1"), ("b", "2")] {
+            flac(
+                &album.join(format!("{file}.flac")),
+                &[
+                    ("TITLE", file),
+                    ("ARTIST", "A-Ha"),
+                    ("ALBUM", "Analogue"),
+                    ("DATE", "2005"),
+                    ("TRACKNUMBER", track),
+                ],
+            );
+        }
+        // Left out of the list: it stays.
+        fs::write(album.join("notes.txt"), "n").unwrap();
+        let opts = crate::ScanOptions {
+            recursive: true,
+            ..Default::default()
+        };
+        let files: Vec<FileEntry> =
+            crate::scan(&[d.path().to_path_buf()], &opts, &Default::default())
+                .files
+                .into_iter()
+                .filter(|f| f.ext == "flac")
+                .collect();
+        let steps = vec![Step {
+            enabled: true,
+            rule: Rule::Music {
+                template: "{track} - {title}".into(),
+                colon: " - ".into(),
+                disc_prefix: true,
+                from_name: false,
+                folders: true,
+                folder_template: "{album artist}/{album} ({year})".into(),
+                cover: false,
+                playlist: false,
+                listen: false,
+                write_tags: false,
+                embed_cover: false,
+                clean_tags: false,
+            },
+        }];
+        let view = View {
+            leftover_suffix: "additional files".into(),
+            ..View::default()
+        };
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        let new = d.path().join("A-Ha/Analogue (2005)");
+        assert!(p.items.iter().all(|i| i.target().starts_with(&new)));
+        assert_eq!(p.left_folders.len(), 1);
+        assert_eq!(p.left_folders[0].from, album);
+        assert_eq!(
+            p.left_folders[0].to,
+            d.path().join("A-Ha/Analogue (2005) (additional files)")
+        );
+        assert_eq!(p.left_folders[0].files, 1);
+    }
+
+    #[test]
+    fn book_folder_that_becomes_two_keeps_its_name() {
+        let d = tempfile::tempdir().unwrap();
+        let old = d.path().join("Dom Casmurro");
+        fs::create_dir(&old).unwrap();
+        fs::write(old.join("notas.txt"), "n").unwrap();
+        let files = entries(&old, &["dc.epub"]);
+        let mut view = View::default();
+        view.books.insert(
+            files[0].path.clone(),
+            crate::books::BookMatch {
+                title: "Dom Casmurro".into(),
+                authors: vec!["Machado de Assis".into()],
+                year: Some(1899),
+                ..Default::default()
+            },
+        );
+        let steps = vec![Step {
+            enabled: true,
+            rule: Rule::Book {
+                template: "{title}".into(),
+                colon: " - ".into(),
+                folders: true,
+                folder_template: "{author}/{title}".into(),
+                cover: false,
+                opf: false,
+            },
+        }];
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        assert_eq!(
+            p.operations()[0].to,
+            d.path()
+                .join("Machado de Assis/Dom Casmurro/Dom Casmurro.epub")
+        );
+        assert!(p.left_folders.is_empty());
+
+        // A folder with that book alone, whatever its name: its folders go
+        // next to it.
+        let other = d.path().join("stuff");
+        fs::create_dir(&other).unwrap();
+        let more = entries(&other, &["dc.epub", "dc.pdf"]);
+        for f in &more {
+            view.books
+                .insert(f.path.clone(), view.books[&files[0].path].clone());
+        }
+        let p = preview(&more, &steps, &HashMap::new(), &view);
+        let to = d.path().join("Machado de Assis/Dom Casmurro");
+        assert_eq!(p.operations()[0].to, to.join("Dom Casmurro.epub"));
+        assert_eq!(p.operations()[1].to, to.join("Dom Casmurro.pdf"));
+    }
+
+    #[test]
+    fn album_folder_known_by_what_it_holds() {
+        let d = tempfile::tempdir().unwrap();
+        let song = |dir: &Path, file: &str, album: &str| {
+            fs::create_dir_all(dir).unwrap();
+            flac(
+                &dir.join(format!("{file}.flac")),
+                &[
+                    ("TITLE", file),
+                    ("ARTIST", "A-Ha"),
+                    ("ALBUM", album),
+                    ("DATE", "2005"),
+                    ("TRACKNUMBER", "1"),
+                ],
+            );
+        };
+        let one = d.path().join("new folder");
+        song(&one.join("CD 1"), "a", "Analogue");
+        song(&one, "b", "Analogue");
+        fs::write(one.join("cover.jpg"), "c").unwrap();
+        // Two albums: a folder like any other.
+        let mixed = d.path().join("mixed");
+        song(&mixed, "c", "Analogue");
+        song(&mixed, "e", "Other");
+        let opts = crate::ScanOptions {
+            recursive: true,
+            ..Default::default()
+        };
+        let files = crate::scan(&[d.path().to_path_buf()], &opts, &Default::default()).files;
+        let steps = vec![Step {
+            enabled: true,
+            rule: Rule::Music {
+                template: "{title}".into(),
+                colon: " - ".into(),
+                disc_prefix: false,
+                from_name: false,
+                folders: true,
+                folder_template: "{album artist}/{album} ({year})".into(),
+                cover: false,
+                playlist: false,
+                listen: false,
+                write_tags: false,
+                embed_cover: false,
+                clean_tags: false,
+            },
+        }];
+        let p = preview(&files, &steps, &HashMap::new(), &View::default());
+        let to = |name: &str| {
+            p.items
+                .iter()
+                .find(|i| i.original == name)
+                .map(|i| i.target())
+                .unwrap()
+        };
+        let beside = d.path().join("A-Ha/Analogue (2005)");
+        assert_eq!(to("a.flac"), beside.join("a.flac"));
+        assert_eq!(to("b.flac"), beside.join("b.flac"));
+        assert_eq!(to("cover.jpg"), beside.join("cover.jpg"));
+        assert_eq!(to("c.flac"), mixed.join("A-Ha/Analogue (2005)/c.flac"));
+        assert_eq!(to("e.flac"), mixed.join("A-Ha/Other (2005)/e.flac"));
+    }
+
+    #[test]
+    fn series_folder_known_by_what_it_holds() {
+        let d = tempfile::tempdir().unwrap();
+        let old = d.path().join("my comics");
+        fs::create_dir(&old).unwrap();
+        // Not a comic: it stays, in the old folder renamed beside the new.
+        fs::write(old.join("drawing.xcf"), "x").unwrap();
+        let files = entries(&old, &["SERIES v01.cbz", "SERIES VOL.02.pdf"]);
+        let mut view = View {
+            leftover_suffix: "additional files".into(),
+            ..View::default()
+        };
+        for (n, f) in files.iter().enumerate() {
+            view.comics.insert(
+                f.path.clone(),
+                crate::comics::ComicMatch {
+                    series: "Series".into(),
+                    series_year: Some(2020),
+                    number: (n + 1).to_string(),
+                    ..Default::default()
+                },
+            );
+        }
+        let steps = vec![Step {
+            enabled: true,
+            rule: Rule::Comic {
+                template: "{series} {number}".into(),
+                colon: " - ".into(),
+                series: String::new(),
+                source: "gcd".into(),
+                folders: true,
+                folder_template: "{series} ({series year})".into(),
+                by_folder: false,
+                missing: false,
+            },
+        }];
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        let new = d.path().join("Series (2020)");
+        assert!(
+            p.items.iter().all(|i| i.target().parent() == Some(&new)),
+            "{:?}",
+            p.items.iter().map(|i| i.target()).collect::<Vec<_>>()
+        );
+        assert_eq!(p.left_folders.len(), 1);
+        assert_eq!(
+            p.left_folders[0].to,
+            d.path().join("Series (2020) (additional files)")
+        );
+
+        // Another series' comic in it: a folder like any other.
+        fs::write(old.join("Other 01.cbz"), "o").unwrap();
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        assert!(
+            p.items
+                .iter()
+                .all(|i| i.target().starts_with(old.join("Series (2020)")))
+        );
+        assert!(p.left_folders.is_empty());
     }
 
     #[test]

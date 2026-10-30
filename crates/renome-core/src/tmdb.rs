@@ -3,6 +3,7 @@
 //! the new name and the `.nfo` file that media servers read.
 
 use std::collections::HashSet;
+use std::path::Path;
 use std::sync::LazyLock;
 
 use chrono::Datelike;
@@ -166,6 +167,24 @@ pub fn similarity(a: &str, b: &str) -> f64 {
     }
     // Slightly below an exact match even when every bigram is shared.
     (2.0 * shared as f64 / (ba.len() + bb.len()) as f64).min(0.99)
+}
+
+/// Whether a folder is named after a movie: its TMDB id, or (almost) its
+/// title with a year that is the movie's (or none).
+pub fn names_movie(folder: &Path, m: &MovieMatch) -> bool {
+    let name = folder.file_name().unwrap_or_default().to_string_lossy();
+    let g = guess(&name);
+    if g.id.is_some() {
+        return g.id == Some(m.id);
+    }
+    let year_ok = match (g.year, m.year) {
+        (Some(a), Some(b)) => a.abs_diff(b) <= 1,
+        _ => true,
+    };
+    year_ok
+        && [&m.title, &m.original_title]
+            .iter()
+            .any(|t| similarity(&g.title, t) >= 0.8)
 }
 
 fn year_penalty(guess: Option<u16>, year: Option<u16>) -> f64 {

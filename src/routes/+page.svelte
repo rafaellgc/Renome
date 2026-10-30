@@ -610,7 +610,7 @@
     task = "rename";
     try {
       const rule = movieRule?.rule;
-      // Old show folders renamed for their leftovers: not files.
+      // Old folders renamed for their leftovers: not files.
       const leftFrom = new Set(preview.leftFolders.map((f) => f.from));
       const r: ApplyReport = preview.changed
         ? await api.apply(payload(), $state.snapshot(overrides), $state.snapshot(view))

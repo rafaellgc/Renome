@@ -105,8 +105,17 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   removed.
 - "Create a folder for each movie" moves each file with a movie (video
   and subtitles alike) into a folder named after its new name, inside its
-  current folder; a file already in a folder with that name stays. The
-  preview shows the folder before the new name; the folder name is
+  current folder; a file already in a folder with that name stays. When
+  the current folder is the movie's own under another name, the new
+  folder goes next to it instead. It is when it is named after the movie
+  (it holds `tmdbid-<id>` of that movie, or its title, guessed like a
+  file name, has similarity ≥ 0.8 with the title or original title and
+  its year, if any, is within one of the movie's) or when it holds, three
+  levels down, only videos of that movie (at least one), subtitles,
+  images (jpg, jpeg, png, webp, gif, bmp), `.nfo` and `.txt` files; and
+  in both cases it holds no other movie of the batch and is not one of
+  the user's own folders (see the series rule). The preview shows the
+  folder before the new name; the folder name is
   checked like a file name. Missing folders are created when renaming,
   recorded in the history entry, and removed by undo when left empty.
 - With "save .nfo and poster", renaming also writes `<new name>.nfo` next
@@ -239,16 +248,26 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   device than its parent) or one right under `/`. A file already there
   stays. The preview shows `<show folder>/Season NN` before the new name;
   each folder name is checked like a file name.
-- A show's old folder (by name or content) that keeps files after its
-  episodes leave (extras, a file in conflict or hidden by the filter) is
-  renamed `<show folder> (<suffix>)` next to the new one (suffix in the UI
-  language: "arquivos adicionais", "additional files", "archivos
-  adicionales"; skipped if that name exists). It is an operation of the
-  rename, run after the files leave it (shallower), undone with it. The
-  bottom bar shows "N folder(s) with leftovers" (tooltip: each folder),
-  and applying always asks first, naming the folder and the count, even
-  with confirmation off. The result counts files and those folders
-  apart.
+- An old folder that files leave for a new one next to it keeps the files
+  that do not leave (extras, a file in conflict or hidden by the filter):
+  it is then renamed `<new folder> (<suffix>)` next to the new one (suffix
+  in the UI language: "arquivos adicionais", "additional files",
+  "archivos adicionales"; skipped if that name exists). This applies to
+  every rule that moves files into folders (movie, series, music, book,
+  comic): for each moving file, the destination root is the destination
+  without the folder levels the rule made; the old and new paths below it
+  are compared level by level, and the first level where they differ
+  gives the old folder and its new one. Not renamed: a folder differing
+  only in case (the same folder where case is ignored); a folder whose
+  files go to different new folders; a folder some file goes into or that
+  is itself in the list; a folder with fewer levels below the root than
+  the new path (`Title` → `Author/Title`), except for episodes (the season
+  folder is the extra level); the user's own folders, a disk's top folder
+  or one right under `/`. It is an operation of the rename, run after the
+  files leave it (shallower), undone with it. The bottom bar shows "N
+  folder(s) with leftovers" (tooltip: each folder), and applying always
+  asks first, naming the folder and the count, even with confirmation
+  off. The result counts files and those folders apart.
 - After any rename, the folders files were moved out of are deleted when
   left empty, up to the folder the move happened within (inside a folder
   renamed in the same batch, under its new name). Undo makes them again
@@ -302,6 +321,17 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
 - With artist and album folders, a folder of loose songs (at least 3
   songs from at least 3 albums, 4 in 5 of which have one or two songs
   there) is a collection: its songs are renamed but stay in it.
+- With artist and album folders, a folder whose songs are the folders'
+  root (its own songs, or those of its disc folders) and where every
+  audio file three levels down is a song of the batch from one album
+  (same album artist and album, ignoring case) is that album's folder
+  whatever its name (the same goes for a folder of one comic series,
+  every comic file in it of that series, and a folder of one book, every
+  book file in it that book, same authors and title): the new folders go in its parent instead, and it is
+  deleted if left empty (else it keeps its name: it becomes two levels,
+  see the leftovers rule). Never the user's own folders, a disk's top
+  folder or one right under `/`; never a root reached by names (`Music`
+  above `Artist/Album`).
 - A song whose tags have no track number keeps the number its name starts
   with. An album (folder + album name) gets one year, its tracks' most
   common, so a reissue's bonus track does not get a folder of its own.
