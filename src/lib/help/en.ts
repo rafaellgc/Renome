@@ -268,13 +268,16 @@ ${ex("Movie.Name.2001.1080p.BluRay.x264.mkv", "Movie Name (2001) [tmdbid-12345].
 <p>With <b>Save .nfo and poster next to the movie</b>, renaming also creates, next to each video, <code>Name (year) [tmdbid-…].nfo</code> and the poster; optionally the background image (fanart) and the movie's logo too. Inside the movie's folder the images are named <code>poster.jpg</code>, <code>fanart.jpg</code> and <code>logo.png</code>; next to other movies they start with the movie's name (<code>…-poster.jpg</code>). Jellyfin, Kodi and Emby read these files.</p>
 <p>The <code>.nfo</code> holds everything TMDB has that Jellyfin reads: title and original title, year and release date, overview and tagline, runtime, rating and votes, the age rating of the chosen language's country (e.g. PG-13), genres, keywords (as tags), countries, studios, collection (e.g. "Collection Name"), YouTube trailer, director, writers, cast with characters and photos, producers, composer and the TMDB and IMDb ids. The movie file is not changed, existing files are not replaced, and <b>undoing</b> the rename deletes what was created.</p>
 <p>Movies whose <b>names are already right</b> get the metadata too: the Rename button counts them and the confirmation says so. If the name already has <code>[tmdbid-…]</code>, the movie is recognized by that id, without searching. That way an organized library can get just the .nfo files and images.</p>
+<h4>Missing movies of the collection</h4>
+<p>With <b>Show the collection's missing movies</b> (on by default), when a chosen movie is part of a collection on TMDB (a trilogy, a franchise), the list gets faded rows for the collection's other released movies that are not in it, such as <code>1999 · Title</code>, with the release date, in the order they came out. They are only a notice, like the missing episodes: they are not counted or renamed. <b>Click the total</b> in the bottom bar to save the list to a CSV file (collection, title and release date). To know the collection, the program asks TMDB once more per movie and once per collection.</p>
+<p>TMDB decides what is in a collection: sometimes spin-offs are left out, and sometimes movies you would not count as part of it are in.</p>
 <h4>Limitations</h4>
 <ul>
   <li>The movie is looked up by the title and year in the file name. Heavily abbreviated names, names with initials only or with the title in another language may not be found; in that case, fix the title in the review.</li>
   <li>Movies with the same name (remakes, say) can only be told apart by the year; without a year in the name, the choice usually goes to the review.</li>
   <li>Rare, regional or very recent movies may be missing from TMDB, or lack a translation, an overview or a poster.</li>
 </ul>
-<p class="tip">Only the searched title and year are sent to TMDB, never the full file name or the folders.</p>`,
+<p class="tip">Only the searched title and year (and, for collections, the movie's TMDB id) are sent to TMDB, never the full file name or the folders.</p>`,
   },
   {
     id: "r-series",
@@ -389,6 +392,9 @@ ${ex("01.mp3", "01 - Song Title.mp3")}
   <li>Each song takes about half a second to be listened to and looked up.</li>
 </ul>
 <p class="tip">Only each song's sound fingerprint and length are sent to AcoustID, never the file.</p>
+<h4>Missing tracks</h4>
+<p>With <b>Show the missing tracks</b> (on by default), in the albums identified on MusicBrainz the list gets faded rows for the chosen release's tracks that no song in the list has, such as <code>05 · Title</code> (<code>2-05</code> on albums with more than one disc), in their place, between their neighbours. They are only a notice: they are not counted or renamed. <b>Click the total</b> in the bottom bar to save the list to a CSV file (album, disc, track and title). No extra request is made: the track list is the one already used to identify the album.</p>
+<p>The list is the <b>chosen release's</b>: a release with bonus tracks shows the bonus tracks you do not have; another release of the same album may not have them. In the review you can pick the release that matches yours. A song that matched no track of the release makes its track show up as missing.</p>
 <h4>Limitations</h4>
 <ul>
   <li>Without the MusicBrainz search, names depend on the tags alone: wrong tags make wrong names.</li>
@@ -433,6 +439,9 @@ ${ex("book_title_author.pdf", "Author Name - Book Title (1937).pdf")}
   <li><b>Save the book's details</b>: saves <code>metadata.opf</code> (or <code>….opf</code>, without the folders option), in OPF format, with title, authors, description, subjects, publisher, year, language, ISBN and series. Audiobookshelf and e-book managers read this file.</li>
   <li>Books whose names are already right get the cover and details too (they count in the <b>Rename</b> button). Existing files are not replaced, and undo deletes what was created. The book file itself is never changed.</li>
 </ul>
+<h4>Missing volumes</h4>
+<p>With <b>Show the series' missing volumes</b> (on by default), after the search, for books in a series the list gets faded rows for the volumes missing <b>between yours</b>, from 1 to the highest number you have, such as <code>3</code>, in their place. They are only a notice: they are not counted or renamed. <b>Click the total</b> in the bottom bar to save the list to a CSV file (series and volume).</p>
+<p>No catalogue has a reliable list of each series' books, so the program only sees the gaps between your files: what comes after your last volume does not show up. The series comes from the book's details (EPUB, FB2); the number, from them or the file name (<code>Author - 03 - Title</code>). Books without a series in their details are left out. Volumes such as <code>2.5</code> (stories between two books) neither fill nor open a gap.</p>
 <h4>Limitations</h4>
 <ul>
   <li><b>PDF</b>: many PDFs have empty or wrong document details (the Word file's name, the name of the computer it was made on). A <b>scanned</b> PDF is only a series of images, with no text to find the ISBN in. Then the file name is all that is left: a clear name, like <code>Author - Title</code>, helps a lot; a confusing one leads to the review. It is worth fixing these files' names with the other rules, put above this one in the list: the search reads the name as they leave it.</li>

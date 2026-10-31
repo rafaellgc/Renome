@@ -326,6 +326,99 @@ struct Progress {
 
 /// Looks up many files, a few at a time. Files with the same guessed title
 /// and year (a movie and its subtitles) share one search.
+#[derive(Deserialize)]
+struct InSet {
+    #[serde(default)]
+    belongs_to_collection: Option<tmdb::Collection>,
+}
+
+#[derive(Deserialize)]
+struct RawSet {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    parts: Vec<RawPart>,
+}
+
+#[derive(Deserialize)]
+struct RawPart {
+    id: u64,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    release_date: Option<String>,
+}
+
+/// A collection of movies (a trilogy, say), for those missing from the list.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MovieSet {
+    id: u64,
+    name: String,
+    parts: Vec<SetPart>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetPart {
+    id: u64,
+    title: String,
+    /// `YYYY-MM-DD`, empty when not known.
+    release_date: String,
+}
+
+/// Each movie's collection (`None`: it is in none) and the collections.
+/// Movies whose answer did not come are left out.
+#[derive(Serialize)]
+pub struct MovieSets {
+    of: Vec<(u64, Option<u64>)>,
+    sets: Vec<MovieSet>,
+}
+
+/// The collections the movies belong to, with their movies.
+pub async fn collections(client: &Client, ids: Vec<u64>) -> MovieSets {
+    let of: Vec<(u64, Option<u64>)> = stream::iter(ids)
+        .map(|id| {
+            let client = client.clone();
+            async move {
+                let r: Result<InSet, String> = client.get(&format!("/movie/{id}"), &[]).await;
+                r.ok().map(|m| (id, m.belongs_to_collection.map(|c| c.id)))
+            }
+        })
+        .buffer_unordered(6)
+        .filter_map(|x| async move { x })
+        .collect()
+        .await;
+    let mut wanted: Vec<u64> = of.iter().filter_map(|(_, s)| *s).collect();
+    wanted.sort_unstable();
+    wanted.dedup();
+    let sets = stream::iter(wanted)
+        .map(|id| {
+            let client = client.clone();
+            async move {
+                let r: Result<RawSet, String> = client.get(&format!("/collection/{id}"), &[]).await;
+                r.ok().map(|s| MovieSet {
+                    id,
+                    name: s.name,
+                    parts: s
+                        .parts
+                        .into_iter()
+                        .map(|p| SetPart {
+                            id: p.id,
+                            title: p.title,
+                            release_date: p.release_date.unwrap_or_default(),
+                        })
+                        .collect(),
+                })
+            }
+        })
+        .buffer_unordered(6)
+        .filter_map(|x| async move { x })
+        .collect()
+        .await;
+    MovieSets { of, sets }
+}
+
 pub async fn lookup(app: &AppHandle, client: &Client, items: Vec<LookupItem>) -> Vec<Lookup> {
     let guesses: Vec<(PathBuf, Guess)> = items
         .into_iter()

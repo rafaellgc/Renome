@@ -53,6 +53,13 @@
    *  and the arrow keys skip). */
   const rows = $derived(interleave(items, ghosts, descending));
   const isGhost = (r: Row): r is Ghost => "ghost" in r;
+  const TIPS = {
+    episode: "missingTip",
+    issue: "missingIssueTip",
+    track: "missingTrackTip",
+    movie: "missingMovieTip",
+    book: "missingBookTip",
+  } as const;
   const keyOf = (r: Row) => (isGhost(r) ? r.key : r.path);
 
   const start = $derived(Math.max(0, Math.floor(scrollTop / ROW) - OVERSCAN));
@@ -253,7 +260,7 @@
       {#each visible as item, k (keyOf(item))}
         {@const index = start + k}
         {#if isGhost(item)}
-          {@const tip = `${t(item.kind === "issue" ? "missingIssueTip" : "missingTip", { show: item.group })}${item.date ? ` · ${day(item.date)}` : ""}`}
+          {@const tip = `${t(TIPS[item.kind], { show: item.group })}${item.date ? ` · ${day(item.date)}` : ""}`}
           <div class="row ghost" style:top="{index * ROW}px" role="row" aria-disabled="true" title={tip}>
             <span class="c-status"><span class="dot hole" aria-hidden="true">○</span></span>
             <span class="c-orig"><span class="missing">{t("missingRow")}</span>{item.group}</span>

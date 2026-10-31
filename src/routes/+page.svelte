@@ -16,7 +16,7 @@
   import ComicReview from "$lib/ComicReview.svelte";
   import GcdLogin from "$lib/GcdLogin.svelte";
   import EpisodeReview from "$lib/EpisodeReview.svelte";
-  import { missingEpisodes, missingFolder, missingIssues, today } from "$lib/missing";
+  import { missingBooks, missingEpisodes, missingFolder, missingIssues, missingMovies, missingTracks, today, type Ghost } from "$lib/missing";
   import MovieReview from "$lib/MovieReview.svelte";
   import Options from "$lib/Options.svelte";
   import RuleCard from "$lib/RuleCard.svelte";
@@ -25,7 +25,7 @@
   import { RULE_TYPES, byFit, isAudio, isBook, isComic, isScreen, isVideo, newRule, newStep, splitExt } from "$lib/rules";
   import { loadSettings, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
-    AlbumState, ApplyReport, BookCandidate, BookMatch, BookState, Candidate, ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, Copies, MbCandidate, SongMatch, EpKey, EpisodeMatch, EpisodeState, MovieMatch, MovieState, MovieStatus, HistoryEntry,
+    AlbumState, ApplyReport, BookCandidate, BookMatch, BookState, Candidate, ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, Copies, MbCandidate, SongMatch, EpKey, EpisodeMatch, EpisodeState, MovieMatch, MovieSet, MovieState, MovieStatus, HistoryEntry,
     OpError, Preview, PreviewItem, Rule, RuleType, Show, Step, View, ViewSort,
   } from "$lib/types";
 
@@ -84,6 +84,25 @@
       : [],
   );
   const movieCounts = $derived(counts(movies));
+  /** Each chosen movie's TMDB collection (null: none), and the collections,
+   *  for the movies missing from them. */
+  let setOf = $state<Record<number, number | null>>({});
+  let movieSets = $state<Record<number, MovieSet>>({});
+  /** Movies already asked about (an answer may not come). */
+  const setAsked = new Set<number>();
+  $effect(() => {
+    if (movieRule?.rule.type !== "movie" || !movieRule.rule.missing || !settings.tmdbKey) return;
+    const ids = [...new Set(Object.values(movieMatches).map((m) => m.id))].filter((id) => !setAsked.has(id));
+    if (!ids.length) return;
+    for (const id of ids) setAsked.add(id);
+    api.tmdbCollections(settings.tmdbKey, tmdbLang(), ids).then(
+      (r) => {
+        for (const [id, set] of r.of) setOf[id] = set;
+        for (const set of r.sets) movieSets[set.id] = set;
+      },
+      () => {},
+    );
+  });
 
   /** Open Library results and choices per file, for the book rule. */
   let books = $state<Record<string, BookState>>({});
@@ -312,8 +331,10 @@
     ),
   );
   const seriesCounts = $derived(counts(series));
-  /** Aired episodes missing from the seasons the listed videos cover, and
-   *  issues missing from the series the listed comics are from. */
+  /** Aired episodes missing from the seasons the listed videos cover,
+   *  issues from the series the listed comics are from, tracks from the
+   *  albums, released movies from the collections and volumes between a
+   *  book series' files. */
   const ghosts = $derived([
     ...(seriesRule?.rule.type === "series" && seriesRule.rule.missing
       ? missingEpisodes(shows, episodeMatches, preview.items, sortDesc, today())
@@ -321,11 +342,23 @@
     ...(comicRule?.rule.type === "comic" && comicRule.rule.missing
       ? missingIssues(comicVolumes, comics, preview.items, sortDesc, today())
       : []),
+    ...(musicRule?.rule.type === "music" && musicRule.rule.missing ? missingTracks(albums, preview.items, sortDesc) : []),
+    ...(movieRule?.rule.type === "movie" && movieRule.rule.missing
+      ? missingMovies(movieSets, setOf, Object.fromEntries(Object.entries(movieMatches).map(([p, m]) => [p, m.id])), preview.items, sortDesc, today())
+      : []),
+    ...(bookRule?.rule.type === "book" && bookRule.rule.missing ? missingBooks(books, preview.items, sortDesc) : []),
   ]);
+  /** The words for each kind of missing item. */
+  const MISSING = {
+    episode: { count: "missingEpisodes", file: "defaultMissingName" },
+    issue: { count: "missingIssues", file: "defaultMissingIssuesName" },
+    track: { count: "missingTracks", file: "defaultMissingTracksName" },
+    movie: { count: "missingMovies", file: "defaultMissingMoviesName" },
+    book: { count: "missingBooks", file: "defaultMissingBooksName" },
+  } as const;
   const missingCount = $derived.by(() => {
-    const kinds = new Set(ghosts.map((g) => g.kind));
-    const key = kinds.size > 1 ? "missingItems" : kinds.has("issue") ? "missingIssues" : "missingEpisodes";
-    return t(key, { n: ghosts.length });
+    const kinds = [...new Set(ghosts.map((g) => g.kind))];
+    return t(kinds.length === 1 ? MISSING[kinds[0]].count : "missingItems", { n: ghosts.length });
   });
   /** Episodes whose names are already right but that still get metadata. */
   const episodeMetaOnly = $derived(
@@ -1128,6 +1161,7 @@
           status: f.choice ? "auto" : f.candidates.length ? "choose" : "none",
           error: f.error,
           heard: f.heard,
+          tracks: f.tracks,
         })),
       ];
       openAlbumReview();
@@ -1154,7 +1188,7 @@
     const a = albums[index];
     const rule = musicRule?.rule;
     if (!choice || rule?.type !== "music") {
-      albums[index] = { ...a, choice: null, matches: {}, status: "none" };
+      albums[index] = { ...a, choice: null, matches: {}, tracks: [], status: "none" };
       return;
     }
     const res = await api.mbChoose(choice.id, a.files, rule.fromName);
@@ -1163,6 +1197,7 @@
       choice,
       candidates: candidates ?? a.candidates,
       matches: Object.fromEntries(res.matches),
+      tracks: res.tracks,
       status: "chosen",
     };
   }
@@ -1463,13 +1498,13 @@
     ]);
   }
 
-  /** Saves the missing episodes and issues to a CSV file, by show (or
-   *  series), season and number. */
+  /** Saves the missing items to a CSV file, by show (or series, album,
+   *  collection), season (or disc) and number. */
   async function exportMissing() {
     // In the show's folder, named after the show when there is one.
     const names = [...new Set(ghosts.map((g) => g.group))];
-    const kinds = new Set(ghosts.map((g) => g.kind));
-    const base = t(kinds.size > 1 ? "defaultMissingItemsName" : kinds.has("issue") ? "defaultMissingIssuesName" : "defaultMissingName");
+    const kinds = [...new Set(ghosts.map((g) => g.kind))];
+    const base = t(kinds.length === 1 ? MISSING[kinds[0]].file : "defaultMissingItemsName");
     const file = `${names.length === 1 ? names[0].replace(/[\\/:*?"<>|]/g, " ").trim() + " - " : ""}${base}.csv`;
     const byPath = new Map(preview.items.map((i) => [i.path, i.dir]));
     const dir = missingFolder(ghosts, (p) => byPath.get(p));
@@ -1482,26 +1517,22 @@
     const list = [...ghosts].sort(
       (a, b) => a.group.localeCompare(b.group) || a.season - b.season || a.number - b.number,
     );
-    // Issues alone have no season: series, number, title and cover date.
-    const issues = list.every((g) => g.kind === "issue");
-    await saveCsv(
-      path,
-      t("exportMissing"),
-      t("missingSaved"),
-      issues
-        ? [
-            [t("csv.series"), t("csv.number"), t("csv.title"), t("csv.coverDate")],
-            ...list.map((g) => [g.group, g.code.replace(/^#/, ""), g.title, g.date]),
-          ]
-        : [
-            [t("csv.show"), t("csv.season"), t("csv.episode"), t("csv.code"), t("csv.title"), t("csv.airDate")],
-            ...list.map((g) =>
-              g.kind === "issue"
-                ? [g.group, "", g.code.replace(/^#/, ""), g.code, g.title, g.date]
-                : [g.group, String(g.season), String(g.number), g.code, g.title, g.date],
-            ),
-          ],
-    );
+    // Each kind alone with its own columns; mixed, the columns all share.
+    const columns: Record<Ghost["kind"], [string[], (g: Ghost) => string[]]> = {
+      episode: [
+        [t("csv.show"), t("csv.season"), t("csv.episode"), t("csv.code"), t("csv.title"), t("csv.airDate")],
+        (g) => [g.group, String(g.season), String(g.number), g.code, g.title, g.date],
+      ],
+      issue: [[t("csv.series"), t("csv.number"), t("csv.title"), t("csv.coverDate")], (g) => [g.group, g.code.replace(/^#/, ""), g.title, g.date]],
+      track: [[t("csv.album"), t("csv.disc"), t("csv.track"), t("csv.title")], (g) => [g.group, String(g.season), String(g.position ?? ""), g.title]],
+      movie: [[t("csv.collection"), t("csv.title"), t("csv.releaseDate")], (g) => [g.group, g.title, g.date]],
+      book: [[t("csv.series"), t("csv.volume")], (g) => [g.group, g.code]],
+    };
+    const [head, row]: [string[], (g: Ghost) => string[]] =
+      kinds.length === 1
+        ? columns[kinds[0]]
+        : [[t("csv.group"), t("csv.code"), t("csv.title"), t("csv.date")], (g) => [g.group, g.code, g.title, g.date]];
+    await saveCsv(path, t("exportMissing"), t("missingSaved"), [head, ...list.map(row)]);
   }
 
   /** Writes rows as CSV (`;` between fields where a comma is the decimal

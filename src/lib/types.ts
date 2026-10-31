@@ -26,16 +26,16 @@ export type Rule =
   | { type: "charAt"; position: number; fromEnd: boolean; onlyIf: string; caseSensitive: boolean; replace: string }
   | { type: "extension"; mode: "set" | "lower" | "upper" | "remove"; value: string }
   | { type: "rearrange"; separator: string; order: string; target: Target }
-  | { type: "movie"; template: string; colon: string; sidecar: boolean; fanart: boolean; folder: boolean }
+  | { type: "movie"; template: string; colon: string; sidecar: boolean; fanart: boolean; folder: boolean; missing: boolean }
   | {
       type: "series"; template: string; colon: string; show: string;
       folders: boolean; folderTemplate: string; sidecar: boolean; fanart: boolean; missing: boolean;
     }
   | {
       type: "music"; template: string; colon: string; discPrefix: boolean; fromName: boolean;
-      folders: boolean; folderTemplate: string; cover: boolean; playlist: boolean; listen: boolean; writeTags: boolean; embedCover: boolean; cleanTags: boolean;
+      folders: boolean; folderTemplate: string; cover: boolean; playlist: boolean; listen: boolean; writeTags: boolean; embedCover: boolean; cleanTags: boolean; missing: boolean;
     }
-  | { type: "book"; template: string; colon: string; folders: boolean; folderTemplate: string; cover: boolean; opf: boolean }
+  | { type: "book"; template: string; colon: string; folders: boolean; folderTemplate: string; cover: boolean; opf: boolean; missing: boolean }
   | { type: "comic"; template: string; colon: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; byFolder: boolean; missing: boolean };
 
 export type RuleType = Rule["type"];
@@ -160,9 +160,28 @@ export interface AlbumLookup {
   candidates: MbCandidate[];
   choice: MbCandidate | null;
   matches: [string, SongMatch][];
+  /** The chosen release's tracks. */
+  tracks: ListedTrack[];
   error: string | null;
   /** Identified by the songs' sound (AcoustID), not their tags. */
   heard: boolean;
+}
+
+/** A release's track, for those missing from an album. */
+export interface ListedTrack {
+  id: string;
+  disc: number;
+  position: number;
+  title: string;
+  /** Seconds. */
+  length: number | null;
+}
+
+/** A TMDB collection of movies (a trilogy, say). */
+export interface MovieSet {
+  id: number;
+  name: string;
+  parts: { id: number; title: string; releaseDate: string }[];
 }
 
 export interface AlbumState {
@@ -172,6 +191,8 @@ export interface AlbumState {
   candidates: MbCandidate[];
   choice: MbCandidate | null;
   matches: Record<string, SongMatch>;
+  /** The chosen release's tracks (empty without one). */
+  tracks: ListedTrack[];
   status: MovieStatus;
   error: string | null;
   heard: boolean;

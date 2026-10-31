@@ -220,6 +220,10 @@ pub enum Rule {
         /// Moves each file into a folder with the new name.
         #[serde(default)]
         folder: bool,
+        /// Lists the released movies missing from the collections the
+        /// files are in (used by the app, not here).
+        #[serde(default = "yes")]
+        missing: bool,
     },
     /// Names each file after the episode chosen for it on TMDB (files
     /// without one are left alone). The search happens outside the rules.
@@ -286,6 +290,10 @@ pub enum Rule {
         /// notes), but for lyrics, loudness and the like.
         #[serde(default = "yes")]
         clean_tags: bool,
+        /// Lists the tracks missing from the albums with a release (used
+        /// by the app).
+        #[serde(default = "yes")]
+        missing: bool,
     },
     /// Names each book after the one chosen for it on Open Library (files
     /// without one are left alone). The search happens outside the rules.
@@ -306,6 +314,10 @@ pub enum Rule {
         /// Write a `metadata.opf` file (used by the app).
         #[serde(default)]
         opf: bool,
+        /// Lists the volumes missing between a series' books (used by the
+        /// app).
+        #[serde(default = "yes")]
+        missing: bool,
     },
     /// Names comics after their series and number: the issue chosen on
     /// Comic Vine, else what the file's `ComicInfo.xml` and name say. Files

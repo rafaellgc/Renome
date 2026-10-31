@@ -104,7 +104,7 @@ export function newRule(type: RuleType): Rule {
     case "rearrange":
       return { type, separator: " - ", order: "", target: "name" };
     case "movie":
-      return { type, template: MOVIE_TEMPLATE[settings.lang], colon: " - ", sidecar: false, fanart: false, folder: false };
+      return { type, template: MOVIE_TEMPLATE[settings.lang], colon: " - ", sidecar: false, fanart: false, folder: false, missing: true };
     case "series":
       return {
         type, template: SERIES_TEMPLATE[settings.lang], colon: " - ", show: "",
@@ -112,11 +112,11 @@ export function newRule(type: RuleType): Rule {
       };
     case "music": {
       const [template, folderTemplate] = MUSIC_TEMPLATE[settings.lang];
-      return { type, template, colon: " - ", discPrefix: true, fromName: false, folders: false, folderTemplate, cover: false, playlist: false, listen: true, writeTags: false, embedCover: true, cleanTags: true };
+      return { type, template, colon: " - ", discPrefix: true, fromName: false, folders: false, folderTemplate, cover: false, playlist: false, listen: true, writeTags: false, embedCover: true, cleanTags: true, missing: true };
     }
     case "book": {
       const [template, folderTemplate] = BOOK_TEMPLATE[settings.lang];
-      return { type, template, colon: " - ", folders: false, folderTemplate, cover: false, opf: false };
+      return { type, template, colon: " - ", folders: false, folderTemplate, cover: false, opf: false, missing: true };
     }
     case "comic": {
       const [template, folderTemplate] = COMIC_TEMPLATE[settings.lang];

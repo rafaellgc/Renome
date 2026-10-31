@@ -1,19 +1,24 @@
 import { isVideo } from "./rules";
-import type { ComicIssue, ComicMatch, ComicState, ComicVolume, EpisodeMatch, PreviewItem, Show } from "./types";
+import type { AlbumState, BookState, ComicIssue, ComicMatch, ComicState, ComicVolume, EpisodeMatch, MovieSet, PreviewItem, Show } from "./types";
 
-/** An aired episode or a published issue that no file in the list
- *  holds: a faded row that only informs, never selected, renamed or
- *  counted. */
+/** An aired episode, a published issue, a track of an album, a released
+ *  movie of a collection or a volume of a book series that no file in
+ *  the list holds: a faded row that only informs, never selected,
+ *  renamed or counted. */
 export interface Ghost {
   ghost: true;
   key: string;
-  kind: "episode" | "issue";
-  /** The show or the series, with its year. */
+  kind: "episode" | "issue" | "track" | "movie" | "book";
+  /** The show, series, album or collection, with its year. */
   group: string;
-  /** An episode's season and number; an issue's place in its series. */
+  /** An episode's season, a track's disc; 0 for the others. */
   season: number;
+  /** An episode's number; an issue's, track's or movie's place in its
+   *  series, album or collection; a book's volume. */
   number: number;
-  /** As in the file names: S01E16, #7. */
+  /** A track's number on its disc. */
+  position?: number;
+  /** As in the file names: S01E16, #7, 1-05, 1999, 3. */
   code: string;
   title: string;
   /** Air date or cover date, YYYY-MM-DD. */
@@ -172,6 +177,118 @@ export function missingIssues(
         ...place(at, files, descending),
       });
     });
+  }
+  return out;
+}
+
+/** The tracks missing from each album with a release whose songs are
+ *  listed. */
+export function missingTracks(albums: AlbumState[], items: PreviewItem[], descending: boolean): Ghost[] {
+  const listed = new Set(items.map((i) => i.path));
+  const out: Ghost[] = [];
+  for (const a of albums) {
+    if (!a.choice || !a.tracks?.length) continue;
+    const order = new Map(a.tracks.map((tr, at) => [tr.id, at]));
+    const files = a.files.flatMap((p) => {
+      const at = listed.has(p) ? order.get(a.matches[p]?.trackId ?? "") : undefined;
+      return at === undefined ? [] : [{ path: p, from: at, to: at }];
+    });
+    if (!files.length) continue;
+    const m = a.matches[files[0].path];
+    const group = `${m.albumArtist} - ${named(m.album, m.year)}`;
+    const discs = new Set(a.tracks.map((tr) => tr.disc)).size;
+    const have = new Set(files.map((f) => f.from));
+    a.tracks.forEach((tr, at) => {
+      if (have.has(at)) return;
+      const n = String(tr.position).padStart(2, "0");
+      out.push({
+        ghost: true,
+        key: `ghost:${a.choice!.id}:${tr.id || at}`,
+        kind: "track",
+        group,
+        season: tr.disc,
+        number: at,
+        position: tr.position,
+        code: discs > 1 ? `${tr.disc}-${n}` : n,
+        title: tr.title,
+        date: "",
+        ...place(at, files, descending),
+      });
+    });
+  }
+  return out;
+}
+
+/** The released movies missing from each collection a listed movie is
+ *  in, in order of release. */
+export function missingMovies(
+  sets: Record<number, MovieSet>,
+  setOf: Record<number, number | null>,
+  movieOf: Record<string, number>,
+  items: PreviewItem[],
+  descending: boolean,
+  day: string,
+): Ghost[] {
+  const bySet = new Map<number, { path: string; id: number }[]>();
+  for (const i of items) {
+    const id = movieOf[i.path];
+    const set = id === undefined ? null : setOf[id];
+    if (set == null || !sets[set] || !isVideo(i.original)) continue;
+    const list = bySet.get(set);
+    if (list) list.push({ path: i.path, id });
+    else bySet.set(set, [{ path: i.path, id }]);
+  }
+  const out: Ghost[] = [];
+  for (const [id, listed] of bySet) {
+    const set = sets[id];
+    // Unknown dates last, as TMDB lists them.
+    const order = [...set.parts].sort((a, b) => (a.releaseDate || "9").localeCompare(b.releaseDate || "9"));
+    const at = new Map(order.map((m, k) => [m.id, k]));
+    const files = listed.map((f) => ({ path: f.path, from: at.get(f.id) ?? -1, to: at.get(f.id) ?? -1 })).filter((f) => f.from >= 0);
+    if (!files.length) continue;
+    const have = new Set(files.map((f) => f.from));
+    order.forEach((m, k) => {
+      if (have.has(k) || !m.releaseDate || m.releaseDate > day) return;
+      out.push({
+        ghost: true,
+        key: `ghost:set:${id}:${m.id}`,
+        kind: "movie",
+        group: set.name,
+        season: 0,
+        number: k,
+        code: m.releaseDate.slice(0, 4),
+        title: m.title,
+        date: m.releaseDate,
+        ...place(k, files, descending),
+      });
+    });
+  }
+  return out;
+}
+
+/** The volumes missing between a book series' own files (its number in
+ *  the books' details or names), from 1 to the highest: no catalogue has
+ *  a reliable list of a series' books. */
+export function missingBooks(books: Record<string, BookState>, items: PreviewItem[], descending: boolean): Ghost[] {
+  const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  const series = new Map<string, { name: string; files: { path: string; from: number; to: number }[] }>();
+  for (const i of items) {
+    const g = books[i.path]?.guess;
+    const n = g ? Number.parseFloat(g.seriesIndex) : NaN;
+    if (!g?.series.trim() || !Number.isFinite(n)) continue;
+    const k = fold(g.series);
+    let s = series.get(k);
+    if (!s) series.set(k, (s = { name: g.series.trim(), files: [] }));
+    s.files.push({ path: i.path, from: n, to: n });
+  }
+  const out: Ghost[] = [];
+  for (const [k, { name, files }] of series) {
+    // Half volumes (2.5) are extras: they neither fill nor make a gap.
+    const have = new Set(files.map((f) => f.from).filter(Number.isInteger));
+    for (let n = 1; n < Math.max(0, ...have); n++) {
+      if (have.has(n)) continue;
+      out.push({ ghost: true, key: `ghost:book:${k}:${n}`, kind: "book", group: name, season: 0, number: n, code: String(n), title: "", date: "", ...place(n, files, descending) });
+    }
   }
   return out;
 }

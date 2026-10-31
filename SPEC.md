@@ -68,10 +68,10 @@ before it is read. The preview sends that name to the app
 | Remove range | from: position N or first occurrence of a text; to: end, position N or occurrence of a text; include the delimiters or not |
 | Character at position | position N; optionally only if the current character is X (case-insensitive unless asked); replace with Y or delete |
 | Extension | set a new one; lowercase/uppercase; remove |
-| Movie (TMDB) | template with `{title}`, `{original}`, `{year}`, `{id}` (default `{title} ({year}) [tmdbid-{id}]`); what `:` becomes (default ` - `); a folder for each movie; save `.nfo` and poster (optionally fanart and logo) next to renamed videos. See 2.1 |
+| Movie (TMDB) | template with `{title}`, `{original}`, `{year}`, `{id}` (default `{title} ({year}) [tmdbid-{id}]`); what `:` becomes (default ` - `); a folder for each movie; save `.nfo` and poster (optionally fanart and logo) next to renamed videos; show the collection's missing movies. See 2.1 |
 | TV show (TMDB) | the show (name, TMDB id or link; empty: from the files); template with `{show}`, `{original}`, `{year}`, `{season}`, `{episode}`, `{title}`, `{id}` (default `{show} ({year}) - S{season}E{episode} - {title}`); what `:` becomes; show and season folders (show folder template, default `{show} ({year}) [tmdbid-{id}]`); save `.nfo` files and images (optionally fanart and logo); show the missing episodes. See 2.2 |
-| Music (tags) | template with `{track}`, `{title}`, `{artist}`, `{album artist}`, `{album}`, `{year}`, `{disc}`, `{genre}`, `{composer}` (default `{track} - {title}`); what `:` becomes; disc number in the track on multi-disc albums; fill in from the file name; artist and album folders (default `{album artist}/{album} ({year})`). See 2.3 |
-| Book (Open Library) | template with `{author}`, `{authors}`, `{author sort}`, `{initial}`, `{title}`, `{original}`, `{year}`, `{edition year}`, `{publisher}`, `{isbn}`, `{series}`, `{volume}`, `{id}` (default `{author} - {title} ({year})`); what `:` becomes; author and book folders (default `{author}/{title}`); save the cover and `metadata.opf`. See 2.4 |
+| Music (tags) | template with `{track}`, `{title}`, `{artist}`, `{album artist}`, `{album}`, `{year}`, `{disc}`, `{genre}`, `{composer}` (default `{track} - {title}`); what `:` becomes; disc number in the track on multi-disc albums; fill in from the file name; artist and album folders (default `{album artist}/{album} ({year})`); show the missing tracks. See 2.3 |
+| Book (Open Library) | template with `{author}`, `{authors}`, `{author sort}`, `{initial}`, `{title}`, `{original}`, `{year}`, `{edition year}`, `{publisher}`, `{isbn}`, `{series}`, `{volume}`, `{id}` (default `{author} - {title} ({year})`); what `:` becomes; author and book folders (default `{author}/{title}`); save the cover and `metadata.opf`; show the series' missing volumes. See 2.4 |
 | Comic (ComicInfo.xml, GCD, Comic Vine, MangaDex) | template with `{series}`, `{series year}`, `{number}`, `{volume}`, `{chapter}`, `{title}`, `{year}`, `{count}`, `{publisher}`, `{writer}`, `{artist}`, `{id}` (default `{series} v{volume} #{number} c{chapter} - {title} ({year})`); what `:` becomes; the series (empty: from the files); the catalogue; series folders (default `{series} ({series year})`); series from the folder; show the missing issues. See 2.5 |
 
 Positions count **visible characters** (Unicode graphemes), starting at 1.
@@ -80,7 +80,8 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
 
 - Needs a TMDB API key (v3 key or v4 read token) in Options, plus the
   language of titles (default: the interface's). The key stays in the
-  local settings; only the searched title and year are sent to TMDB.
+  local settings; only the searched title and year (and, for collections,
+  the chosen movies' ids) are sent to TMDB.
 - Only videos, subtitles and folders take part (looked up and renamed);
   images, `.nfo` and other files stay as they are, even with a match
   kept from before.
@@ -150,6 +151,15 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
 - Subtitles (srt, ass, ssa, sub, idx, vtt, sup, smi) keep the language
   and flags at the end of their names (`.pt-BR`, `.eng.forced`: lowercase
   ISO codes, optionally with a region) after the movie or episode name.
+
+- "Show the collection's missing movies" (on by default; old saved rules
+  get it on): for each chosen movie, TMDB is asked once for its
+  collection (`/movie/{id}`) and once per collection for its movies
+  (`/collection/{id}`); the released movies (release date known and not
+  after today) of a collection that no listed video is matched to become
+  faded rows like the missing episodes (`year · title`, release date),
+  in release order (unknown dates last). The bottom bar counts them;
+  clicking saves a CSV (collection, title, release date).
 
 ### 2.2 TV shows (TMDB)
 
@@ -545,6 +555,13 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   deletes the copies left beside songs and puts the songs written into
   the entry, to undo (an undo of tags is noted the same way, for its
   copies).
+- "Show the missing tracks" (on by default; old saved rules get it on):
+  for each album with a release (picked or chosen), the release's tracks
+  no listed song is matched to become faded rows like the missing
+  episodes (`05 · title`, `2-05` with more than one disc), in the
+  release's order. The track list comes with the lookup and the choice:
+  no extra request. The bottom bar counts them; clicking saves a CSV
+  (album as `album artist - album (year)`, disc, track, title).
 - Only the album and artist names (and release ids) are sent to
   MusicBrainz; to AcoustID, only each song's fingerprint and length.
 - The files' audio is never changed, nor their tags unless "Write the
@@ -599,6 +616,14 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   reuse folders already named after the book or its author. Optionally
   `cover.jpg` and an OPF `metadata.opf` (or `<name>.jpg`/`.opf` without
   folders) are saved; existing files are kept; undo deletes them.
+- "Show the series' missing volumes" (on by default; old saved rules get
+  it on): no catalogue lists a series' books, so, as with MangaDex, for
+  each series (name compared without case, accents or punctuation) with
+  a looked-up book whose details give the series and whose details or
+  name give a number, the whole
+  numbers from 1 to the highest one held that no book has become faded
+  rows (`3`); fractional numbers (`2.5`) neither fill nor open a gap.
+  The bottom bar counts them; clicking saves a CSV (series, volume).
 - Only the searched title, author and ISBN are sent to Open Library, and
   only the ISBN to BrasilAPI. The book files are never changed.
 
@@ -699,8 +724,10 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   then as the catalogue lists them); each row sits before the file with
   the nearest later issue, else after the nearest earlier one. The
   bottom bar counts them; clicking saves a CSV (series with start year,
-  number, title, cover date) in the series' folder. With both missing
-  episodes and issues, one count ("N missing") and the TV columns.
+  number, title, cover date) in the series' folder. With missing items
+  of more than one kind (episodes, issues, tracks, movies, volumes), one
+  count ("N missing") and a CSV with what they share: group (show,
+  series, album, collection), code, title, date.
   MangaDex has no list of a manga's volumes (only uploaded chapters,
   often taken down for licensed manga): for its series the rows are the
   numbers missing between the files, from 1 to the highest (by volume

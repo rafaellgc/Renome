@@ -52,8 +52,10 @@ const OLD_COMIC_TEMPLATES: Record<string, string> = {
 
 function upgradeRules(steps: Step[]) {
   for (const s of steps ?? []) {
-    // Rules from before the missing episodes and issues were shown.
-    if (s.rule?.type === "series" || s.rule?.type === "comic") s.rule.missing ??= true;
+    // Rules from before the missing episodes, issues, movies, tracks and
+    // books were shown.
+    const r = s.rule as { type?: string; missing?: boolean } | undefined;
+    if (r && ["series", "comic", "movie", "music", "book"].includes(r.type ?? "")) r.missing ??= true;
     if (s.rule?.type !== "comic") continue;
     if (OLD_COMIC_TEMPLATES[s.rule.template]) s.rule.template = OLD_COMIC_TEMPLATES[s.rule.template];
     // Rules from before there was a choice of catalogue.

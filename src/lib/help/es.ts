@@ -268,13 +268,16 @@ ${ex("Nombre.de.la.Pelicula.2001.1080p.BluRay.x264.mkv", "Nombre de la Película
 <p>Con <b>Guardar .nfo y póster junto a la película</b>, al renombrar se crean, junto a cada vídeo, <code>Nombre (año) [tmdbid-…].nfo</code> y el póster; opcionalmente también la imagen de fondo (fanart) y el logo de la película. Dentro de la carpeta de la película, las imágenes se llaman <code>poster.jpg</code>, <code>fanart.jpg</code> y <code>logo.png</code>; sueltas, llevan delante el nombre de la película (<code>…-poster.jpg</code>). Jellyfin, Kodi y Emby leen estos archivos.</p>
 <p>El <code>.nfo</code> incluye todo lo que TMDB tiene y Jellyfin lee: título y título original, año y fecha de estreno, sinopsis y eslogan, duración, nota y votos, la clasificación por edades del país del idioma elegido (ej.: ES-12), géneros, palabras clave (como etiquetas), países, estudios, colección (ej.: "Nombre de la Colección"), tráiler de YouTube, dirección, guion, reparto con personajes y fotos, productores, compositor y los ids de TMDB e IMDb. El archivo de la película no cambia, los archivos que ya existen no se reemplazan y <b>deshacer</b> el renombrado borra lo creado.</p>
 <p>Las películas que <b>ya tienen el nombre correcto</b> también reciben los metadatos: el botón Renombrar las cuenta y la confirmación lo avisa. Si el nombre ya trae <code>[tmdbid-…]</code>, la película se reconoce directamente por ese id, sin buscar. Así una biblioteca ya organizada puede recibir solo los .nfo y las imágenes.</p>
+<h4>Películas que faltan de la colección</h4>
+<p>Con <b>Mostrar las películas que faltan de la colección</b> (activada por defecto), cuando una película elegida es parte de una colección en TMDB (una trilogía, una franquicia), la lista muestra filas atenuadas para las otras películas ya estrenadas de la colección que no están en ella, como <code>1999 · Título</code>, con la fecha de estreno, en el orden en que salieron. Son solo un aviso, como los episodios que faltan: no entran en conteos ni en el renombrado. <b>Haga clic en el total</b>, en la barra de abajo, para guardar la lista en un archivo CSV (colección, título y estreno). Para saber la colección, el programa hace una consulta más a TMDB por película y una por colección.</p>
+<p>Quien decide qué entra en una colección es TMDB: a veces quedan fuera películas derivadas, y a veces entran películas que usted no consideraría parte de ella.</p>
 <h4>Limitaciones</h4>
 <ul>
   <li>La película se busca por el título y el año del nombre del archivo. Los nombres muy abreviados, solo con siglas o con el título en otro idioma pueden no encontrarse; en ese caso, corrija el título en la revisión.</li>
   <li>Las películas con el mismo nombre (remakes, por ejemplo) solo se distinguen por el año; sin el año en el nombre, la elección suele ir a la revisión.</li>
   <li>Las películas raras, regionales o muy recientes pueden no estar en TMDB, o estar sin traducción, sinopsis o póster.</li>
 </ul>
-<p class="tip">Solo se envían a TMDB el título y el año buscados, nunca el nombre completo del archivo ni las carpetas.</p>`,
+<p class="tip">Solo se envían a TMDB el título y el año buscados (y, para las colecciones, el número de la película en TMDB), nunca el nombre completo del archivo ni las carpetas.</p>`,
   },
   {
     id: "r-series",
@@ -389,6 +392,9 @@ ${ex("01.mp3", "01 - Título de la Canción.mp3")}
   <li>Cada canción tarda cerca de medio segundo en escucharse y consultarse.</li>
 </ul>
 <p class="tip">A AcoustID solo van la huella digital del sonido y la duración de cada canción, nunca el archivo.</p>
+<h4>Pistas que faltan</h4>
+<p>Con <b>Mostrar las pistas que faltan</b> (activada por defecto), en los álbumes identificados en MusicBrainz la lista muestra filas atenuadas para las pistas de la edición elegida que ninguna canción de la lista tiene, como <code>05 · Título</code> (<code>2-05</code> en álbumes con más de un disco), en su lugar, entre sus vecinas. Son solo un aviso: no entran en conteos ni en el renombrado. <b>Haga clic en el total</b>, en la barra de abajo, para guardar la lista en un archivo CSV (álbum, disco, pista y título). No hay consulta extra: la lista de pistas es la que ya se usó para identificar el álbum.</p>
+<p>La lista es la de la <b>edición elegida</b>: una edición con pistas extra muestra las extra que usted no tiene; otra edición del mismo álbum puede no tenerlas. En la revisión se puede elegir la edición que corresponde a la suya. Una canción que no casó con ninguna pista de la edición hace que su pista aparezca como faltante.</p>
 <h4>Limitaciones</h4>
 <ul>
   <li>Sin la búsqueda en MusicBrainz, el nombre depende solo de las etiquetas: etiquetas erróneas dan nombres erróneos.</li>
@@ -433,6 +439,9 @@ ${ex("titulo_del_libro_autor.pdf", "Nombre del Autor - Título del Libro (1937).
   <li><b>Guardar los datos del libro</b>: guarda <code>metadata.opf</code> (o <code>….opf</code>, sin la opción de carpetas), en formato OPF, con título, autores, sinopsis, temas, editorial, año, idioma, ISBN y serie. Audiobookshelf y los gestores de libros electrónicos leen este archivo.</li>
   <li>Los libros que ya tienen el nombre correcto también reciben la portada y los datos (cuentan en el botón <b>Renombrar</b>). Los archivos que ya existen no se reemplazan, y deshacer borra lo creado. El archivo del libro nunca cambia.</li>
 </ul>
+<h4>Volúmenes que faltan</h4>
+<p>Con <b>Mostrar los volúmenes que faltan de la serie</b> (activada por defecto), después de la búsqueda, en los libros de una serie la lista muestra filas atenuadas para los volúmenes que faltan <b>entre los suyos</b>, del 1 al mayor número que tiene, como <code>3</code>, en su lugar. Son solo un aviso: no entran en conteos ni en el renombrado. <b>Haga clic en el total</b>, en la barra de abajo, para guardar la lista en un archivo CSV (serie y volumen).</p>
+<p>Ningún catálogo tiene una lista fiable de los libros de cada serie, por eso el programa solo ve los huecos entre sus archivos: lo que viene después de su último volumen no aparece. La serie viene de los datos del libro (EPUB, FB2); el número, de ellos o del nombre del archivo (<code>Autor - 03 - Título</code>). Los libros sin serie en sus datos no entran. Volúmenes como <code>2.5</code> (relatos entre dos libros) no llenan ni abren huecos.</p>
 <h4>Limitaciones</h4>
 <ul>
   <li><b>PDF</b>: muchos PDF tienen los datos del documento vacíos o erróneos (el nombre del archivo de Word, el nombre del equipo de quien lo hizo). Un PDF <b>escaneado</b> es solo una serie de imágenes, sin texto donde buscar el ISBN. En esos casos queda el nombre del archivo: un nombre claro, como <code>Autor - Título</code>, ayuda mucho; uno confuso lleva a la revisión. Conviene arreglar el nombre de esos archivos con las otras reglas, puestas encima de esta en la lista: la búsqueda lee el nombre tal como sale de ellas.</li>

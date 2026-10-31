@@ -366,6 +366,12 @@ async fn tmdb_lookup(
     Ok(tmdb::lookup(&app, &client, items).await)
 }
 
+/// The collections the chosen movies belong to, for those missing.
+#[tauri::command]
+async fn tmdb_collections(key: String, lang: String, ids: Vec<u64>) -> tmdb::MovieSets {
+    tmdb::collections(&tmdb::Client::new(&key, &lang), ids).await
+}
+
 /// A search typed by the user in the review window.
 #[tauri::command]
 async fn tmdb_search(
@@ -1104,6 +1110,7 @@ pub fn run() {
             add_paths,
             remove_files,
             stop_search,
+            tmdb_collections,
             clear_files,
             move_files,
             sort_files,

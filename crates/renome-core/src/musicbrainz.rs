@@ -431,6 +431,36 @@ fn same_length(tr: &Track, song: &AudioTags) -> bool {
     matches!((length_of(tr), song.duration), (Some(ms), Some(secs)) if (ms / 1000).abs_diff(u64::from(secs)) <= 5)
 }
 
+/// A release's track, for the list of those missing from an album.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListedTrack {
+    /// The release track's id ([`SongMatch::track_id`]).
+    pub id: String,
+    pub disc: u32,
+    pub position: u32,
+    pub title: String,
+    /// Seconds.
+    pub length: Option<u64>,
+}
+
+/// A release's tracks, disc by disc, as [`match_tracks`] numbers them.
+pub fn tracklist(release: &Release) -> Vec<ListedTrack> {
+    release
+        .media
+        .iter()
+        .flat_map(|m| {
+            m.tracks.iter().map(|tr| ListedTrack {
+                id: tr.id.clone(),
+                disc: m.position.max(1),
+                position: tr.position,
+                title: plain(&tr.title),
+                length: length_of(tr).map(|ms| ms / 1000),
+            })
+        })
+        .collect()
+}
+
 /// Matches the songs of an album to a release's tracks: by the recording
 /// the song was heard as (AcoustID), else by disc and track number when the
 /// track has the song's title or length, else by title; each track at most
@@ -565,6 +595,25 @@ mod tests {
             {"position":1,"title":"Take On Me","length":228000},
             {"position":2,"title":"Train of Thought","length":254000,
              "artist-credit":[{"name":"a‐ha","joinphrase":" feat. "},{"name":"X","joinphrase":""}]}]}]}"#;
+
+    #[test]
+    fn lists_the_tracks() {
+        let r = release(HHL);
+        let list = tracklist(&r);
+        assert_eq!(list.len(), 2);
+        assert_eq!(
+            (
+                list[1].disc,
+                list[1].position,
+                list[1].title.as_str(),
+                list[1].length
+            ),
+            (1, 2, "Train of Thought", Some(254))
+        );
+        // The tracks a match names are the listed ones.
+        let (m, _) = match_tracks(&r, &[song("Take On Me", 1, 227)]);
+        assert_eq!(m[0].1.track_id, list[0].id);
+    }
 
     #[test]
     fn matches_and_checks() {

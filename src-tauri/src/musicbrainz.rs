@@ -192,6 +192,8 @@ pub struct AlbumLookup {
     /// Picked with confidence.
     choice: Option<Candidate>,
     matches: Vec<(PathBuf, SongMatch)>,
+    /// The chosen release's tracks, for those missing from the album.
+    tracks: Vec<mb::ListedTrack>,
     error: Option<String>,
     /// Identified by the songs' sound (AcoustID), not their tags.
     heard: bool,
@@ -337,6 +339,7 @@ async fn by_tags(
             candidates: Vec::new(),
             choice: None,
             matches: Vec::new(),
+            tracks: Vec::new(),
             error: None,
             heard: false,
         };
@@ -368,6 +371,7 @@ async fn by_tags(
                 if (same_release && matches.len() == songs.len()) || mb::sure(&r, &songs) {
                     found.choice = found.candidates.iter().find(|c| c.id == r.id).cloned();
                     found.matches = matches;
+                    found.tracks = mb::tracklist(&r);
                 }
             }
             Ok::<(), String>(())
@@ -528,6 +532,7 @@ async fn by_sound(
             candidates: f.candidates,
             choice: None,
             matches: Vec::new(),
+            tracks: Vec::new(),
             error: failed,
             heard: true,
         };
@@ -547,6 +552,7 @@ async fn by_sound(
                         lookup.candidates[0] = c.clone();
                         lookup.choice = Some(c);
                         lookup.matches = matches;
+                        lookup.tracks = mb::tracklist(r);
                     }
                 }
                 Err(e) => lookup.error = Some(e.clone()),
@@ -564,6 +570,7 @@ async fn by_sound(
 #[serde(rename_all = "camelCase")]
 pub struct Chosen {
     matches: Vec<(PathBuf, SongMatch)>,
+    tracks: Vec<mb::ListedTrack>,
     /// How many songs agree in duration with their track.
     agree: usize,
 }
@@ -571,7 +578,11 @@ pub struct Chosen {
 pub async fn choose(client: &Client, id: &str, songs: &[Song]) -> Result<Chosen, String> {
     let r = client.release(id).await?;
     let (matches, agree) = mb::match_tracks(&r, songs);
-    Ok(Chosen { matches, agree })
+    Ok(Chosen {
+        matches,
+        tracks: mb::tracklist(&r),
+        agree,
+    })
 }
 
 #[derive(Deserialize)]

@@ -1662,6 +1662,7 @@ mod tests {
                 sidecar: false,
                 fanart: false,
                 folder: true,
+                missing: false,
             },
         }];
         // With something else in the folder: not the movie's own.
@@ -1705,6 +1706,7 @@ mod tests {
                 folder_template: "{author}/{title}".into(),
                 cover: false,
                 opf: false,
+                missing: false,
             },
         }];
         // The same book in two formats, and a file the rule knows nothing of.
@@ -1991,6 +1993,7 @@ mod tests {
                 write_tags: false,
                 embed_cover: false,
                 clean_tags: false,
+                missing: false,
             },
         }];
         let p = preview(&files, &steps, &HashMap::new(), &View::default());
@@ -2093,6 +2096,7 @@ mod tests {
                 write_tags: false,
                 embed_cover: false,
                 clean_tags: false,
+                missing: false,
             },
         }];
         let p = preview(&files, &steps, &HashMap::new(), &View::default());
@@ -2131,6 +2135,7 @@ mod tests {
                 sidecar: false,
                 fanart: false,
                 folder: true,
+                missing: false,
             },
         }];
         let old = d.path().join("Filme.2001.1080p.BluRay");
@@ -2228,6 +2233,7 @@ mod tests {
                 write_tags: false,
                 embed_cover: false,
                 clean_tags: false,
+                missing: false,
             },
         }];
         let view = View {
@@ -2272,6 +2278,7 @@ mod tests {
                 folder_template: "{author}/{title}".into(),
                 cover: false,
                 opf: false,
+                missing: false,
             },
         }];
         let p = preview(&files, &steps, &HashMap::new(), &view);
@@ -2341,6 +2348,7 @@ mod tests {
                 write_tags: false,
                 embed_cover: false,
                 clean_tags: false,
+                missing: false,
             },
         }];
         let p = preview(&files, &steps, &HashMap::new(), &View::default());

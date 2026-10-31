@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AlbumLookup, AlbumQuery, ApplyReport, BookCandidate, BookLookup, BookMatch, Candidate, ComicIssue, ComicMatch, ComicSource, ComicVolume, EpisodeLookup, MbCandidate, SongMatch, HistoryEntry, Lookup, Preview, ScanOptions, Show, SortKey, Step, View } from "./types";
+import type { AlbumLookup, AlbumQuery, ApplyReport, BookCandidate, BookLookup, BookMatch, Candidate, ComicIssue, ComicMatch, ComicSource, ComicVolume, EpisodeLookup, MbCandidate, SongMatch, HistoryEntry, ListedTrack, Lookup, MovieSet, Preview, ScanOptions, Show, SortKey, Step, View } from "./types";
 
 type Overrides = Record<string, string>;
 type TvItem = { path: string; name: string; isDir: boolean };
@@ -25,6 +25,9 @@ export const api = {
   tmdbCheck: (key: string) => invoke<void>("tmdb_check", { key }),
   tmdbLookup: (key: string, lang: string, items: { path: string; name: string }[]) =>
     invoke<Lookup[]>("tmdb_lookup", { key, lang, items }),
+  /** Each movie's collection (null: none) and the collections. */
+  tmdbCollections: (key: string, lang: string, ids: number[]) =>
+    invoke<{ of: [number, number | null][]; sets: MovieSet[] }>("tmdb_collections", { key, lang, ids }),
   tmdbSearch: (key: string, lang: string, title: string, year: number | null) =>
     invoke<Candidate[]>("tmdb_search", { key, lang, title, year }),
   tvSearch: (key: string, lang: string, query: string, items: TvItem[]) =>
@@ -36,7 +39,7 @@ export const api = {
     invoke<AlbumLookup[]>("mb_lookup", { paths, fromName, listen }),
   mbSearch: (query: AlbumQuery) => invoke<MbCandidate[]>("mb_search", { query }),
   mbChoose: (id: string, paths: string[], fromName: boolean) =>
-    invoke<{ matches: [string, SongMatch][]; agree: number }>("mb_choose", { id, paths, fromName }),
+    invoke<{ matches: [string, SongMatch][]; tracks: ListedTrack[]; agree: number }>("mb_choose", { id, paths, fromName }),
   /** `names`: the name each file is read by (null: its own). */
   saveText: (path: string, text: string) => invoke<void>("save_text", { path, text }),
   /** Where TMDB images come from (`…/t/p`, sizes added). */

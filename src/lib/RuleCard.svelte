@@ -236,6 +236,7 @@
         {#if r.sidecar}
           <label class="check sub"><input type="checkbox" bind:checked={r.fanart} /> {t("fanartLabel")}</label>
         {/if}
+        <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("movieMissingLabel")}<small>{t("movieMissingHint")}</small></span></label>
         {@render actions(t("tmdbSearch"), "movieSummary")}
       {:else if r.type === "series"}
         <p class="hint top">{t("seriesHint")}</p>
@@ -274,6 +275,7 @@
           <label class="check sub"><input type="checkbox" bind:checked={r.embedCover} /> <span>{t("musicEmbedCover")}<small>{t("musicEmbedCoverHint")}</small></span></label>
           <label class="check sub"><input type="checkbox" bind:checked={r.cleanTags} /> <span>{t("musicCleanTags")}<small>{t("musicCleanTagsHint")}</small></span></label>
         {/if}
+        <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("musicMissingLabel")}<small>{t("musicMissingHint")}</small></span></label>
         {@render actions(t("mbSearch"), "albumSummary")}
       {:else if r.type === "book"}
         <p class="hint top">{t("bookHint")}</p>
@@ -286,6 +288,7 @@
         {/if}
         <label class="check"><input type="checkbox" bind:checked={r.cover} /> <span>{t("bookCover")}<small>{t("bookCoverHint")}</small></span></label>
         <label class="check"><input type="checkbox" bind:checked={r.opf} /> <span>{t("bookOpf")}<small>{t("bookOpfHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("bookMissingLabel")}<small>{t("bookMissingHint")}</small></span></label>
         {@render actions(t("olSearch"), "bookSummary")}
       {:else if r.type === "comic"}
         <p class="hint top">{t("comicHint")}</p>
