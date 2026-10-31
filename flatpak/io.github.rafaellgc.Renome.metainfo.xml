@@ -63,6 +63,11 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.18.0" date="2026-10-31">
+      <description>
+        <p>Shows the tracks missing from an album, the movies missing from a collection and the volumes missing from a book series, with CSV export. Renaming never replaces a file on macOS and Windows either. On Windows, hidden and system files stay out of the list and the title bar follows the theme. Playlists use forward slashes everywhere, and writing tags keeps the encoder field.</p>
+      </description>
+    </release>
     <release version="0.17.0" date="2026-10-30">
       <description>
         <p>Online searches can be stopped, keeping what was found. If the program stops while writing tags, the next start cleans up and keeps the songs written undoable. On Linux, names a USB stick formatted for Windows refuses are flagged before renaming. AcoustID retries a dropped connection.</p>
