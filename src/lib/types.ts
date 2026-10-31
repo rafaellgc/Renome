@@ -16,7 +16,8 @@ export type Rule =
       at: Anchor; position: number;
     }
   | { type: "number"; template: string; start: number; step: number; digits: number; perFolder: boolean }
-  | { type: "remove"; allSpaces: boolean; extraSpaces: boolean; accents: boolean; digits: boolean; chars: string; target: Target }
+  | { type: "remove"; allSpaces: boolean; extraSpaces: boolean; accents: boolean; digits: boolean; chars: string; leadingNumber: boolean; maxLength: number; target: Target }
+  | { type: "convert"; mojibake: boolean; latin: boolean; web: "" | "-" | "_"; target: Target }
   | {
       type: "removeRange";
       from: Bound; fromPosition: number; fromText: string;
@@ -33,7 +34,7 @@ export type Rule =
     }
   | {
       type: "music"; template: string; colon: string; discPrefix: boolean; fromName: boolean;
-      folders: boolean; folderTemplate: string; cover: boolean; playlist: boolean; listen: boolean; writeTags: boolean; embedCover: boolean; cleanTags: boolean; missing: boolean;
+      folders: boolean; folderTemplate: string; cover: boolean; playlist: boolean; listen: boolean; writeTags: boolean; embedCover: boolean; coverSize: number; cleanTags: boolean; missing: boolean;
     }
   | { type: "book"; template: string; colon: string; folders: boolean; folderTemplate: string; cover: boolean; opf: boolean; missing: boolean }
   | { type: "comic"; template: string; colon: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; byFolder: boolean; missing: boolean };

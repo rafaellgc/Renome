@@ -602,6 +602,7 @@ async fn write_tags(
     items: Vec<TagJob>,
     cover: bool,
     clean: bool,
+    cover_size: Option<u32>,
 ) -> Result<TagReport, String> {
     use renome_core::tagwrite;
     let state = app.state::<AppState>();
@@ -642,7 +643,12 @@ async fn write_tags(
     for (done, job) in items.into_iter().enumerate() {
         let image = if cover {
             if !covers.contains_key(&job.song.release) {
-                let mut found = state.mb.front_cover(&job.song.release).await.ok().flatten();
+                let mut found = state
+                    .mb
+                    .front_cover(&job.song.release, cover_size.unwrap_or(1200))
+                    .await
+                    .ok()
+                    .flatten();
                 if found.is_none() {
                     found = job.path.parent().and_then(folder_cover);
                 }

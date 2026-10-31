@@ -2,6 +2,7 @@
 //! the [`Pipeline`] compiles the list and applies the rules in order.
 
 use std::path::PathBuf;
+use std::sync::LazyLock;
 
 use chrono::format::{Item, StrftimeItems};
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
@@ -157,6 +158,27 @@ pub enum Rule {
         digits: bool,
         #[serde(default)]
         chars: String,
+        /// A track number at the start (`01 - `, `01. `, `1-05 `).
+        #[serde(default)]
+        leading_number: bool,
+        /// Cut to this many characters (0: no limit).
+        #[serde(default)]
+        max_length: usize,
+        #[serde(default)]
+        target: Target,
+    },
+    /// Characters turned into others.
+    Convert {
+        /// Accents broken by a wrong encoding (`SÃ£o` → `São`).
+        #[serde(default)]
+        mojibake: bool,
+        /// Cyrillic and Greek in Latin letters (`Кино` → `Kino`).
+        #[serde(default)]
+        latin: bool,
+        /// A name any server takes, with this between words (`-`, `_`);
+        /// empty: off.
+        #[serde(default)]
+        web: String,
         #[serde(default)]
         target: Target,
     },
@@ -286,6 +308,10 @@ pub enum Rule {
         /// the songs have.
         #[serde(default = "yes")]
         embed_cover: bool,
+        /// The embedded cover's size in pixels: 1200, 500 or 250, the
+        /// sizes the Cover Art Archive has (used by the app).
+        #[serde(default = "cover_size")]
+        cover_size: u32,
         /// With `write_tags`, the songs' other tags go (site names, ripper
         /// notes), but for lyrics, loudness and the like.
         #[serde(default = "yes")]
@@ -348,6 +374,10 @@ pub enum Rule {
         #[serde(default = "yes")]
         missing: bool,
     },
+}
+
+fn cover_size() -> u32 {
+    1200
 }
 
 fn colon() -> String {
@@ -424,6 +454,7 @@ pub struct RuleError {
 }
 
 /// Per-file context while applying the rules.
+#[derive(Clone, Copy)]
 pub struct Ctx<'a> {
     pub index: usize,
     /// Position among the files of the same folder.
@@ -445,6 +476,11 @@ pub struct Ctx<'a> {
     /// The series its folder is named after, when not its own (see
     /// [`crate::comics::arrange`]).
     pub comic_folder: Option<&'a crate::comics::ComicMatch>,
+    /// The video whose picture names it: itself, or a subtitle's video.
+    pub video: Option<&'a FileEntry>,
+    /// Names the movie's folder: as the video, without a subtitle's
+    /// language or the picture's size.
+    pub as_folder: bool,
 }
 
 enum Compiled {
@@ -574,7 +610,7 @@ impl Pipeline {
                         moved = Some(Move::Into {
                             root: tv::library_root(&ctx.file.dir, m),
                             folders: vec![
-                                tv::episode_name(folder_template, m, colon),
+                                tv::episode_name(folder_template, m, colon, None),
                                 tv::season_folder(m.season),
                             ],
                         });
@@ -815,12 +851,20 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             accents,
             digits,
             chars,
+            leading_number,
+            max_length,
             target,
         } => {
             on_target(stem, ext, *target, |s| {
                 let mut s = s.to_string();
+                if *leading_number
+                    && let Some(m) = LEADING_NUMBER.find(&s)
+                    && m.end() < s.len()
+                {
+                    s = s[m.end()..].to_string();
+                }
                 if *accents {
-                    s = text::strip_accents(&s);
+                    s = text::plain_letters(&s);
                 }
                 if *digits {
                     s.retain(|c| !c.is_ascii_digit());
@@ -832,6 +876,30 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
                     s.retain(|c| !c.is_whitespace());
                 } else if *extra_spaces {
                     s = text::collapse_spaces(&s);
+                }
+                if *max_length > 0 {
+                    s = text::cut(&s, *max_length);
+                }
+                s
+            });
+        }
+
+        Rule::Convert {
+            mojibake,
+            latin,
+            web,
+            target,
+        } => {
+            on_target(stem, ext, *target, |s| {
+                let mut s = s.to_string();
+                if *mojibake {
+                    s = text::fix_mojibake(&s);
+                }
+                if *latin {
+                    s = text::to_latin(&s);
+                }
+                if !web.is_empty() {
+                    s = text::web_safe(&s, web);
                 }
                 s
             });
@@ -912,9 +980,14 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             template, colon, ..
         } => {
             if let Some(m) = ctx.movie {
-                let name = tmdb::movie_name(template, m, colon);
+                let name = tmdb::movie_name(template, m, colon, video_of(ctx, template));
                 if !name.is_empty() {
-                    *stem = name + tmdb::subtitle_suffix(stem, ext);
+                    let suffix = if ctx.as_folder {
+                        ""
+                    } else {
+                        tmdb::subtitle_suffix(stem, ext)
+                    };
+                    *stem = name + suffix;
                 }
             }
         }
@@ -923,7 +996,7 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             template, colon, ..
         } => {
             if let Some(m) = ctx.episode {
-                let name = tv::episode_name(template, m, colon);
+                let name = tv::episode_name(template, m, colon, video_of(ctx, template));
                 if !name.is_empty() {
                     *stem = name + tmdb::subtitle_suffix(stem, ext);
                 }
@@ -985,6 +1058,14 @@ fn comic_of(ctx: &Ctx, by_folder: bool, stem: &str) -> Option<comics::ComicMatch
         .or_else(|| comics::from_name(ctx.file, stem, by_folder))
 }
 
+/// The video's picture, read only when the template asks for it.
+fn video_of<'a>(ctx: &Ctx<'a>, template: &str) -> Option<&'a crate::video::VideoInfo> {
+    if ctx.as_folder || !crate::video::wanted(template) {
+        return None;
+    }
+    ctx.video?.video_info()
+}
+
 fn folder_name(file: &FileEntry) -> String {
     file.dir
         .file_name()
@@ -992,11 +1073,60 @@ fn folder_name(file: &FileEntry) -> String {
         .unwrap_or_default()
 }
 
-/// Replaces `{key}` in a single pass, so values that contain braces are
-/// not expanded again. Unknown keys are kept as they are.
-pub(crate) fn expand<'a>(template: &str, value: impl Fn(&str) -> Option<&'a str>) -> String {
+/// A number of up to three digits at the start, with a disc before it
+/// (`1-05`) and what separates it from the rest; not the whole name.
+static LEADING_NUMBER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*(?:\d{1,2}[-.])?\d{1,3}(?:\s*[-.)_]\s*|\s+)(?:[-–]\s*)?").unwrap()
+});
+
+/// Resolves the optional sections of a template: `<...>` is kept (without
+/// the `<>`) when every key in it has a value, else dropped
+/// (`{album}< - CD{disc}>`). A section without known keys, or a `<` with
+/// no `>` after it, stays as written.
+pub(crate) fn optional_sections<'a>(
+    template: &str,
+    value: impl Fn(&str) -> Option<&'a str>,
+) -> String {
     let mut out = String::new();
     let mut rest = template;
+    while let Some(open) = rest.find('<') {
+        let tail = &rest[open..];
+        let Some(close) = tail.find('>') else {
+            break;
+        };
+        out.push_str(&rest[..open]);
+        let inner = &tail[1..close];
+        let mut keys = 0;
+        let mut filled = true;
+        let mut scan = inner;
+        while let Some(start) = scan.find('{') {
+            let Some(end) = scan[start..].find('}') else {
+                break;
+            };
+            if let Some(v) = value(&scan[start + 1..start + end]) {
+                keys += 1;
+                filled &= !v.trim().is_empty();
+            }
+            scan = &scan[start + end + 1..];
+        }
+        if keys == 0 {
+            out.push_str(&tail[..=close]);
+        } else if filled {
+            out.push_str(inner);
+        }
+        rest = &tail[close + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Replaces `{key}` in a single pass, so values that contain braces are
+/// not expanded again. Unknown keys are kept as they are. Optional
+/// sections (`<...>`) are resolved first.
+pub(crate) fn expand<'a>(template: &str, value: impl Fn(&str) -> Option<&'a str>) -> String {
+    let template = optional_sections(template, &value);
+    let mut out = String::new();
+    let mut rest = template.as_str();
     while let Some(open) = rest.find('{') {
         out.push_str(&rest[..open]);
         let tail = &rest[open..];
@@ -1147,6 +1277,7 @@ mod tests {
             taken: Default::default(),
             tags: Default::default(),
             comic: Default::default(),
+            video: Default::default(),
         }
     }
 
@@ -1175,6 +1306,8 @@ mod tests {
             book: None,
             comic: None,
             comic_folder: None,
+            video: None,
+            as_folder: false,
         });
         join_name(&s, &e)
     }
@@ -1187,6 +1320,24 @@ mod tests {
             first_only: first,
             target: Target::Name,
         }
+    }
+
+    #[test]
+    fn optional_sections() {
+        let value = |key: &str| match key {
+            "a" => Some("A"),
+            "empty" => Some(""),
+            _ => None,
+        };
+        assert_eq!(expand("{a}< - {a}>", value), "A - A");
+        assert_eq!(expand("{a}< - {empty}>", value), "A");
+        // Every key must have a value.
+        assert_eq!(expand("<{a} {empty}>x", value), "x");
+        // Without known keys, or unclosed, it stays as written.
+        assert_eq!(expand("<b> <{zzz}> {a}", value), "<b> <{zzz}> A");
+        assert_eq!(expand("{a} <{a}", value), "A <A");
+        // Values are not read as sections.
+        assert_eq!(expand("{a}<{a}>", |_| Some("<x>")), "<x><x>");
     }
 
     #[test]
@@ -1450,11 +1601,77 @@ mod tests {
             accents: true,
             digits: true,
             chars: "_".into(),
+            leading_number: false,
+            max_length: 0,
             target: Target::Name,
         };
         assert_eq!(
             run(vec![r], "  Canção_01   do  Mês .txt", 0),
             "Cancao do Mes.txt"
+        );
+        let r = |leading_number, max_length| Rule::Remove {
+            all_spaces: false,
+            extra_spaces: true,
+            accents: false,
+            digits: false,
+            chars: String::new(),
+            leading_number,
+            max_length,
+            target: Target::Name,
+        };
+        for (from, to) in [
+            ("01 - Song.mp3", "Song.mp3"),
+            ("01. Song.mp3", "Song.mp3"),
+            ("1-05 Song.mp3", "Song.mp3"),
+            ("05_Song.mp3", "Song.mp3"),
+            ("3 - - Song.mp3", "Song.mp3"),
+            // Not a date, a year or the whole name.
+            ("2024-07-15 Trip.jpg", "2024-07-15 Trip.jpg"),
+            ("1999 Song.mp3", "1999 Song.mp3"),
+            ("01.mp3", "01.mp3"),
+            ("Song 01.mp3", "Song 01.mp3"),
+        ] {
+            assert_eq!(run(vec![r(true, 0)], from, 0), to, "{from}");
+        }
+        // Cut at a length, without spaces or separators left at the end.
+        assert_eq!(
+            run(vec![r(false, 10)], "Música de Teste - Parte.flac", 0),
+            "Música de.flac"
+        );
+        assert_eq!(
+            run(vec![r(false, 12)], "Abc - Defghij.txt", 0),
+            "Abc - Defghi.txt"
+        );
+        assert_eq!(run(vec![r(false, 6)], "Abc - Def.txt", 0), "Abc.txt");
+    }
+
+    #[test]
+    fn convert_characters() {
+        let r = |mojibake, latin, web: &str| Rule::Convert {
+            mojibake,
+            latin,
+            web: web.into(),
+            target: Target::Name,
+        };
+        assert_eq!(
+            run(
+                vec![r(true, false, "")],
+                "02 - CoraÃ§Ã£o de Estudante.mp3",
+                0
+            ),
+            "02 - Coração de Estudante.mp3"
+        );
+        assert_eq!(
+            run(vec![r(false, true, "")], "Кино - Звезда.mp3", 0),
+            "Kino - Zvezda.mp3"
+        );
+        assert_eq!(
+            run(
+                vec![r(true, false, "-")],
+                "Férias em SÃ£o Paulo (2024).JPG",
+                0
+            ),
+            "Ferias-em-Sao-Paulo-2024.JPG"
         );
     }
 
@@ -1600,6 +1817,8 @@ mod tests {
             book: None,
             comic: None,
             comic_folder: None,
+            video: None,
+            as_folder: false,
         });
         assert_eq!(s, "a");
     }

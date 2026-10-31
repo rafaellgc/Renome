@@ -795,6 +795,37 @@ pub fn preview(
             (index, *n - 1, file)
         })
         .collect();
+    // The video each subtitle goes with, whose picture names it too: the
+    // one with the same movie or episode in its folder, the one with its
+    // name first.
+    let same_lookup = |a: &FileEntry, b: &FileEntry| {
+        if let (Some(x), Some(y)) = (view.movies.get(&a.path), view.movies.get(&b.path)) {
+            return x.id == y.id;
+        }
+        matches!(
+            (view.episodes.get(&a.path), view.episodes.get(&b.path)),
+            (Some(x), Some(y)) if x.id == y.id && x.season == y.season && x.episodes == y.episodes
+        )
+    };
+    let subtitle_video: HashMap<&Path, &FileEntry> = files
+        .iter()
+        .filter(|f| !f.is_dir && tmdb::is_subtitle(&f.ext))
+        .filter_map(|sub| {
+            let base =
+                &sub.stem[..sub.stem.len() - tmdb::subtitle_suffix(&sub.stem, &sub.ext).len()];
+            let mine: Vec<&FileEntry> = files
+                .iter()
+                .filter(|v| {
+                    !v.is_dir && tmdb::is_video(&v.ext) && v.dir == sub.dir && same_lookup(sub, v)
+                })
+                .collect();
+            let video = mine
+                .iter()
+                .find(|v| v.stem == base)
+                .or_else(|| (mine.len() == 1).then(|| &mine[0]))?;
+            Some((sub.path.as_path(), *video))
+        })
+        .collect();
     let ctx_of = |index, folder_index, file| Ctx {
         index,
         folder_index,
@@ -816,6 +847,12 @@ pub fn preview(
             .filter(|_| !file.is_dir && crate::ebook::is_book(&file.ext)),
         comic: None,
         comic_folder: None,
+        video: if tmdb::is_video(&file.ext) {
+            Some(file)
+        } else {
+            subtitle_video.get(file.path.as_path()).copied()
+        },
+        as_folder: false,
     };
     // What each lookup reads (see `Pipeline::lookup_name`).
     let lookup: HashMap<&Path, (String, String)> = shown
@@ -884,13 +921,26 @@ pub fn preview(
                 let (stem, ext, moved) = pipeline.run_full(&ctx);
                 empty_stem =
                     stem.is_empty() && !file.stem.is_empty() && !overrides.contains_key(&file.path);
+                // The movie's folder is named as the video, without a
+                // subtitle's language or the picture's size.
+                let folder = match moved {
+                    Some(Move::OwnFolder) => {
+                        pipeline
+                            .run_full(&Ctx {
+                                as_folder: true,
+                                ..ctx
+                            })
+                            .0
+                    }
+                    _ => String::new(),
+                };
                 // A movie already in a folder with its name stays there.
                 let inside = file
                     .dir
                     .file_name()
-                    .is_some_and(|d| d.to_string_lossy() == stem);
+                    .is_some_and(|d| d.to_string_lossy() == folder);
                 let (root, names) = match moved {
-                    Some(Move::OwnFolder) if !inside => (file.dir.clone(), vec![stem.clone()]),
+                    Some(Move::OwnFolder) if !inside => (file.dir.clone(), vec![folder.clone()]),
                     Some(Move::Into { root, folders }) => (root, folders),
                     _ => (file.dir.clone(), Vec::new()),
                 };
@@ -1682,6 +1732,19 @@ mod tests {
             d.path().join("Filme (2001)/Filme (2001).mkv")
         );
 
+        // The subtitle goes into the same folder.
+        let files = entries(d.path(), &["f.2001.mkv", "f.2001.pt-BR.srt"]);
+        let mut view = View::default();
+        for f in &files {
+            view.movies.insert(f.path.clone(), m.clone());
+        }
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        let to: Vec<_> = p.operations().iter().map(|o| o.to.clone()).collect();
+        assert!(
+            to.contains(&d.path().join("Filme (2001)/Filme (2001).pt-BR.srt")),
+            "{to:?}"
+        );
+
         // Already organized: no folder inside the folder, nothing to do.
         let inner = d.path().join("Filme (2001)");
         fs::create_dir(&inner).unwrap();
@@ -1691,6 +1754,48 @@ mod tests {
         let p = preview(&files, &steps, &HashMap::new(), &view);
         assert_eq!(p.items[0].folder, None);
         assert_eq!(p.items[0].status, Status::Unchanged);
+    }
+
+    #[test]
+    fn movie_versions_by_picture() {
+        let d = tempfile::tempdir().unwrap();
+        let m = MovieMatch {
+            id: 1,
+            title: "Filme".into(),
+            original_title: String::new(),
+            year: Some(2001),
+        };
+        let steps = vec![Step {
+            enabled: true,
+            rule: Rule::Movie {
+                template: "{title} ({year})< - {resolution}>".into(),
+                colon: " - ".into(),
+                sidecar: false,
+                fanart: false,
+                folder: true,
+                missing: false,
+            },
+        }];
+        fs::write(d.path().join("notes.ods"), "n").unwrap();
+        let mut files = entries(d.path(), &["f.2001.pt-BR.srt"]);
+        let video = d.path().join("f.2001.mkv");
+        fs::copy("tests/fixtures/video.mkv", &video).unwrap();
+        files.push(FileEntry::from_path(&video, &fs::metadata(&video).unwrap()).unwrap());
+        let mut view = View::default();
+        for f in &files {
+            view.movies.insert(f.path.clone(), m.clone());
+        }
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        let mut to: Vec<_> = p.operations().iter().map(|o| o.to.clone()).collect();
+        to.sort();
+        // The subtitle takes its video's picture; the folder has neither.
+        assert_eq!(
+            to,
+            [
+                d.path().join("Filme (2001)/Filme (2001) - 136p.mkv"),
+                d.path().join("Filme (2001)/Filme (2001) - 136p.pt-BR.srt"),
+            ]
+        );
     }
 
     #[test]
@@ -1997,6 +2102,7 @@ mod tests {
                 listen: false,
                 write_tags: false,
                 embed_cover: false,
+                cover_size: 1200,
                 clean_tags: false,
                 missing: false,
             },
@@ -2100,6 +2206,7 @@ mod tests {
                 listen: false,
                 write_tags: false,
                 embed_cover: false,
+                cover_size: 1200,
                 clean_tags: false,
                 missing: false,
             },
@@ -2237,6 +2344,7 @@ mod tests {
                 listen: false,
                 write_tags: false,
                 embed_cover: false,
+                cover_size: 1200,
                 clean_tags: false,
                 missing: false,
             },
@@ -2352,6 +2460,7 @@ mod tests {
                 listen: false,
                 write_tags: false,
                 embed_cover: false,
+                cover_size: 1200,
                 clean_tags: false,
                 missing: false,
             },

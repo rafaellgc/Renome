@@ -140,11 +140,17 @@ impl Client {
         .await
     }
 
-    /// The front cover (1200 pixels): the release's, else its release
-    /// group's (an edition without artwork, a cassette say, shares the
-    /// album's); `None` if neither has one.
-    pub async fn front_cover(&self, id: &str) -> Result<Option<Vec<u8>>, String> {
-        if let Some(bytes) = self.front(&format!("release/{id}")).await? {
+    /// The front cover, `size` pixels wide (1200, 500 or 250; others
+    /// give 1200): the release's, else its release group's (an edition
+    /// without artwork, a cassette say, shares the album's); `None` if
+    /// neither has one.
+    pub async fn front_cover(&self, id: &str, size: u32) -> Result<Option<Vec<u8>>, String> {
+        let size = if matches!(size, 250 | 500) {
+            size
+        } else {
+            1200
+        };
+        if let Some(bytes) = self.front(&format!("release/{id}"), size).await? {
             return Ok(Some(bytes));
         }
         let group = self
@@ -155,15 +161,15 @@ impl Client {
             .map(|g| g.id)
             .filter(|g| !g.is_empty());
         match group {
-            Some(g) => self.front(&format!("release-group/{g}")).await,
+            Some(g) => self.front(&format!("release-group/{g}"), size).await,
             None => Ok(None),
         }
     }
 
     /// The front image of `what` (`release/<id>`, `release-group/<id>`).
     /// The archive fails now and then (HTTP 5xx): it is asked once more.
-    async fn front(&self, what: &str) -> Result<Option<Vec<u8>>, String> {
-        let url = format!("{}/{what}/front-1200", covers_base());
+    async fn front(&self, what: &str, size: u32) -> Result<Option<Vec<u8>>, String> {
+        let url = format!("{}/{what}/front-{size}", covers_base());
         let mut retried = false;
         loop {
             let res = self.http.get(&url).send().await.map_err(net_error)?;
@@ -615,7 +621,7 @@ pub async fn covers(
             .unwrap_or(true);
         if !has_cover {
             let path = item.dir.join("cover.jpg");
-            match client.front_cover(&item.release).await {
+            match client.front_cover(&item.release, 1200).await {
                 Ok(Some(bytes)) => match crate::tmdb::write_new(&path, &bytes) {
                     Ok(()) => report.created.push(path),
                     Err(e) => report.errors.push(("cover.jpg".into(), e)),

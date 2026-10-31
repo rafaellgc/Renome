@@ -34,6 +34,9 @@ pub struct FileEntry {
     /// The `ComicInfo.xml` of a comic, read on first use.
     #[serde(skip)]
     pub(crate) comic: OnceLock<Option<crate::comics::ComicInfo>>,
+    /// A video's picture size and codec, read on first use.
+    #[serde(skip)]
+    pub(crate) video: OnceLock<Option<crate::video::VideoInfo>>,
 }
 
 impl FileEntry {
@@ -58,6 +61,7 @@ impl FileEntry {
             taken: OnceLock::new(),
             tags: OnceLock::new(),
             comic: OnceLock::new(),
+            video: OnceLock::new(),
         })
     }
 
@@ -77,7 +81,18 @@ impl FileEntry {
             return None;
         }
         self.tags
-            .get_or_init(|| crate::music::read(&self.path))
+            .get_or_init(|| crate::music::probe(&self.path))
+            .as_ref()
+    }
+
+    /// A video's picture size and codec, from its headers. Read once and
+    /// cached.
+    pub fn video_info(&self) -> Option<&crate::video::VideoInfo> {
+        if self.is_dir || !crate::tmdb::is_video(&self.ext) {
+            return None;
+        }
+        self.video
+            .get_or_init(|| crate::video::read(&self.path))
             .as_ref()
     }
 

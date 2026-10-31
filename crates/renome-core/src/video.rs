@@ -1,0 +1,592 @@
+//! What a video file holds: its picture's size and codec, read from the
+//! container's headers (Matroska/WebM, MP4/QuickTime, AVI, MPEG, FLV); no
+//! video is decoded and the media data is skipped, not read. Each reader
+//! looks only for what it needs and stops there, so a file cut short or
+//! with odd parts elsewhere (an index past its end) is still read.
+
+use std::fs::File;
+use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::path::Path;
+
+use serde::Serialize;
+
+/// The main video track's frame size, in pixels, and codec.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoInfo {
+    pub width: u32,
+    pub height: u32,
+    /// `H.264`, `HEVC`, `AV1`…; empty when unknown.
+    pub codec: String,
+}
+
+impl VideoInfo {
+    /// The usual name for the picture's size: `2160p`, `1080p`, `720p`,
+    /// `576p`, `480p`. A film cropped to a wider shape (`1920×800`) keeps
+    /// the name of its width; other sizes give their height (`360p`).
+    pub fn resolution(&self) -> String {
+        let (w, h) = (self.width, self.height);
+        if w == 0 || h == 0 {
+            return String::new();
+        }
+        let name = if w >= 3200 || h >= 1800 {
+            "2160p"
+        } else if w >= 2200 || h >= 1300 {
+            "1440p"
+        } else if w >= 1700 || h >= 1000 {
+            "1080p"
+        } else if w >= 1100 || h >= 700 {
+            "720p"
+        } else if h >= 540 {
+            "576p"
+        } else if h >= 460 {
+            "480p"
+        } else {
+            return format!("{h}p");
+        };
+        name.into()
+    }
+}
+
+/// The template keys that read the video (resolution and codec).
+const KEYS: [&str; 10] = [
+    "resolution",
+    "resolução",
+    "resolucao",
+    "resolución",
+    "video codec",
+    "codec de vídeo",
+    "codec de video",
+    "códec de vídeo",
+    "códec de video",
+    "codec",
+];
+
+/// Whether a template has a key that needs the video read.
+pub fn wanted(template: &str) -> bool {
+    KEYS.iter().any(|k| template.contains(&format!("{{{k}}}")))
+}
+
+/// The video's values for templates: resolution and codec, empty when
+/// the video is unknown.
+#[derive(Default)]
+pub struct Fields {
+    resolution: String,
+    codec: String,
+}
+
+impl Fields {
+    pub fn of(video: Option<&VideoInfo>) -> Self {
+        video
+            .map(|v| Fields {
+                resolution: v.resolution(),
+                codec: v.codec.clone(),
+            })
+            .unwrap_or_default()
+    }
+
+    /// The value of a template key about the video; `None` for other keys.
+    pub fn get(&self, key: &str) -> Option<&str> {
+        match KEYS.iter().position(|k| *k == key)? {
+            0..=3 => Some(&self.resolution),
+            _ => Some(&self.codec),
+        }
+    }
+}
+
+/// Reads the main video track of a video file; `None` when the format is
+/// not one of those read or the file has no video track. The format is
+/// told by the file's first bytes, not its extension (an `.avi` is
+/// sometimes an MP4).
+pub fn read(path: &Path) -> Option<VideoInfo> {
+    let mut f = BufReader::new(File::open(path).ok()?);
+    let mut head = [0u8; 12];
+    f.read_exact(&mut head).ok()?;
+    f.seek(SeekFrom::Start(0)).ok()?;
+    let mp4_box = [
+        b"ftyp", b"moov", b"mdat", b"free", b"wide", b"skip", b"pnot",
+    ];
+    match head {
+        [0x1a, 0x45, 0xdf, 0xa3, ..] => matroska_video(&mut f),
+        [b'R', b'I', b'F', b'F', _, _, _, _, b'A', b'V', b'I', b' '] => avi_video(&mut f),
+        // A video CD's MPEG wrapped in RIFF.
+        [b'R', b'I', b'F', b'F', _, _, _, _, b'C', b'D', b'X', b'A'] => mpeg_video(&mut f),
+        [0, 0, 1, 0xba, ..] | [0, 0, 1, 0xb3, ..] => mpeg_video(&mut f),
+        [b'F', b'L', b'V', 1, ..] => flv_video(&mut f),
+        _ if mp4_box.iter().any(|k| head[4..8] == k[..]) => mp4_video(&mut f),
+        _ => None,
+    }
+    .filter(|v| v.width > 0 && v.height > 0)
+}
+
+/// An EBML number: the element ids keep their length marker, sizes lose
+/// it (all ones: unknown). Returns the value and its length.
+fn vint(data: &[u8], keep_marker: bool) -> Option<(u64, usize)> {
+    let first = *data.first()?;
+    let len = first.leading_zeros() as usize + 1;
+    if len > 8 {
+        return None;
+    }
+    let mut value = u64::from(if keep_marker {
+        first
+    } else {
+        first & (0xffu16 >> len) as u8
+    });
+    for &b in data.get(1..len)? {
+        value = (value << 8) | u64::from(b);
+    }
+    if !keep_marker && value == (1u64 << (7 * len)) - 1 {
+        value = u64::MAX;
+    }
+    Some((value, len))
+}
+
+/// The EBML elements in `data`: id and content.
+fn ebml(data: &[u8]) -> impl Iterator<Item = (u64, &[u8])> {
+    let mut at = 0usize;
+    std::iter::from_fn(move || {
+        let (id, a) = vint(data.get(at..)?, true)?;
+        let (size, b) = vint(data.get(at + a..)?, false)?;
+        let start = at + a + b;
+        let end = start
+            .checked_add(usize::try_from(size).ok()?)?
+            .min(data.len());
+        at = end;
+        Some((id, data.get(start..end)?))
+    })
+}
+
+fn ebml_uint(data: &[u8]) -> u64 {
+    data.iter().fold(0, |n, &b| (n << 8) | u64::from(b))
+}
+
+/// Matroska and WebM: the segment's elements are walked by their headers
+/// until its track list, which is read; the clusters before it, if any,
+/// are skipped.
+fn matroska_video<R: Read + Seek>(f: &mut R) -> Option<VideoInfo> {
+    const SEGMENT: u64 = 0x1853_8067;
+    const TRACKS: u64 = 0x1654_ae6b;
+    let size = f.seek(SeekFrom::End(0)).ok()?;
+    let mut pos = 0u64;
+    let mut head = [0u8; 16];
+    let tracks = loop {
+        if pos >= size {
+            return None;
+        }
+        f.seek(SeekFrom::Start(pos)).ok()?;
+        let n = f.read(&mut head).ok()?;
+        let (id, a) = vint(&head[..n], true)?;
+        let (len, b) = vint(head.get(a..n)?, false)?;
+        let start = pos + (a + b) as u64;
+        if id == SEGMENT {
+            // Its children follow.
+            pos = start;
+        } else if id == TRACKS {
+            let len = len.min(size - start).min(16 << 20);
+            let mut body = vec![0u8; len as usize];
+            f.seek(SeekFrom::Start(start)).ok()?;
+            f.read_exact(&mut body).ok()?;
+            break body;
+        } else if len == u64::MAX {
+            return None;
+        } else {
+            pos = start.checked_add(len)?;
+        }
+    };
+    ebml(&tracks)
+        .filter(|(id, _)| *id == 0xae)
+        .filter_map(|(_, entry)| {
+            let (mut video, mut kind, mut codec) = (None, 0, "");
+            for (id, data) in ebml(entry) {
+                match id {
+                    0x83 => kind = ebml_uint(data),
+                    0x86 => {
+                        codec =
+                            matroska_codec(std::str::from_utf8(data).ok()?.trim_end_matches('\0'))
+                    }
+                    0xe0 => video = Some(data),
+                    _ => {}
+                }
+            }
+            if kind != 1 {
+                return None;
+            }
+            let (mut width, mut height) = (0, 0);
+            for (id, data) in ebml(video?) {
+                match id {
+                    0xb0 => width = ebml_uint(data),
+                    0xba => height = ebml_uint(data),
+                    _ => {}
+                }
+            }
+            Some(VideoInfo {
+                width: u32::try_from(width).ok()?,
+                height: u32::try_from(height).ok()?,
+                codec: codec.into(),
+            })
+        })
+        .max_by_key(|v| u64::from(v.width) * u64::from(v.height))
+}
+
+fn matroska_codec(id: &str) -> &'static str {
+    match id {
+        "V_MPEG4/ISO/AVC" => "H.264",
+        "V_MPEGH/ISO/HEVC" => "HEVC",
+        "V_AV1" => "AV1",
+        "V_VP9" => "VP9",
+        "V_VP8" => "VP8",
+        "V_MPEG2" | "V_MPEG1" => "MPEG-2",
+        id if id.starts_with("V_MPEG4/ISO/") || id.starts_with("V_MPEG4/MS/") => "MPEG-4",
+        _ => "",
+    }
+}
+
+/// The codec of a four-character code, as MP4 sample descriptions and AVI
+/// stream headers give it.
+fn fourcc_codec(code: &[u8]) -> &'static str {
+    match code.to_ascii_lowercase().as_slice() {
+        b"avc1" | b"avc3" | b"h264" | b"x264" => "H.264",
+        b"hvc1" | b"hev1" | b"hevc" | b"h265" | b"x265" => "HEVC",
+        b"av01" => "AV1",
+        b"vp09" => "VP9",
+        b"vp08" => "VP8",
+        b"mp4v" | b"xvid" | b"divx" | b"dx50" | b"fmp4" | b"div3" | b"div4" | b"mp43" | b"mp42"
+        | b"mp41" => "MPEG-4",
+        b"mjpg" | b"jpeg" | b"mjpa" | b"mjpb" => "MJPEG",
+        b"apch" | b"apcn" | b"apcs" | b"apco" | b"ap4h" | b"ap4x" => "ProRes",
+        _ => "",
+    }
+}
+
+/// The boxes inside `data` (an MP4 box's content): kind and content.
+fn children(data: &[u8]) -> impl Iterator<Item = (&[u8], &[u8])> {
+    let mut at = 0usize;
+    std::iter::from_fn(move || {
+        let head = data.get(at..at + 8)?;
+        let mut len = u32::from_be_bytes(head[..4].try_into().ok()?) as usize;
+        let mut start = 8;
+        if len == 1 {
+            len = usize::try_from(u64::from_be_bytes(
+                data.get(at + 8..at + 16)?.try_into().ok()?,
+            ))
+            .ok()?;
+            start = 16;
+        } else if len == 0 {
+            len = data.len() - at;
+        }
+        let body = data.get(at + start..at.checked_add(len)?)?;
+        let kind = &head[4..8];
+        at += len;
+        Some((kind, body))
+    })
+}
+
+fn child<'a>(data: &'a [u8], kind: &[u8]) -> Option<&'a [u8]> {
+    children(data).find(|(k, _)| *k == kind).map(|(_, b)| b)
+}
+
+/// MP4 and QuickTime: the `moov` box is found by the top-level headers,
+/// the media data skipped (a film's index is a few megabytes, its data
+/// gigabytes); of its tracks, the video ones (`hdlr` `vide`) give their
+/// size from the sample description (`stsd`), else the track header
+/// (`tkhd`), and the largest is taken.
+fn mp4_video<R: Read + Seek>(f: &mut R) -> Option<VideoInfo> {
+    // A moov bigger than this is no sane file's.
+    const MOOV_MAX: u64 = 256 << 20;
+    let size = f.seek(SeekFrom::End(0)).ok()?;
+    let mut pos = 0u64;
+    let moov = loop {
+        if pos + 8 > size {
+            return None;
+        }
+        f.seek(SeekFrom::Start(pos)).ok()?;
+        let mut head = [0u8; 16];
+        f.read_exact(&mut head[..8]).ok()?;
+        let (mut len, mut start) = (u64::from(u32::from_be_bytes(head[..4].try_into().ok()?)), 8);
+        if len == 1 {
+            f.read_exact(&mut head[8..]).ok()?;
+            len = u64::from_be_bytes(head[8..].try_into().ok()?);
+            start = 16;
+        } else if len == 0 {
+            len = size - pos;
+        }
+        if len < start {
+            return None;
+        }
+        if &head[4..8] == b"moov" {
+            let len = len.min(size - pos);
+            if len > MOOV_MAX {
+                return None;
+            }
+            let mut body = vec![0u8; (len - start) as usize];
+            f.read_exact(&mut body).ok()?;
+            break body;
+        }
+        pos += len;
+    };
+    children(&moov)
+        .filter(|(k, _)| *k == b"trak")
+        .filter_map(|(_, trak)| {
+            let mdia = child(trak, b"mdia")?;
+            // hdlr: version and flags, pre-defined, then the handler type.
+            if child(mdia, b"hdlr")?.get(8..12)? != b"vide" {
+                return None;
+            }
+            let stsd = child(child(child(mdia, b"minf")?, b"stbl")?, b"stsd")?;
+            // stsd: version and flags, entry count, then the first entry
+            // (size, format, 6 reserved, data reference, 16 bytes of
+            // version and the like, width and height).
+            let entry = stsd.get(8..)?;
+            let codec = fourcc_codec(entry.get(4..8)?);
+            let be16 =
+                |at: usize| Some(u16::from_be_bytes(entry.get(at..at + 2)?.try_into().ok()?));
+            let (mut width, mut height) = (u32::from(be16(32)?), u32::from(be16(34)?));
+            if width == 0 || height == 0 {
+                // tkhd: the size in 16.16 fixed point at its end.
+                let tkhd = child(trak, b"tkhd")?;
+                let n = tkhd.len();
+                let be32 =
+                    |at: usize| Some(u32::from_be_bytes(tkhd.get(at..at + 4)?.try_into().ok()?));
+                width = be32(n.checked_sub(8)?)? >> 16;
+                height = be32(n - 4)? >> 16;
+            }
+            Some(VideoInfo {
+                width,
+                height,
+                codec: codec.into(),
+            })
+        })
+        .max_by_key(|v| u64::from(v.width) * u64::from(v.height))
+}
+
+/// AVI: the first video stream's format (`strf`, a bitmap header) gives
+/// its size and codec, the main header (`avih`) the size when it lacks it.
+fn avi_video<R: Read>(f: &mut R) -> Option<VideoInfo> {
+    let mut head = vec![0u8; 64 * 1024];
+    let mut n = 0;
+    while n < head.len() {
+        match f.read(&mut head[n..]).ok()? {
+            0 => break,
+            k => n += k,
+        }
+    }
+    let head = &head[..n];
+    let le32 = |at: usize| Some(u32::from_le_bytes(head.get(at..at + 4)?.try_into().ok()?));
+    let find = |tag: &[u8], from: usize| {
+        head.get(from..)?
+            .windows(4)
+            .position(|w| w == tag)
+            .map(|p| p + from)
+    };
+    // The video stream header (`strh` of type `vids`), and the format
+    // after it.
+    let mut at = 0;
+    let (handler, strf) = loop {
+        let strh = find(b"strh", at)?;
+        if head.get(strh + 8..strh + 12)? == b"vids" {
+            let handler = head.get(strh + 12..strh + 16)?;
+            break (handler, find(b"strf", strh));
+        }
+        at = strh + 4;
+    };
+    // strf: size, then the bitmap header's size, width, height, planes and
+    // bit count, and the compression.
+    let (mut width, mut height, mut codec) = (0, 0, "");
+    if let Some(strf) = strf {
+        width = le32(strf + 12)?;
+        height = (le32(strf + 16)? as i32).unsigned_abs();
+        codec = fourcc_codec(head.get(strf + 24..strf + 28)?);
+    }
+    if width == 0 || height == 0 {
+        let avih = find(b"avih", 0)? + 8;
+        (width, height) = (le32(avih + 32)?, le32(avih + 36)?);
+    }
+    if codec.is_empty() {
+        codec = fourcc_codec(handler);
+    }
+    Some(VideoInfo {
+        width,
+        height,
+        codec: codec.into(),
+    })
+}
+
+/// Flash video: the size from the metadata (`onMetaData`'s `width` and
+/// `height`), the codec from the first video tag.
+fn flv_video<R: Read>(f: &mut R) -> Option<VideoInfo> {
+    let mut head = Vec::new();
+    f.take(256 * 1024).read_to_end(&mut head).ok()?;
+    let number = |key: &[u8]| {
+        let mut pattern = (key.len() as u16).to_be_bytes().to_vec();
+        pattern.extend_from_slice(key);
+        pattern.push(0);
+        let at = head.windows(pattern.len()).position(|w| w == pattern)? + pattern.len();
+        let n = f64::from_be_bytes(head.get(at..at + 8)?.try_into().ok()?);
+        (n.is_finite() && n > 0.0 && n < 100_000.0).then_some(n as u32)
+    };
+    let (width, height) = (number(b"width")?, number(b"height")?);
+    // Tags after the header: previous tag size, type, data size, time,
+    // stream id, data.
+    let mut at = u32::from_be_bytes(head.get(5..9)?.try_into().ok()?) as usize + 4;
+    let mut codec = "";
+    while let Some(tag) = head.get(at..at + 12) {
+        let len = u32::from_be_bytes([0, tag[1], tag[2], tag[3]]) as usize;
+        if tag[0] == 9 {
+            codec = match tag[11] & 0x0f {
+                2 => "H.263",
+                4 | 5 => "VP6",
+                7 => "H.264",
+                12 => "HEVC",
+                _ => "",
+            };
+            break;
+        }
+        at += 11 + len + 4;
+    }
+    Some(VideoInfo {
+        width,
+        height,
+        codec: codec.into(),
+    })
+}
+
+/// MPEG program streams (`.mpg`, `.vob`): the first sequence header gives
+/// the size; an extension after it marks MPEG-2.
+fn mpeg_video<R: Read>(f: &mut R) -> Option<VideoInfo> {
+    let mut head = Vec::new();
+    f.take(4 << 20).read_to_end(&mut head).ok()?;
+    let seq = head.windows(4).position(|w| w == [0, 0, 1, 0xb3])?;
+    let b = head.get(seq + 4..seq + 7)?;
+    let width = (u32::from(b[0]) << 4) | (u32::from(b[1]) >> 4);
+    let height = ((u32::from(b[1]) & 0xf) << 8) | u32::from(b[2]);
+    let mpeg2 = head
+        .get(seq..(seq + 200).min(head.len()))?
+        .windows(4)
+        .any(|w| w == [0, 0, 1, 0xb5]);
+    Some(VideoInfo {
+        width,
+        height,
+        codec: if mpeg2 { "MPEG-2" } else { "MPEG-1" }.into(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolutions() {
+        let r = |width, height| {
+            VideoInfo {
+                width,
+                height,
+                codec: String::new(),
+            }
+            .resolution()
+        };
+        assert_eq!(r(3840, 2160), "2160p");
+        assert_eq!(r(3840, 1600), "2160p");
+        assert_eq!(r(1920, 1080), "1080p");
+        assert_eq!(r(1920, 800), "1080p");
+        assert_eq!(r(1440, 1080), "1080p");
+        assert_eq!(r(1280, 720), "720p");
+        assert_eq!(r(1280, 536), "720p");
+        assert_eq!(r(720, 576), "576p");
+        assert_eq!(r(720, 480), "480p");
+        assert_eq!(r(640, 360), "360p");
+        assert_eq!(r(0, 0), "");
+    }
+
+    #[test]
+    fn reads_containers() {
+        let dir = Path::new("tests/fixtures");
+        for (name, codec) in [
+            ("video.mkv", "H.264"),
+            ("video.webm", "VP9"),
+            ("video.mp4", "HEVC"),
+            ("video-faststart.mp4", "H.264"),
+            ("video.mov", "H.264"),
+            ("video.avi", "MPEG-4"),
+            ("video.mpg", "MPEG-2"),
+            ("video.flv", "H.263"),
+        ] {
+            let v = read(&dir.join(name)).unwrap_or_else(|| panic!("{name}"));
+            assert_eq!(
+                (v.width, v.height, v.codec.as_str()),
+                (320, 136, codec),
+                "{name}"
+            );
+            assert_eq!(v.resolution(), "136p");
+        }
+        // Not a video.
+        assert_eq!(read(&dir.join("song.flac")), None);
+        // Told by its content, not its extension.
+        let d = tempfile::tempdir().unwrap();
+        let odd = d.path().join("really an mp4.avi");
+        std::fs::copy(dir.join("video.mp4"), &odd).unwrap();
+        assert_eq!(read(&odd).map(|v| v.codec), Some("HEVC".into()));
+        // Cut short (a download stopped halfway): its tracks are at the start.
+        let mkv = std::fs::read(dir.join("video.mkv")).unwrap();
+        let cut = d.path().join("cut.mkv");
+        std::fs::write(&cut, &mkv[..mkv.len() / 2]).unwrap();
+        assert_eq!(read(&cut).map(|v| v.height), Some(136));
+    }
+
+    /// The boxes of an MP4 file: (kind, bytes with the header).
+    fn boxes(data: &[u8]) -> Vec<([u8; 4], Vec<u8>)> {
+        let mut out = Vec::new();
+        let mut at = 0;
+        while at + 8 <= data.len() {
+            let len = u32::from_be_bytes(data[at..at + 4].try_into().unwrap()) as usize;
+            out.push((
+                data[at + 4..at + 8].try_into().unwrap(),
+                data[at..at + len].to_vec(),
+            ));
+            at += len;
+        }
+        out
+    }
+
+    #[test]
+    fn old_and_huge_mp4() {
+        let d = tempfile::tempdir().unwrap();
+        let mov = std::fs::read("tests/fixtures/video.mov").unwrap();
+        // QuickTime without ftyp.
+        let bare: Vec<u8> = boxes(&mov)
+            .into_iter()
+            .filter(|(k, _)| k != b"ftyp")
+            .flat_map(|(_, b)| b)
+            .collect();
+        let old = d.path().join("old.mov");
+        std::fs::write(&old, bare).unwrap();
+        assert_eq!(read(&old).map(|v| v.height), Some(136));
+        // 5 GB of media data (a sparse file) before the moov, its size in
+        // 64 bits: skipped, not read. (Windows would fill the file.)
+        if cfg!(windows) {
+            return;
+        }
+        let mp4 = std::fs::read("tests/fixtures/video.mp4").unwrap();
+        let parts = boxes(&mp4);
+        let huge = d.path().join("huge.mp4");
+        let mut f = File::create(&huge).unwrap();
+        use std::io::Write;
+        let mdat: u64 = 5 << 30;
+        for (kind, bytes) in &parts {
+            if kind == b"moov" {
+                let mut head = 1u32.to_be_bytes().to_vec();
+                head.extend_from_slice(b"mdat");
+                head.extend_from_slice(&mdat.to_be_bytes());
+                f.write_all(&head).unwrap();
+                f.seek(SeekFrom::Current(mdat as i64 - 16)).unwrap();
+            }
+            if kind != b"mdat" {
+                f.write_all(bytes).unwrap();
+            }
+        }
+        drop(f);
+        let start = std::time::Instant::now();
+        let v = read(&huge).unwrap();
+        assert_eq!((v.width, v.codec.as_str()), (320, "HEVC"));
+        assert!(start.elapsed().as_secs() < 2);
+    }
+}

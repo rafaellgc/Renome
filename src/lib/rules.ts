@@ -2,7 +2,7 @@ import { settings } from "./settings.svelte";
 import type { Rule, RuleType, Step } from "./types";
 
 export const RULE_TYPES: RuleType[] = [
-  "replace", "regex", "rearrange", "case", "insert", "number", "remove", "removeRange", "charAt", "extension", "movie", "series", "music", "book", "comic",
+  "replace", "regex", "rearrange", "case", "insert", "number", "remove", "convert", "removeRange", "charAt", "extension", "movie", "series", "music", "book", "comic",
 ];
 
 const NAME_VAR = { pt: "{nome}", en: "{name}", es: "{nombre}" } as const;
@@ -94,7 +94,9 @@ export function newRule(type: RuleType): Rule {
     case "number":
       return { type, template: `${NAME_VAR[settings.lang]} {n}`, start: 1, step: 1, digits: 2, perFolder: false };
     case "remove":
-      return { type, allSpaces: false, extraSpaces: true, accents: false, digits: false, chars: "", target: "name" };
+      return { type, allSpaces: false, extraSpaces: true, accents: false, digits: false, chars: "", leadingNumber: false, maxLength: 0, target: "name" };
+    case "convert":
+      return { type, mojibake: true, latin: false, web: "", target: "name" };
     case "removeRange":
       return { type, from: "text", fromPosition: 1, fromText: "", to: "text", toPosition: 1, toText: "", inclusive: true };
     case "charAt":
@@ -112,7 +114,7 @@ export function newRule(type: RuleType): Rule {
       };
     case "music": {
       const [template, folderTemplate] = MUSIC_TEMPLATE[settings.lang];
-      return { type, template, colon: " - ", discPrefix: true, fromName: false, folders: false, folderTemplate, cover: false, playlist: false, listen: true, writeTags: false, embedCover: true, cleanTags: true, missing: true };
+      return { type, template, colon: " - ", discPrefix: true, fromName: false, folders: false, folderTemplate, cover: false, playlist: false, listen: true, writeTags: false, embedCover: true, coverSize: 1200, cleanTags: true, missing: true };
     }
     case "book": {
       const [template, folderTemplate] = BOOK_TEMPLATE[settings.lang];

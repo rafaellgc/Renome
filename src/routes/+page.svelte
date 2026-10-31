@@ -717,7 +717,7 @@
         if (items.length) {
           mbProgress = { done: 0, total: items.length, kind: "tags" };
           try {
-            const res = await api.writeTags(r.historyId, $state.snapshot(items), mrule.embedCover, mrule.cleanTags);
+            const res = await api.writeTags(r.historyId, $state.snapshot(items), mrule.embedCover, mrule.cleanTags, mrule.coverSize);
             tagged = res.written;
             if (res.errors.length) {
               await notify({

@@ -273,13 +273,20 @@ pub fn safe_text(s: &str, colon: &str) -> String {
 }
 
 /// The new name from the rule's template: `{title}`, `{original}`,
-/// `{year}`, `{id}` (also in Portuguese and Spanish). Empty brackets left
-/// by a missing year are removed.
-pub fn movie_name(template: &str, m: &MovieMatch, colon: &str) -> String {
+/// `{year}`, `{id}`, `{resolution}`, `{video codec}` (also in Portuguese
+/// and Spanish). Empty brackets left by a missing year are removed, and so
+/// is a dash left at an end.
+pub fn movie_name(
+    template: &str,
+    m: &MovieMatch,
+    colon: &str,
+    video: Option<&crate::video::VideoInfo>,
+) -> String {
     let title = safe_title(&m.title, colon);
     let original = safe_title(&m.original_title, colon);
     let year = m.year.map(|y| y.to_string()).unwrap_or_default();
     let id = m.id.to_string();
+    let video = crate::video::Fields::of(video);
     let out = crate::rules::expand(template, |key| match key {
         "title" | "titulo" | "título" => Some(title.as_str()),
         "original" | "original title" | "título original" | "titulo original" => {
@@ -287,10 +294,14 @@ pub fn movie_name(template: &str, m: &MovieMatch, colon: &str) -> String {
         }
         "year" | "ano" | "año" => Some(year.as_str()),
         "id" | "tmdbid" => Some(id.as_str()),
-        _ => None,
+        key => video.get(key),
     });
     let out = out.replace("()", "").replace("[]", "");
-    text::collapse_spaces(&out).trim().to_string()
+    text::collapse_spaces(&out)
+        .trim()
+        .trim_end_matches([' ', '-', '–'])
+        .trim_start_matches([' ', '-', '–'])
+        .to_string()
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -808,7 +819,7 @@ mod tests {
             year: Some(2001),
         };
         assert_eq!(
-            movie_name("{título} ({ano}) [tmdbid-{id}]", &m, " - "),
+            movie_name("{título} ({ano}) [tmdbid-{id}]", &m, " - ", None),
             "O Senhor dos Anéis - A Sociedade do Anel (2001) [tmdbid-120]"
         );
         let m = MovieMatch {
@@ -818,7 +829,21 @@ mod tests {
             year: None,
         };
         assert_eq!(
-            movie_name("{title} ({year})", &m, " - "),
+            movie_name("{title} ({year})", &m, " - ", None),
+            "What About Bob - AC-DC"
+        );
+        // Versions by picture size, as Jellyfin names them.
+        let uhd = crate::video::VideoInfo {
+            width: 3840,
+            height: 1608,
+            codec: "HEVC".into(),
+        };
+        assert_eq!(
+            movie_name("{título} - {resolução}", &m, " - ", Some(&uhd)),
+            "What About Bob - AC-DC - 2160p"
+        );
+        assert_eq!(
+            movie_name("{título} - {resolução}", &m, " - ", None),
             "What About Bob - AC-DC"
         );
     }

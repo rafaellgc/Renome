@@ -66,8 +66,8 @@ export const api = {
     inFolder: boolean,
   ) => invoke<{ created: string[]; errors: [string, string][] }>("write_book_sidecars", { historyId, items, cover, opf, inFolder }),
   playlistDirs: (dirs: string[]) => invoke<string[]>("playlist_dirs", { dirs }),
-  writeTags: (historyId: string | null, items: { path: string; song: SongMatch }[], cover: boolean, clean: boolean) =>
-    invoke<{ written: number; errors: [string, string][] }>("write_tags", { historyId, items, cover, clean }),
+  writeTags: (historyId: string | null, items: { path: string; song: SongMatch }[], cover: boolean, clean: boolean, coverSize: number) =>
+    invoke<{ written: number; errors: [string, string][] }>("write_tags", { historyId, items, cover, clean, coverSize }),
   writePlaylists: (historyId: string | null, dirs: string[]) =>
     invoke<{ created: string[]; errors: [string, string][]; kept: number }>("write_playlists", { historyId, dirs }),
   writeCovers: (historyId: string | null, items: { dir: string; release: string }[]) =>

@@ -865,10 +865,17 @@ pub struct EpisodeMatch {
 }
 
 /// The new name from the rule's template: `{show}`, `{original}`,
-/// `{year}`, `{season}`, `{episode}`, `{title}`, `{id}` (also in
-/// Portuguese and Spanish). Numbers have two digits; several episodes
-/// become `01-E02` (so `S{season}E{episode}` gives `S01E01-E02`).
-pub fn episode_name(template: &str, m: &EpisodeMatch, colon: &str) -> String {
+/// `{year}`, `{season}`, `{episode}`, `{title}`, `{id}`, `{resolution}`,
+/// `{video codec}` (also in Portuguese and Spanish). Numbers have two
+/// digits; several episodes become `01-E02` (so `S{season}E{episode}`
+/// gives `S01E01-E02`).
+pub fn episode_name(
+    template: &str,
+    m: &EpisodeMatch,
+    colon: &str,
+    video: Option<&crate::video::VideoInfo>,
+) -> String {
+    let video = crate::video::Fields::of(video);
     let show = safe_title(&m.show, colon);
     let original = safe_title(&m.original_show, colon);
     let year = m.year.map(|y| y.to_string()).unwrap_or_default();
@@ -895,7 +902,7 @@ pub fn episode_name(template: &str, m: &EpisodeMatch, colon: &str) -> String {
         "episode" | "episódio" | "episodio" => Some(episode.as_str()),
         "title" | "título" | "titulo" => Some(title.as_str()),
         "id" | "tmdbid" => Some(id.as_str()),
-        _ => None,
+        key => video.get(key),
     });
     let out = out.replace("()", "").replace("[]", "");
     // A missing title leaves a dangling " - ".
@@ -1626,7 +1633,8 @@ mod tests {
             episode_name(
                 "{série} ({ano}) - S{temporada}E{episódio} - {título}",
                 &m,
-                " - "
+                " - ",
+                None
             ),
             "Breaking Bad (2008) - S01E01-E02 - Piloto & O Gato - Parte 2"
         );
@@ -1637,8 +1645,27 @@ mod tests {
             ..m
         };
         assert_eq!(
-            episode_name("{show} ({year}) - S{season}E{episode} - {title}", &m, " - "),
+            episode_name(
+                "{show} ({year}) - S{season}E{episode} - {title}",
+                &m,
+                " - ",
+                None
+            ),
             "Breaking Bad - S01E03"
+        );
+        let hd = crate::video::VideoInfo {
+            width: 1280,
+            height: 720,
+            codec: "HEVC".into(),
+        };
+        assert_eq!(
+            episode_name(
+                "{show} S{season}E{episode}< [{resolution} {codec}]>",
+                &m,
+                " - ",
+                Some(&hd)
+            ),
+            "Breaking Bad S01E03 [720p HEVC]"
         );
     }
 

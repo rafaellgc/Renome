@@ -886,6 +886,7 @@ mod tests {
             release_group: "grp-1".into(),
             artist_ids: vec!["art-1".into()],
             album_artist_ids: vec!["art-1".into()],
+            ..Default::default()
         }
     }
 

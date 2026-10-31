@@ -683,8 +683,9 @@ pub fn comic_name(template: &str, m: &ComicMatch, colon: &str) -> String {
 fn expand_labeled<'a>(template: &str, value: impl Fn(&str) -> Option<&'a str>) -> String {
     static LABEL: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?:(?:^|\s)[^\s{}]{1,6}\.\s?|[^\s{}()\[\]]{1,6})$").unwrap());
+    let template = crate::rules::optional_sections(template, &value);
     let mut out = String::new();
-    let mut rest = template;
+    let mut rest = template.as_str();
     while let Some(open) = rest.find('{') {
         out.push_str(&rest[..open]);
         let tail = &rest[open..];
@@ -1410,6 +1411,11 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(comic_name("{series} {number}", &m, " - "), "Spawn 012.1");
+        // An optional section goes with its empty key, label and all.
+        assert_eq!(
+            comic_name("{series}< (Vol. {volume})> #{number}", &m, " - "),
+            "Spawn #012.1"
+        );
         assert_eq!(padded("½", 3), "½");
         assert_eq!(padded("0", 3), "000");
         assert_eq!(

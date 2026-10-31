@@ -165,8 +165,25 @@
           <label class="check"><input type="checkbox" bind:checked={r.allSpaces} /> {t("rmAllSpaces")}</label>
           <label class="check"><input type="checkbox" bind:checked={r.accents} /> {t("rmAccents")}</label>
           <label class="check"><input type="checkbox" bind:checked={r.digits} /> {t("rmDigits")}</label>
+          <label class="check" title={t("rmLeadingNumberHint")}><input type="checkbox" bind:checked={r.leadingNumber} /> {t("rmLeadingNumber")}</label>
         </div>
         <label>{t("chars")} <input class="mono" bind:value={r.chars} spellcheck="false" placeholder="_#[]" /></label>
+        <div class="row">
+          <label>{t("maxLength")} <input type="number" min="0" bind:value={r.maxLength} /></label>
+        </div>
+        {@render target()}
+      {:else if r.type === "convert"}
+        <div class="checks">
+          <label class="check" title={t("cvMojibakeHint")}><input type="checkbox" bind:checked={r.mojibake} /> {t("cvMojibake")}</label>
+          <label class="check"><input type="checkbox" bind:checked={r.latin} /> {t("cvLatin")}</label>
+        </div>
+        <label>{t("cvWeb")}
+          <select bind:value={r.web} title={t("cvWebHint")}>
+            <option value="">{t("cvWebOff")}</option>
+            <option value="-">{t("cvWebDash")}</option>
+            <option value="_">{t("cvWebUnderscore")}</option>
+          </select>
+        </label>
         {@render target()}
       {:else if r.type === "removeRange"}
         <div class="row">
@@ -273,6 +290,15 @@
         <label class="check"><input type="checkbox" bind:checked={r.writeTags} /> <span>{t("musicWriteTags")}<small>{t("musicWriteTagsHint")}</small></span></label>
         {#if r.writeTags}
           <label class="check sub"><input type="checkbox" bind:checked={r.embedCover} /> <span>{t("musicEmbedCover")}<small>{t("musicEmbedCoverHint")}</small></span></label>
+          {#if r.embedCover}
+            <label class="sub">{t("musicCoverSize")}
+              <select bind:value={r.coverSize}>
+                <option value={1200}>{t("musicCoverSize1200")}</option>
+                <option value={500}>500 px</option>
+                <option value={250}>250 px</option>
+              </select>
+            </label>
+          {/if}
           <label class="check sub"><input type="checkbox" bind:checked={r.cleanTags} /> <span>{t("musicCleanTags")}<small>{t("musicCleanTagsHint")}</small></span></label>
         {/if}
         <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("musicMissingLabel")}<small>{t("musicMissingHint")}</small></span></label>

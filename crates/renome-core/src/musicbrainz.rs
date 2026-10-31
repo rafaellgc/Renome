@@ -92,6 +92,20 @@ pub fn plain(s: &str) -> String {
         .replace('\u{2026}', "...")
 }
 
+/// An artist credit written with the sort names: `Azul, Banda feat. Rui`;
+/// empty when an artist has none.
+fn sort_credit(c: &[Credit]) -> String {
+    let mut out = String::new();
+    for a in c {
+        match a.artist.as_ref().filter(|x| !x.sort_name.is_empty()) {
+            Some(x) => out.push_str(&x.sort_name),
+            None => return String::new(),
+        }
+        out.push_str(&a.joinphrase);
+    }
+    out.trim().to_string()
+}
+
 /// An artist credit written out: `Banda Azul feat. Rui`.
 pub fn credit(c: &[Credit]) -> String {
     c.iter()
@@ -379,6 +393,18 @@ pub struct SongMatch {
     pub artist_ids: Vec<String>,
     #[serde(default)]
     pub album_artist_ids: Vec<String>,
+    /// The release group's first release.
+    #[serde(default)]
+    pub original_year: Option<u16>,
+    /// The release's first label and catalog number.
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub catalog: String,
+    #[serde(default)]
+    pub artist_sort: String,
+    #[serde(default)]
+    pub album_artist_sort: String,
 }
 
 impl SongMatch {
@@ -409,6 +435,16 @@ impl SongMatch {
         t.track_total = Some(self.track_total);
         t.disc = Some(self.disc);
         t.disc_total = Some(self.disc_total);
+        t.original_year = self.original_year.or(t.original_year);
+        let take = |own: &mut String, found: &str| {
+            if !found.is_empty() {
+                *own = found.to_string();
+            }
+        };
+        take(&mut t.label, &self.label);
+        take(&mut t.catalog, &self.catalog);
+        take(&mut t.artist_sort, &self.artist_sort);
+        take(&mut t.album_artist_sort, &self.album_artist_sort);
     }
 }
 
@@ -469,6 +505,22 @@ pub fn tracklist(release: &Release) -> Vec<ListedTrack> {
 pub fn match_tracks(release: &Release, songs: &[Song]) -> (Vec<(PathBuf, SongMatch)>, usize) {
     let album_artist = plain(&credit(&release.artist_credit));
     let album_artist_ids = artist_ids(&release.artist_credit);
+    let album_artist_sort = plain(&sort_credit(&release.artist_credit));
+    let original_year = release
+        .release_group
+        .as_ref()
+        .and_then(|g| year_of(&g.first_release_date));
+    let label = release.label_info.iter().find_map(|l| {
+        l.label
+            .as_ref()
+            .map(|n| n.name.clone())
+            .filter(|n| !n.is_empty())
+    });
+    let catalog = release.label_info.iter().find_map(|l| {
+        l.catalog_number
+            .clone()
+            .filter(|c| !c.is_empty() && c != "[none]")
+    });
     let discs = release.media.len().max(1) as u32;
     let year = year_of(&release.date);
     let mut used = HashSet::new();
@@ -517,12 +569,17 @@ pub fn match_tracks(release: &Release, songs: &[Song]) -> (Vec<(PathBuf, SongMat
         if same_length(tr, t) {
             agree += 1;
         }
-        let (artist, artist_id) = if tr.artist_credit.is_empty() {
-            (album_artist.clone(), album_artist_ids.clone())
+        let (artist, artist_id, artist_sort) = if tr.artist_credit.is_empty() {
+            (
+                album_artist.clone(),
+                album_artist_ids.clone(),
+                album_artist_sort.clone(),
+            )
         } else {
             (
                 plain(&credit(&tr.artist_credit)),
                 artist_ids(&tr.artist_credit),
+                plain(&sort_credit(&tr.artist_credit)),
             )
         };
         out.push((
@@ -552,6 +609,11 @@ pub fn match_tracks(release: &Release, songs: &[Song]) -> (Vec<(PathBuf, SongMat
                     .unwrap_or_default(),
                 artist_ids: artist_id,
                 album_artist_ids: album_artist_ids.clone(),
+                original_year,
+                label: label.clone().unwrap_or_default(),
+                catalog: catalog.clone().unwrap_or_default(),
+                artist_sort,
+                album_artist_sort: album_artist_sort.clone(),
             },
         ));
     }

@@ -67,17 +67,26 @@ before it is read. The preview sends that name to the app
 | Case | lowercase; UPPERCASE; Sentence case; Title Case; Title Case except connectives (of, the, de, da…; a part after ` - `, `:`, `(`, `.` starts capitalized). Title Case keeps Roman numerals II–XXXIX in capitals (lowercase `vi`/`xi` are words) and leaves words with inner capitals (`iPhone`, `McDonald`) as they are |
 | Insert | text, current date, file modification date, date the photo was taken (EXIF; optionally the modification date when missing, otherwise the name is unchanged) or the name of the folder the file is in; configurable date format; at the start, at the end or at a position (from the start or the end) |
 | Number | template with `{n}` (number), `{name}` (current name) and `{folder}` (folder name); start, step, minimum digits (zero padding); optionally restart in each folder |
-| Remove | spaces; repeated/leading/trailing spaces; accents; digits; custom characters |
+| Remove | spaces; repeated/leading/trailing spaces; accents (also letters written apart from their base: `ø` → `o`, `ß` → `ss`, `æ` → `ae`, `ł` → `l`, `đ`/`ð` → `d`, `þ` → `th`, `œ` → `oe`, `ı` → `i`, `ħ` → `h`); digits; custom characters; the number at the start (up to three digits, an optional `1-` disc before it, and the separator after it: `01 - `, `01. `, `1-05 `; years, dates and a name that is only the number stay); a maximum length in characters (cut at the end, without spaces, dashes, dots or commas left there; 0: no limit) |
+| Convert characters | fix broken accents: each run of non-ASCII characters is turned back into the Windows-1252/Latin-1 bytes it was read as and, when those are UTF-8, decoded (up to 3 times, for text broken more than once; `SÃ£o` → `São`, `â€™` → `’`); text that does not decode stays; other alphabets in Latin letters: Cyrillic (Russian, Ukrainian, Belarusian, Serbian, Macedonian letters; `щ` → `shch`, `ъ`/`ь` dropped) and Greek (accents dropped, `ου` → `ou`), a capital as `Sh`, or `SH` inside a word in capitals; a web-safe name: the name in plain Latin letters (as above and with the accents rule's letters), then only ASCII letters, digits and dots, every other run of characters becoming one `-` or `_` (the user's choice), none at the ends |
 | Remove range | from: position N or first occurrence of a text; to: end, position N or occurrence of a text; include the delimiters or not |
 | Character at position | position N; optionally only if the current character is X (case-insensitive unless asked); replace with Y or delete |
 | Extension | set a new one; lowercase/uppercase; remove |
-| Movie (TMDB) | template with `{title}`, `{original}`, `{year}`, `{id}` (default `{title} ({year}) [tmdbid-{id}]`); what `:` becomes (default ` - `); a folder for each movie; save `.nfo` and poster (optionally fanart and logo) next to renamed videos; show the collection's missing movies. See 2.1 |
-| TV show (TMDB) | the show (name, TMDB id or link; empty: from the files); template with `{show}`, `{original}`, `{year}`, `{season}`, `{episode}`, `{title}`, `{id}` (default `{show} ({year}) - S{season}E{episode} - {title}`); what `:` becomes; show and season folders (show folder template, default `{show} ({year}) [tmdbid-{id}]`); save `.nfo` files and images (optionally fanart and logo); show the missing episodes. See 2.2 |
-| Music (tags) | template with `{track}`, `{title}`, `{artist}`, `{album artist}`, `{album}`, `{year}`, `{disc}`, `{genre}`, `{composer}` (default `{track} - {title}`); what `:` becomes; disc number in the track on multi-disc albums; fill in from the file name; artist and album folders (default `{album artist}/{album} ({year})`); show the missing tracks. See 2.3 |
+| Movie (TMDB) | template with `{title}`, `{original}`, `{year}`, `{id}`, `{resolution}`, `{video codec}` (default `{title} ({year}) [tmdbid-{id}]`); what `:` becomes (default ` - `); a folder for each movie; save `.nfo` and poster (optionally fanart and logo) next to renamed videos; show the collection's missing movies. See 2.1 |
+| TV show (TMDB) | the show (name, TMDB id or link; empty: from the files); template with `{show}`, `{original}`, `{year}`, `{season}`, `{episode}`, `{title}`, `{id}`, `{resolution}`, `{video codec}` (as for movies, see 2.1; not in the show folder) (default `{show} ({year}) - S{season}E{episode} - {title}`); what `:` becomes; show and season folders (show folder template, default `{show} ({year}) [tmdbid-{id}]`); save `.nfo` files and images (optionally fanart and logo); show the missing episodes. See 2.2 |
+| Music (tags) | template with `{track}`, `{title}`, `{artist}`, `{album artist}`, `{album}`, `{year}`, `{disc}`, `{genre}`, `{composer}`, `{total tracks}`, `{total discs}`, `{original year}`, `{label}`, `{catalog}`, `{artist sort}`, `{album artist sort}`, `{initial}`, `{format}`, `{bitrate}`, `{sample rate}`, `{bits}` (default `{track} - {title}`); what `:` becomes; disc number in the track on multi-disc albums; fill in from the file name; artist and album folders (default `{album artist}/{album} ({year})`); show the missing tracks. See 2.3 |
 | Book (Open Library) | template with `{author}`, `{authors}`, `{author sort}`, `{initial}`, `{title}`, `{original}`, `{year}`, `{edition year}`, `{publisher}`, `{isbn}`, `{series}`, `{volume}`, `{id}` (default `{author} - {title} ({year})`); what `:` becomes; author and book folders (default `{author}/{title}`); save the cover and `metadata.opf`; show the series' missing volumes. See 2.4 |
 | Comic (ComicInfo.xml, GCD, Comic Vine, MangaDex) | template with `{series}`, `{series year}`, `{number}`, `{volume}`, `{chapter}`, `{title}`, `{year}`, `{count}`, `{publisher}`, `{writer}`, `{artist}`, `{id}` (default `{series} v{volume} #{number} c{chapter} - {title} ({year})`); what `:` becomes; the series (empty: from the files); the catalogue; series folders (default `{series} ({series year})`); series from the folder; show the missing issues. See 2.5 |
 
 Positions count **visible characters** (Unicode graphemes), starting at 1.
+
+Templates (every rule above with one, file and folder templates alike)
+can have **optional parts**: `<...>` is written without the `<>` when
+every `{field}` in it has a value, and left out otherwise
+(`{album artist}/{album}/<CD{disc}>`, `<{year} - >{title}`). Parts do
+not nest and do not span a `/` folder level; a `<...>` with no known
+field, or a `<` with no `>` after it, is kept as typed (Windows refuses
+`<` and `>` in names anyway, so no name needed them).
 
 ### 2.1 Movies (TMDB)
 
@@ -109,8 +118,34 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   safe for file names: `:` becomes the chosen text, slashes become
   dashes, `? * < > |` are dropped; empty `()` or `[]` (no year) are
   removed.
+- `{resolution}` and `{video codec}` come from the video's main track
+  (the largest video track), read from its headers; the format is told
+  by the first bytes, not the extension. Matroska/WebM: the segment's
+  elements are walked by their headers to the track list (`PixelWidth`,
+  `PixelHeight`, `CodecID`); MP4/QuickTime: the top-level boxes to
+  `moov`, whose video tracks (`hdlr` `vide`) give the size of their
+  first sample description (else the track header) and its format;
+  AVI: the video stream's bitmap header (else the main header); MPEG
+  program streams and video CDs (RIFF `CDXA`): the first sequence header
+  (an extension marks MPEG-2); FLV: `onMetaData`'s `width`/`height` and
+  the first video tag. The media data is skipped, not read, and only
+  what is needed is parsed, so files cut short or with odd parts
+  elsewhere are read; others (TS, WMV, RealMedia, ISO) give empty
+  values. The
+  resolution is named from the frame: `2160p` (width ≥ 3200 or height ≥
+  1800), `1440p` (≥ 2200 or ≥ 1300), `1080p` (≥ 1700 or ≥ 1000), `720p`
+  (≥ 1100 or ≥ 700), `576p` (height ≥ 540), `480p` (≥ 460), else the
+  height (`360p`), so a film cropped wider keeps its width's name. The
+  codec: `H.264`, `HEVC`, `AV1`, `VP9`, `VP8`, `VP6`, `H.263`, `MPEG-4`
+  (also DivX/Xvid and Microsoft's), `MPEG-2`, `MPEG-1`, `MJPEG`,
+  `ProRes`, else empty. A subtitle takes the video in its folder with the
+  same movie (or episode), the one with its name (without the language)
+  first, else the only one. A video is read only when the template asks
+  for one of these. A dash left at either end of the name is removed.
 - "Create a folder for each movie" moves each file with a movie (video
-  and subtitles alike) into a folder named after its new name, inside its
+  and subtitles alike) into a folder named after its new name as the
+  video's, without the subtitle's language and without the resolution
+  and codec (so versions of a movie share it), inside its
   current folder; a file already in a folder with that name stays. When
   the current folder is the movie's own under another name, the new
   folder goes next to it instead. A folder is the movie's own when it is
@@ -366,12 +401,23 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   the file's main tag first. Read once per file and cached.
 - Fields: title, artist, album artist (the artist's when missing),
   album, year (from the date), track and total, disc and total, genre,
-  composer. A song without a title (after the name fallback, if on) is
+  composer, original year (the year of `ORIGINALDATE`/`ORIGINALYEAR`/
+  `TDOR`; in templates, the year when missing, and left empty like the
+  year beside an album named with one), label, catalog number, artist
+  and album artist sort names (`ARTISTSORT`, `ALBUMARTISTSORT`; in
+  templates, the name itself when missing, and the album artist's falls
+  back to the artist's sort name when the album has no artist of its
+  own); `{initial}` is the album artist sort name's first letter,
+  capital and without accents (`#` for a digit or sign). From the file,
+  not its tags: format (the extension in capitals), bitrate (kbit/s, as
+  the reader measures it), sample rate (kHz, `44.1`) and bit depth
+  (lossless formats only). A song without a title (after the name fallback, if on) is
   left unchanged and flagged (`untagged`, ✕ in the table, a count in the
   card).
 - Names: track with two digits (three when the album or track number
   goes over 99); `disc-track` (`1-01`) when the option is on and the
-  album has more than one disc (disc total over 1, or disc over 1);
+  album has more than one disc (disc total over 1, or disc over 1;
+  `{disc}` is empty on other albums);
   values made safe like movie titles, keeping final dots in file names
   (the extension follows; folder names lose them); empty `()`/`[]` dropped, repeated
   ` - ` separators collapsed, separators at the ends trimmed.
@@ -381,7 +427,8 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   tag, songs with another album tag whose track number is above that
   album's highest on the same disc (bonus tracks: a single, a soundtrack
   song) take its album, album artist, year and release id. Then songs
-  with the same album tag in one folder share: the most common
+  with the same album tag in one folder share: the highest disc number
+  as the disc total of those without one (or with a lower one); the most common
   year for those without one; the most common album artist for those
   without one; when none has one, the main artist (`feat.`, `ft.`,
   `featuring`, `with` guests left out) of more than half the songs, else
@@ -505,8 +552,12 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   a title is named from its release once matched.
 - A matched song takes the release's title (track), artist (the track's
   artist credit, else the release's), album artist (release credit),
-  album, year (release date), track and disc numbers and totals, in
-  place of its tags, before the album-wide agreement. Typographic
+  album, year (release date), track and disc numbers and totals, and,
+  when the release has them, the original year (release group's first
+  release), the first label and catalog number (not `[none]`) and the
+  artist and album artist sort names (each credited artist's sort name
+  with the join phrases; none when one lacks it), in place of its tags,
+  before the album-wide agreement. Typographic
   punctuation is made plain (U+2010/2011 hyphens, curly quotes, `…`);
   dashes stay.
 - "Save the album's cover": after renaming, `cover.jpg` (front, 1200 px)
@@ -546,7 +597,9 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   and ID3v1/APE, are not). A matched song with anything else in its
   tags counts as pending in the Rename button. "Include the cover in the files" (on by default with it)
   removes every embedded picture and adds the release's front (as for
-  `cover.jpg`, else the folder's `cover`/`folder`/`front` image). The
+  `cover.jpg`, else the folder's `cover`/`folder`/`front` image), at
+  the size chosen: 1200 px by default, or the archive's 500 or 250 px
+  thumbnails (a folder image goes in as it is). The
   file is copied beside itself (`.<name>.renome-tags`), written, synced
   and renamed over the original; the modification date changes (media
   servers rescan by it). The fields' old values and the pictures removed

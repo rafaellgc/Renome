@@ -14,6 +14,7 @@
 //! - [`comics`]: comics (`ComicInfo.xml`, numbers in names, names).
 //! - [`tmdb`]: movie title guessing, ranking and `.nfo` files for TMDB.
 //! - [`tv`]: season and episode numbers, and matching files to a show.
+//! - [`video`]: a video's picture size and codec, from its headers.
 
 pub mod acoustid;
 pub mod apply;
@@ -34,6 +35,7 @@ pub mod tagwrite;
 pub mod text;
 pub mod tmdb;
 pub mod tv;
+pub mod video;
 
 pub use apply::{ApplyReport, History, HistoryEntry, Operation};
 pub use files::{FileEntry, SortKey, sort_files};

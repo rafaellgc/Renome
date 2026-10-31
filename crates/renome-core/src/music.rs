@@ -30,8 +30,17 @@ pub struct AudioTags {
     pub disc_total: Option<u32>,
     pub genre: String,
     pub composer: String,
+    /// The year the album (or the song) first came out (`ORIGINALDATE`).
+    pub original_year: Option<u16>,
+    pub label: String,
+    pub catalog: String,
+    /// How the artists are sorted (`ARTISTSORT`: "Beatles, The").
+    pub artist_sort: String,
+    pub album_artist_sort: String,
     /// Length in seconds.
     pub duration: Option<u32>,
+    /// What the audio is, read from the file, not from its tags.
+    pub audio: AudioInfo,
     /// The MusicBrainz release, when the files were tagged with it.
     pub mb_release: String,
     /// The MusicBrainz release track: songs whose tags were written from
@@ -49,6 +58,19 @@ pub struct AudioTags {
     /// The MusicBrainz recordings the song was heard as (AcoustID).
     #[serde(skip)]
     pub recordings: Vec<String>,
+}
+
+/// The file's format and quality.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioInfo {
+    /// The extension in capitals (`FLAC`, `MP3`).
+    pub format: String,
+    /// Kbit/s.
+    pub bitrate: Option<u32>,
+    /// Hz.
+    pub sample_rate: Option<u32>,
+    pub bits: Option<u8>,
 }
 
 /// Audio formats whose tags can be read (video containers left out).
@@ -72,10 +94,16 @@ fn number_of(tags: &[&Tag], get: impl Fn(&Tag) -> Option<u32>) -> Option<u32> {
 }
 
 /// Reads the tags and the length (no audio is decoded); `None` when the
-/// file cannot be read.
+/// file cannot be read or has no tags.
+pub fn read(path: &Path) -> Option<AudioTags> {
+    probe(path).filter(AudioTags::has_tags)
+}
+
+/// Reads the tags, the length and the audio's format (no audio is
+/// decoded); `None` only when the file cannot be read.
 /// With several tags (ID3v2 and ID3v1), each field comes from the first
 /// that has it, the main one first.
-pub fn read(path: &Path) -> Option<AudioTags> {
+pub fn probe(path: &Path) -> Option<AudioTags> {
     let file = Probe::open(path)
         .ok()?
         .options(ParseOptions::new().read_cover_art(false))
@@ -105,7 +133,32 @@ pub fn read(path: &Path) -> Option<AudioTags> {
         composer: text_of(&tags, |t| {
             t.get_string(ItemKey::Composer).map(str::to_string)
         }),
+        original_year: tags.iter().find_map(|t| {
+            let date = t.get_string(ItemKey::OriginalReleaseDate)?;
+            date.get(..4)?.parse().ok().filter(|&y| y > 0)
+        }),
+        label: text_of(&tags, |t| t.get_string(ItemKey::Label).map(str::to_string)),
+        catalog: text_of(&tags, |t| {
+            t.get_string(ItemKey::CatalogNumber).map(str::to_string)
+        }),
+        artist_sort: text_of(&tags, |t| {
+            t.get_string(ItemKey::TrackArtistSortOrder)
+                .map(str::to_string)
+        }),
+        album_artist_sort: text_of(&tags, |t| {
+            t.get_string(ItemKey::AlbumArtistSortOrder)
+                .map(str::to_string)
+        }),
         duration: Some(file.properties().duration().as_secs() as u32).filter(|&s| s > 0),
+        audio: AudioInfo {
+            format: path
+                .extension()
+                .map(|e| e.to_string_lossy().to_uppercase())
+                .unwrap_or_default(),
+            bitrate: file.properties().audio_bitrate().filter(|&b| b > 0),
+            sample_rate: file.properties().sample_rate().filter(|&r| r > 0),
+            bits: file.properties().bit_depth().filter(|&b| b > 0),
+        },
         mb_release: text_of(&tags, |t| {
             t.get_string(ItemKey::MusicBrainzReleaseId)
                 .map(str::to_string)
@@ -121,7 +174,7 @@ pub fn read(path: &Path) -> Option<AudioTags> {
         compilation: false,
         recordings: Vec::new(),
     };
-    (t != AudioTags::default()).then_some(t)
+    Some(t)
 }
 
 static LEADING_NUMBER: LazyLock<Regex> =
@@ -349,8 +402,16 @@ pub fn fill_albums(songs: &mut [(PathBuf, AudioTags)]) {
                 Some(VARIOUS_ARTISTS.to_string())
             }
         });
+        // A disc numbered without a total belongs to an album of as many
+        // discs as its highest (`CD1` beside `CD2`).
+        let discs = idx.iter().filter_map(|&i| songs[i].1.disc).max();
         for &i in idx {
             let t = &mut songs[i].1;
+            if let Some(d) = discs.filter(|&d| d > 1)
+                && t.disc_total.is_none_or(|n| n < d)
+            {
+                t.disc_total = Some(d);
+            }
             // One year for the album (a bonus track from a later reissue
             // does not get a folder of its own).
             t.year = year.or(t.year);
@@ -381,6 +442,15 @@ fn mark_compilation(songs: &mut [(PathBuf, AudioTags)], idx: &[usize]) {
 }
 
 impl AudioTags {
+    /// Whether anything was read besides the format: tags or a length.
+    pub fn has_tags(&self) -> bool {
+        let bare = AudioTags {
+            audio: AudioInfo::default(),
+            ..self.clone()
+        };
+        bare != AudioTags::default()
+    }
+
     /// Fills the empty fields from `other` (the guess from the file name).
     pub fn fill_from(&mut self, other: AudioTags) {
         let fill = |a: &mut String, b: String| {
@@ -399,6 +469,18 @@ impl AudioTags {
         self.disc = self.disc.or(other.disc);
     }
 
+    /// How the album's artist is sorted: its sort name, the track artist's
+    /// when the album has no artist of its own, else the name itself.
+    pub fn album_artist_sort(&self) -> &str {
+        if !self.album_artist_sort.is_empty() {
+            &self.album_artist_sort
+        } else if self.album_artist.is_empty() && !self.artist_sort.is_empty() {
+            &self.artist_sort
+        } else {
+            self.album_artist()
+        }
+    }
+
     /// The album's artist; the track's when not tagged.
     pub fn album_artist(&self) -> &str {
         if self.album_artist.is_empty() {
@@ -406,6 +488,16 @@ impl AudioTags {
         } else {
             &self.album_artist
         }
+    }
+}
+
+/// The first letter of a name, in capitals and without accents; `#` for a
+/// name that starts with a digit or a sign (`B` for "Beatles, The").
+fn initial(name: &str) -> String {
+    match text::strip_accents(name.trim()).chars().next() {
+        Some(c) if c.is_alphabetic() => c.to_uppercase().collect(),
+        Some(_) => "#".into(),
+        None => String::new(),
     }
 }
 
@@ -465,8 +557,45 @@ fn expand_as(
     if names_album && !year.is_empty() && YEAR_IN_NAME.is_match(&t.album) {
         year.clear();
     }
-    let disc = t.disc.map(|d| d.to_string()).unwrap_or_default();
+    let mut original_year = t
+        .original_year
+        .or(t.year)
+        .map(|y| y.to_string())
+        .unwrap_or_default();
+    if names_album && YEAR_IN_NAME.is_match(&t.album) {
+        original_year.clear();
+    }
+    let number = |n: Option<u32>| n.map(|n| n.to_string()).unwrap_or_default();
+    let (track_total, disc_total) = (number(t.track_total), number(t.disc_total));
+    let (label, catalog) = (safe(&t.label), safe(&t.catalog));
+    let artist_sort = safe(if t.artist_sort.is_empty() {
+        &t.artist
+    } else {
+        &t.artist_sort
+    });
+    let album_artist_sort = t.album_artist_sort();
+    let letter = initial(album_artist_sort);
+    let album_artist_sort = safe(album_artist_sort);
+    let format = t.audio.format.clone();
+    let bitrate = number(t.audio.bitrate);
+    let sample_rate = t
+        .audio
+        .sample_rate
+        .map(|hz| {
+            format!("{:.2}", f64::from(hz) / 1000.0)
+                .trim_end_matches('0')
+                .trim_end_matches('.')
+                .to_string()
+        })
+        .unwrap_or_default();
+    let bits = t.audio.bits.map(|b| b.to_string()).unwrap_or_default();
     let several_discs = t.disc_total.is_some_and(|n| n > 1) || t.disc.is_some_and(|d| d > 1);
+    // An album of one disc has no disc to tell.
+    let disc = t
+        .disc
+        .filter(|_| several_discs)
+        .map(|d| d.to_string())
+        .unwrap_or_default();
     let track = t
         .track
         .map(|n| {
@@ -492,6 +621,22 @@ fn expand_as(
         "disc" | "disco" => Some(disc.as_str()),
         "genre" | "gênero" | "genero" | "género" => Some(genre.as_str()),
         "composer" | "compositor" => Some(composer.as_str()),
+        "total tracks" | "total de faixas" | "total de pistas" => Some(track_total.as_str()),
+        "total discs" | "total de discos" => Some(disc_total.as_str()),
+        "original year" | "ano original" | "año original" => Some(original_year.as_str()),
+        "label" | "gravadora" | "sello" => Some(label.as_str()),
+        "catalog" | "catálogo" | "catalogo" => Some(catalog.as_str()),
+        "artist sort" | "artista invertido" => Some(artist_sort.as_str()),
+        "album artist sort"
+        | "artista do álbum invertido"
+        | "artista do album invertido"
+        | "artista del álbum invertido"
+        | "artista del album invertido" => Some(album_artist_sort.as_str()),
+        "initial" | "inicial" => Some(letter.as_str()),
+        "format" | "formato" => Some(format.as_str()),
+        "bitrate" | "taxa de bits" | "tasa de bits" => Some(bitrate.as_str()),
+        "sample rate" | "amostragem" | "muestreo" => Some(sample_rate.as_str()),
+        "bits" => Some(bits.as_str()),
         _ => None,
     });
     let out = out.replace("()", "").replace("[]", "");
@@ -716,6 +861,72 @@ mod tests {
             expand("{track} {title}", &multi, " - ", false),
             "04 Wish You Were Here"
         );
+        // Release details, sort names and the file's format.
+        let full = AudioTags {
+            artist: "The Beatles".into(),
+            artist_sort: "Beatles, The".into(),
+            original_year: Some(1969),
+            year: Some(2009),
+            label: "Apple".into(),
+            catalog: "PCS 7088".into(),
+            audio: AudioInfo {
+                format: "FLAC".into(),
+                bitrate: Some(912),
+                sample_rate: Some(44100),
+                bits: Some(24),
+            },
+            ..t.clone()
+        };
+        assert_eq!(
+            folders(
+                "{inicial}/{artista do álbum invertido}/{ano original} - {álbum} [{catálogo}]",
+                &full,
+                " - "
+            ),
+            ["B", "Beatles, The", "1969 - Wish You Were Here [PCS 7088]"]
+        );
+        assert_eq!(
+            expand(
+                "{track} of {total tracks} - {title} ({label}) [{format} {bits}-{sample rate} {bitrate}]",
+                &full,
+                " - ",
+                false
+            ),
+            "04 of 5 - Wish You Were Here (Apple) [FLAC 24-44.1 912]"
+        );
+        // Without its own, the original year is the year; without a sort
+        // name, the name.
+        assert_eq!(
+            expand("{original year} {artist sort} <{label}>", &t, " - ", false),
+            "1975 Pink Floyd"
+        );
+        // Optional sections: kept only when their keys have values.
+        assert_eq!(
+            expand("<CD{disc} - >{track} {title}", &multi, " - ", false),
+            "CD2 - 04 Wish You Were Here"
+        );
+        assert_eq!(
+            expand("<CD{disc} - >{track} {title}", &t, " - ", false),
+            "04 Wish You Were Here"
+        );
+        assert_eq!(
+            folders("{album artist}/{album}/<CD{disc}>", &t, " - "),
+            ["Pink Floyd", "Wish You Were Here"]
+        );
+        // Disc 1 of 1 is no disc to tell; disc 2 of 2 is.
+        let one = AudioTags {
+            disc: Some(1),
+            disc_total: Some(1),
+            ..t.clone()
+        };
+        assert_eq!(
+            expand("<CD{disc} - >{title}", &one, " - ", false),
+            "Wish You Were Here"
+        );
+        assert_eq!(
+            folders("{album}/<CD{disc}>", &multi, " - "),
+            ["Wish You Were Here", "CD2"]
+        );
         // AC/DC and "Title: Part 2".
         let odd = AudioTags {
             title: "Rock: Part 2".into(),
@@ -734,6 +945,22 @@ mod tests {
             folders("{album artist}/{album}", &AudioTags::default(), " - "),
             Vec::<String>::new()
         );
+    }
+
+    #[test]
+    fn reads_the_format() {
+        let flac = probe(Path::new("tests/fixtures/song.flac")).unwrap().audio;
+        assert_eq!(flac.format, "FLAC");
+        assert_eq!((flac.sample_rate, flac.bits), (Some(22050), Some(16)));
+        let mp3 = probe(Path::new("tests/fixtures/song.mp3")).unwrap().audio;
+        assert_eq!(mp3.format, "MP3");
+        // 32 kbit/s, measured from the stream's size and length.
+        assert!(mp3.bitrate.is_some_and(|b| (31..=34).contains(&b)));
+        let t = AudioTags {
+            audio: flac,
+            ..Default::default()
+        };
+        assert_eq!(expand("{bits}-{sample rate}", &t, " - ", false), "16-22.05");
     }
 
     #[test]
@@ -850,9 +1077,24 @@ mod tests {
             Path::new("/m/Аэростат (1000 - ..)")
         );
         // One artist throughout: no compilation.
-        let mut songs = vec![(dir.clone(), song("Korn", None)), (dir, song("Korn", None))];
+        let mut songs = vec![
+            (dir.clone(), song("Korn", None)),
+            (dir.clone(), song("Korn", None)),
+        ];
         fill_albums(&mut songs);
         assert_eq!(songs[0].1.album_artist(), "Korn");
+        // Discs numbered without a total: disc 1 is one of two too.
+        let on = |disc| AudioTags {
+            disc: Some(disc),
+            ..song("Korn", None)
+        };
+        let mut songs = vec![(dir.clone(), on(1)), (dir.clone(), on(2)), (dir, on(1))];
+        fill_albums(&mut songs);
+        assert!(songs.iter().all(|(_, t)| t.disc_total == Some(2)));
+        assert_eq!(
+            expand("<CD{disc} >{title}", &songs[0].1, " - ", false),
+            "CD1 x"
+        );
     }
 
     #[test]
