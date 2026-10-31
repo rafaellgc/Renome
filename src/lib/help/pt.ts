@@ -25,7 +25,7 @@ export const pt: Section[] = [
   <li><b>Pastas (renomear as próprias pastas)…</b>: adiciona as pastas em si, para mudar o nome delas. Elas aparecem com um ícone de pasta.</li>
 </ul>
 <p>Arrastar para a janela funciona como "Arquivos" e "Pastas (com subpastas)". Arquivos que já estão na lista são ignorados, e os recém-adicionados ficam selecionados.</p>
-<p>Arquivos ocultos (que começam com ponto, como <code>.config</code>) ficam de fora ao adicionar pastas, a não ser que você ligue a opção correspondente.</p>
+<p>Arquivos ocultos (que começam com ponto, como <code>.config</code>, e, no Windows, os marcados como ocultos ou de sistema, como <code>desktop.ini</code> e <code>Thumbs.db</code>) ficam de fora ao adicionar pastas, a não ser que você ligue a opção correspondente. Uma pasta oculta que você mesmo adiciona entra com tudo o que tem.</p>
 <p>Também dá para abrir o programa já com arquivos: <code>renome foto1.jpg foto2.jpg pasta/</code>.</p>
 
 <h4>Filtrar</h4>

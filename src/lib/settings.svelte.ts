@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Step } from "./types";
 
 export type Lang = "pt" | "en" | "es";
@@ -92,6 +93,12 @@ const dark = window.matchMedia("(prefers-color-scheme: dark)");
 export function applyTheme() {
   const mode = settings.theme === "system" ? (dark.matches ? "dark" : "light") : settings.theme;
   document.documentElement.dataset.theme = mode;
+  // Windows draws the title bar itself: in the same theme (null: the system's).
+  if (navigator.userAgent.includes("Windows")) {
+    getCurrentWindow()
+      .setTheme(settings.theme === "system" ? null : settings.theme)
+      .catch(() => {});
+  }
 }
 
 dark.addEventListener("change", applyTheme);

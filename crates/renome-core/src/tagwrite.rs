@@ -492,6 +492,20 @@ struct Rest {
 
 /// Builds the Vorbis comments of a rebuild: the generic tag's, then the
 /// raw ones.
+/// The `ENCODER` comments, which lofty would fold into the vendor string
+/// (lost when the file keeps its own): put back as they were.
+fn encoders(vc: &VorbisComments) -> Vec<String> {
+    vc.get_all("ENCODER").map(str::to_string).collect()
+}
+
+fn with_encoders(mut vc: VorbisComments, encoders: Vec<String>) -> VorbisComments {
+    let _ = vc.remove("ENCODER").count();
+    for e in encoders {
+        vc.push("ENCODER".into(), e);
+    }
+    vc
+}
+
 fn vorbis(tag: Tag, raw: Vec<(String, String)>) -> VorbisComments {
     let mut vc = VorbisComments::from(tag);
     for (k, v) in raw {
@@ -547,7 +561,9 @@ fn edit(
             }
             "flac" => {
                 let mut a = FlacFile::read_from(&mut file, parse).map_err(err)?;
-                let (r, mut tag) = a.remove_vorbis_comments().unwrap_or_default().split_tag();
+                let vc = a.remove_vorbis_comments().unwrap_or_default();
+                let enc = encoders(&vc);
+                let (r, mut tag) = vc.split_tag();
                 // FLAC keeps pictures in blocks of their own.
                 for (p, _) in a.remove_pictures() {
                     tag.push_picture(p);
@@ -562,11 +578,12 @@ fn edit(
                 let pictures: Vec<Picture> = (0..tag.picture_count())
                     .map(|_| tag.remove_picture(0))
                     .collect();
-                if rebuild {
-                    a.set_vorbis_comments(vorbis(tag, std::mem::take(&mut rest.raw)));
+                let vc = if rebuild {
+                    vorbis(tag, std::mem::take(&mut rest.raw))
                 } else {
-                    a.set_vorbis_comments(r.merge_tag(tag));
-                }
+                    r.merge_tag(tag)
+                };
+                a.set_vorbis_comments(with_encoders(vc, enc));
                 for p in pictures {
                     a.insert_picture(p, None).map_err(|e| e.to_string())?;
                 }
@@ -574,14 +591,18 @@ fn edit(
             }
             "ogg" | "oga" | "opus" => {
                 // Both keep the comments (and pictures) in one tag.
-                let (r, mut tag, mut vorbis_file, mut opus_file) = if ext == "opus" {
+                let (r, mut tag, enc, mut vorbis_file, mut opus_file) = if ext == "opus" {
                     let mut a = OpusFile::read_from(&mut file, parse).map_err(err)?;
-                    let (r, t) = std::mem::take(a.vorbis_comments_mut()).split_tag();
-                    (r, t, None, Some(a))
+                    let vc = std::mem::take(a.vorbis_comments_mut());
+                    let enc = encoders(&vc);
+                    let (r, t) = vc.split_tag();
+                    (r, t, enc, None, Some(a))
                 } else {
                     let mut a = VorbisFile::read_from(&mut file, parse).map_err(err)?;
-                    let (r, t) = std::mem::take(a.vorbis_comments_mut()).split_tag();
-                    (r, t, Some(a), None)
+                    let vc = std::mem::take(a.vorbis_comments_mut());
+                    let enc = encoders(&vc);
+                    let (r, t) = vc.split_tag();
+                    (r, t, enc, Some(a), None)
                 };
                 if rebuild {
                     rest.raw = r
@@ -590,11 +611,14 @@ fn edit(
                         .collect();
                 }
                 let changed = edit(&mut tag, &mut rest);
-                let vc = if rebuild {
-                    vorbis(tag, std::mem::take(&mut rest.raw))
-                } else {
-                    r.merge_tag(tag)
-                };
+                let vc = with_encoders(
+                    if rebuild {
+                        vorbis(tag, std::mem::take(&mut rest.raw))
+                    } else {
+                        r.merge_tag(tag)
+                    },
+                    enc,
+                );
                 match (&mut vorbis_file, &mut opus_file) {
                     (Some(a), _) => {
                         a.set_vorbis_comments(vc);
@@ -951,6 +975,40 @@ mod tests {
                 .filter(|n| n.ends_with(".renome-tags"))
                 .collect();
             assert!(left.is_empty(), "{name}: {left:?}");
+        }
+    }
+
+    #[test]
+    fn keeps_encoder_comments() {
+        let encoder = |p: &Path| -> Vec<String> {
+            let mut f = fs::File::open(p).unwrap();
+            let a = FlacFile::read_from(&mut f, ParseOptions::new()).unwrap();
+            a.vorbis_comments()
+                .map(|v| v.get_all("ENCODER").map(str::to_string).collect())
+                .unwrap_or_default()
+        };
+        for clean in [false, true] {
+            let d = tempfile::tempdir().unwrap();
+            let p = d.path().join("song.flac");
+            fs::copy("tests/fixtures/song.flac", &p).unwrap();
+            // As a ripper writes it, beside the vendor string.
+            {
+                let mut f = OpenOptions::new().read(true).write(true).open(&p).unwrap();
+                let mut a = FlacFile::read_from(&mut f, ParseOptions::new()).unwrap();
+                let mut vc = a.remove_vorbis_comments().unwrap();
+                vc.push("ENCODER".into(), "Ripper 1.0".into());
+                a.set_vorbis_comments(vc);
+                save(&a, &mut f, WriteOptions::new()).unwrap();
+            }
+            let before = encoder(&p);
+            assert!(before.contains(&"Ripper 1.0".to_string()));
+            let store = d.path().join("store");
+            let b = write(&p, &fields_of(&song_match()), None, clean, &store)
+                .unwrap()
+                .unwrap();
+            assert_eq!(encoder(&p), before, "clean: {clean}");
+            restore(&b, &store).unwrap();
+            assert_eq!(encoder(&p), before, "clean: {clean}, undone");
         }
     }
 

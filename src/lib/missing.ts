@@ -182,24 +182,39 @@ export function missingIssues(
 }
 
 /** The tracks missing from each album with a release whose songs are
- *  listed. */
+ *  listed. A folder whose songs were heard on more than one release (a
+ *  song from another edition) shows only those of the release most of
+ *  them are on, and a track whose disc and number a song of the folder
+ *  already has is not missing. */
 export function missingTracks(albums: AlbumState[], items: PreviewItem[], descending: boolean): Ghost[] {
   const listed = new Set(items.map((i) => i.path));
-  const out: Ghost[] = [];
-  for (const a of albums) {
-    if (!a.choice || !a.tracks?.length) continue;
+  const found = albums.flatMap((a) => {
+    if (!a.choice || !a.tracks?.length) return [];
     const order = new Map(a.tracks.map((tr, at) => [tr.id, at]));
     const files = a.files.flatMap((p) => {
       const at = listed.has(p) ? order.get(a.matches[p]?.trackId ?? "") : undefined;
       return at === undefined ? [] : [{ path: p, from: at, to: at }];
     });
-    if (!files.length) continue;
+    return files.length ? [{ a, files }] : [];
+  });
+  const most = new Map<string, number>();
+  const taken = new Map<string, Set<string>>();
+  for (const { a, files } of found) {
+    most.set(a.dir, Math.max(most.get(a.dir) ?? 0, files.length));
+    const t = taken.get(a.dir) ?? new Set<string>();
+    for (const f of files) t.add(`${a.tracks[f.from].disc}:${a.tracks[f.from].position}`);
+    taken.set(a.dir, t);
+  }
+  const out: Ghost[] = [];
+  for (const { a, files } of found) {
+    if (files.length < (most.get(a.dir) ?? 0)) continue;
     const m = a.matches[files[0].path];
     const group = `${m.albumArtist} - ${named(m.album, m.year)}`;
     const discs = new Set(a.tracks.map((tr) => tr.disc)).size;
     const have = new Set(files.map((f) => f.from));
+    const held = taken.get(a.dir)!;
     a.tracks.forEach((tr, at) => {
-      if (have.has(at)) return;
+      if (have.has(at) || held.has(`${tr.disc}:${tr.position}`)) return;
       const n = String(tr.position).padStart(2, "0");
       out.push({
         ghost: true,

@@ -63,6 +63,20 @@ fn relative(to: &Path, from: &Path) -> PathBuf {
     out
 }
 
+/// A path as lists have it: with `/`, which Windows takes too and which
+/// works when the music goes to another system, or with `\` for a list
+/// already written so.
+fn list_path(path: &Path, backslash: bool) -> String {
+    let s = path.to_string_lossy();
+    if backslash {
+        s.replace('/', "\\")
+    } else if cfg!(windows) {
+        s.replace('\\', "/")
+    } else {
+        s.into_owned()
+    }
+}
+
 static CUE_FILE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^(\s*FILE\s+)(?:"([^"]+)"|(\S+))(.*)$"#).unwrap());
 
@@ -91,8 +105,7 @@ fn new_reference(
     } else {
         relative(&renamed, now)
     };
-    let out = out.to_string_lossy().into_owned();
-    let out = if windows { out.replace('/', "\\") } else { out };
+    let out = list_path(&out, windows);
     (out != reference).then_some(out)
 }
 
@@ -410,7 +423,7 @@ pub fn album_playlist(dir: &Path) -> Option<(PathBuf, String)> {
         };
         let length = t.duration.map_or(-1, i64::from);
         let path = relative(&p, dir);
-        text += &format!("#EXTINF:{length},{title}\n{}\n", path.to_string_lossy());
+        text += &format!("#EXTINF:{length},{title}\n{}\n", list_path(&path, false));
     }
     let name = dir.file_name()?.to_string_lossy();
     Some((dir.join(format!("{name}.m3u8")), text))

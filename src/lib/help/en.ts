@@ -25,7 +25,7 @@ export const en: Section[] = [
   <li><b>Folders (rename the folders themselves)…</b>: adds the folders themselves, to change their names. They are shown with a folder icon.</li>
 </ul>
 <p>Dragging into the window works like "Files" and "Folders (with subfolders)". Files already in the list are skipped, and newly added ones are selected.</p>
-<p>Hidden files (starting with a dot, like <code>.config</code>) are left out when adding folders, unless you turn on the matching option.</p>
+<p>Hidden files (starting with a dot, like <code>.config</code>, and, on Windows, those marked hidden or system, like <code>desktop.ini</code> and <code>Thumbs.db</code>) are left out when adding folders, unless you turn on the matching option. A hidden folder you add yourself comes in with all it holds.</p>
 <p>You can also open the program with files: <code>renome photo1.jpg photo2.jpg folder/</code>.</p>
 
 <h4>Filtering</h4>

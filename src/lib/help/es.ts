@@ -25,7 +25,7 @@ export const es: Section[] = [
   <li><b>Carpetas (renombrar las propias carpetas)…</b>: añade las carpetas en sí, para cambiar su nombre. Aparecen con un icono de carpeta.</li>
 </ul>
 <p>Arrastrar a la ventana funciona como "Archivos" y "Carpetas (con subcarpetas)". Los archivos que ya están en la lista se ignoran, y los recién añadidos quedan seleccionados.</p>
-<p>Los archivos ocultos (que empiezan con punto, como <code>.config</code>) quedan fuera al añadir carpetas, salvo que active la opción correspondiente.</p>
+<p>Los archivos ocultos (que empiezan con punto, como <code>.config</code>, y, en Windows, los marcados como ocultos o de sistema, como <code>desktop.ini</code> y <code>Thumbs.db</code>) quedan fuera al añadir carpetas, salvo que active la opción correspondiente. Una carpeta oculta que usted mismo añade entra con todo lo que tiene.</p>
 <p>También puede abrir el programa con archivos: <code>renome foto1.jpg foto2.jpg carpeta/</code>.</p>
 
 <h4>Filtrar</h4>

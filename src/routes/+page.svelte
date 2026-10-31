@@ -1914,7 +1914,7 @@
         <ul>
           {#each history as h (h.id)}
             <li>
-              <span>{new Date(h.created).toLocaleString(LOCALES[settings.lang])}</span>
+              <span class="when">{new Date(h.created).toLocaleString(LOCALES[settings.lang])}</span>
               <span class="muted">
                 {[
                   h.count || (!h.extra && !h.tagged) ? t("files", { n: h.count }) : "",
@@ -2170,6 +2170,8 @@
   .modal ul { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
   .modal li { display: flex; align-items: center; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--row-line); }
   .modal li > :first-child { flex: 1; }
+  /* The date on one line; a long summary beside it wraps instead. */
+  .modal li > .when { white-space: nowrap; }
   .muted { color: var(--muted); }
   .help-btn { font-size: 16px; font-weight: 700; }
   .failed { color: var(--danger); font-size: 13px; }

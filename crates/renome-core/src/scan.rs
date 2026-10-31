@@ -41,7 +41,22 @@ pub struct Skipped {
     pub reason: String,
 }
 
+/// A name starting with a dot, or on Windows a file marked hidden or
+/// system (`desktop.ini`, `Thumbs.db`) or a folder marked hidden (Windows
+/// marks folders with a custom look as system: they count).
 fn is_hidden(p: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const HIDDEN: u32 = 0x2;
+        const SYSTEM: u32 = 0x4;
+        if let Ok(m) = std::fs::symlink_metadata(p) {
+            let mask = if m.is_dir() { HIDDEN } else { HIDDEN | SYSTEM };
+            if m.file_attributes() & mask != 0 {
+                return true;
+            }
+        }
+    }
     p.file_name()
         .and_then(|n| n.to_str())
         .is_some_and(|n| n.starts_with('.'))
@@ -93,7 +108,8 @@ pub fn scan(paths: &[PathBuf], opts: &ScanOptions, known: &HashSet<PathBuf>) -> 
             .max_depth(if opts.recursive { usize::MAX } else { 1 })
             .sort_by_file_name()
             .into_iter()
-            .filter_entry(|e| opts.include_hidden || !is_hidden(e.path()));
+            // The folder added itself is never left out.
+            .filter_entry(|e| opts.include_hidden || e.depth() == 0 || !is_hidden(e.path()));
         for entry in walker {
             match entry {
                 Ok(e) if e.file_type().is_dir() => {}
@@ -143,6 +159,13 @@ mod tests {
             folders_as_items: false,
         };
         assert_eq!(names(&o), ["a.JPG"]);
+        // A hidden folder added on its own shows what it holds.
+        let r = scan(
+            &[root.join("sub/.git")],
+            &ScanOptions::default(),
+            &HashSet::new(),
+        );
+        assert_eq!(r.files.len(), 1);
 
         let r = scan(
             &[root.join("sub")],

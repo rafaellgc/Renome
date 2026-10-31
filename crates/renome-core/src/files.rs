@@ -92,8 +92,16 @@ impl FileEntry {
     }
 
     /// Forgets the tags read, after they were written.
+    /// After its tags were written: read again, with the new size and date.
     pub fn forget_tags(&mut self) {
         self.tags = OnceLock::new();
+        if let Some(fresh) = std::fs::metadata(&self.path)
+            .ok()
+            .and_then(|m| Self::from_path(&self.path, &m))
+        {
+            self.size = fresh.size;
+            self.modified = fresh.modified;
+        }
     }
 
     pub fn file_name(&self) -> String {

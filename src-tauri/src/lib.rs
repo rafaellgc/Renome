@@ -947,6 +947,12 @@ async fn undo(app: AppHandle, id: String) -> Result<ApplyReport, String> {
         let report = state.history.undo(&id)?;
         let s = &mut *state.session.lock().unwrap();
         refresh_renamed(&mut s.files, &report);
+        // Songs may have their old tags back: read again.
+        for f in s.files.iter_mut() {
+            if renome_core::music::is_audio(&f.ext) {
+                f.forget_tags();
+            }
+        }
         s.undo.clear();
         Ok(report)
     })

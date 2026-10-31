@@ -269,8 +269,8 @@ mod tests {
         fs::write(p.join("e1"), "").unwrap();
         fs::write(p.join("e2"), "").unwrap();
         fs::hard_link(p.join("s3.txt"), p.join("s3 link.txt")).unwrap();
-        std::os::unix::fs::symlink(p.join("a.bin"), p.join("link.bin")).unwrap();
-        let names = [
+        #[cfg_attr(not(unix), allow(unused_mut))]
+        let mut names = vec![
             "a.bin",
             "b copy.bin",
             "c.bin",
@@ -280,9 +280,15 @@ mod tests {
             "s3 link.txt",
             "e1",
             "e2",
-            "link.bin",
         ];
-        let files = entries(&names.map(|n| p.join(n)));
+        // Windows makes links only with special rights.
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(p.join("a.bin"), p.join("link.bin")).unwrap();
+            names.push("link.bin");
+        }
+        let paths: Vec<PathBuf> = names.iter().map(|n| p.join(n)).collect();
+        let files = entries(&paths);
         let mut cache = HashCache::default();
         let groups = run(&files, &mut cache);
         assert_eq!(
@@ -296,7 +302,15 @@ mod tests {
         // The cache answers again without changes; a changed file is reread.
         assert_eq!(run(&files, &mut cache), groups);
         fs::write(p.join("s2.txt"), "other").unwrap();
-        let files = entries(&names.map(|n| p.join(n)));
+        // As if written a moment later: Windows' clock moves in steps of
+        // about 15 ms, so the date may not have changed yet.
+        fs::File::options()
+            .write(true)
+            .open(p.join("s2.txt"))
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(2))
+            .unwrap();
+        let files = entries(&paths);
         assert_eq!(run(&files, &mut cache).len(), 2);
     }
 

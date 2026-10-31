@@ -1580,7 +1580,12 @@ mod tests {
             &HashMap::new(),
             &View::default(),
         );
-        assert_eq!(p.items[0].status, Status::Ok);
+        // An error on Windows, a warning elsewhere.
+        if cfg!(windows) {
+            assert_eq!(p.items[0].problem, Some(Problem::WindowsChars));
+        } else {
+            assert_eq!(p.items[0].status, Status::Ok);
+        }
         assert!(p.items[0].windows_unsafe);
     }
 

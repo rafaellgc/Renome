@@ -12,7 +12,10 @@ This document describes **what** the program does, not **how**.
 - A folder's name has no extension: extension rules leave it alone and
   dots in it are kept as text. Folders and files inside them can be renamed
   in the same batch.
-- Hidden files (`.file`, `.git/`) are left out unless enabled in Options.
+- Hidden files (`.file`, `.git/`; on Windows also files marked hidden or
+  system, like `desktop.ini`, and folders marked hidden: Windows marks
+  folders with a custom look as system) are left out unless enabled in
+  Options; a folder added itself is never left out.
 - Files already in the list are ignored.
 - Newly added files are selected and the list scrolls to them.
 - **List filter**: terms separated by commas/spaces; terms with `*`/`?` are
@@ -430,7 +433,7 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   song went to (the one above, for a disc folder) gets
   `<folder name>.m3u8` (UTF-8, `#EXTM3U`, one
   `#EXTINF:<seconds or -1>,<artist> - <title>` per song, paths relative
-  to it) listing its songs and those of its
+  to it, with `/` on every system) listing its songs and those of its
   disc folders, by disc (the disc folder's number, else the tag), track
   number and file name; not when it has fewer than two songs or already
   has a `.m3u` or `.m3u8` (which follows the renames; the summary counts
@@ -851,7 +854,9 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   references (`FILE "…"` lines in cue sheets, non-comment lines in
   playlists; relative or absolute, `/` or `\`, URLs left alone) point to
   the new names; references to files that stayed are adjusted when the
-  list moved. UTF-8 or Latin-1 is kept (a list whose new names Latin-1
+  list moved. A reference written with `\` keeps it; others get `/`,
+  also on Windows (which takes it), so lists work on other systems.
+  UTF-8 or Latin-1 is kept (a list whose new names Latin-1
   cannot hold is left alone), as are line endings. A cue sheet none of
   whose `FILE`s exist (a whole-disc image later split) is rebuilt: each
   `TRACK n` gets `FILE "<song>"` (`MP3` for .mp3, else `WAVE`) with the
