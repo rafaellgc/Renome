@@ -607,6 +607,20 @@ ${ex("Series_Name_012_(2019)_(Digital)_(group).cbz", "Series Name #012 (2019).cb
   <li>If a file fails (no permission, deleted by another program…), the others still go ahead, and at the end you get a list of what failed and why.</li>
   <li>After renaming, the rules are turned off (can be changed in Options), so they are not applied twice.</li>
 </ul>
+<h4>Sending to another folder</h4>
+<p>Next to the Rename button, the picker says where the files go: <b>In the same folder</b> (the usual: only renames), <b>Move to another folder…</b> or <b>Copy to another folder…</b>. It is for sorting a downloads folder straight into your library, also on another disk. The choice is not saved and goes back to "In the same folder" after each send: the list then shows the files in their new place, and sending them again would send them once more.</p>
+<ul>
+  <li>The folders the rules make (artist and album, movie, show and season, author, comic series) go inside the chosen folder: <code>Target/Artist/Album (1999)/01 - Song.flac</code>.</li>
+  <li>Other files keep their subfolders from the folder you added: with <code>Photos</code> added, <code>Photos/2024/Beach/x.jpg</code> goes to <code>Target/2024/Beach/x.jpg</code>. Files added one by one go straight into the target.</li>
+  <li>Every visible file goes, even those keeping their names. The Folder column shows where each will be.</li>
+  <li><b>Copy</b>: the originals stay exactly as they are, and the copies get the new names. Covers, <code>.nfo</code> files, playlists and written tags go to the copies. <code>.cue</code>/<code>.m3u</code> lists copied along name the copies; the originals do not change. Each file's modification date is kept on its copy.</li>
+  <li>Folders left empty at the source are deleted, but only those inside the folder you added: it, and those outside it, stay.</li>
+  <li><b>Move</b> to another disk: the file is copied and only deleted from the source disk once the copy is complete and checked.</li>
+  <li>While copying, the progress and a <b>Stop</b> button show: what was copied stays (and can be undone), the rest is left as it was.</li>
+  <li>Each copy is made under a passing name and only gets its final name when whole; if the program closes halfway, the half copy is deleted at the next start. Nothing is overwritten: a name that already exists in the target shows as a conflict.</li>
+  <li><b>Undo</b> of a copy deletes the copies made, but only those still as Renome left them. A copy you edited afterwards stays, and the notice says which. Undoing a move brings the files back, even from another disk.</li>
+</ul>
+<p><b>Limitations</b>: free space in the target is not checked first; if it runs out, the files that do not fit fail (leaving nothing halfway) and show in the error list. Copying many large files takes the disk's time: Renome does not make copying faster. Folders added as items are copied or moved whole.</p>
 <h4>History</h4>
 <p>Each rename is recorded in the <b>History</b>, even after closing the program. There you can:</p>
 <ul>

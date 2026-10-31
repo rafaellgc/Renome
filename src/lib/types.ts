@@ -112,6 +112,8 @@ export interface View {
   comics: Record<string, ComicMatch>;
   /** What a show's old folder is called after when files stay in it. */
   leftoverSuffix: string;
+  /** Another folder the files go to, moved or copied. */
+  sendTo: { dir: string; copy: boolean } | null;
 }
 
 /** A MusicBrainz release offered for an album, best first. */
@@ -367,13 +369,20 @@ export type ErrorKind = "tempExists" | "targetExists" | "notFound" | "permission
 export interface OpError { from: string; to: string; kind: ErrorKind; detail: string }
 
 export interface ApplyReport {
-  done: { from: string; to: string }[];
+  /** `copy`: a copy made (or, on undo, deleted: from the copy to its original). */
+  done: { from: string; to: string; copy?: boolean }[];
   errors: OpError[];
   historyId: string | null;
   /** Cue sheets and playlists updated to the new names (or rebuilt). */
   lists: number;
   /** Useless cue sheets and playlists deleted. */
   listsRemoved: number;
+  /** Copies undo left because they changed after they were made. */
+  kept?: string[];
+  /** Copies undo deleted. */
+  copiesRemoved?: number;
+  /** Stopped before the end. */
+  stopped?: boolean;
 }
 
 export interface HistoryEntry {

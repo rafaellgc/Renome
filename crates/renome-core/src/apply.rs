@@ -8,6 +8,11 @@
 //! run by depth: deepest first when applying (so a folder is renamed after
 //! its contents), shallowest first when undoing (so the folder is back in
 //! place before its contents are restored).
+//!
+//! A move to another disk, and a copy, writes the file under a passing
+//! name beside its target, waits until it is on the disk, checks its size
+//! and only then gives it its name; a moved file's original goes after
+//! that. Undo deletes a copy only while it is as it was left.
 
 use std::collections::HashSet;
 use std::fs::{self, File};
@@ -21,6 +26,13 @@ use serde::{Deserialize, Serialize};
 pub struct Operation {
     pub from: PathBuf,
     pub to: PathBuf,
+    /// A copy is made at `to`; `from` stays.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub copy: bool,
+    /// Sent to another folder: the folders it leaves empty are deleted
+    /// only below this one (the folder it was added with), not it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub within: Option<PathBuf>,
 }
 
 /// Error kind (translated by the UI); `detail` holds the OS message.
@@ -42,6 +54,9 @@ pub enum ErrorKind {
     History,
     /// A song's old tags could not be put back; `detail` says why.
     Tags,
+    /// A folder moved to another disk, whose original could not all be
+    /// deleted: what is left of it stays under its old name.
+    PartlyLeft,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -66,6 +81,144 @@ pub struct ApplyReport {
     pub lists: usize,
     /// Useless cue sheets and playlists deleted (none of their files exist).
     pub lists_removed: usize,
+    /// Copies undo left because they changed after they were made.
+    pub kept: Vec<PathBuf>,
+    /// Copies undo deleted.
+    pub copies_removed: usize,
+    /// Stopped before the end: the files not reached stay as they were.
+    pub stopped: bool,
+}
+
+/// What the caller is told while files are copied, and asked whether to
+/// stop.
+pub struct Hooks<'a> {
+    /// Bytes done and in all, for the copies (and moves to other disks).
+    pub progress: &'a dyn Fn(u64, u64),
+    pub stop: &'a dyn Fn() -> bool,
+}
+
+impl Hooks<'_> {
+    pub fn none() -> Hooks<'static> {
+        Hooks {
+            progress: &|_, _| {},
+            stop: &|| false,
+        }
+    }
+}
+
+/// What a copy was like when it was left: undo deletes it only if it still
+/// is. A folder's: its files' count and total size, and the latest date.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Stamp {
+    pub size: u64,
+    pub modified: i128,
+    pub files: u64,
+}
+
+fn modified_ns(m: &fs::Metadata) -> i128 {
+    m.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos() as i128)
+        .unwrap_or_default()
+}
+
+pub fn stamp(path: &Path) -> Option<Stamp> {
+    let meta = fs::symlink_metadata(path).ok()?;
+    if !meta.is_dir() {
+        return Some(Stamp {
+            size: meta.len(),
+            modified: modified_ns(&meta),
+            files: 1,
+        });
+    }
+    let mut s = Stamp::default();
+    for e in walkdir::WalkDir::new(path).min_depth(1) {
+        let m = e.ok()?.metadata().ok()?;
+        if !m.is_dir() {
+            s.files += 1;
+            s.size += m.len();
+            s.modified = s.modified.max(modified_ns(&m));
+        }
+    }
+    Some(s)
+}
+
+/// The bytes a copy of `path` writes (a folder's files).
+fn size_of(path: &Path) -> u64 {
+    stamp(path).map(|s| s.size).unwrap_or_default()
+}
+
+/// Copies a file with its date, waits until it is on the disk and checks
+/// its size; a folder with everything in it (links as links where they
+/// can be).
+fn copy_any(from: &Path, to: &Path, done: &mut dyn FnMut(u64)) -> std::io::Result<()> {
+    let meta = fs::symlink_metadata(from)?;
+    if meta.is_symlink() {
+        #[cfg(unix)]
+        return std::os::unix::fs::symlink(fs::read_link(from)?, to);
+    }
+    if !meta.is_dir() {
+        let n = fs::copy(from, to)?;
+        let f = File::options().write(true).open(to)?;
+        if let Ok(t) = meta.modified() {
+            f.set_modified(t)?;
+        }
+        f.sync_all()?;
+        if n != meta.len() || f.metadata()?.len() != meta.len() {
+            return Err(std::io::Error::other("copy incomplete"));
+        }
+        done(n);
+        return Ok(());
+    }
+    fs::create_dir(to)?;
+    for e in fs::read_dir(from)? {
+        let e = e?;
+        copy_any(&e.path(), &to.join(e.file_name()), done)?;
+    }
+    if let Ok(t) = meta.modified() {
+        let _ = File::open(to).and_then(|d| d.set_modified(t));
+    }
+    Ok(())
+}
+
+fn remove_any(path: &Path) -> std::io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(m) if m.is_dir() => fs::remove_dir_all(path),
+        Ok(_) => fs::remove_file(path),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+/// Where a copy is written before it gets its name (see [`copy_new`]).
+fn part_path(to: &Path, i: usize) -> PathBuf {
+    to.with_file_name(format!(".renome-{}-{i}.part", std::process::id()))
+}
+
+/// Copies `from` to `to` (which must not exist) through `part`, and gives
+/// it its name only when whole; nothing is left behind on failure.
+fn copy_new(
+    from: &Path,
+    to: &Path,
+    part: &Path,
+    done: &mut dyn FnMut(u64),
+) -> Result<(), (ErrorKind, String)> {
+    if fs::symlink_metadata(to).is_ok() {
+        return Err((ErrorKind::TargetExists, String::new()));
+    }
+    let _ = remove_any(part);
+    if let Err(e) = copy_any(from, part, done) {
+        let _ = remove_any(part);
+        return Err(io_kind(&e));
+    }
+    sync_dir(part);
+    if let Err(e) = rename_new(part, to) {
+        let _ = remove_any(part);
+        return Err(e);
+    }
+    sync_dir(to);
+    Ok(())
 }
 
 /// Renames `from` to `to` only if `to` does not exist. The check and the
@@ -204,6 +357,28 @@ pub enum Depth {
 /// the others still go ahead. `done` lists the renames in the order they
 /// happened.
 pub fn execute(ops: &[Operation], order: Depth) -> ApplyReport {
+    execute_with(ops, order, &Hooks::none())
+}
+
+pub fn execute_with(ops: &[Operation], order: Depth, hooks: &Hooks) -> ApplyReport {
+    // What is copied: the copies, and moves that may cross disks (only
+    // known when they fail to rename; counted when they do).
+    let total: u64 = ops
+        .iter()
+        .filter(|op| op.copy)
+        .map(|op| size_of(&op.from))
+        .sum();
+    let bytes = std::cell::Cell::new(0u64);
+    let total = std::cell::Cell::new(total);
+    let progress = |n: u64| {
+        bytes.set(bytes.get() + n);
+        (hooks.progress)(bytes.get(), total.get().max(bytes.get()));
+    };
+    let ctx = Copying {
+        progress: &progress,
+        grow: &|n| total.set(total.get() + n),
+        stop: hooks.stop,
+    };
     let depth = |op: &Operation| op.from.components().count();
     let mut levels: Vec<usize> = ops.iter().map(depth).collect();
     levels.sort_unstable();
@@ -213,22 +388,39 @@ pub fn execute(ops: &[Operation], order: Depth) -> ApplyReport {
     }
     let mut report = ApplyReport::default();
     for level in levels {
+        if (ctx.stop)() {
+            report.stopped = true;
+            break;
+        }
         let batch: Vec<(usize, &Operation)> = ops
             .iter()
             .enumerate()
             .filter(|(_, op)| depth(op) == level)
             .collect();
-        execute_level(&batch, &mut report);
+        execute_level(&batch, &mut report, &ctx);
     }
     report
 }
 
+/// Progress and stop, while running.
+struct Copying<'a> {
+    progress: &'a dyn Fn(u64),
+    /// A move found to cross disks: its bytes join the total.
+    grow: &'a dyn Fn(u64),
+    stop: &'a dyn Fn() -> bool,
+}
+
 /// Two-phase rename of operations at the same depth. `i` keeps the
-/// temporary names unique across levels.
-fn execute_level(ops: &[(usize, &Operation)], report: &mut ApplyReport) {
-    let mut staged: Vec<(&Operation, PathBuf)> = Vec::with_capacity(ops.len());
+/// temporary names unique across levels. Copies skip the first phase:
+/// their files stay.
+fn execute_level(ops: &[(usize, &Operation)], report: &mut ApplyReport, ctx: &Copying) {
+    let mut staged: Vec<(usize, &Operation, PathBuf)> = Vec::with_capacity(ops.len());
 
     for &(i, op) in ops {
+        if op.copy {
+            staged.push((i, op, op.from.clone()));
+            continue;
+        }
         let tmp = temp_path(&op.from, i);
         if fs::symlink_metadata(&tmp).is_ok() {
             report
@@ -237,7 +429,7 @@ fn execute_level(ops: &[(usize, &Operation)], report: &mut ApplyReport) {
             continue;
         }
         match fs::rename(&op.from, &tmp) {
-            Ok(()) => staged.push((op, tmp)),
+            Ok(()) => staged.push((i, op, tmp)),
             Err(e) => {
                 let (kind, detail) = io_kind(&e);
                 report.errors.push(err(op, kind, detail));
@@ -245,17 +437,58 @@ fn execute_level(ops: &[(usize, &Operation)], report: &mut ApplyReport) {
         }
     }
 
-    for (op, tmp) in staged {
+    for (i, op, tmp) in staged {
+        // Stopped: those not reached get their names back.
+        if report.stopped || (ctx.stop)() {
+            report.stopped = true;
+            if !op.copy {
+                let _ = fs::rename(&tmp, &op.from);
+            }
+            continue;
+        }
         let made = match make_parent(&op.to, report) {
             Ok(made) => made,
             Err(e) => {
                 let (kind, detail) = io_kind(&e);
-                let _ = fs::rename(&tmp, &op.from);
+                if !op.copy {
+                    let _ = fs::rename(&tmp, &op.from);
+                }
                 report.errors.push(err(op, kind, detail));
                 continue;
             }
         };
-        let result = rename_new(&tmp, &op.to);
+        let mut add = |n| (ctx.progress)(n);
+        let result = if op.copy {
+            copy_new(&op.from, &op.to, &part_path(&op.to, i), &mut add)
+        } else {
+            match rename_new(&tmp, &op.to) {
+                // Another disk: copied, then the original goes.
+                Err((ErrorKind::OtherDisk, _)) => {
+                    (ctx.grow)(size_of(&tmp));
+                    let copied = copy_new(&tmp, &op.to, &part_path(&op.to, i), &mut add);
+                    match copied.map(|()| (tmp.is_dir(), remove_any(&tmp))) {
+                        Ok((_, Ok(()))) => Ok(()),
+                        // A file is whole when it cannot go: its copy goes.
+                        Ok((false, Err(e))) => {
+                            let _ = remove_any(&op.to);
+                            Err(io_kind(&e))
+                        }
+                        // A folder may be partly gone: its copy is the
+                        // whole one, so it stays and the move counts; what
+                        // is left of the original is told, under its name.
+                        Ok((true, Err(e))) => {
+                            let _ = fs::rename(&tmp, &op.from);
+                            report
+                                .errors
+                                .push(err(op, ErrorKind::PartlyLeft, io_kind(&e).1));
+                            Ok(())
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+                r => r,
+            }
+        };
         match result {
             Ok(()) => report.done.push(op.clone()),
             Err((kind, detail)) => {
@@ -266,9 +499,13 @@ fn execute_level(ops: &[(usize, &Operation)], report: &mut ApplyReport) {
                     }
                 }
                 // Restore the original name.
-                let (kind, detail) = match fs::rename(&tmp, &op.from) {
-                    Ok(()) => (kind, detail),
-                    Err(_) => (ErrorKind::RestoreFailed, tmp.display().to_string()),
+                let (kind, detail) = if op.copy {
+                    (kind, detail)
+                } else {
+                    match fs::rename(&tmp, &op.from) {
+                        Ok(()) => (kind, detail),
+                        Err(_) => (ErrorKind::RestoreFailed, tmp.display().to_string()),
+                    }
                 };
                 report.errors.push(err(op, kind, detail));
             }
@@ -303,8 +540,11 @@ fn make_parent(to: &Path, report: &mut ApplyReport) -> std::io::Result<Vec<PathB
 /// was renamed afterwards, under its new name. Undo makes them again
 /// when moving the files back.
 fn remove_emptied(done: &[Operation]) {
-    let folders: Vec<&Operation> = done.iter().filter(|op| op.to.is_dir()).collect();
-    for op in done {
+    let folders: Vec<&Operation> = done
+        .iter()
+        .filter(|op| !op.copy && op.to.is_dir())
+        .collect();
+    for op in done.iter().filter(|op| !op.copy) {
         let from = folders
             .iter()
             .find_map(|f| {
@@ -317,7 +557,15 @@ fn remove_emptied(done: &[Operation]) {
             .unwrap_or_else(|| op.from.clone());
         let mut dir = from.parent();
         while let Some(d) = dir {
-            if d.as_os_str().is_empty() || op.to.starts_with(d) || fs::remove_dir(d).is_err() {
+            let above = op
+                .within
+                .as_ref()
+                .is_some_and(|w| !d.starts_with(w) || d == w);
+            if d.as_os_str().is_empty()
+                || above
+                || op.to.starts_with(d)
+                || fs::remove_dir(d).is_err()
+            {
                 break;
             }
             dir = d.parent();
@@ -338,6 +586,14 @@ fn io_kind(e: &std::io::Error) -> (ErrorKind, String) {
             (ErrorKind::Io, text.to_string())
         }
     }
+}
+
+/// The copies among `done`, as they are now.
+fn copy_stamps(done: &[Operation]) -> Vec<(PathBuf, Stamp)> {
+    done.iter()
+        .filter(|op| op.copy)
+        .filter_map(|op| Some((op.to.clone(), stamp(&op.to)?)))
+        .collect()
 }
 
 fn err(op: &Operation, kind: ErrorKind, detail: String) -> OpError {
@@ -378,6 +634,9 @@ struct Journal {
     /// How many songs had their tags written (for the list).
     #[serde(default)]
     tagged: usize,
+    /// Each copy made as it was left (after its lists and tags), for undo.
+    #[serde(default)]
+    stamps: Vec<(PathBuf, Stamp)>,
 }
 
 /// A rename in progress: written before it starts and removed when the
@@ -392,6 +651,10 @@ struct Pending {
     /// An undo of this entry, not a rename.
     #[serde(default)]
     undoing: bool,
+    /// Where each copy (and move to another disk) is written before it
+    /// gets its name (see [`part_path`]).
+    #[serde(default)]
+    parts: Vec<PathBuf>,
 }
 
 /// What [`History::recover`] did with renames left halfway.
@@ -567,14 +830,32 @@ impl History {
             };
             let stuck = out.stuck.len();
             let mut done = Vec::new();
-            for (op, tmp) in p.ops.iter().zip(&p.temps) {
+            for (n, (op, tmp)) in p.ops.iter().zip(&p.temps).enumerate() {
                 let here = |p: &Path| fs::symlink_metadata(p).is_ok();
+                // A copy cut short.
+                if let Some(part) = p.parts.get(n) {
+                    let _ = remove_any(part);
+                }
+                // A copy gets its name only when whole.
+                if op.copy {
+                    if here(&op.to) {
+                        done.push(op.clone());
+                    }
+                    continue;
+                }
                 if here(tmp) {
+                    // Copied whole to another disk, the original not gone
+                    // yet: the copy goes, the same as the original.
+                    if here(&op.to) && stamp(&op.to) == stamp(tmp) {
+                        let _ = remove_any(&op.to);
+                    }
                     match rename_new(tmp, &op.from) {
                         Ok(()) => out.restored += 1,
                         Err(_) => out.stuck.push(Operation {
                             from: tmp.clone(),
                             to: op.from.clone(),
+                            copy: false,
+                            within: None,
                         }),
                     }
                 } else if !here(&op.from) && here(&op.to) {
@@ -602,6 +883,7 @@ impl History {
                 }
                 // Outermost first.
                 dirs.sort_by_key(|d| d.components().count());
+                let stamps = copy_stamps(&done);
                 done.is_empty()
                     || self
                         .write(
@@ -617,6 +899,7 @@ impl History {
                                 lists: Vec::new(),
                                 tags: Vec::new(),
                                 tagged: 0,
+                                stamps,
                             },
                         )
                         .is_ok()
@@ -698,6 +981,10 @@ impl History {
     /// Runs and records in the history. What is about to happen is written
     /// first (see [`Pending`]), so a stop halfway can be recovered.
     pub fn apply(&self, ops: &[Operation]) -> ApplyReport {
+        self.apply_with(ops, &Hooks::none())
+    }
+
+    pub fn apply_with(&self, ops: &[Operation], hooks: &Hooks) -> ApplyReport {
         let created = Local::now();
         let id = self.new_id(&created);
         let pending = self.pending_path(&id).ok().filter(|path| {
@@ -710,11 +997,16 @@ impl History {
                     .map(|(i, op)| temp_path(&op.from, i))
                     .collect(),
                 undoing: false,
+                parts: ops
+                    .iter()
+                    .enumerate()
+                    .map(|(i, op)| part_path(&op.to, i))
+                    .collect(),
             };
             fs::create_dir_all(&self.dir).is_ok()
                 && serde_json::to_vec(&p).is_ok_and(|t| write_synced(path, &t).is_ok())
         });
-        let mut report = execute(ops, Depth::DeepestFirst);
+        let mut report = execute_with(ops, Depth::DeepestFirst, hooks);
         if !report.done.is_empty() {
             let (lists, removed) = self.update_lists(&id, &report.done);
             report.lists = lists.len() - removed;
@@ -732,6 +1024,7 @@ impl History {
                 lists,
                 tags: Vec::new(),
                 tagged: 0,
+                stamps: copy_stamps(&report.done),
             };
             match self.write(&id, &j) {
                 Ok(()) => report.history_id = Some(id),
@@ -792,6 +1085,7 @@ impl History {
             lists: Vec::new(),
             tags: Vec::new(),
             tagged: 0,
+            stamps: Vec::new(),
         };
         self.write(&id, &j)?;
         Ok(id)
@@ -814,6 +1108,14 @@ impl History {
     /// puts their old tags back.
     pub fn add_tags(&self, id: &str, backups: Vec<crate::tagwrite::Backup>) -> Result<(), String> {
         let mut j = self.read(id)?;
+        // Copies written to are left so.
+        for (path, st) in &mut j.stamps {
+            if backups.iter().any(|b| b.path == *path)
+                && let Some(now) = stamp(path)
+            {
+                *st = now;
+            }
+        }
         j.tagged += backups.len();
         j.tags.extend(backups);
         self.write(id, &j)
@@ -859,6 +1161,39 @@ impl History {
             Ok(()) => false,
             Err(e) => e.kind() != std::io::ErrorKind::NotFound,
         });
+        // Copies go while they are as they were left; a changed one stays
+        // (and leaves the entry), with its lists and tags as they are.
+        let mut kept = Vec::new();
+        let mut removed = 0;
+        let mut copies = Vec::new();
+        let stamps = std::mem::take(&mut j.stamps);
+        let before = j.ops.len();
+        j.ops.retain(|op| {
+            if !op.copy {
+                return true;
+            }
+            let left = stamps.iter().find(|(p, _)| *p == op.to).map(|(_, s)| *s);
+            match stamp(&op.to) {
+                None => {}
+                Some(now) if Some(now) == left => {
+                    if remove_any(&op.to).is_err() {
+                        return true;
+                    }
+                    removed += 1;
+                }
+                Some(_) => kept.push(op.to.clone()),
+            }
+            copies.push(op.clone());
+            false
+        });
+        j.reverted += before - j.ops.len();
+        j.stamps = stamps
+            .into_iter()
+            .filter(|(p, _)| j.ops.iter().any(|op| op.to == *p))
+            .collect();
+        let in_copy = |p: &Path| copies.iter().any(|c| p.starts_with(&c.to));
+        j.tags.retain(|b| !in_copy(&b.path));
+        j.lists.retain(|(p, _)| !in_copy(p));
         let backups = self.backups(id)?;
         // Songs get their old tags back where they are now, before the
         // renames take them back.
@@ -908,6 +1243,8 @@ impl History {
             .map(|op| Operation {
                 from: op.to.clone(),
                 to: op.from.clone(),
+                copy: false,
+                within: None,
             })
             .collect();
         // As for a rename: written first, so a stop halfway is recovered.
@@ -921,10 +1258,24 @@ impl History {
                     .map(|(i, op)| temp_path(&op.from, i))
                     .collect(),
                 undoing: true,
+                parts: reverse
+                    .iter()
+                    .enumerate()
+                    .map(|(i, op)| part_path(&op.to, i))
+                    .collect(),
             };
             serde_json::to_vec(&p).is_ok_and(|t| write_synced(path, &t).is_ok())
         });
         let mut report = execute(&reverse, Depth::ShallowestFirst);
+        report.kept = kept;
+        report.copies_removed = removed;
+        // The list goes back to the originals.
+        report.done.extend(copies.into_iter().map(|op| Operation {
+            from: op.to,
+            to: op.from,
+            copy: true,
+            within: None,
+        }));
         j.reverted += report.done.len();
         let back: HashSet<(&Path, &Path)> = report
             .done
@@ -961,6 +1312,15 @@ mod tests {
         Operation {
             from: d.join(a),
             to: d.join(b),
+            copy: false,
+            within: None,
+        }
+    }
+
+    fn copy(d: &Path, a: &str, b: &str) -> Operation {
+        Operation {
+            copy: true,
+            ..op(d, a, b)
         }
     }
 
@@ -1269,6 +1629,7 @@ mod tests {
             ops: ops.to_vec(),
             temps,
             undoing: false,
+            parts: Vec::new(),
         };
         fs::write(
             p.join("hist/x-1.pending"),
@@ -1324,6 +1685,7 @@ mod tests {
             ops: back.to_vec(),
             temps,
             undoing: true,
+            parts: Vec::new(),
         };
         fs::write(
             h.pending_path(&id).unwrap(),
@@ -1361,6 +1723,257 @@ mod tests {
         let r = execute(&[op(d.path(), "nao-existe", "x")], Depth::DeepestFirst);
         assert_eq!(r.errors.len(), 1);
         assert!(r.done.is_empty());
+    }
+
+    #[test]
+    fn copies_and_undo() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        fs::create_dir_all(p.join("in/Album")).unwrap();
+        fs::write(p.join("in/a.txt"), "A").unwrap();
+        fs::write(p.join("in/b.txt"), "B").unwrap();
+        fs::write(p.join("in/Album/01.flac"), "song").unwrap();
+        // The original's date goes with the copy.
+        let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
+        File::options()
+            .write(true)
+            .open(p.join("in/a.txt"))
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        let h = History::new(p.join("hist"));
+        let r = h.apply(&[
+            copy(p, "in/a.txt", "out/x/A.txt"),
+            copy(p, "in/b.txt", "out/B.txt"),
+            copy(p, "in/Album", "out/Album (1999)"),
+        ]);
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        assert_eq!(read(p.join("in/a.txt")), "A");
+        assert_eq!(read(p.join("out/x/A.txt")), "A");
+        assert_eq!(read(p.join("out/Album (1999)/01.flac")), "song");
+        assert_eq!(
+            fs::metadata(p.join("out/x/A.txt"))
+                .unwrap()
+                .modified()
+                .unwrap(),
+            old
+        );
+        // Nothing passing is left.
+        let names: Vec<String> = walkdir::WalkDir::new(p.join("out"))
+            .into_iter()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(names.iter().all(|n| !n.starts_with(".renome")), "{names:?}");
+        // One copy changed afterwards: it stays.
+        fs::write(p.join("out/B.txt"), "edited").unwrap();
+        let u = h.undo(r.history_id.as_deref().unwrap()).unwrap();
+        assert!(u.errors.is_empty(), "{:?}", u.errors);
+        assert_eq!(u.kept, [p.join("out/B.txt")]);
+        // The list is told to go back to the originals.
+        assert!(u.done.contains(&Operation {
+            from: p.join("out/x/A.txt"),
+            to: p.join("in/a.txt"),
+            copy: true,
+            within: None,
+        }));
+        assert!(!p.join("out/x").exists());
+        assert!(!p.join("out/Album (1999)").exists());
+        assert_eq!(read(p.join("out/B.txt")), "edited");
+        // The originals as they were.
+        assert_eq!(read(p.join("in/b.txt")), "B");
+        assert_eq!(read(p.join("in/Album/01.flac")), "song");
+        assert!(h.list()[0].undone);
+        // A copy onto a name taken is refused, and nothing is touched.
+        let r = h.apply(&[copy(p, "in/a.txt", "out/B.txt")]);
+        assert_eq!(r.errors[0].kind, ErrorKind::TargetExists);
+        assert_eq!(read(p.join("out/B.txt")), "edited");
+    }
+
+    #[test]
+    fn copied_lists_follow_their_copies() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        fs::create_dir_all(p.join("in")).unwrap();
+        fs::write(p.join("in/01.mp3"), "x").unwrap();
+        fs::write(p.join("in/list.m3u"), "01.mp3\n").unwrap();
+        fs::write(p.join("in/other.m3u"), "01.mp3\n").unwrap();
+        let h = History::new(p.join("hist"));
+        let r = h.apply(&[
+            copy(p, "in/01.mp3", "out/01 - Song.mp3"),
+            copy(p, "in/list.m3u", "out/list.m3u"),
+        ]);
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        assert_eq!(read(p.join("out/list.m3u")), "01 - Song.mp3\n");
+        // The originals' lists still name the originals.
+        assert_eq!(read(p.join("in/list.m3u")), "01.mp3\n");
+        assert_eq!(read(p.join("in/other.m3u")), "01.mp3\n");
+        // Undo: the copies were left so, and go.
+        h.undo(r.history_id.as_deref().unwrap()).unwrap();
+        assert!(!p.join("out").exists());
+    }
+
+    #[test]
+    fn stops_between_files() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        for n in ["a", "b", "c"] {
+            fs::write(p.join(n), n).unwrap();
+        }
+        let h = History::new(p.join("hist"));
+        let seen = std::cell::Cell::new(0);
+        let stop = || {
+            seen.set(seen.get() + 1);
+            seen.get() > 2
+        };
+        let r = h.apply_with(
+            &[copy(p, "a", "a2"), copy(p, "b", "b2"), op(p, "c", "c2")],
+            &Hooks {
+                progress: &|_, _| {},
+                stop: &stop,
+            },
+        );
+        assert!(r.stopped);
+        assert_eq!(r.done.len(), 1);
+        // The others stay as they were, under their names.
+        assert!(p.join("b").exists() && !p.join("b2").exists());
+        assert!(p.join("c").exists() && !p.join("c2").exists());
+        assert!(h.recover().restored == 0);
+    }
+
+    #[test]
+    fn recovers_copies_stopped_halfway() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        for n in ["a", "b", "c"] {
+            fs::write(p.join(n), n).unwrap();
+        }
+        fs::create_dir_all(p.join("out")).unwrap();
+        let h = History::new(p.join("hist"));
+        // `a` was copied whole; `b`'s copy was cut short; `c`, moved to
+        // another disk, was copied whole but its original not deleted yet.
+        let ops = [
+            copy(p, "a", "out/a"),
+            copy(p, "b", "out/b"),
+            op(p, "c", "out/c"),
+        ];
+        let temps: Vec<PathBuf> = ops
+            .iter()
+            .enumerate()
+            .map(|(i, o)| temp_path(&o.from, i))
+            .collect();
+        let parts: Vec<PathBuf> = ops
+            .iter()
+            .enumerate()
+            .map(|(i, o)| part_path(&o.to, i))
+            .collect();
+        fs::copy(p.join("a"), p.join("out/a")).unwrap();
+        fs::write(&parts[1], "half").unwrap();
+        fs::rename(p.join("c"), &temps[2]).unwrap();
+        fs::copy(&temps[2], p.join("out/c")).unwrap();
+        let t = fs::metadata(&temps[2]).unwrap().modified().unwrap();
+        File::options()
+            .write(true)
+            .open(p.join("out/c"))
+            .unwrap()
+            .set_modified(t)
+            .unwrap();
+        fs::create_dir_all(p.join("hist")).unwrap();
+        let pending = Pending {
+            created: Local::now(),
+            ops: ops.to_vec(),
+            temps,
+            undoing: false,
+            parts: parts.clone(),
+        };
+        fs::write(
+            p.join("hist/x-1.pending"),
+            serde_json::to_string(&pending).unwrap(),
+        )
+        .unwrap();
+        let r = h.recover();
+        assert_eq!((r.restored, r.renamed, r.stuck.len()), (1, 1, 0));
+        assert!(!parts[1].exists());
+        // `c` is back, its extra copy gone.
+        assert_eq!(read(p.join("c")), "c");
+        assert!(!p.join("out/c").exists());
+        // The whole copy is in an entry that undo deletes.
+        h.undo("x-1").unwrap();
+        assert!(!p.join("out/a").exists());
+        assert_eq!(read(p.join("a")), "a");
+    }
+
+    /// Two folders on different file systems, when this machine has them
+    /// (`/dev/shm` beside the build folder, say).
+    fn two_disks() -> Option<(tempfile::TempDir, tempfile::TempDir)> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let a = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).ok()?;
+            for other in ["/dev/shm", "/tmp"] {
+                if let Ok(b) = tempfile::tempdir_in(other)
+                    && fs::metadata(a.path()).ok()?.dev() != fs::metadata(b.path()).ok()?.dev()
+                {
+                    return Some((a, b));
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn moves_to_another_disk() {
+        let Some((a, b)) = two_disks() else {
+            return;
+        };
+        fs::create_dir_all(a.path().join("Album")).unwrap();
+        fs::write(a.path().join("song.mp3"), "s").unwrap();
+        fs::write(a.path().join("Album/01.flac"), "1").unwrap();
+        let h = History::new(a.path().join("hist"));
+        let ops = [
+            Operation {
+                from: a.path().join("song.mp3"),
+                to: b.path().join("x/Song.mp3"),
+                copy: false,
+                within: None,
+            },
+            Operation {
+                from: a.path().join("Album"),
+                to: b.path().join("Album (2001)"),
+                copy: false,
+                within: None,
+            },
+        ];
+        let r = h.apply(&ops);
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        assert!(!a.path().join("song.mp3").exists());
+        assert!(!a.path().join("Album").exists());
+        assert_eq!(read(b.path().join("x/Song.mp3")), "s");
+        assert_eq!(read(b.path().join("Album (2001)/01.flac")), "1");
+        h.undo(r.history_id.as_deref().unwrap()).unwrap();
+        assert_eq!(read(a.path().join("song.mp3")), "s");
+        assert_eq!(read(a.path().join("Album/01.flac")), "1");
+        assert!(!b.path().join("x").exists());
+    }
+
+    #[test]
+    fn sent_files_leave_the_added_folder() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        fs::create_dir_all(p.join("home/Downloads/Album/CD1")).unwrap();
+        fs::write(p.join("home/Downloads/Album/CD1/01.flac"), "1").unwrap();
+        let h = History::new(p.join("hist"));
+        let r = h.apply(&[Operation {
+            within: Some(p.join("home/Downloads")),
+            ..op(p, "home/Downloads/Album/CD1/01.flac", "lib/Album/01.flac")
+        }]);
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        // The folders below the one added go; it and those above stay.
+        assert!(!p.join("home/Downloads/Album").exists());
+        assert!(p.join("home/Downloads").is_dir());
+        // Undo makes them again.
+        h.undo(r.history_id.as_deref().unwrap()).unwrap();
+        assert_eq!(read(p.join("home/Downloads/Album/CD1/01.flac")), "1");
     }
 
     #[test]

@@ -607,6 +607,20 @@ ${ex("Nombre_de_la_Serie_012_(2019)_(Digital)_(grupo).cbz", "Nombre de la Serie 
   <li>Si un archivo falla (sin permiso, borrado por otro programa…), los demás siguen, y al final aparece la lista de lo que falló y por qué.</li>
   <li>Después de renombrar, las reglas se desactivan (se puede cambiar en Opciones), para no aplicarlas dos veces.</li>
 </ul>
+<h4>Enviar a otra carpeta</h4>
+<p>Junto al botón Renombrar, el selector dice adónde van los archivos: <b>En la misma carpeta</b> (lo normal: solo renombra), <b>Mover a otra carpeta…</b> o <b>Copiar a otra carpeta…</b>. Sirve para ordenar una carpeta de descargas directamente en su biblioteca, también en otro disco. La elección no se guarda y vuelve a "En la misma carpeta" después de cada envío: la lista pasa a mostrar los archivos en su lugar nuevo, y enviarlos otra vez los mandaría de nuevo.</p>
+<ul>
+  <li>Las carpetas que crean las reglas (artista y álbum, película, serie y temporada, autor, serie de cómics) quedan dentro de la carpeta elegida: <code>Destino/Artista/Álbum (1999)/01 - Canción.flac</code>.</li>
+  <li>Los demás archivos mantienen sus subcarpetas a partir de la carpeta que usted agregó: con <code>Fotos</code> agregada, <code>Fotos/2024/Playa/x.jpg</code> va a <code>Destino/2024/Playa/x.jpg</code>. Los archivos agregados uno por uno van directamente al destino.</li>
+  <li>Van todos los archivos visibles, incluso los que mantienen el nombre. La columna Carpeta muestra dónde quedará cada uno.</li>
+  <li><b>Copiar</b>: los originales quedan exactamente como están, y las copias reciben los nombres nuevos. Portadas, <code>.nfo</code>, listas y etiquetas grabadas van a las copias. Las listas <code>.cue</code>/<code>.m3u</code> copiadas junto pasan a citar las copias; las originales no cambian. La fecha de modificación de cada archivo se mantiene en su copia.</li>
+  <li>Las carpetas que queden vacías en el origen se borran, pero solo las que están dentro de la carpeta que usted agregó: ella misma, y las de fuera, quedan.</li>
+  <li><b>Mover</b> a otro disco: el archivo se copia y solo se borra del disco de origen cuando la copia está completa y verificada.</li>
+  <li>Durante la copia aparecen el progreso y el botón <b>Detener</b>: lo que ya se copió queda (y se puede deshacer), y el resto queda como estaba.</li>
+  <li>Cada copia se hace con un nombre provisional y solo recibe el nombre final cuando está entera; si el programa se cierra a mitad, la copia a medias se borra al abrirlo de nuevo. Nada se sobrescribe: un nombre que ya existe en el destino aparece como conflicto.</li>
+  <li><b>Deshacer</b> una copia borra las copias creadas, pero solo las que siguen como Renome las dejó. Una copia que usted editó después queda, y el aviso dice cuáles. Deshacer un movimiento trae los archivos de vuelta, incluso desde otro disco.</li>
+</ul>
+<p><b>Limitaciones</b>: no se comprueba antes el espacio libre en el destino; si se acaba, los archivos que no quepan fallan (sin dejar nada a medias) y aparecen en la lista de errores. Copiar muchos archivos grandes lleva el tiempo del disco: Renome no acelera la copia. Las carpetas agregadas como elementos se copian o mueven enteras.</p>
 <h4>Historial</h4>
 <p>Cada renombrado queda registrado en el <b>Historial</b>, incluso después de cerrar el programa. Allí puede:</p>
 <ul>

@@ -68,13 +68,19 @@ pub fn scan(paths: &[PathBuf], opts: &ScanOptions, known: &HashSet<PathBuf>) -> 
     let mut seen = known.clone();
     let mut out = ScanResult::default();
 
-    let mut push = |path: &Path, out: &mut ScanResult| {
+    // `base`: the folder added, for the files found in it.
+    let mut push = |path: &Path, base: Option<&Path>, out: &mut ScanResult| {
         if !seen.insert(path.to_path_buf()) {
             return;
         }
         match std::fs::symlink_metadata(path) {
             Ok(meta) => match FileEntry::from_path(path, &meta) {
-                Some(e) => out.files.push(e),
+                Some(mut e) => {
+                    if let Some(b) = base {
+                        e.base = b.to_path_buf();
+                    }
+                    out.files.push(e)
+                }
                 None => out.skipped.push(Skipped {
                     path: path.into(),
                     reason: "invalidUtf8".into(),
@@ -100,7 +106,7 @@ pub fn scan(paths: &[PathBuf], opts: &ScanOptions, known: &HashSet<PathBuf>) -> 
             }
         };
         if !meta.is_dir() || opts.folders_as_items {
-            push(path, &mut out);
+            push(path, None, &mut out);
             continue;
         }
         let walker = WalkDir::new(path)
@@ -113,7 +119,7 @@ pub fn scan(paths: &[PathBuf], opts: &ScanOptions, known: &HashSet<PathBuf>) -> 
         for entry in walker {
             match entry {
                 Ok(e) if e.file_type().is_dir() => {}
-                Ok(e) => push(e.path(), &mut out),
+                Ok(e) => push(e.path(), Some(path), &mut out),
                 Err(e) => out.skipped.push(Skipped {
                     path: e
                         .path()

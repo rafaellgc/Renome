@@ -290,7 +290,13 @@ pub fn changes(done: &[Operation]) -> Vec<ListChange> {
         .map(|op| (op.from.clone(), op.to.clone()))
         .collect();
     let moved_lists: HashSet<PathBuf> = lists.iter().map(|(from, _)| from.clone()).collect();
-    let dirs: HashSet<&Path> = done.iter().filter_map(|op| op.from.parent()).collect();
+    // The lists beside the files moved (a copy's originals stay, and so do
+    // the lists that name them).
+    let dirs: HashSet<&Path> = done
+        .iter()
+        .filter(|op| !op.copy)
+        .filter_map(|op| op.from.parent())
+        .collect();
     for dir in dirs {
         let Ok(rd) = fs::read_dir(dir) else { continue };
         for p in rd.flatten().map(|e| e.path()) {
@@ -477,14 +483,20 @@ mod tests {
             Operation {
                 from: old.join("01 Song.flac"),
                 to: new.join("01 - Song.flac"),
+                copy: false,
+                within: None,
             },
             Operation {
                 from: old.join("2.flac"),
                 to: new.join("2.flac"),
+                copy: false,
+                within: None,
             },
             Operation {
                 from: old.join("album.cue"),
                 to: new.join("album.cue"),
+                copy: false,
+                within: None,
             },
         ];
         assert_eq!(update(&done), (2, 0));
@@ -510,10 +522,14 @@ mod tests {
             Operation {
                 from: p.join("Canção.mp3"),
                 to: p.join("01 - Canção.mp3"),
+                copy: false,
+                within: None,
             },
             Operation {
                 from: p.join("sub/x.mp3"),
                 to: p.join("sub/y.mp3"),
+                copy: false,
+                within: None,
             },
         ];
         update(&done);
@@ -541,6 +557,8 @@ mod tests {
         let done = vec![Operation {
             from: p.join("x.txt"),
             to: p.join("y.txt"),
+            copy: false,
+            within: None,
         }];
         assert_eq!(update(&done), (1, 1));
         assert_eq!(

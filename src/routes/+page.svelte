@@ -126,6 +126,13 @@
       );
     if (tvProgress) return { label: tvProgress, stop: true };
     if (comicProgress && !comicPick && !gcdLogin) return { label: comicProgress, stop: true };
+    if (task === "rename" && applyProgress?.total)
+      return {
+        label: t(sendTo?.copy ? "workingCopy" : "workingMove", { p: Math.floor((applyProgress.done / applyProgress.total) * 100) }),
+        done: applyProgress.done,
+        total: applyProgress.total,
+        stop: true,
+      };
     if (task) return { label: t({ add: "workingAdd", rename: "workingRename", undo: "workingUndo" }[task] as "workingAdd") };
     return null;
   });
@@ -410,6 +417,11 @@
     return { found, choose, none };
   }
   let addMenu = $state(false);
+  /** Another folder the files go to (moved or copied); for this session only. */
+  let sendTo = $state<{ dir: string; copy: boolean } | null>(null);
+  let sendMenu = $state(false);
+  /** Bytes copied so far, while copying. */
+  let applyProgress = $state<{ done: number; total: number } | null>(null);
   let ruleMenu = $state(false);
   let table = $state<FileTable>();
 
@@ -435,7 +447,7 @@
     return out;
   });
 
-  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, movies: movieMatches, episodes: episodeMatches, songs: songMatches, books: bookMatches, comics: comicMatches, leftoverSuffix: t("leftoverSuffix") });
+  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, movies: movieMatches, episodes: episodeMatches, songs: songMatches, books: bookMatches, comics: comicMatches, leftoverSuffix: t("leftoverSuffix"), sendTo });
   /** Example name for rule cards: the first file in natural name order, so
    *  it does not jump around while the preview re-sorts. */
   const collator = new Intl.Collator(undefined, { numeric: true });
@@ -562,6 +574,12 @@
     if (r) await addPaths(Array.isArray(r) ? r : [r], asItems);
   }
 
+  async function pickSendTo(copy: boolean) {
+    sendMenu = false;
+    const r = await open({ directory: true, multiple: false, title: t(copy ? "sendCopyTo" : "sendMoveTo") });
+    if (typeof r === "string") sendTo = { dir: r, copy };
+  }
+
   async function removeSelected() {
     if (!selected.size) return;
     await remember(found());
@@ -606,7 +624,7 @@
     else overrides[path] = name;
   }
 
-  const basename = (p: string) => p.split("/").pop() ?? p;
+  const basename = (p: string) => p.split(/[\\/]/).pop() ?? p;
   const errText = (e: OpError) => {
     if (e.kind === "history") return `${t("err.history")} (${e.detail})`;
     const why =
@@ -642,7 +660,11 @@
     if (settings.confirmApply || left.length) {
       const lines = [
         ...left,
-        preview.changed ? t("confirmText", { n: preview.changed }) : "",
+        preview.changed
+          ? sendTo
+            ? t(sendTo.copy ? "confirmCopy" : "confirmMove", { n: preview.changed, dir: sendTo.dir })
+            : t("confirmText", { n: preview.changed })
+          : "",
         meta.length + tvMeta.length ? t("confirmMeta", { n: meta.length + tvMeta.length }) : "",
         bookMeta.length ? t("confirmBookMeta", { n: bookMeta.length }) : "",
         coverOnly ? t("confirmCovers", { n: coverOnly }) : "",
@@ -660,6 +682,9 @@
     }
     busy = true;
     task = "rename";
+    applyProgress = null;
+    // Where the files went, for the notice (the choice is reset below).
+    const sent = sendTo;
     try {
       const rule = movieRule?.rule;
       // Old folders renamed for their leftovers: not files.
@@ -763,9 +788,13 @@
       }
       followMatches(r);
       if (settings.disableRulesAfterApply) for (const s of steps) s.enabled = false;
+      // The list now holds what was sent: sending it again would send it
+      // once more, so the files stay where they are until chosen again.
+      if (preview.changed) sendTo = null;
       overrides = {};
       notice = [
-        preview.changed ? t("renamedN", { n: r.done.filter((op) => !leftFrom.has(op.from)).length }) : "",
+        preview.changed ? t(sent ? (sent.copy ? "copiedN" : "movedN") : "renamedN", { n: r.done.filter((op) => !leftFrom.has(op.from)).length }) : "",
+        r.stopped ? t("applyStopped") : "",
         r.done.some((op) => leftFrom.has(op.from)) ? t("leftFoldersN", { n: r.done.filter((op) => leftFrom.has(op.from)).length }) : "",
         r.lists ? t("listsN", { n: r.lists }) : "",
         r.listsRemoved ? t("listsRemovedN", { n: r.listsRemoved }) : "",
@@ -781,6 +810,9 @@
     } catch (e) {
       notice = `${t("error")}: ${tError(e)}`;
     } finally {
+      // Its own notice says it stopped.
+      stopping = false;
+      applyProgress = null;
       busy = false;
       task = null;
     }
@@ -797,15 +829,19 @@
       const r = await api.undo(id);
       foundUndo = [];
       followMatches(r);
-      notice = t("restoredN", { n: r.done.length });
+      const restored = r.done.filter((op) => !op.copy).length;
+      notice = [restored || !r.copiesRemoved ? t("restoredN", { n: restored }) : "", r.copiesRemoved ? t("copiesRemovedN", { n: r.copiesRemoved }) : ""]
+        .filter(Boolean)
+        .join(" · ");
       if (history) history = await api.history();
+      if (r.kept?.length) await notify({ title: t("copiesKeptTitle"), text: t("copiesKeptText"), items: r.kept });
       await refresh();
       checkIdentical();
       if (!r.errors.length) done(notice);
       await showErrors(
         r,
         r.done.length ? t("resultTitle") : t("undoFailed"),
-        `${r.done.length ? `${t("restoredN", { n: r.done.length })}\n` : ""}${t("undoFailedHint")}`,
+        `${restored ? `${t("restoredN", { n: restored })}\n` : ""}${t("undoFailedHint")}`,
       );
     } catch (e) {
       await notify({ title: t("undoFailed"), text: tError(e) });
@@ -1567,7 +1603,7 @@
       return;
     }
     if (e.key === "Escape") {
-      addMenu = ruleMenu = false;
+      addMenu = ruleMenu = sendMenu = false;
       history = null;
       showOptions = false;
       help = null;
@@ -1623,7 +1659,7 @@
   }
 
   function onpointerdown(e: PointerEvent) {
-    if (!(e.target as Element).closest(".menu-host")) addMenu = ruleMenu = false;
+    if (!(e.target as Element).closest(".menu-host")) addMenu = ruleMenu = sendMenu = false;
   }
 
   onMount(() => {
@@ -1641,6 +1677,9 @@
     });
     const unlistenBooks = listen<{ done: number; total: number }>("book-progress", (e) => {
       if (bookProgress) bookProgress = { ...bookProgress, ...e.payload };
+    });
+    const unlistenApply = listen<{ done: number; total: number }>("apply-progress", (e) => {
+      if (task === "rename") applyProgress = e.payload;
     });
     const unlistenProgress = listen<{ done: number; total: number }>("identical-progress", (e) => {
       identicalProgress = e.payload.done < e.payload.total ? e.payload.done / e.payload.total : null;
@@ -1674,6 +1713,7 @@
     return () => {
       unlisten.then((f) => f());
       unlistenProgress.then((f) => f());
+      unlistenApply.then((f) => f());
       unlistenTmdb.then((f) => f());
       unlistenMb.then((f) => f());
       unlistenBooks.then((f) => f());
@@ -1722,8 +1762,20 @@
           <path fill="currentColor" fill-rule="evenodd" stroke="currentColor" stroke-width="1" stroke-linejoin="round" d="M12.15 3.76L11.96 1.50L8.04 1.50L7.85 3.76L5.67 5.02L3.62 4.05L1.66 7.45L3.52 8.74L3.52 11.26L1.66 12.55L3.62 15.95L5.67 14.98L7.85 16.24L8.04 18.50L11.96 18.50L12.15 16.24L14.33 14.98L16.38 15.95L18.34 12.55L16.48 11.26L16.48 8.74L18.34 7.45L16.38 4.05L14.33 5.02ZM13 10a3 3 0 1 0-6 0a3 3 0 1 0 6 0Z" />
         </svg>
       </button>
+    </div>
+    <div class="group menu-host">
+      <button class="send" class:on={!!sendTo} title={sendTo ? sendTo.dir : t("sendHint")} disabled={!!working} onclick={() => (sendMenu = !sendMenu)}>
+        {sendTo ? t(sendTo.copy ? "sendCopyShort" : "sendMoveShort", { dir: basename(sendTo.dir) }) : t("sendHere")} ▾
+      </button>
+      {#if sendMenu}
+        <div class="menu right">
+          <button onclick={() => ((sendTo = null), (sendMenu = false))}>{t("sendHere")}</button>
+          <button onclick={() => pickSendTo(false)}>{t("sendMoveTo")}</button>
+          <button onclick={() => pickSendTo(true)}>{t("sendCopyTo")}</button>
+        </div>
+      {/if}
       <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !metaOnly.length && !episodeMetaOnly.length && !coverOnly && !playlistOnly.length && !tagsOnly.length) || busy || !!working} onclick={applyAll}>
-        {t("rename")} {preview.changed + metaOnly.length + episodeMetaOnly.length + coverOnly + playlistOnly.length + tagsOnly.length || ""}
+        {t(sendTo ? (sendTo.copy ? "copyAction" : "moveAction") : "rename")} {preview.changed + metaOnly.length + episodeMetaOnly.length + coverOnly + playlistOnly.length + tagsOnly.length || ""}
       </button>
     </div>
   </header>
@@ -2058,6 +2110,9 @@
     z-index: 5;
   }
   .menu button { border: none; background: none; text-align: left; }
+  .menu.right { left: auto; right: 0; }
+  .send { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .send.on { border-color: var(--accent); color: var(--accent); }
   .menu button:hover { background: var(--hover); }
   .files { flex: 1; display: flex; min-width: 0; border-radius: 8px; position: relative; }
   .files.dragging { outline: 2px dashed var(--accent); outline-offset: 2px; }

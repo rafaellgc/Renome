@@ -12,6 +12,8 @@ This document describes **what** the program does, not **how**.
 - A folder's name has no extension: extension rules leave it alone and
   dots in it are kept as text. Folders and files inside them can be renamed
   in the same batch.
+- Each file keeps the folder it was added with (its own folder when
+  added by itself), for sending to another folder (see 4).
 - Hidden files (`.file`, `.git/`; on Windows also files marked hidden or
   system, like `desktop.ini`, and folders marked hidden: Windows marks
   folders with a custom look as system) are left out unless enabled in
@@ -888,7 +890,39 @@ field, or a `<` with no `>` after it, is kept as typed (Windows refuses
   History files are written through a copy that takes their place and
   synced to the disk, so a power cut leaves neither an empty entry nor a
   lost note.
-- A move to another disk is refused ("other disk"); the file stays.
+- A move to another disk (the rename says so) is a copy: the file (a
+  folder with everything in it, links as links on Linux and macOS) is
+  copied to a passing name beside its target (`.renome-<pid>-<n>.part`,
+  also noted before starting), with its modification date, synced to the
+  disk and checked for size, renamed to its target only if that is free
+  (as above), and only then is the original deleted; a file whose
+  original cannot be deleted loses its copy again, a folder keeps it
+  (the move counts) and what is left of the original gets its old name
+  back and is reported ("partly left").
+- **Send to another folder** (toolbar, next to Rename; "In the same
+  folder", "Move to another folder…", "Copy to another folder…"; not
+  saved, and back to "In the same folder" after each send, since the list
+  then holds the files sent): the folders the rules make go inside the chosen
+  folder instead of their root (no root is looked for, old folders are
+  not taken for new ones nor renamed for leftovers); every other visible
+  file (also one keeping its name) keeps the subfolders below the folder
+  it was added with (`Photos/2024/x.jpg` → `<target>/2024/x.jpg`; a file
+  or folder added by itself goes straight in), after the songs' companion
+  files have followed their songs. Copies: made as for another disk,
+  without the first phase (the originals stay, so a name another file of
+  the batch has stays taken); metadata files, covers, playlists and tags
+  go to the copies, and only lists copied along are rewritten (the
+  folders the originals are in are not looked at). Each copy is
+  recorded as it was left (size and date; for a folder its files' count,
+  total size and latest date), updated when its tags are written; undo
+  deletes the copies still so and keeps the others (out of the entry,
+  listed), with their lists and tags untouched. Copies and moves to
+  other disks report their progress (bytes, every 200 ms at most) and
+  can be stopped between files: the files not reached keep their names.
+  The next start after a stop halfway deletes passing copies, records
+  whole copies in an entry, and, for a move to another disk whose
+  original was still under its temporary name, deletes its copy when
+  identical (size and date) and gives the original its name back.
 - Renaming, undoing, adding folders and the preview run away from the
   window's thread; a preview that comes back after a newer one is dropped.
 - Names are compared without case where the file system ignores it:
@@ -901,7 +935,9 @@ field, or a `<` with no `>` after it, is kept as typed (Windows refuses
   copies (by content, as found in the background): the first in the list
   goes ahead and the others stay, marked "copy".
 - Folders files were moved out of are deleted when left empty (up to
-  the folder the move happened within); undo makes them again.
+  the folder the move happened within; for files sent to another folder,
+  only below the folder they were added with, which stays); undo makes
+  them again.
 - Cue sheets and playlists (`.cue`, `.m3u`, `.m3u8`) in the folders
   renamed files left, or renamed/moved themselves, are rewritten so their
   references (`FILE "…"` lines in cue sheets, non-comment lines in

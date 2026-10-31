@@ -1274,6 +1274,7 @@ mod tests {
             size: 0,
             modified: Some(1_700_000_000),
             is_dir: false,
+            base: PathBuf::from("/tmp"),
             taken: Default::default(),
             tags: Default::default(),
             comic: Default::default(),

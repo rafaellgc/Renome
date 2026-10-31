@@ -607,6 +607,20 @@ ${ex("Nome_da_Serie_012_(2019)_(Digital)_(grupo).cbz", "Nome da Série #012 (201
   <li>Se um arquivo falhar (sem permissão, apagado por outro programa…), os outros seguem, e no fim aparece a lista do que falhou e por quê.</li>
   <li>Depois de renomear, as regras são desligadas (desligável nas Opções), para não serem aplicadas duas vezes.</li>
 </ul>
+<h4>Enviar para outra pasta</h4>
+<p>Ao lado do botão Renomear, o seletor diz para onde vão os arquivos: <b>Na mesma pasta</b> (o normal: só renomeia), <b>Mover para outra pasta…</b> ou <b>Copiar para outra pasta…</b>. Serve para organizar uma pasta de downloads direto na sua biblioteca, inclusive em outro disco. A escolha não fica salva e volta para "Na mesma pasta" depois de cada envio: a lista passa a mostrar os arquivos no lugar novo, e enviá-los de novo os mandaria outra vez.</p>
+<ul>
+  <li>As pastas que as regras criam (artista e álbum, filme, série e temporada, autor, série de quadrinhos) ficam dentro da pasta escolhida: <code>Destino/Artista/Álbum (1999)/01 - Música.flac</code>.</li>
+  <li>Os outros arquivos mantêm as subpastas a partir da pasta que você adicionou: com <code>Fotos</code> adicionada, <code>Fotos/2024/Praia/x.jpg</code> vai para <code>Destino/2024/Praia/x.jpg</code>. Arquivos adicionados um a um vão direto para o destino.</li>
+  <li>Todos os arquivos visíveis vão, mesmo os que mantêm o nome. A coluna Pasta mostra onde cada um vai ficar.</li>
+  <li><b>Copiar</b>: os originais ficam exatamente como estão, e as cópias recebem os nomes novos. Capas, <code>.nfo</code>, playlists e tags gravadas vão para as cópias. Listas <code>.cue</code>/<code>.m3u</code> copiadas junto passam a citar as cópias; as originais não mudam. A data de modificação de cada arquivo é mantida na cópia.</li>
+  <li>As pastas que ficarem vazias na origem são apagadas, mas só as que estão dentro da pasta que você adicionou: ela mesma, e as de fora dela, ficam.</li>
+  <li><b>Mover</b> para outro disco: o arquivo é copiado e só é apagado do disco de origem depois que a cópia está completa e conferida.</li>
+  <li>Durante a cópia aparece o progresso e o botão <b>Parar</b>: o que já foi copiado fica (e pode ser desfeito), e o resto fica como estava.</li>
+  <li>Cada cópia é feita com um nome provisório e só recebe o nome final quando está inteira; se o programa fechar no meio, a cópia pela metade é apagada ao abrir de novo. Nada é sobrescrito: um nome que já existe no destino aparece como conflito.</li>
+  <li><b>Desfazer</b> uma cópia apaga as cópias criadas, mas só as que continuam como o Renome as deixou. Uma cópia que você editou depois fica, e o aviso diz quais. Desfazer um movimento traz os arquivos de volta, mesmo de outro disco.</li>
+</ul>
+<p><b>Limitações</b>: o espaço livre no destino não é conferido antes; se acabar, os arquivos que não couberem falham (sem deixar nada pela metade) e aparecem na lista de erros. Copiar muitos arquivos grandes leva o tempo do disco: o Renome não acelera a cópia. Pastas adicionadas como itens são copiadas ou movidas inteiras.</p>
 <h4>Histórico</h4>
 <p>Cada renomeação fica registrada no <b>Histórico</b>, mesmo depois de fechar o programa. Lá você pode:</p>
 <ul>

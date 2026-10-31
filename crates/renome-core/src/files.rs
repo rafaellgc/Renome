@@ -25,6 +25,10 @@ pub struct FileEntry {
     /// A folder renamed as an item; its name has no extension.
     #[serde(default)]
     pub is_dir: bool,
+    /// The folder it was added with (its own folder when added by itself):
+    /// sent to another folder, it keeps the subfolders below this one.
+    #[serde(default)]
+    pub base: PathBuf,
     /// Date the photo was taken (EXIF), read on first use.
     #[serde(skip)]
     pub(crate) taken: OnceLock<Option<NaiveDateTime>>,
@@ -50,9 +54,11 @@ impl FileEntry {
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs() as i64);
+        let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
         Some(Self {
             path: path.to_path_buf(),
-            dir: path.parent().map(Path::to_path_buf).unwrap_or_default(),
+            base: dir.clone(),
+            dir,
             stem: stem.to_string(),
             ext: ext.to_string(),
             size: if is_dir { 0 } else { meta.len() },

@@ -83,6 +83,21 @@ pub struct View {
     /// leftovers (home, Downloads…; filled in by the app).
     #[serde(skip)]
     pub protected: Vec<PathBuf>,
+    /// Another folder the files go to, moved or copied.
+    #[serde(default)]
+    pub send_to: Option<SendTo>,
+}
+
+/// Where the files go instead of staying where they are: the folders the
+/// rules make go into `dir`, and other files keep the subfolders below
+/// the folder they were added with.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendTo {
+    pub dir: PathBuf,
+    /// Copies are made; the files stay as they are.
+    #[serde(default)]
+    pub copy: bool,
 }
 
 /// An old folder (a show's, movie's, album's…) that keeps files after the
@@ -128,6 +143,10 @@ pub struct PreviewItem {
     /// rules above the first lookup rule make of it, when not the original.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lookup_name: Option<String>,
+    /// Sent to another folder: the folder it was added with (see
+    /// [`Operation::within`]).
+    #[serde(skip)]
+    pub within: Option<PathBuf>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -142,6 +161,9 @@ pub struct Preview {
     pub conflicts: usize,
     /// Old folders renamed for what stays in them.
     pub left_folders: Vec<LeftFolder>,
+    /// The files are copied, not moved (see [`SendTo`]).
+    #[serde(skip)]
+    pub copy: bool,
 }
 
 impl PreviewItem {
@@ -160,11 +182,15 @@ impl Preview {
             .map(|i| Operation {
                 from: i.path.clone(),
                 to: i.target(),
+                copy: self.copy,
+                within: i.within.clone(),
             })
             // Shallower than the files leaving them: renamed after.
             .chain(self.left_folders.iter().map(|l| Operation {
                 from: l.from.clone(),
                 to: l.to.clone(),
+                copy: false,
+                within: None,
             }))
             .collect()
     }
@@ -593,6 +619,40 @@ fn place_own_folders(
     }
 }
 
+/// Sent elsewhere: the files no rule (or song) gave a folder keep the
+/// subfolders below the folder they were added with.
+fn send_rest(items: &mut [PreviewItem], files: &[FileEntry], to: &SendTo) {
+    let base: HashMap<&Path, &Path> = files
+        .iter()
+        .map(|f| (f.path.as_path(), f.base.as_path()))
+        .collect();
+    for i in items.iter_mut().filter(|i| i.dest.is_none()) {
+        let rel = base
+            .get(i.path.as_path())
+            .and_then(|b| i.dir.strip_prefix(b).ok())
+            .unwrap_or(Path::new(""));
+        let dest = to.dir.join(rel);
+        if dest == i.dir {
+            continue;
+        }
+        let levels: Vec<String> = rel
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        if i.status == Status::Unchanged {
+            i.status = Status::Ok;
+        }
+        if i.problem.is_none()
+            && let Some(p) = levels.iter().find_map(|l| validate(l))
+        {
+            i.status = Status::Conflict;
+            i.problem = Some(p);
+        }
+        i.folder = (!levels.is_empty()).then(|| levels.join("/"));
+        i.dest = Some(dest);
+    }
+}
+
 /// Files that go with songs, when no rule changed them:
 /// - lyrics with a song's name (`01 Song.lrc`) get its new name;
 /// - with folders, other files (covers, cue sheets, logs) go with their
@@ -939,9 +999,15 @@ pub fn preview(
                     .dir
                     .file_name()
                     .is_some_and(|d| d.to_string_lossy() == folder);
-                let (root, names) = match moved {
-                    Some(Move::OwnFolder) if !inside => (file.dir.clone(), vec![folder.clone()]),
-                    Some(Move::Into { root, folders }) => (root, folders),
+                let (root, names) = match (&view.send_to, moved) {
+                    // The rules' folders go into the destination (the
+                    // other files get theirs at the end, see `send_rest`).
+                    (Some(s), Some(Move::OwnFolder)) => (s.dir.clone(), vec![folder.clone()]),
+                    (Some(s), Some(Move::Into { folders, .. })) => (s.dir.clone(), folders),
+                    (None, Some(Move::OwnFolder)) if !inside => {
+                        (file.dir.clone(), vec![folder.clone()])
+                    }
+                    (None, Some(Move::Into { root, folders })) => (root, folders),
                     _ => (file.dir.clone(), Vec::new()),
                 };
                 let to = names.iter().fold(root, |p, n| p.join(n));
@@ -996,19 +1062,29 @@ pub fn preview(
                 retag,
                 junk,
                 lookup_name,
+                within: view.send_to.as_ref().map(|_| file.base.clone()),
             }
         })
         .collect();
-    climb_shared_roots(&mut items);
+    // Sent elsewhere, the destination is the library: no root is looked
+    // for around the files, nor old folders taken for new ones.
+    let in_place = view.send_to.is_none();
+    if in_place {
+        climb_shared_roots(&mut items);
+    }
     unify_folders(&mut items);
-    place_show_folders(&mut items, view);
-    place_movie_folders(&mut items, view);
+    if in_place {
+        place_show_folders(&mut items, view);
+        place_movie_folders(&mut items, view);
+    }
     let series: HashMap<&Path, String> = comics
         .iter()
         .map(|(p, (m, folder))| (*p, folder.as_ref().unwrap_or(m).series.to_lowercase()))
         .filter(|(_, s)| !s.is_empty())
         .collect();
-    place_own_folders(&mut items, &series, comics::is_comic, |_| false, view);
+    if in_place {
+        place_own_folders(&mut items, &series, comics::is_comic, |_| false, view);
+    }
     let books: HashMap<&Path, String> = view
         .books
         .iter()
@@ -1019,9 +1095,11 @@ pub fn preview(
             )
         })
         .collect();
-    place_own_folders(&mut items, &books, crate::ebook::is_book, |_| false, view);
+    if in_place {
+        place_own_folders(&mut items, &books, crate::ebook::is_book, |_| false, view);
+    }
     if let Some((_, folders)) = music {
-        if folders {
+        if folders && in_place {
             keep_collections(&mut items, &songs);
             skip_artist_level(&mut items, &songs);
             let albums: HashMap<&Path, String> = songs
@@ -1043,6 +1121,9 @@ pub fn preview(
             );
         }
         follow_songs(&mut items, folders, &view.identical);
+    }
+    if let Some(s) = &view.send_to {
+        send_rest(&mut items, files, s);
     }
 
     // Repeated targets within the batch. A file that keeps its name is not
@@ -1089,12 +1170,14 @@ pub fn preview(
         }
     }
 
-    // Target already exists on disk and is not moving away. Repeat until
-    // stable, since a conflict keeps that file from being moved.
+    // Target already exists on disk and is not moving away (copies leave
+    // nothing). Repeat until stable, since a conflict keeps that file from
+    // being moved.
+    let copying = view.send_to.as_ref().is_some_and(|s| s.copy);
     loop {
         let moving: HashSet<PathBuf> = items
             .iter()
-            .filter(|i| i.status == Status::Ok)
+            .filter(|i| i.status == Status::Ok && !copying)
             .map(|i| keys.key(&i.path))
             .collect();
         let mut blocked = Vec::new();
@@ -1136,7 +1219,11 @@ pub fn preview(
         .iter()
         .filter(|i| i.status == Status::Conflict)
         .count();
-    let left_folders = left_folders(&items, view);
+    let left_folders = if in_place {
+        left_folders(&items, view)
+    } else {
+        Vec::new()
+    };
     Preview {
         items,
         rule_errors: pipeline.errors,
@@ -1145,6 +1232,7 @@ pub fn preview(
         changed,
         conflicts,
         left_folders,
+        copy: copying,
     }
 }
 
@@ -1796,6 +1884,95 @@ mod tests {
                 d.path().join("Filme (2001)/Filme (2001) - 136p.pt-BR.srt"),
             ]
         );
+    }
+
+    #[test]
+    fn sent_to_another_folder() {
+        let d = tempfile::tempdir().unwrap();
+        let (inp, out) = (d.path().join("Fotos"), d.path().join("Destino"));
+        fs::create_dir_all(inp.join("2024/Praia")).unwrap();
+        fs::create_dir_all(&out).unwrap();
+        let mut files = entries(&inp, &["a.jpg", "2024/Praia/b.jpg"]);
+        for f in &mut files {
+            f.base = inp.clone();
+        }
+        let movie = d.path().join("f.2001.mkv");
+        fs::write(&movie, "v").unwrap();
+        files.extend(entries(d.path(), &["f.2001.mkv"]));
+        let m = MovieMatch {
+            id: 1,
+            title: "Filme".into(),
+            original_title: String::new(),
+            year: Some(2001),
+        };
+        let mut view = View::default();
+        view.movies.insert(movie.clone(), m);
+        view.send_to = Some(SendTo {
+            dir: out.clone(),
+            copy: false,
+        });
+        let steps = vec![
+            Step {
+                enabled: true,
+                rule: Rule::Replace {
+                    find: "b".into(),
+                    replace: "B".into(),
+                    case_sensitive: true,
+                    first_only: false,
+                    target: crate::rules::Target::Name,
+                },
+            },
+            Step {
+                enabled: true,
+                rule: Rule::Movie {
+                    template: "{title} ({year})".into(),
+                    colon: " - ".into(),
+                    sidecar: false,
+                    fanart: false,
+                    folder: true,
+                    missing: false,
+                },
+            },
+        ];
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        let mut to: Vec<_> = p.operations().iter().map(|o| o.to.clone()).collect();
+        to.sort();
+        // Unchanged names go too; subfolders below the folder added stay;
+        // the rule's folder goes straight into the destination.
+        assert_eq!(
+            to,
+            [
+                out.join("2024/Praia/B.jpg"),
+                out.join("Filme (2001)/Filme (2001).mkv"),
+                out.join("a.jpg"),
+            ]
+        );
+        assert!(p.operations().iter().all(|o| !o.copy));
+
+        // Copied: the originals stay, so a name another file of the batch
+        // has is taken, not freed.
+        fs::write(out.join("a.jpg"), "old").unwrap();
+        view.send_to = Some(SendTo {
+            dir: inp.clone(),
+            copy: true,
+        });
+        let swap = vec![Step {
+            enabled: true,
+            rule: Rule::Replace {
+                find: "a".into(),
+                replace: "b".into(),
+                case_sensitive: true,
+                first_only: false,
+                target: crate::rules::Target::Name,
+            },
+        }];
+        let files = entries(&inp, &["a.jpg", "b.jpg"]);
+        let p = preview(&files, &swap, &HashMap::new(), &view);
+        let a = p.items.iter().find(|i| i.original == "a.jpg").unwrap();
+        assert_eq!(a.problem, Some(Problem::Exists));
+        // Copied onto itself: nothing to do.
+        let b = p.items.iter().find(|i| i.original == "b.jpg").unwrap();
+        assert_eq!(b.status, Status::Unchanged);
     }
 
     #[test]

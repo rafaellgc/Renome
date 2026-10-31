@@ -324,13 +324,30 @@ async fn apply(
     overrides: Overrides,
     mut view: View,
 ) -> Result<ApplyReport, String> {
+    let stop = stop_signal(&app);
+    let emitter = app.clone();
     in_background(app, move |state| {
         let mut s = state.session.lock().unwrap();
         view.identical = s.identical.clone();
         view.protected = protected_dirs();
         // Recompute the preview here to apply exactly what is visible and valid right now.
         let ops = renome_core::preview(&s.files, &steps, &overrides, &view).operations();
-        let report = state.history.apply(&ops);
+        // Copies (and moves to other disks) tell how far they are.
+        let last = std::cell::Cell::new(std::time::Instant::now());
+        let progress = |done: u64, total: u64| {
+            if last.get().elapsed().as_millis() >= 200 || done == total {
+                last.set(std::time::Instant::now());
+                let _ = emitter.emit(
+                    "apply-progress",
+                    serde_json::json!({ "done": done, "total": total }),
+                );
+            }
+        };
+        let hooks = renome_core::apply::Hooks {
+            progress: &progress,
+            stop: &stop,
+        };
+        let report = state.history.apply_with(&ops, &hooks);
         refresh_renamed(&mut s.files, &report);
         // Earlier states point to the old names.
         s.undo.clear();
