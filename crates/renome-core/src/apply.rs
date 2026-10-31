@@ -68,9 +68,11 @@ pub struct ApplyReport {
     pub lists_removed: usize,
 }
 
-/// Renames `from` to `to` only if `to` does not exist. On Linux the check
-/// and the rename are one step (nothing can appear in between); elsewhere,
-/// and on file systems that cannot do that, it checks first.
+/// Renames `from` to `to` only if `to` does not exist. The check and the
+/// rename are one step, so nothing can appear in between: `renameat2` on
+/// Linux, `renamex_np` on macOS, `MoveFileExW` on Windows. Where the file
+/// system cannot do that (or a Windows path is too long for it), it checks
+/// first.
 fn rename_new(from: &Path, to: &Path) -> Result<(), (ErrorKind, String)> {
     #[cfg(target_os = "linux")]
     {
@@ -100,6 +102,61 @@ fn rename_new(from: &Path, to: &Path) -> Result<(), (ErrorKind, String)> {
                 Some(libc::EINVAL | libc::ENOSYS | libc::ENOTSUP) => {}
                 _ => return Err(io_kind(&e)),
             }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        if let (Ok(f), Ok(t)) = (
+            CString::new(from.as_os_str().as_bytes()),
+            CString::new(to.as_os_str().as_bytes()),
+        ) {
+            // SAFETY: both are valid C strings for the call's duration.
+            let r = unsafe { libc::renamex_np(f.as_ptr(), t.as_ptr(), libc::RENAME_EXCL) };
+            if r == 0 {
+                return Ok(());
+            }
+            let e = std::io::Error::last_os_error();
+            match e.raw_os_error() {
+                Some(libc::EEXIST) => return Err((ErrorKind::TargetExists, String::new())),
+                // Not supported here: check, then rename.
+                Some(libc::EINVAL | libc::ENOSYS | libc::ENOTSUP) => {}
+                _ => return Err(io_kind(&e)),
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn MoveFileExW(existing: *const u16, new: *const u16, flags: u32) -> i32;
+        }
+        const ERROR_FILE_EXISTS: i32 = 80;
+        const ERROR_ALREADY_EXISTS: i32 = 183;
+        let wide = |p: &Path| -> Vec<u16> {
+            p.as_os_str()
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect()
+        };
+        let (f, t) = (wide(from), wide(to));
+        // Longer paths need a prefix the standard rename knows how to add.
+        if f.len() < 260 && t.len() < 260 {
+            // No flags: an existing target is refused, not replaced.
+            // SAFETY: both are null-terminated wide strings for the call's
+            // duration.
+            if unsafe { MoveFileExW(f.as_ptr(), t.as_ptr(), 0) } != 0 {
+                return Ok(());
+            }
+            let e = std::io::Error::last_os_error();
+            return match e.raw_os_error() {
+                Some(ERROR_FILE_EXISTS | ERROR_ALREADY_EXISTS) => {
+                    Err((ErrorKind::TargetExists, String::new()))
+                }
+                _ => Err(io_kind(&e)),
+            };
         }
     }
     if fs::symlink_metadata(to).is_ok() {

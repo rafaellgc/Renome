@@ -26,6 +26,20 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test -p renome-core
 
+  # The same tests on Windows and macOS (renaming works differently there);
+  # they do not hold the builds back.
+  test-other:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p renome-core
+
   build:
     needs: test
     strategy:

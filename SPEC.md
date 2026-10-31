@@ -71,6 +71,8 @@ before it is read. The preview sends that name to the app
 | Movie (TMDB) | template with `{title}`, `{original}`, `{year}`, `{id}` (default `{title} ({year}) [tmdbid-{id}]`); what `:` becomes (default ` - `); a folder for each movie; save `.nfo` and poster (optionally fanart and logo) next to renamed videos. See 2.1 |
 | TV show (TMDB) | the show (name, TMDB id or link; empty: from the files); template with `{show}`, `{original}`, `{year}`, `{season}`, `{episode}`, `{title}`, `{id}` (default `{show} ({year}) - S{season}E{episode} - {title}`); what `:` becomes; show and season folders (show folder template, default `{show} ({year}) [tmdbid-{id}]`); save `.nfo` files and images (optionally fanart and logo); show the missing episodes. See 2.2 |
 | Music (tags) | template with `{track}`, `{title}`, `{artist}`, `{album artist}`, `{album}`, `{year}`, `{disc}`, `{genre}`, `{composer}` (default `{track} - {title}`); what `:` becomes; disc number in the track on multi-disc albums; fill in from the file name; artist and album folders (default `{album artist}/{album} ({year})`). See 2.3 |
+| Book (Open Library) | template with `{author}`, `{authors}`, `{author sort}`, `{initial}`, `{title}`, `{original}`, `{year}`, `{edition year}`, `{publisher}`, `{isbn}`, `{series}`, `{volume}`, `{id}` (default `{author} - {title} ({year})`); what `:` becomes; author and book folders (default `{author}/{title}`); save the cover and `metadata.opf`. See 2.4 |
+| Comic (ComicInfo.xml, GCD, Comic Vine, MangaDex) | template with `{series}`, `{series year}`, `{number}`, `{volume}`, `{chapter}`, `{title}`, `{year}`, `{count}`, `{publisher}`, `{writer}`, `{artist}`, `{id}` (default `{series} v{volume} #{number} c{chapter} - {title} ({year})`); what `:` becomes; the series (empty: from the files); the catalogue; series folders (default `{series} ({series year})`); series from the folder; show the missing issues. See 2.5 |
 
 Positions count **visible characters** (Unicode graphemes), starting at 1.
 
@@ -107,14 +109,15 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   and subtitles alike) into a folder named after its new name, inside its
   current folder; a file already in a folder with that name stays. When
   the current folder is the movie's own under another name, the new
-  folder goes next to it instead. It is when it is named after the movie
-  (it holds `tmdbid-<id>` of that movie, or its title, guessed like a
+  folder goes next to it instead. A folder is the movie's own when it is
+  named after the movie (its name holds `tmdbid-<id>` of that movie, or its title, guessed like a
   file name, has similarity ≥ 0.8 with the title or original title and
   its year, if any, is within one of the movie's) or when it holds, three
   levels down, only videos of that movie (at least one), subtitles,
   images (jpg, jpeg, png, webp, gif, bmp), `.nfo` and `.txt` files; and
   in both cases it holds no other movie of the batch and is not one of
-  the user's own folders (see the series rule). The preview shows the
+  the user's own folders (see 2.2: the home folder and its standard
+  folders, a disk's top folder, the file system's). The preview shows the
   folder before the new name; the folder name is
   checked like a file name. Missing folders are created when renaming,
   recorded in the history entry, and removed by undo when left empty.
@@ -130,7 +133,10 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   composers). Images: poster, and optionally fanart (backdrop) and logo
   (PNG title logo in the language, else English); named `poster.jpg`,
   `fanart.jpg`, `logo.png` inside the movie's own folder, else
-  `<new name>-poster.jpg` and so on. Existing files are never replaced.
+  `<new name>-poster.jpg` and so on. Existing files are never replaced
+  (true of every file written beside others: `.nfo`, images, covers,
+  `metadata.opf`, playlists; tags inside songs, unlike them, are
+  rewritten when they differ, see 2.3).
   They are recorded in the rename's history entry and deleted by its undo.
 - Movies whose names are already right (unchanged rows with a movie) get
   the metadata too when renaming: the Rename button counts them and the
@@ -212,6 +218,10 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   air date gives the episodes aired that day. The title is compared with
   every episode's titles (same similarity as movies; the show's name in
   front is ignored).
+- Title similarity, here and in the other rules, is the Dice coefficient
+  of the letter pairs of both names' words joined (case, accents and
+  punctuation ignored): 1 only for the same words, at most 0.99
+  otherwise.
 - Title similarity (movies, shows) reads Roman numerals up to 39 as
   numbers: `Part II` = `Part 2`.
   - Numbers, no title: one candidate is picked; several wait for the user.
@@ -319,8 +329,9 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
 ### 2.3 Music (tags)
 
 - With artist and album folders, a folder of loose songs (at least 3
-  songs from at least 3 albums, 4 in 5 of which have one or two songs
-  there) is a collection: its songs are renamed but stay in it.
+  songs from at least 3 albums, and at least 4 in 5 of those albums with
+  only one or two songs there; proportions here and below are exact, with
+  no rounding) is a collection: its songs are renamed but stay in it.
 - With artist and album folders, a folder whose songs are the folders'
   root (its own songs, or those of its disc folders) and where every
   audio file three levels down is a song of the batch from one album
@@ -699,6 +710,23 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
   catalogues; the GCD sign-in only to comics.org.
   Files are never changed.
 
+### 2.6 Order of operations
+
+- Preview: each file's name goes through the rules from top to bottom
+  (lookup rules use their choices, made on the name the rules above give);
+  then the folders: shared roots and folder levels unified, a show's, a
+  movie's, a comic series', a book's and (with music folders) an album's
+  own folder found, collections kept, songs' companion files following
+  them; then the checks: names, repeated targets, characters the target
+  disk refuses, targets that exist; last, the old folders that keep
+  files.
+- Rename: the renames (written down first, two phases, deepest first),
+  then the cue sheets and playlists that cite them, then the folders left
+  empty, then the history entry; after it, each recorded in that entry,
+  the movies' `.nfo` and images, the albums' covers, the playlists, the
+  songs' tags, the books' cover and `metadata.opf`, the shows' `.nfo` and
+  images.
+
 ## 3. Preview
 
 - Table: original name → new name, with a status per row:
@@ -761,9 +789,11 @@ Positions count **visible characters** (Unicode graphemes), starting at 1.
 - Renames run by depth: deepest first, so a folder is renamed after the
   files inside it (undo runs the other way).
 - Failure midway: whatever was done for that file is reverted.
-- The target is taken only if free, in one step on Linux (`renameat2`
-  with `RENAME_NOREPLACE`; elsewhere, or where the file system cannot,
-  a check right before).
+- The target is taken only if free, checked and renamed in one step:
+  `renameat2` with `RENAME_NOREPLACE` on Linux, `renamex_np` with
+  `RENAME_EXCL` on macOS, `MoveFileExW` without replacing on Windows;
+  where the file system cannot (or a Windows path is 260 characters or
+  longer), a check right before.
 - What is about to happen (each rename and its temporary name) is written
   to the history folder before starting and removed once the history
   entry is written. If the program stops in between, the next start puts

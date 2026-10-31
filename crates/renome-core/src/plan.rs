@@ -1147,6 +1147,9 @@ fn protected(dir: &Path, view: &View) -> bool {
             return true;
         }
     }
+    // Without devices to compare: the disk's top folder is caught above.
+    #[cfg(not(unix))]
+    let _ = up;
     view.protected.iter().any(|p| p == dir)
 }
 
