@@ -63,6 +63,11 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.19.0" date="2026-10-31">
+      <description>
+        <p>Files can be moved or copied to another folder, even on another disk, with progress, Stop and an undo that keeps copies you changed. Templates gain optional parts shown only when their fields have values, more music fields (original year, label, catalog number, format, bitrate, sort names, initial) and resolution and video codec for movies and series. A new rule converts characters: fixes broken accents, transliterates to Latin letters and makes web-safe names. The Remove rule can drop leading numbers and limit name length, and downloaded covers can be 1200, 500 or 250 pixels.</p>
+      </description>
+    </release>
     <release version="0.18.0" date="2026-10-31">
       <description>
         <p>Shows the tracks missing from an album, the movies missing from a collection and the volumes missing from a book series, with CSV export. Renaming never replaces a file on macOS and Windows either. On Windows, hidden and system files stay out of the list and the title bar follows the theme. Playlists use forward slashes everywhere, and writing tags keeps the encoder field.</p>
