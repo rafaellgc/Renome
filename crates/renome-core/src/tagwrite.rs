@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 use lofty::config::{ParseOptions, WriteOptions};
 use lofty::file::AudioFile;
 use lofty::flac::FlacFile;
-use lofty::id3::v2::Id3v2Tag;
-use lofty::mp4::{Ilst, Mp4File};
+use lofty::id3::v2::{Frame, Id3v2Tag};
+use lofty::mp4::{Atom, AtomData, AtomIdent, Ilst, Mp4File};
 use lofty::mpeg::MpegFile;
 use lofty::ogg::tag::VorbisComments;
 use lofty::ogg::{OggPictureStorage, OpusFile, VorbisFile};
@@ -453,6 +453,11 @@ pub struct Backup {
     /// Vorbis comments cleaning took out that no generic field stands for.
     #[serde(default)]
     pub raw: Vec<(String, String)>,
+    /// Texts cleaning took out of an MP3 or MP4 tag that no generic field
+    /// stands for: ID3v2 user texts by description, MP4 atoms by
+    /// identifier.
+    #[serde(default)]
+    pub kept_text: Vec<(String, String)>,
 }
 
 /// The copy a song's tags are written in before it takes the song's place.
@@ -491,6 +496,12 @@ struct Rest {
     /// Rebuilding drops other things too (unknown ID3v2 frames, MP4
     /// atoms, an MP3's ID3v1 or APE tag).
     more: bool,
+    /// The texts no generic field stands for that a rebuild drops, kept
+    /// to put back: ID3v2 user texts (`TXXX`, by description) and MP4 text
+    /// atoms (by identifier, `©prd`, `----:mean:name`).
+    dropped_text: Vec<(String, String)>,
+    /// Such texts to put in the tag (an undo).
+    add_text: Vec<(String, String)>,
 }
 
 /// Builds the Vorbis comments of a rebuild: the generic tag's, then the
@@ -549,15 +560,29 @@ fn edit(
                 let (r, mut tag) = a.remove_id3v2().unwrap_or_default().split_tag();
                 if rebuild {
                     rest.more = !r.is_empty() || a.id3v1().is_some() || a.ape().is_some();
+                    rest.dropped_text = (&*r)
+                        .into_iter()
+                        .filter_map(|f| match f {
+                            Frame::UserText(t) => {
+                                Some((t.description.to_string(), t.content.to_string()))
+                            }
+                            _ => None,
+                        })
+                        .collect();
                 }
                 let changed = edit(&mut tag, &mut rest);
-                if rebuild {
-                    a.set_id3v2(Id3v2Tag::from(tag));
+                one_genre(&mut tag);
+                let mut id3 = if rebuild {
                     a.remove_id3v1();
                     a.remove_ape();
+                    Id3v2Tag::from(tag)
                 } else {
-                    a.set_id3v2(r.merge_tag(tag));
+                    r.merge_tag(tag)
+                };
+                for (description, content) in std::mem::take(&mut rest.add_text) {
+                    id3.insert_user_text(description, content);
                 }
+                a.set_id3v2(id3);
                 // ID3v2.3: what Windows and older players read.
                 write = write.use_id3v23(true);
                 changed.then(|| save(&a, &mut file, write)).transpose()?
@@ -639,13 +664,20 @@ fn edit(
                 let (r, mut tag) = a.remove_ilst().unwrap_or_default().split_tag();
                 if rebuild {
                     rest.more = !r.is_empty();
+                    rest.dropped_text = mp4_texts(&r);
                 }
                 let changed = edit(&mut tag, &mut rest);
-                a.set_ilst(if rebuild {
+                let mut ilst = if rebuild {
                     Ilst::from(tag)
                 } else {
                     r.merge_tag(tag)
-                });
+                };
+                for (ident, text) in std::mem::take(&mut rest.add_text) {
+                    if let Some(ident) = mp4_ident(&ident) {
+                        ilst.insert(Atom::new(ident, AtomData::UTF8(text)));
+                    }
+                }
+                a.set_ilst(ilst);
                 changed.then(|| save(&a, &mut file, write)).transpose()?
             }
         };
@@ -669,6 +701,47 @@ fn edit(
 fn save(a: &impl AudioFile, file: &mut File, write: WriteOptions) -> Result<(), String> {
     file.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
     a.save_to(file, write).map_err(|e| e.to_string())
+}
+
+/// An MP4 tag's text atoms, by identifier (`©prd`, `----:mean:name`).
+fn mp4_texts(ilst: &Ilst) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for atom in ilst {
+        let ident = match atom.ident() {
+            AtomIdent::Fourcc(f) => f.iter().map(|&b| char::from(b)).collect(),
+            AtomIdent::Freeform { mean, name } => format!("----:{mean}:{name}"),
+        };
+        for d in atom.data() {
+            if let AtomData::UTF8(t) | AtomData::UTF16(t) = d {
+                out.push((ident.clone(), t.clone()));
+            }
+        }
+    }
+    out
+}
+
+fn mp4_ident(ident: &str) -> Option<AtomIdent<'static>> {
+    if let Some(rest) = ident.strip_prefix("----:") {
+        let (mean, name) = rest.split_once(':')?;
+        return Some(AtomIdent::Freeform {
+            mean: mean.to_string().into(),
+            name: name.to_string().into(),
+        });
+    }
+    let bytes: Vec<u8> = ident
+        .chars()
+        .map(|c| u8::try_from(c as u32).ok())
+        .collect::<Option<_>>()?;
+    Some(AtomIdent::Fourcc(bytes.try_into().ok()?))
+}
+
+/// ID3v2.3 has one genre: more are written as `(Rock)Pop`, which players
+/// show as it is. Several genres become one, `Rock; Pop`.
+fn one_genre(tag: &mut Tag) {
+    let genres = values(tag, Field::Genre);
+    if genres.len() > 1 {
+        set(tag, Field::Genre, &[genres.join("; ")]);
+    }
 }
 
 /// The values a tag has for a field.
@@ -714,6 +787,7 @@ pub fn write(
         cleaned: clean,
         removed: Vec::new(),
         raw: Vec::new(),
+        kept_text: Vec::new(),
     };
     let mut saved: Result<(), String> = Ok(());
     let changed = edit(path, clean, |tag, rest| {
@@ -753,10 +827,13 @@ pub fn write(
             rest.raw = kept;
             changed = !backup.removed.is_empty() || !out.is_empty() || rest.more;
             backup.raw = out;
+            backup.kept_text = std::mem::take(&mut rest.dropped_text);
         }
         for (f, new) in fields {
             let old = values(tag, *f);
-            if old != *new {
+            // An MP3 keeps several genres as one (see `one_genre`).
+            let same_genres = *f == Field::Genre && old.len() == 1 && old[0] == new.join("; ");
+            if old != *new && !same_genres {
                 changed = true;
                 backup.fields.push((*f, old));
                 set(tag, *f, new);
@@ -853,6 +930,7 @@ pub fn restore(b: &Backup, store: &Path) -> Result<(), String> {
             set(tag, *f, old);
         }
         rest.raw.extend(b.raw.iter().cloned());
+        rest.add_text = b.kept_text.clone();
         if let Some(pictures) = pictures {
             while tag.picture_count() > 0 {
                 tag.remove_picture(0);
@@ -980,6 +1058,80 @@ mod tests {
                 .collect();
             assert!(left.is_empty(), "{name}: {left:?}");
         }
+    }
+
+    #[test]
+    fn cleaning_keeps_unknown_texts_for_undo() {
+        let d = tempfile::tempdir().unwrap();
+        let store = d.path().join("s");
+        // An MP3 with a user text no field stands for.
+        let mp3 = d.path().join("song.mp3");
+        fs::copy("tests/fixtures/song.mp3", &mp3).unwrap();
+        {
+            let mut f = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&mp3)
+                .unwrap();
+            let mut a = MpegFile::read_from(&mut f, ParseOptions::new()).unwrap();
+            let mut id3 = a.remove_id3v2().unwrap_or_default();
+            id3.insert_user_text("MY_NOTE".into(), "kept".into());
+            a.set_id3v2(id3);
+            save(&a, &mut f, WriteOptions::new()).unwrap();
+        }
+        // An MP4 with a freeform atom no field stands for.
+        let m4a = d.path().join("song.m4a");
+        fs::copy("tests/fixtures/song.m4a", &m4a).unwrap();
+        {
+            let mut f = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&m4a)
+                .unwrap();
+            let mut a = Mp4File::read_from(&mut f, ParseOptions::new()).unwrap();
+            let mut ilst = a.remove_ilst().unwrap_or_default();
+            ilst.insert(Atom::new(
+                mp4_ident("----:com.example:MY_NOTE").unwrap(),
+                AtomData::UTF8("kept".into()),
+            ));
+            a.set_ilst(ilst);
+            save(&a, &mut f, WriteOptions::new()).unwrap();
+        }
+        let note = |p: &Path| -> Option<String> {
+            let mut f = fs::File::open(p).unwrap();
+            if p == mp3 {
+                let a = MpegFile::read_from(&mut f, ParseOptions::new()).unwrap();
+                a.id3v2()?.get_user_text("MY_NOTE").map(str::to_string)
+            } else {
+                let a = Mp4File::read_from(&mut f, ParseOptions::new()).unwrap();
+                mp4_texts(a.ilst()?)
+                    .into_iter()
+                    .find(|(k, _)| k == "----:com.example:MY_NOTE")
+                    .map(|(_, v)| v)
+            }
+        };
+        for p in [&mp3, &m4a] {
+            assert_eq!(note(p).as_deref(), Some("kept"), "{p:?}");
+            let b = write(p, &fields_of(&song_match()), None, true, &store)
+                .unwrap()
+                .unwrap();
+            assert_eq!(note(p), None, "{p:?}: cleaning keeps it");
+            restore(&b, &store).unwrap();
+            assert_eq!(note(p).as_deref(), Some("kept"), "{p:?}: not put back");
+        }
+    }
+
+    #[test]
+    fn several_genres_in_an_mp3() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("song.mp3");
+        fs::copy("tests/fixtures/song.mp3", &p).unwrap();
+        let store = d.path().join("s");
+        let fields: Fields = vec![(Field::Genre, vec!["Rock".into(), "Pop".into()])];
+        write(&p, &fields, None, false, &store).unwrap().unwrap();
+        assert_eq!(read(&p, ItemKey::Genre).0.as_deref(), Some("Rock; Pop"));
+        // Written once: the same genres are not written again.
+        assert!(write(&p, &fields, None, false, &store).unwrap().is_none());
     }
 
     #[test]

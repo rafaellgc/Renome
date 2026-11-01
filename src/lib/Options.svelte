@@ -37,7 +37,7 @@
     gcdStatus = null;
     try {
       await api.gcdCheck(settings.gcdEmail.trim(), settings.gcdPassword);
-      gcdStatus = { ok: true, text: t("tmdbKeyOk") };
+      gcdStatus = { ok: true, text: t("gcdAccountOk") };
     } catch (e) {
       gcdStatus = { ok: false, text: tError(e) };
     } finally {

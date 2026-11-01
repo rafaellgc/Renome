@@ -373,6 +373,10 @@ field, or a `<` with no `>` after it, is kept as typed (Windows refuses
   Show details and seasons are fetched once per batch. Existing files are
   skipped; created ones are recorded in the rename's history entry (or an
   entry of their own) and deleted by undo.
+- The missing rows of every rule (episodes, issues, tracks, movies,
+  volumes) have a checkbox beside their count in the bottom bar (on by
+  default, saved as `showMissing`): off, the rows leave the list (the
+  count and the CSV stay; nothing is searched again).
 - "Show the missing episodes" (on by default): the list shows, between
   the files, a faded row for each aired episode (air date known and not
   after today) that no listed video holds, in the seasons at least one
@@ -552,7 +556,9 @@ field, or a `<` with no `>` after it, is kept as typed (Windows refuses
   (`1987-07-00` → `1987-07`), else the year; headings left out; an index
   track's parts are tracks of their own (`Work: Part`) unless their
   positions end in a letter (`3a`, `3b`: one track, its length the sum);
-  the disc from the position (`1-05`, `CD2-3`, `2.1`), else disc 1
+  tracks whose positions are parts of one (`12.1`, `12.2`, or `3a`, `3b`
+  outside an index) are one track, titled `Part / Part`, its length the
+  sum; the disc from the position (`1-05`, `CD2-3`, `CD2.1`), else disc 1
   (vinyl sides `A1`, `B2` number on as one disc), positions renumbered
   1, 2, 3… per disc; durations `m:ss`/`h:mm:ss`; labels (without
   `(n)`) and catalog numbers (not "none"); the barcode's digits; styles
@@ -638,7 +644,8 @@ field, or a `<` with no `>` after it, is kept as typed (Windows refuses
   the works' composers, lyricists and writers, the recording's
   producers, arrangers, mixers and engineers, artist and album artist
   sort names, work ids, and each credited artist (`ARTISTS`,
-  `ALBUMARTISTS`). The main tag (ID3v2, written as v2.3, for MP3;
+  `ALBUMARTISTS`). The main tag (ID3v2, written as v2.3, for MP3, where
+  several genres are joined into one, `Rock; Pop`, since v2.3 has one;
   Vorbis comments for FLAC, Ogg Vorbis and Opus; ilst for M4A; other
   formats are reported as not writable) is split with `lofty` into the
   fields it knows and the rest, edited and merged back, so other fields
@@ -647,8 +654,9 @@ field, or a `<` with no `>` after it, is kept as typed (Windows refuses
   the tag from those fields and lyrics, ReplayGain, BPM, genre,
   composer, lyricist and the encoder (plus a Vorbis `CUESHEET`), and
   drops an MP3's ID3v1 and APE tags; the items removed are kept for
-  undo (Vorbis comments whole; ID3v2 and MP4 items lofty does not map,
-  and ID3v1/APE, are not). A matched song with anything else in its
+  undo (Vorbis comments whole; ID3v2 user texts `TXXX` and MP4 text
+  atoms lofty does not map, by description or identifier; other such
+  ID3v2 frames and MP4 atoms, and ID3v1/APE, are not). A matched song with anything else in its
   tags counts as pending in the Rename button. "Include the cover in the files" (on by default with it)
   removes every embedded picture and adds the release's front (as for
   `cover.jpg`, else the folder's `cover`/`folder`/`front` image), at

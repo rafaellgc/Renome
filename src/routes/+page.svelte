@@ -512,7 +512,7 @@
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
   $effect(() => {
     const deps = [settings.lang, settings.theme, settings.includeHidden, settings.confirmApply,
-      settings.disableRulesAfterApply, settings.warnWindows, settings.rememberRules, settings.tmdbLang,
+      settings.disableRulesAfterApply, settings.warnWindows, settings.rememberRules, settings.tmdbLang, settings.showMissing,
       JSON.stringify(steps)];
     if (!ready || !deps) return;
     clearTimeout(saveTimer);
@@ -710,9 +710,9 @@
         preview.conflicts ? t("confirmConflicts", { n: preview.conflicts }) : "",
       ].filter(Boolean);
       const ok = await confirm({
-        title: t("confirmTitle"),
+        title: t(sendTo ? (sendTo.copy ? "confirmCopyTitle" : "confirmMoveTitle") : "confirmTitle"),
         text: `${lines.join("\n")}\n\n${t("confirmUndoHint")}`,
-        ok: t("confirmOk"),
+        ok: t(sendTo ? (sendTo.copy ? "confirmCopyOk" : "confirmMoveOk") : "confirmOk"),
         cancel: t("cancel"),
       });
       if (!ok) return;
@@ -1115,6 +1115,15 @@
           if (!found.length && head && head !== g.query.trim()) found = await api.comicSearch(source, key, head, lang);
           if (stopRun !== run) break;
           const year = g.owns.find((o) => o.seriesYear)?.seriesYear ?? null;
+          // A common name (`Saga`) may leave the series out of what the
+          // catalogue answers: asked again with the files' year (theirs, or
+          // their issues'), whose series come first.
+          const dated = year ?? g.owns.find((o) => o.year)?.year ?? null;
+          if (dated && !found.some((v) => fold(v.name) === k)) {
+            const more = await api.comicSearch(source, key, g.query, lang, dated).catch(() => []);
+            if (stopRun !== run) break;
+            found = [...more, ...found.filter((v) => !more.some((m) => m.id === v.id))];
+          }
           // The highest number among the files: a series with fewer issues
           // is not theirs.
           const highest = Math.max(
@@ -1938,7 +1947,7 @@
           {copies}
           {alike}
           {matches}
-          {ghosts}
+          ghosts={settings.showMissing ? ghosts : []}
           {outside}
           onmatch={(p) => {
             if (seriesRule && series[p]) openEpisodeReview(p);
@@ -1974,7 +1983,10 @@
     {/if}
     {#if selected.size}<span>{t("selected", { n: selected.size })}</span>{/if}
     {#if ghosts.length}
-      <button class="link faint" title={t("exportMissingHint")} onclick={exportMissing}>{missingCount}</button>
+      <span class="missing">
+        <input type="checkbox" bind:checked={settings.showMissing} title={t("showMissingHint")} aria-label={t("showMissingHint")} />
+        <button class="link faint" title={t("exportMissingHint")} onclick={exportMissing}>{missingCount}</button>
+      </span>
     {/if}
     {#if identicalProgress !== null}
       <span>{t("identicalScanning", { p: Math.floor(identicalProgress * 100) })}</span>
@@ -2260,6 +2272,7 @@
   }
   footer .ok { color: var(--accent); }
   footer .faint { color: var(--muted); font-style: italic; }
+  footer .missing { display: inline-flex; align-items: center; gap: 5px; }
   footer .bad { color: var(--danger); }
   footer .warn { padding: 0 6px; border-radius: 4px; background: var(--warn); color: black; cursor: help; }
   footer .link {

@@ -28,6 +28,8 @@ export interface Settings {
   rules: Step[];
   /** The optional columns shown in the list, in their order. */
   columns: DetailColumn[];
+  /** The faded rows of what is missing are shown (they are still counted). */
+  showMissing: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -46,6 +48,7 @@ const DEFAULTS: Settings = {
   gcdPassword: "",
   rules: [],
   columns: [],
+  showMissing: true,
 };
 
 export const settings = $state<Settings>({ ...DEFAULTS });
@@ -136,8 +139,9 @@ const dark = window.matchMedia("(prefers-color-scheme: dark)");
 export function applyTheme() {
   const mode = settings.theme === "system" ? (dark.matches ? "dark" : "light") : settings.theme;
   document.documentElement.dataset.theme = mode;
-  // Windows draws the title bar itself: in the same theme (null: the system's).
-  if (navigator.userAgent.includes("Windows")) {
+  // Windows and macOS draw the title bar themselves: in the same theme
+  // (null: the system's).
+  if (navigator.userAgent.includes("Windows") || navigator.userAgent.includes("Mac OS X")) {
     getCurrentWindow()
       .setTheme(settings.theme === "system" ? null : settings.theme)
       .catch(() => {});

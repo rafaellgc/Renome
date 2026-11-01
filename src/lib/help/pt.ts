@@ -405,7 +405,7 @@ ${ex("01.mp3", "01 - Título da Música.mp3")}
   <li><b>Gravar as tags nos arquivos</b>: depois de renomear, grava nas músicas identificadas tudo o que o MusicBrainz sabe delas: título, artistas (também cada um em separado), artista do álbum, álbum, data e data original, faixa e disco (com os totais), gravadora, número de catálogo, código de barras, país, tipo de lançamento, mídia, ISRC, gêneros, idioma, compositor, letrista, produtor, arranjador, mixagem e os IDs do MusicBrainz, que o Jellyfin, o Navidrome e o Plex usam. Para isso, cada álbum é consultado mais uma vez (uns 2 segundos). Vale também para as músicas que já estão com o nome certo (elas contam no botão <b>Renomear</b>). Uma música que já tem tudo isso não é regravada. Funciona com MP3 (gravado em ID3v2.3), FLAC, OGG, Opus e M4A.</li>
   <li><b>Apagar as outras tags</b>: tira o que não vem do MusicBrainz (comentários, endereços de sites, dados de quem ripou, "codificado por"), e no MP3 também as tags secundárias (ID3v1 e APE). Ficam as letras, o ReplayGain, o BPM, a folha de faixas embutida (CUESHEET) e o gênero e o compositor quando o MusicBrainz não os tiver. Desmarcada, as outras tags ficam como estão.</li>
   <li><b>Incluir a capa nos arquivos</b>: tira as imagens que já estão dentro de cada música e coloca a capa do álbum (do Cover Art Archive ou, se não houver, a <code>cover.jpg</code> da pasta). Em <b>Tamanho da capa</b>, escolha 500 ou 250 px para aparelhos de som de carro e tocadores antigos que travam ou não mostram capas grandes; as músicas também ficam menores. A <code>cover.jpg</code> salva na pasta continua grande. Limitação: a capa tirada da pasta (quando o Cover Art Archive não tem) entra no tamanho que tiver, sem ser reduzida.</li>
-  <li>A gravação é feita numa cópia, que só toma o lugar do arquivo no fim; uma queda no meio não estraga a música. Se o programa for fechado ou o computador desligar durante a gravação, na próxima vez que o Renome abrir as músicas já gravadas vão para o <b>Histórico</b>, para desfazer, e a cópia que estava sendo gravada é apagada. Desfazer devolve as tags e as imagens antigas (no MP3 e no M4A, campos raros que a limpeza tirou e as tags ID3v1 e APE não voltam). A data de modificação muda, para que os players releiam as tags. Como o conteúdo muda, um torrent não reconhece mais esses arquivos.</li>
+  <li>A gravação é feita numa cópia, que só toma o lugar do arquivo no fim; uma queda no meio não estraga a música. Se o programa for fechado ou o computador desligar durante a gravação, na próxima vez que o Renome abrir as músicas já gravadas vão para o <b>Histórico</b>, para desfazer, e a cópia que estava sendo gravada é apagada. Desfazer devolve as tags e as imagens antigas (no MP3 e no M4A, campos raros que a limpeza tirou e que não são texto, como dados binários de outros programas, e as tags ID3v1 e APE não voltam). A data de modificação muda, para que os players releiam as tags. Como o conteúdo muda, um torrent não reconhece mais esses arquivos.</li>
   <li>As consultas são espaçadas (uma a cada 2 segundos), como o MusicBrainz pede; cada álbum leva uns 4 segundos.</li>
 </ul>
 <h4>Discogs (opcional)</h4>
@@ -436,7 +436,8 @@ ${ex("01.mp3", "01 - Título da Música.mp3")}
   <li>Lançamentos regionais, independentes, piratas ou muito recentes podem não estar no MusicBrainz; aí valem as tags, a não ser que o Discogs (com o seu token) os tenha.</li>
   <li>Pelo som, gravações muito parecidas (uma remasterização, uma regravação do próprio artista) podem ser confundidas. Quando o álbum fica em dúvida, ele vai para a revisão.</li>
   <li>Músicas em Opus, WMA e outros formatos não listados acima não são ouvidas.</li>
-  <li>No MP3 e no M4A, desfazer a gravação das tags não traz de volta os campos raros nem as tags ID3v1 e APE.</li>
+  <li>No MP3 e no M4A, desfazer a gravação das tags não traz de volta os campos raros que não são texto nem as tags ID3v1 e APE.</li>
+  <li>No MP3, vários gêneros ficam num campo só (<code>Rock; Pop</code>), porque o formato usado para que o Windows leia as tags (ID3v2.3) só tem um gênero.</li>
 </ul>
 <p class="tip">Sem <b>Gravar as tags nos arquivos</b>, o Renome só lê as tags; o conteúdo das músicas não é alterado. Ao MusicBrainz vão só o artista e o nome do álbum.</p>`,
   },
@@ -592,6 +593,7 @@ ${ex("Nome_da_Serie_012_(2019)_(Digital)_(grupo).cbz", "Nome da Série #012 (201
 </ul>
 <p>Em outros sistemas, esses caracteres do Windows só geram um aviso amarelo, desligável nas Opções. No Windows, no macOS e em discos que não diferenciam maiúsculas (exFAT, FAT, NTFS, como pendrives), nomes que só diferem em maiúsculas contam como iguais.</p>
 <p><b>Exportar lista</b>, no rodapé, salva a lista como está na tela (pasta, nome atual, novo nome, pasta para onde vai, situação e problema) num arquivo CSV, que abre em qualquer planilha. Serve para conferir com calma um lote grande antes de renomear.</p>
+<p>Quando há o que falta (episódios, edições, faixas, filmes ou volumes), o rodapé mostra o total, com uma caixa ao lado: <b>desmarcada</b>, as linhas apagadas somem da lista, para ver só os seus arquivos; <b>marcada</b>, elas voltam. Nada é buscado de novo, e o total e a exportação continuam iguais. A escolha fica salva.</p>
 `,
   },
   {

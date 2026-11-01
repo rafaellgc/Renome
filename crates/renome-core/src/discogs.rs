@@ -238,16 +238,56 @@ fn millis(duration: &str) -> Option<u64> {
     (secs > 0).then_some(secs * 1000)
 }
 
-/// The disc a track's position names (`2-05`, `CD2-5`, `2.05`); 1 for the
-/// rest (`5`, and vinyl sides `A1`, `B2`, which number on as one disc).
+/// The disc a track's position names (`2-05`, `CD2-5`, `CD2.5`); 1 for
+/// the rest (`5`, vinyl sides `A1`, `B2`, which number on as one disc, and
+/// a track's parts `12.1`, `12.2`).
 fn disc_of(position: &str) -> u32 {
     static DISC: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?i)^(?:cd|dvd|disc|disk|lp)?\s*(\d+)\s*[-.]\s*\d+").unwrap()
+        Regex::new(r"(?i)^(?:(?:cd|dvd|disc|disk|lp)\s*(\d+)\s*[-.]|(\d+)\s*-)\s*\d+").unwrap()
     });
     DISC.captures(position.trim())
-        .and_then(|c| c[1].parse().ok())
+        .and_then(|c| c.get(1).or(c.get(2))?.as_str().parse().ok())
         .filter(|&d| d > 0)
         .unwrap_or(1)
+}
+
+/// The track a part's position belongs to (`12.1` and `3a` → `12`, `3`;
+/// `2-3b` → `2-3`); `None` for a whole track (and `CD2.5`, a disc's).
+fn part_of(position: &str) -> Option<&str> {
+    static PART: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^([0-9][0-9-]*?)(?:\.[0-9]+|[a-z])$").unwrap());
+    PART.captures(position.trim())
+        .map(|c| c.get(1).unwrap().as_str())
+}
+
+/// Parts of one track listed as tracks (`12.1 Song`, `12.2 [hidden]`):
+/// one track, as the file holds them, titled with both.
+fn join_parts(tracks: Vec<DgTrack>) -> Vec<DgTrack> {
+    let mut out: Vec<DgTrack> = Vec::new();
+    let mut last_part: Option<String> = None;
+    for t in tracks {
+        let part = part_of(&t.position).map(str::to_string);
+        match (&part, &last_part, out.last_mut()) {
+            (Some(p), Some(l), Some(prev)) if p == l => {
+                prev.title = format!("{} / {}", prev.title.trim(), t.title.trim());
+                let total = millis(&prev.duration)
+                    .zip(millis(&t.duration))
+                    .map(|(a, b)| a + b);
+                prev.duration = total
+                    .map(|ms| format!("{}:{:02}", ms / 60000, ms / 1000 % 60))
+                    .unwrap_or_default();
+            }
+            _ => {
+                let mut t = t;
+                if let Some(p) = &part {
+                    t.position = p.clone();
+                }
+                out.push(t);
+            }
+        }
+        last_part = part;
+    }
+    out
 }
 
 /// The tracks as the files have them: headings left out; a work's parts
@@ -308,7 +348,7 @@ fn flat(tracklist: &[DgTrack]) -> Vec<DgTrack> {
             _ => out.push(t.clone()),
         }
     }
-    out
+    join_parts(out)
 }
 
 /// `1987-07-00` → `1987-07`; the year alone when that is all there is.
@@ -494,6 +534,32 @@ mod tests {
                 ..Default::default()
             },
         )
+    }
+
+    #[test]
+    fn parts_of_a_track() {
+        assert_eq!(disc_of("12.1"), 1);
+        assert_eq!(disc_of("2-05"), 2);
+        assert_eq!(disc_of("CD2.5"), 2);
+        assert_eq!(disc_of("A1"), 1);
+        assert_eq!(part_of("12.1"), Some("12"));
+        assert_eq!(part_of("2-3b"), Some("2-3"));
+        assert_eq!(part_of("CD2.5"), None);
+        assert_eq!(part_of("A1"), None);
+        let dg: DgRelease = serde_json::from_str(
+            r#"{"id":7,"title":"T","tracklist":[
+            {"position":"11","type_":"track","title":"Onze","duration":"4:02"},
+            {"position":"12.1","type_":"track","title":"Doze","duration":"9:00"},
+            {"position":"12.2","type_":"track","title":"Oculta","duration":"0:32"}]}"#,
+        )
+        .unwrap();
+        let r = to_release(&dg, None);
+        assert_eq!(r.media.len(), 1);
+        let t = &r.media[0].tracks;
+        assert_eq!(
+            (t.len(), t[1].title.as_str(), t[1].length),
+            (2, "Doze / Oculta", Some(572_000))
+        );
     }
 
     #[test]

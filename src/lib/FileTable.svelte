@@ -524,7 +524,7 @@
     font-size: 11px;
   }
   .dot.hole { color: var(--muted); }
-  .row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row span { overflow: hidden; text-overflow: ellipsis; white-space: pre; }
   .c-size, .c-date { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
   .row .c-dir { color: var(--muted); direction: rtl; text-align: left; }
   /* Where it goes: the arrow stays, the path is cut at its start, like

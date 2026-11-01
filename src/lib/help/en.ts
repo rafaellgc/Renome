@@ -405,7 +405,7 @@ ${ex("01.mp3", "01 - Song Title.mp3")}
   <li><b>Write the tags into the files</b>: after renaming, writes into the identified songs all MusicBrainz knows of them: title, artists (each one on its own too), album artist, album, date and original date, track and disc (with totals), label, catalog number, barcode, country, release type, medium, ISRC, genres, language, composer, lyricist, producer, arranger, mixer and the MusicBrainz ids, which Jellyfin, Navidrome and Plex use. For that, each album is looked up once more (about 2 seconds). Songs whose names are already right get them too (they count in the <b>Rename</b> button). A song that already has all of this is not written again. Works with MP3 (written as ID3v2.3), FLAC, OGG, Opus and M4A.</li>
   <li><b>Delete the other tags</b>: takes out what does not come from MusicBrainz (comments, site addresses, ripper notes, "encoded by"), and in MP3 also the secondary tags (ID3v1 and APE). Lyrics, ReplayGain, BPM, an embedded cue sheet (CUESHEET) stay, and genre and composer when MusicBrainz does not have them. Unchecked, the other tags stay as they are.</li>
   <li><b>Include the cover in the files</b>: takes out the pictures already inside each song and puts in the album's cover (from the Cover Art Archive or, if there is none, the folder's <code>cover.jpg</code>). In <b>Cover size</b>, pick 500 or 250 px for car stereos and old players that freeze on large covers or do not show them; the songs also get smaller. The <code>cover.jpg</code> saved in the folder stays large. Limitation: a cover taken from the folder (when the Cover Art Archive has none) goes in at whatever size it has, without being reduced.</li>
-  <li>The writing is done on a copy, which only takes the file's place at the end; a crash midway does not spoil the song. If the program is closed or the computer goes off while writing, the next time Renome opens the songs already written go into the <b>History</b>, to undo, and the copy being written is deleted. Undo puts the old tags and pictures back (in MP3 and M4A, rare fields cleaning took out and the ID3v1 and APE tags do not come back). The modification date changes, so players read the tags again. Since the content changes, a torrent no longer recognises these files.</li>
+  <li>The writing is done on a copy, which only takes the file's place at the end; a crash midway does not spoil the song. If the program is closed or the computer goes off while writing, the next time Renome opens the songs already written go into the <b>History</b>, to undo, and the copy being written is deleted. Undo puts the old tags and pictures back (in MP3 and M4A, rare fields cleaning took out that are not text, such as other programs' binary data, and the ID3v1 and APE tags do not come back). The modification date changes, so players read the tags again. Since the content changes, a torrent no longer recognises these files.</li>
   <li>Lookups are spaced out (one every 2 seconds), as MusicBrainz asks; each album takes about 4 seconds.</li>
 </ul>
 <h4>Discogs (optional)</h4>
@@ -436,7 +436,8 @@ ${ex("01.mp3", "01 - Song Title.mp3")}
   <li>Regional, independent, bootleg or very recent releases may be missing from MusicBrainz; then the tags are used, unless Discogs (with your token) has them.</li>
   <li>By sound, very similar recordings (a remaster, an artist's own re-recording) may be mixed up. When the album is in doubt, it goes to the review.</li>
   <li>Songs in Opus, WMA and other formats not listed above are not listened to.</li>
-  <li>For MP3 and M4A, undoing written tags does not bring back rare fields or ID3v1 and APE tags.</li>
+  <li>For MP3 and M4A, undoing written tags does not bring back rare fields that are not text, or ID3v1 and APE tags.</li>
+  <li>In MP3, several genres go into one field (<code>Rock; Pop</code>), because the format used so Windows reads the tags (ID3v2.3) has one genre.</li>
 </ul>
 <p class="tip">Without <b>Write the tags into the files</b>, Renome only reads the tags; the songs themselves are not changed. Only the artist and album name are sent to MusicBrainz.</p>`,
   },
@@ -592,6 +593,7 @@ ${ex("Series_Name_012_(2019)_(Digital)_(group).cbz", "Series Name #012 (2019).cb
 </ul>
 <p>On other systems, those Windows characters only cause a yellow warning, which can be turned off in Options. On Windows, macOS and disks that ignore case (exFAT, FAT, NTFS, as on USB sticks), names that differ only in case count as the same.</p>
 <p><b>Export list</b>, in the footer, saves the list as shown (folder, current name, new name, folder it moves into, status and problem) to a CSV file, which opens in any spreadsheet. It helps check a large batch calmly before renaming.</p>
+<p>When something is missing (episodes, issues, tracks, movies or volumes), the footer shows the total, with a box beside it: <b>unticked</b>, the faded rows leave the list, to see only your files; <b>ticked</b>, they come back. Nothing is searched again, and the total and the export stay the same. The choice is saved.</p>
 `,
   },
   {
