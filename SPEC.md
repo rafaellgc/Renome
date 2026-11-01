@@ -178,6 +178,15 @@ field, or a `<` with no `>` after it, is kept as typed (Windows refuses
   folder before the new name; the folder name is
   checked like a file name. Missing folders are created when renaming,
   recorded in the history entry, and removed by undo when left empty.
+- Files with a movie, episode, book or comic (found in a catalogue) that
+  no rule changed follow it: those named after it (its old stem, then
+  `.`, `-` or a space: `Name.nfo`, `Name-poster.jpg`) get its new stem and
+  go where it goes; and, in a movie's own folder (as above, with one
+  movie), when that movie goes to a new folder (by its rule, or sent to
+  another folder), the others go there too (`backdrop.jpg`, `movie.nfo`),
+  with their subfolder (`extrafanart/`, two levels at most), when they
+  were added with the movie (same folder added). Before "send to another
+  folder" places what is left.
 - With "save .nfo and poster", renaming also writes `<new name>.nfo` next
   to each renamed video, in Kodi format with every field Jellyfin's NFO
   reader takes that TMDB provides: title, originaltitle, year, premiered,
@@ -206,7 +215,11 @@ field, or a `<` with no `>` after it, is kept as typed (Windows refuses
 - The About tab shows the TMDB logo and notice required by its terms.
 - Subtitles (srt, ass, ssa, sub, idx, vtt, sup, smi) keep the language
   and flags at the end of their names (`.pt-BR`, `.eng.forced`: lowercase
-  ISO codes, optionally with a region) after the movie or episode name.
+  ISO codes, optionally with a region; flags forced, sdh, cc, default,
+  full, foreign) after the movie or episode name, each after a dot, flags
+  in lower case (`Movie.pt-BR.forced.srt`). The flags forced, sdh, cc and
+  foreign are also read after a dash, an underscore or a space
+  (`Movie-forced.srt` → `.forced`).
 
 - "Show the collection's missing movies" (on by default; old saved rules
   get it on): for each chosen movie, TMDB is asked once for its
@@ -568,7 +581,9 @@ field, or a `<` with no `>` after it, is kept as typed (Windows refuses
   release is Discogs'); Discogs candidates show the search's thumbnail
   and a "Discogs" label, and no track count. The cover (`cover.jpg` and
   the embedded one) is the release's primary image (else its first), as
-  Discogs serves it (about 600 px; the cover size is not applied).
+  Discogs serves it (about 600 px); the embedded one is made smaller to
+  the cover size chosen (500 or 250 px, JPEG quality 90, with the `image`
+  crate), never larger.
   Writing tags from a Discogs release writes no MusicBrainz ids, and a
   match from Discogs does not call for writing because the tags lack its
   id. Credited in Help with Discogs' notice (not affiliated, sponsored or
@@ -625,7 +640,8 @@ field, or a `<` with no `>` after it, is kept as typed (Windows refuses
   `cover.*`, `folder.*` or `front.*` file (an HTTP 5xx from the archive
   is retried once after 3 s); a release without artwork (a cassette
   edition, say) takes its release group's front; albums whose songs keep their
-  names count in the Rename button too. Recorded in the history and
+  names count in the Rename button too, when their folder has no cover yet
+  (asked of the disk, `cover_dirs`). Recorded in the history and
   deleted by undo.
 - "Write the tags into the files" (off by default), after renaming:
   each song matched to a release (moved or not; those keeping their

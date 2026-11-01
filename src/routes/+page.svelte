@@ -279,12 +279,24 @@
   );
   /** The album each song is in. */
   const albumOf = $derived(new Map(albums.flatMap((a, i) => a.files.map((p): [string, number] => [p, i]))));
-  /** Albums whose songs keep their names but still get a cover (an
-   *  existing cover is kept when writing). */
-  const coverOnly = $derived.by(() => {
-    if (musicRule?.rule.type !== "music" || !musicRule.rule.cover) return 0;
-    const status = new Map(preview.items.map((i) => [i.path, i.status]));
-    return albums.filter((a) => a.choice && a.files.every((p) => status.get(p) === "unchanged")).length;
+  /** Albums whose songs keep their names but still get a cover: those
+   *  whose folder has none yet (asked of the disk; an existing cover is
+   *  kept when writing). */
+  let coverOnly = $state(0);
+  $effect(() => {
+    const on = musicRule?.rule.type === "music" && musicRule.rule.cover;
+    const items = preview.items;
+    const status = new Map(items.map((i) => [i.path, i.status]));
+    const dirs = on
+      ? [...new Set(albums.filter((a) => a.choice && a.files.every((p) => status.get(p) === "unchanged")).map((a) => a.dir))]
+      : [];
+    if (!dirs.length) {
+      coverOnly = 0;
+      return;
+    }
+    api.coverDirs(dirs).then((d) => {
+      if (items === preview.items) coverOnly = d.length;
+    }, () => {});
   });
   /** Album folders whose songs keep their names but still get a playlist
    *  (asked of the disk: those without one and with two songs or more). */

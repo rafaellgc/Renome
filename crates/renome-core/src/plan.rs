@@ -660,6 +660,135 @@ fn send_rest(items: &mut [PreviewItem], files: &[FileEntry], to: &SendTo) {
     }
 }
 
+/// Files that go with a movie, an episode, a book or a comic found in a
+/// catalogue, when no rule changed them (artwork and `.nfo` a media server
+/// left, extras):
+/// - those named after it (`Movie.nfo`, `Movie-poster.jpg`) get its new
+///   name and go where it goes;
+/// - in a movie's own folder (named after it, or holding only it with its
+///   subtitles, images and `.nfo`), when the movie goes to a new folder the
+///   others go there too (`backdrop.jpg`), with their subfolder
+///   (`extrafanart/`, two levels at most).
+fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
+    // The folder each file was added with: a folder's files follow its
+    // movie only when added with it (not a folder of photos added on its
+    // own that happens to be inside).
+    let base: HashMap<&Path, &Path> = files
+        .iter()
+        .map(|f| (f.path.as_path(), f.base.as_path()))
+        .collect();
+    let is_work = |i: &PreviewItem| {
+        !i.is_dir
+            && (view.movies.contains_key(&i.path)
+                || view.episodes.contains_key(&i.path)
+                || view.books.contains_key(&i.path)
+                || view.comics.contains_key(&i.path))
+    };
+    type Place = (Option<PathBuf>, Option<String>);
+    // Each movie folder's place (None: not all its movie's files go to one
+    // new folder, or it is not the movie's own), and each folder's works'
+    // names: old stem, new stem and where it goes.
+    let mut places: HashMap<PathBuf, Option<Place>> = HashMap::new();
+    let mut ids: HashMap<PathBuf, HashSet<u64>> = HashMap::new();
+    let mut stems: HashMap<PathBuf, Vec<(String, String, Place)>> = HashMap::new();
+    for i in items
+        .iter()
+        .filter(|i| is_work(i) && i.status != Status::Conflict)
+    {
+        let here = (i.dest.clone(), i.folder.clone());
+        if let Some(m) = view.movies.get(&i.path) {
+            ids.entry(i.dir.clone()).or_default().insert(m.id);
+            let moving = i.dest.is_some().then(|| here.clone());
+            match places.get_mut(&i.dir) {
+                Some(p) if *p != moving => *p = None,
+                Some(_) => {}
+                None => {
+                    places.insert(i.dir.clone(), moving);
+                }
+            }
+        }
+        let (old, new) = (split_name(&i.original).0, split_name(&i.new_name).0);
+        stems
+            .entry(i.dir.clone())
+            .or_default()
+            .push((old.to_string(), new.to_string(), here));
+    }
+    // Each movie folder's files were added with: the movie's.
+    let added: HashMap<PathBuf, &Path> = items
+        .iter()
+        .filter(|i| view.movies.contains_key(&i.path))
+        .filter_map(|i| Some((i.dir.clone(), *base.get(i.path.as_path())?)))
+        .collect();
+    // Only a movie's own folder.
+    for (dir, place) in places.iter_mut() {
+        let own = ids.get(dir).is_some_and(|s| s.len() == 1)
+            && !protected(dir, view)
+            && items
+                .iter()
+                .find(|i| &i.dir == dir && view.movies.contains_key(&i.path))
+                .and_then(|i| view.movies.get(&i.path))
+                .is_some_and(|m| tmdb::names_movie(dir, m) || only_movie_files(dir, m.id, view));
+        if !own {
+            *place = None;
+        }
+    }
+    let place = |dir: &Path, own_base: Option<&Path>| -> Option<(PathBuf, Option<String>)> {
+        for (n, up) in dir.ancestors().take(3).enumerate() {
+            if let Some(found) = places.get(up) {
+                if added.get(up).copied() != own_base {
+                    return None;
+                }
+                let (Some(dest), folder) = found.clone()? else {
+                    return None;
+                };
+                if n == 0 {
+                    return Some((dest, folder));
+                }
+                let rel = dir.strip_prefix(up).ok()?;
+                let shown = rel.to_string_lossy().replace('\\', "/");
+                let folder = match folder {
+                    Some(f) => format!("{f}/{shown}"),
+                    None => shown,
+                };
+                return Some((dest.join(rel), Some(folder)));
+            }
+        }
+        None
+    };
+    for i in items.iter_mut() {
+        if i.is_dir || i.manual || is_work(i) || i.new_name != i.original || i.dest.is_some() {
+            continue;
+        }
+        // Named after a work of its folder: the longest stem it starts with.
+        let named = stems
+            .get(&i.dir)
+            .into_iter()
+            .flatten()
+            .filter(|(old, new, (dest, _))| {
+                (old != new || dest.is_some())
+                    && i.original.len() > old.len()
+                    && i.original.starts_with(old.as_str())
+                    && i.original[old.len()..].starts_with(['.', '-', ' '])
+            })
+            .max_by_key(|(old, _, _)| old.len())
+            .cloned();
+        if let Some((old, new, (dest, folder))) = named {
+            i.new_name = format!("{new}{}", &i.original[old.len()..]);
+            i.dest = dest;
+            i.folder = folder;
+        } else if let Some((dest, folder)) = place(&i.dir, base.get(i.path.as_path()).copied()) {
+            i.dest = Some(dest);
+            i.folder = folder;
+        } else {
+            continue;
+        }
+        if i.status == Status::Unchanged {
+            i.status = Status::Ok;
+        }
+        i.windows_unsafe = windows_bad(&i.new_name);
+    }
+}
+
 /// Files that go with songs, when no rule changed them:
 /// - lyrics with a song's name (`01 Song.lrc`) get its new name;
 /// - with folders, other files (covers, cue sheets, logs) go with their
@@ -1130,6 +1259,7 @@ pub fn preview(
         }
         follow_songs(&mut items, folders, &view.identical);
     }
+    follow_works(&mut items, files, view);
     if let Some(s) = &view.send_to {
         send_rest(&mut items, files, s);
     }
@@ -1856,6 +1986,54 @@ mod tests {
     }
 
     #[test]
+    fn forced_subtitle_stays_forced() {
+        let d = tempfile::tempdir().unwrap();
+        let m = MovieMatch {
+            id: 12155,
+            title: "Alice no País das Maravilhas".into(),
+            original_title: String::new(),
+            year: Some(2010),
+        };
+        let steps = vec![Step {
+            enabled: true,
+            rule: Rule::Movie {
+                template: "{title} ({year}) [tmdbid-{id}]".into(),
+                colon: " - ".into(),
+                sidecar: false,
+                fanart: false,
+                folder: false,
+                missing: false,
+            },
+        }];
+        let old = "Alice no Pais das Maravilhas (2010) [tmdbid-12155]";
+        let files = entries(
+            d.path(),
+            &[
+                &format!("{old}.mkv"),
+                &format!("{old}-forced.srt"),
+                &format!("{old}.srt"),
+            ],
+        );
+        let mut view = View::default();
+        for f in &files {
+            view.movies.insert(f.path.clone(), m.clone());
+        }
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        assert_eq!(p.conflicts, 0);
+        let mut names: Vec<_> = p.items.iter().map(|i| i.new_name.as_str()).collect();
+        names.sort();
+        let new = "Alice no País das Maravilhas (2010) [tmdbid-12155]";
+        assert_eq!(
+            names,
+            [
+                format!("{new}.forced.srt"),
+                format!("{new}.mkv"),
+                format!("{new}.srt"),
+            ]
+        );
+    }
+
+    #[test]
     fn movie_versions_by_picture() {
         let d = tempfile::tempdir().unwrap();
         let m = MovieMatch {
@@ -1895,6 +2073,87 @@ mod tests {
                 d.path().join("Filme (2001)/Filme (2001) - 136p.pt-BR.srt"),
             ]
         );
+    }
+
+    #[test]
+    fn artwork_follows_its_movie() {
+        let d = tempfile::tempdir().unwrap();
+        let out = d.path().join("Destino");
+        fs::create_dir_all(&out).unwrap();
+        let steps = vec![Step {
+            enabled: true,
+            rule: Rule::Movie {
+                template: "{title} ({year})".into(),
+                colon: " - ".into(),
+                sidecar: false,
+                fanart: false,
+                folder: true,
+                missing: false,
+            },
+        }];
+        // Two movie folders, each added on its own, with what a media
+        // server left in them.
+        let mut files = Vec::new();
+        let mut view = View::default();
+        for (n, dir) in ["um", "dois"].iter().enumerate() {
+            let at = d.path().join("Filmes").join(dir);
+            fs::create_dir_all(at.join("extrafanart")).unwrap();
+            let mut here = entries(
+                &at,
+                &[
+                    "filme.mkv",
+                    "filme.nfo",
+                    "filme-poster.jpg",
+                    "backdrop.jpg",
+                    "extrafanart/f1.jpg",
+                ],
+            );
+            for f in &mut here {
+                f.base = at.clone();
+            }
+            view.movies.insert(
+                here[0].path.clone(),
+                MovieMatch {
+                    id: n as u64 + 1,
+                    title: format!("Filme {dir}"),
+                    original_title: String::new(),
+                    year: Some(2001),
+                },
+            );
+            files.extend(here);
+        }
+        view.send_to = Some(SendTo {
+            dir: out.clone(),
+            copy: true,
+        });
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        assert_eq!(p.conflicts, 0, "{:?}", p.items);
+        let mut to: Vec<_> = p.operations().iter().map(|o| o.to.clone()).collect();
+        to.sort();
+        let f = |dir: &str, name: &str| out.join(format!("Filme {dir} (2001)")).join(name);
+        let mut want = Vec::new();
+        for dir in ["um", "dois"] {
+            let stem = format!("Filme {dir} (2001)");
+            want.extend([
+                f(dir, "backdrop.jpg"),
+                f(dir, "extrafanart/f1.jpg"),
+                f(dir, &format!("{stem}-poster.jpg")),
+                f(dir, &format!("{stem}.mkv")),
+                f(dir, &format!("{stem}.nfo")),
+            ]);
+        }
+        want.sort();
+        assert_eq!(to, want);
+
+        // In place: they go into the new folder too.
+        view.send_to = None;
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        let to: Vec<_> = p.operations().iter().map(|o| o.to.clone()).collect();
+        assert!(
+            to.contains(&d.path().join("Filmes/Filme um (2001)/backdrop.jpg")),
+            "{to:?}"
+        );
+        assert!(p.left_folders.is_empty(), "{:?}", p.left_folders);
     }
 
     #[test]

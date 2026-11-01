@@ -988,6 +988,19 @@ async fn write_book_sidecars(
 }
 
 /// The album folders among (or above) `dirs` that would get a playlist.
+/// The album folders among `dirs` without a cover image yet: those the
+/// album cover would be saved in.
+#[tauri::command]
+async fn cover_dirs(dirs: Vec<PathBuf>) -> Vec<PathBuf> {
+    tauri::async_runtime::spawn_blocking(move || {
+        dirs.into_iter()
+            .filter(|d| !musicbrainz::has_cover(d))
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
+}
+
 #[tauri::command]
 async fn playlist_dirs(dirs: Vec<PathBuf>) -> Vec<PathBuf> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -1349,6 +1362,7 @@ pub fn run() {
             write_playlists,
             write_tags,
             playlist_dirs,
+            cover_dirs,
             book_lookup,
             book_search,
             comic_guesses,

@@ -983,11 +983,11 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
                 let name = tmdb::movie_name(template, m, colon, video_of(ctx, template));
                 if !name.is_empty() {
                     let suffix = if ctx.as_folder {
-                        ""
+                        String::new()
                     } else {
-                        tmdb::subtitle_suffix(stem, ext)
+                        tmdb::subtitle_tags(stem, ext)
                     };
-                    *stem = name + suffix;
+                    *stem = name + &suffix;
                 }
             }
         }
@@ -998,7 +998,7 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             if let Some(m) = ctx.episode {
                 let name = tv::episode_name(template, m, colon, video_of(ctx, template));
                 if !name.is_empty() {
-                    *stem = name + tmdb::subtitle_suffix(stem, ext);
+                    *stem = name + &tmdb::subtitle_tags(stem, ext);
                 }
             }
         }

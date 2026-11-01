@@ -656,20 +656,77 @@ pub fn nfo(d: &Details, lang: &str) -> String {
 }
 
 /// The language and flags at the end of a subtitle's name (`.pt-BR`,
-/// `.eng.forced`), kept when the movie or episode name replaces the rest.
-/// Codes must be lowercase, so a title such as `No` is not taken for one.
+/// `.eng.forced`, also `-forced` or ` SDH` as some name them), as written:
+/// what the movie or episode name keeps (see [`subtitle_tags`]). Codes
+/// must be lowercase, so a title such as `No` is not taken for one; a flag
+/// may follow a dash, an underscore or a space, a language only a dot.
 pub fn subtitle_suffix<'a>(stem: &'a str, ext: &str) -> &'a str {
     if !is_subtitle(ext) {
         return "";
     }
     let mut start = stem.len();
     for _ in 0..3 {
-        match stem[..start].rfind('.') {
-            Some(dot) if dot > 0 && is_subtitle_tag(&stem[dot + 1..start]) => start = dot,
-            _ => break,
+        let head = &stem[..start];
+        // A language or flag after a dot (`.pt-BR`), else a flag after a
+        // dash, an underscore or a space (`-forced`).
+        let dotted = head
+            .rfind('.')
+            .filter(|&at| at > 0 && is_subtitle_tag(&head[at + 1..]));
+        let other = head
+            .rfind(['-', '_', ' '])
+            .filter(|&at| at > 0 && is_subtitle_flag(&head[at + 1..]));
+        match dotted.into_iter().chain(other).max() {
+            Some(at) => start = at,
+            None => break,
         }
     }
     &stem[start..]
+}
+
+/// The suffix as players read it (`Movie.pt-BR.forced.srt`): each part
+/// after a dot, flags in lower case.
+pub fn subtitle_tags(stem: &str, ext: &str) -> String {
+    let raw = subtitle_suffix(stem, ext);
+    let mut out = String::new();
+    let mut rest = raw;
+    while !rest.is_empty() {
+        let sep = rest.starts_with('.');
+        let body = &rest[1..];
+        let end = body.find(['.', '-', '_', ' ']).unwrap_or(body.len());
+        // A language's region (`pt-BR`) keeps its dash.
+        let (part, next) = if sep {
+            let (lang, more) = (&body[..end], &body[end..]);
+            match more.strip_prefix(['-', '_']) {
+                Some(r)
+                    if !is_subtitle_flag(r.split(['.', '-', '_', ' ']).next().unwrap_or(""))
+                        && is_subtitle_tag(
+                            &body[..end + 1 + r.find(['.', '-', '_', ' ']).unwrap_or(r.len())],
+                        ) =>
+                {
+                    let len = end + 1 + r.find(['.', '-', '_', ' ']).unwrap_or(r.len());
+                    (body[..len].to_string(), &body[len..])
+                }
+                _ => (lang.to_string(), more),
+            }
+        } else {
+            (body[..end].to_string(), &body[end..])
+        };
+        out.push('.');
+        if is_subtitle_flag(&part) {
+            out.push_str(&part.to_lowercase());
+        } else {
+            out.push_str(&part);
+        }
+        rest = next;
+    }
+    out
+}
+
+/// Flags that may follow a dash, an underscore or a space too: words a
+/// title rarely ends with (`default`, `full`, `hi` only after a dot).
+fn is_subtitle_flag(s: &str) -> bool {
+    const FLAGS: &[&str] = &["forced", "sdh", "cc", "foreign"];
+    FLAGS.contains(&s.to_lowercase().as_str())
 }
 
 fn is_subtitle_tag(s: &str) -> bool {
@@ -684,6 +741,7 @@ fn is_subtitle_tag(s: &str) -> bool {
     ];
     let (lang, region) = s.split_once(['-', '_']).unwrap_or((s, ""));
     FLAGS.contains(&s)
+        || is_subtitle_flag(s)
         || (LANGS.contains(&lang)
             && (region.is_empty()
                 || ((2..=4).contains(&region.len())
@@ -861,6 +919,19 @@ mod tests {
             subtitle_suffix("Matrix.1999.eng.forced", "srt"),
             ".eng.forced"
         );
+        // Flags after a dash or a space, as some name them.
+        let name = "Alice (2010) [tmdbid-12155]";
+        let t = |stem: &str| subtitle_tags(stem, "srt");
+        assert_eq!(t(&format!("{name}-forced")), ".forced");
+        assert_eq!(t(&format!("{name}.pt-BR-forced")), ".pt-BR.forced");
+        assert_eq!(t(&format!("{name}.pt-BR.FORCED")), ".pt-BR.forced");
+        assert_eq!(t(&format!("{name} SDH")), ".sdh");
+        assert_eq!(t(&format!("{name}.eng.forced")), ".eng.forced");
+        assert_eq!(t(&format!("{name}.pt-BR")), ".pt-BR");
+        assert_eq!(t(name), "");
+        assert_eq!(t("Say Hi"), "");
+        assert_eq!(t("Uma Coisa Default"), "");
+        assert_eq!(t("Movie.default"), ".default");
         assert_eq!(subtitle_suffix("Matrix.1999.pt", "mkv"), "");
         assert_eq!(subtitle_suffix("Movie.It", "srt"), "");
         assert_eq!(subtitle_suffix("pt", "srt"), "");

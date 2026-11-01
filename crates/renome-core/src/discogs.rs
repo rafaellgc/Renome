@@ -495,6 +495,26 @@ pub fn found(search: &DgSearch) -> Vec<Release> {
         .collect()
 }
 
+/// A cover made at most `size` pixels on its longer side (Discogs serves
+/// one size, about 600): as it is when it is not larger, or cannot be read.
+pub fn cover_at(bytes: Vec<u8>, size: u32) -> Vec<u8> {
+    let Ok(img) = image::load_from_memory(&bytes) else {
+        return bytes;
+    };
+    if img.width().max(img.height()) <= size {
+        return bytes;
+    }
+    let small = img
+        .resize(size, size, image::imageops::FilterType::Lanczos3)
+        .into_rgb8();
+    let mut out = Vec::new();
+    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 90);
+    match small.write_with_encoder(encoder) {
+        Ok(()) => out,
+        Err(_) => bytes,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -534,6 +554,21 @@ mod tests {
                 ..Default::default()
             },
         )
+    }
+
+    #[test]
+    fn covers_made_smaller() {
+        let img = image::RgbImage::from_pixel(600, 400, image::Rgb([200, 30, 30]));
+        let mut png = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let small = cover_at(png.clone(), 250);
+        let read = image::load_from_memory(&small).unwrap();
+        assert_eq!((read.width(), read.height()), (250, 167));
+        assert_eq!(&small[..2], b"\xFF\xD8", "a JPEG");
+        // Not larger than asked: as it was.
+        assert_eq!(cover_at(png.clone(), 1200), png);
+        assert_eq!(cover_at(b"not an image".to_vec(), 250), b"not an image");
     }
 
     #[test]

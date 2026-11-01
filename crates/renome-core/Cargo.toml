@@ -9,6 +9,7 @@ description = "Renome core: renaming rules, preview and safe apply"
 chrono = { version = "0.4", features = ["serde"] }
 encoding_rs = "0.8"
 globset = "0.4"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 kamadak-exif = "0.6"
 lofty = "0.25.4"
 lopdf = { version = "0.46", default-features = false }

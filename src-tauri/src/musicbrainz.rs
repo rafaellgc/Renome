@@ -608,7 +608,8 @@ pub async fn front_cover(
     size: u32,
 ) -> Result<Option<Vec<u8>>, String> {
     if renome_core::discogs::is_discogs(id) {
-        dg.front_cover(id).await
+        let found = dg.front_cover(id).await?;
+        Ok(found.map(|b| renome_core::discogs::cover_at(b, size)))
     } else {
         mb.front_cover(id, size).await
     }
@@ -636,8 +637,23 @@ pub struct CoverItem {
     release: String,
 }
 
+/// Whether an album folder has a cover image of its own (`cover`,
+/// `folder` or `front`); one that cannot be read counts as having one.
+pub fn has_cover(dir: &std::path::Path) -> bool {
+    std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.flatten().any(|e| {
+                let n = e.file_name().to_string_lossy().to_lowercase();
+                ["cover.", "folder.", "front."]
+                    .iter()
+                    .any(|p| n.starts_with(p))
+            })
+        })
+        .unwrap_or(true)
+}
+
 /// Saves each album's front cover as `cover.jpg` in its folder, unless the
-/// folder already has a cover (`cover`, `folder` or `front` image).
+/// folder already has a cover (see [`has_cover`]).
 pub async fn covers(
     app: &AppHandle,
     client: &Client,
@@ -648,17 +664,7 @@ pub async fn covers(
     let total = items.len();
     progress(app, 0, total, None);
     for (done, item) in items.into_iter().enumerate() {
-        let has_cover = std::fs::read_dir(&item.dir)
-            .map(|rd| {
-                rd.flatten().any(|e| {
-                    let n = e.file_name().to_string_lossy().to_lowercase();
-                    ["cover.", "folder.", "front."]
-                        .iter()
-                        .any(|p| n.starts_with(p))
-                })
-            })
-            .unwrap_or(true);
-        if !has_cover {
+        if !has_cover(&item.dir) {
             let path = item.dir.join("cover.jpg");
             match front_cover(client, dg, &item.release, 1200).await {
                 Ok(Some(bytes)) => match crate::tmdb::write_new(&path, &bytes) {
