@@ -1105,8 +1105,16 @@ the file, unencrypted, and the options say so. The store may wait to be
 unlocked (the system asks for its password), so the settings load
 without it (`load_settings`) and the secrets apart (`load_secrets`); until
 they come, the options show them waiting and their fields are off.
-Secrets are saved apart too (`save_secrets`); `save_settings` keeps the
-file's secret fields as they are. On macOS, an app not signed by Apple
+`load_secrets` tells how the store answered: `stored`, `refused` (it
+exists but did not answer: denied, as macOS asks after each new version,
+locked, or failing) or `missing` (no store). A store not read in this
+session is never written to nor its entry removed, so a refusal cannot
+lose what it holds; the options then say so, with a "Try again" that
+reads it once more, and keys typed meanwhile go to the file (newest:
+they win over the store's when it next answers). Secrets are saved
+apart too (`save_secrets`), and only when they changed from what was
+loaded or last saved; `save_settings` keeps the file's secret fields as
+they are. On macOS, an app not signed by Apple
 may be asked about the Keychain again with each version.
 
 - Language: English, Portuguese, Spanish. On first run, the system's.

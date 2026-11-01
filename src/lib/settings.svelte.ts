@@ -105,30 +105,41 @@ export function saveSettings() {
 /** The settings kept in the system's password store, not in the file. */
 export const SECRET_FIELDS = ["tmdbKey", "comicVineKey", "discogsToken", "gcdEmail", "gcdPassword"] as const;
 
-/** Whether the secrets came (the store may wait to be unlocked), and
- *  where they are kept: in the password store, or (when the system has
- *  none) in the settings file. */
-export const secrets = $state<{ ready: boolean; stored: boolean | null }>({ ready: false, stored: null });
+/** Whether the secrets came (the store may wait to be unlocked or
+ *  allowed), and where they are kept: `stored` in the password store,
+ *  `refused` when the store did not answer (what it holds stays there,
+ *  untouched; keys typed meanwhile go to the settings file), `missing`
+ *  when the system has none (the settings file). */
+export const secrets = $state<{ ready: boolean; status: "stored" | "refused" | "missing" | null }>({ ready: false, status: null });
+
+/** The secrets as last loaded or saved: only a change is saved, so a
+ *  store that did not answer is never written over with empty fields. */
+let saved = "";
+const current = () => JSON.stringify(SECRET_FIELDS.map((k) => settings[k]));
 
 /** Fills the secrets from the system's password store, when it answers;
  *  without a store, those in the settings file hold. */
 export async function loadSecrets() {
+  secrets.ready = false;
   try {
-    const found = await invoke<Partial<Settings> | null>("load_secrets");
-    if (found) {
-      for (const k of SECRET_FIELDS) if (typeof found[k] === "string" && found[k]) settings[k] = found[k];
+    const r = await invoke<{ status: "stored" | "refused" | "missing"; secrets?: Partial<Settings> }>("load_secrets");
+    if (r.secrets) {
+      for (const k of SECRET_FIELDS) if (typeof r.secrets[k] === "string" && r.secrets[k]) settings[k] = r.secrets[k];
     }
-    secrets.stored = found !== null;
+    secrets.status = r.status;
   } catch {
-    secrets.stored = false;
+    secrets.status = "refused";
   }
+  saved = current();
   secrets.ready = true;
 }
 
 export async function saveSecrets() {
-  if (!secrets.ready) return;
+  if (!secrets.ready || current() === saved) return;
   const values = Object.fromEntries(SECRET_FIELDS.map((k) => [k, settings[k]]));
-  secrets.stored = await invoke<boolean>("save_secrets", { secrets: values });
+  saved = current();
+  const stored = await invoke<boolean>("save_secrets", { secrets: values });
+  if (secrets.status === "stored" && !stored) secrets.status = "refused";
 }
 
 // Styles that differ on macOS (see app.css).

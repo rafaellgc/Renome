@@ -2,7 +2,7 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { api } from "./api";
   import { LANG_NAMES, MOD, t, tError, type Key } from "./i18n";
-  import { applyTheme, secrets, settings, type Lang } from "./settings.svelte";
+  import { applyTheme, loadSecrets, secrets, settings, type Lang } from "./settings.svelte";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -254,8 +254,17 @@
       </div>
     </section>
 
-    <p class="stored" class:bad={secrets.ready && !secrets.stored}>
-      {t(!secrets.ready ? "secretsWaiting" : secrets.stored ? "secretsInStore" : "secretsInFile")}
+    <p class="stored" class:bad={secrets.ready && secrets.status !== "stored"}>
+      {#if !secrets.ready}
+        {t("secretsWaiting")}
+      {:else if secrets.status === "stored"}
+        {t("secretsInStore")}
+      {:else if secrets.status === "refused"}
+        {t("secretsRefused")}
+        <button class="link" onclick={() => loadSecrets()}>{t("secretsRetry")}</button>
+      {:else}
+        {t("secretsInFile")}
+      {/if}
     </p>
 
     <section>

@@ -29,8 +29,21 @@ fn service() -> String {
 const ACCOUNT: &str = "credentials";
 
 /// What was last read from or written to the store, so unchanged secrets
-/// are not written again.
+/// are not written again. `None` until the store was read: a store that
+/// could not be read (a refused or locked one) is never written to, so
+/// what it holds is not lost.
 static STORED: Mutex<Option<String>> = Mutex::new(None);
+
+/// How reading the store went.
+pub enum Read {
+    /// The secrets (none, when it has no entry yet).
+    Found(Map<String, Value>),
+    /// There is a store, but it did not answer: refused (macOS asks the
+    /// user after each new version), locked, or failing.
+    Refused,
+    /// The system has no store.
+    Missing,
+}
 
 fn entry() -> Result<keyring::Entry, keyring::Error> {
     keyring::Entry::new(&service(), ACCOUNT)
@@ -50,25 +63,29 @@ fn is_empty(secrets: &Map<String, Value>) -> bool {
         .all(|v| v.as_str().is_none_or(str::is_empty))
 }
 
-/// The secrets in the store; `None` when the store cannot be reached.
-pub fn read() -> Option<Map<String, Value>> {
-    let found = entry().and_then(|e| e.get_password());
+/// The secrets in the store.
+pub fn read() -> Read {
+    let Ok(entry) = entry() else {
+        return Read::Missing;
+    };
+    let found = entry.get_password();
     let mut stored = STORED.lock().unwrap();
     match found {
         Ok(text) => {
             *stored = Some(text.clone());
-            Some(serde_json::from_str(&text).unwrap_or_default())
+            Read::Found(serde_json::from_str(&text).unwrap_or_default())
         }
         Err(keyring::Error::NoEntry) => {
             *stored = Some(String::new());
-            Some(Map::new())
+            Read::Found(Map::new())
         }
-        Err(_) => None,
+        Err(keyring::Error::NoDefaultStore) => Read::Missing,
+        Err(_) => Read::Refused,
     }
 }
 
 /// Writes the secrets (removes them when all are empty); whether the
-/// store took them.
+/// store took them. A store not read in this session is left alone.
 pub fn write(secrets: &Map<String, Value>) -> bool {
     let empty = is_empty(secrets);
     let text = if empty {
@@ -76,8 +93,10 @@ pub fn write(secrets: &Map<String, Value>) -> bool {
     } else {
         Value::Object(secrets.clone()).to_string()
     };
-    if STORED.lock().unwrap().as_deref() == Some(text.as_str()) {
-        return true;
+    match STORED.lock().unwrap().as_deref() {
+        None => return false,
+        Some(old) if old == text => return true,
+        Some(_) => {}
     }
     let done = entry().and_then(|e| {
         if empty {
@@ -108,12 +127,19 @@ mod tests {
         let mut secrets = Map::new();
         secrets.insert("tmdbKey".into(), "fake-key".into());
         secrets.insert("gcdPassword".into(), "fake password".into());
+        // Never read: the store is left alone.
+        assert!(!write(&secrets));
+        let found = |r: Read| match r {
+            Read::Found(m) => m,
+            _ => panic!("the store did not answer"),
+        };
+        found(read());
         assert!(write(&secrets));
         *STORED.lock().unwrap() = None;
-        assert_eq!(read(), Some(secrets.clone()));
+        assert_eq!(found(read()), secrets);
         let empty: Map<String, Value> = FIELDS.iter().map(|k| (k.to_string(), "".into())).collect();
         assert!(write(&empty));
         *STORED.lock().unwrap() = None;
-        assert_eq!(read(), Some(Map::new()));
+        assert_eq!(found(read()), Map::new());
     }
 }

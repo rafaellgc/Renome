@@ -1154,48 +1154,52 @@ async fn save_settings(mut settings: Value) -> Result<(), String> {
 }
 
 /// The secrets from the system's password store, which may wait for the
-/// user to unlock it; `None` when there is no store (those in the file
-/// then hold). Secrets still in the file (from before the store was
-/// used) move to the store.
+/// user to unlock it or allow it, and how that went: `stored` (then
+/// `secrets` are those), `refused` (the store did not answer: what it holds
+/// stays there, untouched) or `missing` (no store: those in the file
+/// hold). Secrets still in the file (from before the store was used, or
+/// saved there while it did not answer, so the newest) move to the store.
 #[tauri::command]
-async fn load_secrets() -> Option<serde_json::Map<String, Value>> {
+async fn load_secrets() -> serde_json::Value {
     tauri::async_runtime::spawn_blocking(|| {
-        let mut stored = secrets::read()?;
+        let mut stored = match secrets::read() {
+            secrets::Read::Found(m) => m,
+            secrets::Read::Refused => return serde_json::json!({ "status": "refused" }),
+            secrets::Read::Missing => return serde_json::json!({ "status": "missing" }),
+        };
         let _file = SETTINGS_FILE.lock().unwrap();
-        let Some(mut file) = read_settings_file() else {
-            return Some(stored);
-        };
-        let Some(obj) = file.as_object_mut() else {
-            return Some(stored);
-        };
-        let old = secrets::of(obj);
-        if old.is_empty() {
-            return Some(stored);
-        }
-        for (k, v) in old {
-            let missing = stored
-                .get(&k)
-                .and_then(Value::as_str)
-                .is_none_or(str::is_empty);
-            if missing && v.as_str().is_some_and(|s| !s.is_empty()) {
-                stored.insert(k, v);
+        let mut file = read_settings_file();
+        let old = file
+            .as_ref()
+            .and_then(Value::as_object)
+            .map(secrets::of)
+            .unwrap_or_default();
+        if !old.is_empty() {
+            for (k, v) in old {
+                if v.as_str().is_some_and(|s| !s.is_empty()) {
+                    stored.insert(k, v);
+                }
+            }
+            if secrets::write(&stored)
+                && let Some(obj) = file.as_mut().and_then(Value::as_object_mut)
+            {
+                for k in secrets::FIELDS {
+                    obj.remove(k);
+                }
+                if let Some(f) = &file {
+                    write_settings_file(f).ok();
+                }
             }
         }
-        if secrets::write(&stored) {
-            for k in secrets::FIELDS {
-                obj.remove(k);
-            }
-            write_settings_file(&file).ok();
-        }
-        Some(stored)
+        serde_json::json!({ "status": "stored", "secrets": stored })
     })
     .await
-    .ok()
-    .flatten()
+    .unwrap_or_else(|_| serde_json::json!({ "status": "refused" }))
 }
 
 /// Saves the secrets in the system's password store; in the settings
-/// file when the store does not take them. Whether the store took them.
+/// file when the store does not take them (or was not read: then what it
+/// holds stays as it is). Whether the store took them.
 #[tauri::command]
 async fn save_secrets(secrets: serde_json::Map<String, Value>) -> Result<bool, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -1208,7 +1212,11 @@ async fn save_secrets(secrets: serde_json::Map<String, Value>) -> Result<bool, S
                 obj.remove(k);
             }
             if !stored {
-                obj.extend(secrets);
+                obj.extend(
+                    secrets
+                        .into_iter()
+                        .filter(|(_, v)| v.as_str().is_some_and(|s| !s.is_empty())),
+                );
             }
         }
         write_settings_file(&file)?;
