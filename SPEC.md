@@ -645,8 +645,16 @@ field, or a `<` with no `>` after it, is kept as typed (Windows refuses
   producers, arrangers, mixers and engineers, artist and album artist
   sort names, work ids, and each credited artist (`ARTISTS`,
   `ALBUMARTISTS`). The main tag (ID3v2, written as v2.3, for MP3, where
-  several genres are joined into one, `Rock; Pop`, since v2.3 has one;
-  Vorbis comments for FLAC, Ogg Vorbis and Opus; ilst for M4A; other
+  several values of a field (genres, composers…) are joined into one,
+  `Rock; Pop`, since v2.3 readers take one value a frame (the credits'
+  pairs excepted),
+  and the fields v2.3 has no frame of its own for (script, writer, artist
+  sort, disc subtitle) go to `TXXX` frames `SCRIPT`, `WRITER`,
+  `ARTISTSORT`, `DISCSUBTITLE`, read back as those fields; the label,
+  written to `TPUB`, is read back from it;
+  Vorbis comments for FLAC, Ogg Vorbis and Opus; ilst for M4A, with
+  writer and arranger as freeform `----:com.apple.iTunes:WRITER` and
+  `ARRANGER` atoms; other
   formats are reported as not writable) is split with `lofty` into the
   fields it knows and the rest, edited and merged back, so other fields
   and frames stay. A song whose fields (and cover) are already those is

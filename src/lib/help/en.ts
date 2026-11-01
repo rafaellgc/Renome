@@ -437,7 +437,7 @@ ${ex("01.mp3", "01 - Song Title.mp3")}
   <li>By sound, very similar recordings (a remaster, an artist's own re-recording) may be mixed up. When the album is in doubt, it goes to the review.</li>
   <li>Songs in Opus, WMA and other formats not listed above are not listened to.</li>
   <li>For MP3 and M4A, undoing written tags does not bring back rare fields that are not text, or ID3v1 and APE tags.</li>
-  <li>In MP3, several genres go into one field (<code>Rock; Pop</code>), because the format used so Windows reads the tags (ID3v2.3) has one genre.</li>
+  <li>In MP3, several values of a field (genres, composers…) go into one (<code>Rock; Pop</code>), because the format used so Windows reads the tags (ID3v2.3) keeps one value a field.</li>
 </ul>
 <p class="tip">Without <b>Write the tags into the files</b>, Renome only reads the tags; the songs themselves are not changed. Only the artist and album name are sent to MusicBrainz.</p>`,
   },

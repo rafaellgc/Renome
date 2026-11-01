@@ -437,7 +437,7 @@ ${ex("01.mp3", "01 - Título da Música.mp3")}
   <li>Pelo som, gravações muito parecidas (uma remasterização, uma regravação do próprio artista) podem ser confundidas. Quando o álbum fica em dúvida, ele vai para a revisão.</li>
   <li>Músicas em Opus, WMA e outros formatos não listados acima não são ouvidas.</li>
   <li>No MP3 e no M4A, desfazer a gravação das tags não traz de volta os campos raros que não são texto nem as tags ID3v1 e APE.</li>
-  <li>No MP3, vários gêneros ficam num campo só (<code>Rock; Pop</code>), porque o formato usado para que o Windows leia as tags (ID3v2.3) só tem um gênero.</li>
+  <li>No MP3, vários valores de um campo (gêneros, compositores…) ficam num só (<code>Rock; Pop</code>), porque o formato usado para que o Windows leia as tags (ID3v2.3) só guarda um valor por campo.</li>
 </ul>
 <p class="tip">Sem <b>Gravar as tags nos arquivos</b>, o Renome só lê as tags; o conteúdo das músicas não é alterado. Ao MusicBrainz vão só o artista e o nome do álbum.</p>`,
   },

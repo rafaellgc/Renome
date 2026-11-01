@@ -437,7 +437,7 @@ ${ex("01.mp3", "01 - Título de la Canción.mp3")}
   <li>Por el sonido, grabaciones muy parecidas (una remasterización, una regrabación del propio artista) pueden confundirse. Cuando el álbum queda en duda, va a la revisión.</li>
   <li>Las canciones en Opus, WMA y otros formatos no citados arriba no se escuchan.</li>
   <li>En MP3 y M4A, deshacer la grabación de etiquetas no devuelve los campos raros que no son texto ni las etiquetas ID3v1 y APE.</li>
-  <li>En MP3, varios géneros quedan en un solo campo (<code>Rock; Pop</code>), porque el formato usado para que Windows lea las etiquetas (ID3v2.3) tiene un solo género.</li>
+  <li>En MP3, varios valores de un campo (géneros, compositores…) quedan en uno solo (<code>Rock; Pop</code>), porque el formato usado para que Windows lea las etiquetas (ID3v2.3) guarda un valor por campo.</li>
 </ul>
 <p class="tip">Sin <b>Grabar las etiquetas en los archivos</b>, Renome solo lee las etiquetas; las canciones en sí no cambian. A MusicBrainz solo se envían el artista y el nombre del álbum.</p>`,
   },

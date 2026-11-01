@@ -18,7 +18,7 @@ use lofty::mpeg::MpegFile;
 use lofty::ogg::tag::VorbisComments;
 use lofty::ogg::{OggPictureStorage, OpusFile, VorbisFile};
 use lofty::picture::{MimeType, Picture, PictureType};
-use lofty::tag::{ItemKey, ItemValue, MergeTag, SplitTag, Tag, TagExt, TagItem};
+use lofty::tag::{ItemKey, ItemValue, MergeTag, SplitTag, Tag, TagExt, TagItem, TagType};
 use serde::{Deserialize, Serialize};
 
 use crate::musicbrainz::{Credit, Release, SongMatch, plain};
@@ -557,7 +557,16 @@ fn edit(
         let changed = match ext.as_str() {
             "mp3" => {
                 let mut a = MpegFile::read_from(&mut file, parse).map_err(err)?;
-                let (r, mut tag) = a.remove_id3v2().unwrap_or_default().split_tag();
+                let mut id3 = a.remove_id3v2().unwrap_or_default();
+                let own: Vec<(ItemKey, String)> = ID3_TEXTS
+                    .iter()
+                    .filter_map(|&(k, d)| match id3.remove_user_text(d)? {
+                        Frame::UserText(t) => Some((k, t.content.to_string())),
+                        _ => None,
+                    })
+                    .collect();
+                let (r, mut tag) = id3.split_tag();
+                as_items(&mut tag, own);
                 if rebuild {
                     rest.more = !r.is_empty() || a.id3v1().is_some() || a.ape().is_some();
                     rest.dropped_text = (&*r)
@@ -571,7 +580,8 @@ fn edit(
                         .collect();
                 }
                 let changed = edit(&mut tag, &mut rest);
-                one_genre(&mut tag);
+                one_value_each(&mut tag);
+                let texts = out_of_items(&mut tag, ID3_TEXTS);
                 let mut id3 = if rebuild {
                     a.remove_id3v1();
                     a.remove_ape();
@@ -579,7 +589,9 @@ fn edit(
                 } else {
                     r.merge_tag(tag)
                 };
-                for (description, content) in std::mem::take(&mut rest.add_text) {
+                for (description, content) in
+                    std::mem::take(&mut rest.add_text).into_iter().chain(texts)
+                {
                     id3.insert_user_text(description, content);
                 }
                 a.set_id3v2(id3);
@@ -661,18 +673,32 @@ fn edit(
             }
             _ => {
                 let mut a = Mp4File::read_from(&mut file, parse).map_err(err)?;
-                let (r, mut tag) = a.remove_ilst().unwrap_or_default().split_tag();
+                let mut ilst = a.remove_ilst().unwrap_or_default();
+                let own: Vec<(ItemKey, String)> = MP4_TEXTS
+                    .iter()
+                    .filter_map(|&(k, name)| {
+                        let atom = ilst.remove(&mp4_ident(name)?).next()?;
+                        let text = atom.data().find_map(|d| match d {
+                            AtomData::UTF8(t) | AtomData::UTF16(t) => Some(t.clone()),
+                            _ => None,
+                        })?;
+                        Some((k, text))
+                    })
+                    .collect();
+                let (r, mut tag) = ilst.split_tag();
+                as_items(&mut tag, own);
                 if rebuild {
                     rest.more = !r.is_empty();
                     rest.dropped_text = mp4_texts(&r);
                 }
                 let changed = edit(&mut tag, &mut rest);
+                let texts = out_of_items(&mut tag, MP4_TEXTS);
                 let mut ilst = if rebuild {
                     Ilst::from(tag)
                 } else {
                     r.merge_tag(tag)
                 };
-                for (ident, text) in std::mem::take(&mut rest.add_text) {
+                for (ident, text) in std::mem::take(&mut rest.add_text).into_iter().chain(texts) {
                     if let Some(ident) = mp4_ident(&ident) {
                         ilst.insert(Atom::new(ident, AtomData::UTF8(text)));
                     }
@@ -701,6 +727,47 @@ fn edit(
 fn save(a: &impl AudioFile, file: &mut File, write: WriteOptions) -> Result<(), String> {
     file.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
     a.save_to(file, write).map_err(|e| e.to_string())
+}
+
+/// Fields an MP3's ID3v2.3 tag cannot hold as lofty writes it (no frame
+/// for them, a frame of v2.4 only, or one shared with another field),
+/// kept as user texts (`TXXX`), with the names other taggers use.
+const ID3_TEXTS: &[(ItemKey, &str)] = &[
+    (ItemKey::Script, "SCRIPT"),
+    (ItemKey::Writer, "WRITER"),
+    (ItemKey::TrackArtistSortOrder, "ARTISTSORT"),
+    (ItemKey::SetSubtitle, "DISCSUBTITLE"),
+];
+
+/// Fields an MP4 tag has no atom for, kept as freeform atoms.
+const MP4_TEXTS: &[(ItemKey, &str)] = &[
+    (ItemKey::Writer, "----:com.apple.iTunes:WRITER"),
+    (ItemKey::Arranger, "----:com.apple.iTunes:ARRANGER"),
+];
+
+/// Several values in one text, as written by [`out_of_items`].
+const JOIN: &str = "; ";
+
+/// Texts kept outside the generic tag (see [`ID3_TEXTS`]) as its items,
+/// so they are compared, written and put back like the rest.
+fn as_items(tag: &mut Tag, own: Vec<(ItemKey, String)>) {
+    for (k, text) in own {
+        for v in text.split(JOIN) {
+            tag.push_unchecked(TagItem::new(k, ItemValue::Text(v.to_string())));
+        }
+    }
+}
+
+/// Takes those items out of the generic tag, for the format's own texts.
+fn out_of_items(tag: &mut Tag, table: &[(ItemKey, &str)]) -> Vec<(String, String)> {
+    table
+        .iter()
+        .filter_map(|&(k, name)| {
+            let values: Vec<String> = tag.get_strings(k).map(str::to_string).collect();
+            tag.remove_key(k);
+            (!values.is_empty()).then(|| (name.to_string(), values.join(JOIN)))
+        })
+        .collect()
 }
 
 /// An MP4 tag's text atoms, by identifier (`©prd`, `----:mean:name`).
@@ -735,24 +802,57 @@ fn mp4_ident(ident: &str) -> Option<AtomIdent<'static>> {
     Some(AtomIdent::Fourcc(bytes.try_into().ok()?))
 }
 
-/// ID3v2.3 has one genre: more are written as `(Rock)Pop`, which players
-/// show as it is. Several genres become one, `Rock; Pop`.
-fn one_genre(tag: &mut Tag) {
-    let genres = values(tag, Field::Genre);
-    if genres.len() > 1 {
-        set(tag, Field::Genre, &[genres.join("; ")]);
+/// ID3v2.3 has one value a frame (several, as lofty writes them, are
+/// read as the first only, by Windows among others): several become one,
+/// `Rock; Pop`. The credits (producer, mixer…) are pairs of their own.
+fn one_value_each(tag: &mut Tag) {
+    const PAIRS: [ItemKey; 5] = [
+        ItemKey::Producer,
+        ItemKey::Arranger,
+        ItemKey::Engineer,
+        ItemKey::MixDj,
+        ItemKey::MixEngineer,
+    ];
+    let mut keys: Vec<ItemKey> = tag.items().map(|i| i.key()).collect();
+    keys.dedup();
+    for k in keys {
+        if PAIRS.contains(&k) {
+            continue;
+        }
+        let values: Vec<String> = tag.get_strings(k).map(str::to_string).collect();
+        if values.len() > 1 {
+            tag.remove_key(k);
+            tag.push_unchecked(TagItem::new(k, ItemValue::Text(values.join(JOIN))));
+        }
+    }
+}
+
+/// The keys a field is read back as. In ID3v2 the label is written to the
+/// publisher's frame (`TPUB`), which reads back as the publisher.
+fn read_keys(tag: &Tag, f: Field) -> Vec<ItemKey> {
+    match (f, tag.tag_type()) {
+        (Field::Label, TagType::Id3v2) => vec![ItemKey::Label, ItemKey::Publisher],
+        _ => vec![f.key()],
     }
 }
 
 /// The values a tag has for a field.
 fn values(tag: &Tag, f: Field) -> Vec<String> {
-    tag.get_strings(f.key()).map(str::to_string).collect()
+    read_keys(tag, f)
+        .into_iter()
+        .map(|k| tag.get_strings(k).map(str::to_string).collect::<Vec<_>>())
+        .find(|v| !v.is_empty())
+        .unwrap_or_default()
 }
 
 fn set(tag: &mut Tag, f: Field, values: &[String]) {
-    tag.remove_key(f.key());
+    for k in read_keys(tag, f) {
+        tag.remove_key(k);
+    }
+    // Unchecked: fields the format has no place for are taken out to its
+    // own texts before writing (see `ID3_TEXTS`).
     for v in values {
-        tag.push(TagItem::new(f.key(), ItemValue::Text(v.clone())));
+        tag.push_unchecked(TagItem::new(f.key(), ItemValue::Text(v.clone())));
     }
 }
 
@@ -831,9 +931,9 @@ pub fn write(
         }
         for (f, new) in fields {
             let old = values(tag, *f);
-            // An MP3 keeps several genres as one (see `one_genre`).
-            let same_genres = *f == Field::Genre && old.len() == 1 && old[0] == new.join("; ");
-            if old != *new && !same_genres {
+            // An MP3 keeps several values as one (see `one_value_each`).
+            let joined = old.len() == 1 && new.len() > 1 && old[0] == new.join(JOIN);
+            if old != *new && !joined {
                 changed = true;
                 backup.fields.push((*f, old));
                 set(tag, *f, new);
@@ -1122,14 +1222,77 @@ mod tests {
     }
 
     #[test]
+    fn every_field_comes_back_and_goes() {
+        let mut wrong = Vec::new();
+        for name in FORMATS {
+            for &f in ALL {
+                let d = tempfile::tempdir().unwrap();
+                let p = d.path().join(name);
+                fs::copy(Path::new("tests/fixtures").join(name), &p).unwrap();
+                let store = d.path().join("s");
+                let value = match f {
+                    Field::Track | Field::TrackTotal | Field::Disc | Field::DiscTotal => "7",
+                    Field::Date | Field::OriginalDate => "1999",
+                    _ => "Zq9value",
+                };
+                let fields: Fields = vec![(f, vec![value.into()])];
+                let Ok(Some(b)) = write(&p, &fields, None, false, &store) else {
+                    wrong.push(format!("{name} {f:?}: not written"));
+                    continue;
+                };
+                let utf16: Vec<u8> = "Zq9value"
+                    .encode_utf16()
+                    .flat_map(u16::to_le_bytes)
+                    .collect();
+                if value == "Zq9value" && !has(&p, b"Zq9value") && !has(&p, &utf16) {
+                    wrong.push(format!("{name} {f:?}: not in the file"));
+                }
+                if !matches!(write(&p, &fields, None, false, &store), Ok(None)) {
+                    let t = lofty::read_from_path(&p).unwrap();
+                    let tag = t.primary_tag().unwrap();
+                    let keys: Vec<String> = tag
+                        .items()
+                        .filter(|i| matches!(i.value(), ItemValue::Text(v) if v.contains("Zq9")))
+                        .map(|i| format!("{:?}={:?}", i.key(), i.value()))
+                        .collect();
+                    wrong.push(format!("{name} {f:?}: written again; reads {keys:?}"));
+                }
+                restore(&b, &store).unwrap();
+                if value == "Zq9value" && (has(&p, b"Zq9value") || has(&p, &utf16)) {
+                    wrong.push(format!("{name} {f:?}: stays after undo"));
+                }
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    #[test]
+    fn label_in_an_mp3_comes_and_goes() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("song.mp3");
+        fs::copy("tests/fixtures/song.mp3", &p).unwrap();
+        let store = d.path().join("s");
+        let fields: Fields = vec![(Field::Label, vec!["Selo".into()])];
+        let b = write(&p, &fields, None, false, &store).unwrap().unwrap();
+        // Written once: the label read back (as the publisher) is the same.
+        assert!(write(&p, &fields, None, false, &store).unwrap().is_none());
+        restore(&b, &store).unwrap();
+        assert!(!has(&p, b"Selo"), "the label stays after undo");
+    }
+
+    #[test]
     fn several_genres_in_an_mp3() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("song.mp3");
         fs::copy("tests/fixtures/song.mp3", &p).unwrap();
         let store = d.path().join("s");
-        let fields: Fields = vec![(Field::Genre, vec!["Rock".into(), "Pop".into()])];
+        let fields: Fields = vec![
+            (Field::Genre, vec!["Rock".into(), "Pop".into()]),
+            (Field::Composer, vec!["Ana".into(), "Rui".into()]),
+        ];
         write(&p, &fields, None, false, &store).unwrap().unwrap();
         assert_eq!(read(&p, ItemKey::Genre).0.as_deref(), Some("Rock; Pop"));
+        assert_eq!(read(&p, ItemKey::Composer).0.as_deref(), Some("Ana; Rui"));
         // Written once: the same genres are not written again.
         assert!(write(&p, &fields, None, false, &store).unwrap().is_none());
     }
