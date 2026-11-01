@@ -60,6 +60,9 @@ input:not([type="checkbox"]), select {
 input[type="number"] { width: 100%; }
 input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
+/* The macOS WebKit does not draw a checked box with accent-color: the
+   system's own color there. */
+:root.mac input[type="checkbox"] { accent-color: auto; }
 .mono { font-family: ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace; font-size: 13px; }
 
 button {

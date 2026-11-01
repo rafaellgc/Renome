@@ -521,14 +521,19 @@ pub fn from_name(file: &FileEntry, stem: &str, by_folder: bool) -> Option<ComicM
 /// The series named by the folder the file is in, when the user says so
 /// (`Series (Complete)/01 - Story.cbz`): what the name had for a series
 /// becomes the title, unless it is the folder's series (or starts with
-/// it: then the rest is).
+/// it: then the rest is), or words of it (`FRIEREN v01` in `<original
+/// title> Frieren [<romanized>]`: a shorter name for the same series).
 pub fn in_folder(m: &mut ComicMatch, folder: &str) {
     let f = parse_folder(folder);
     if f.series.is_empty() {
         return;
     }
     let fold = |s: &str| text::strip_accents(&s.to_lowercase());
-    if m.title.is_empty() {
+    let part_of = |a: &str, b: &str| {
+        let a = simple(a);
+        !a.is_empty() && format!(" {} ", simple(b)).contains(&format!(" {a} "))
+    };
+    if m.title.is_empty() && !part_of(&m.series, &f.series) {
         m.title = match fold(&m.series).starts_with(&fold(&f.series)) {
             true => story(&m.series, &f.series),
             false => m.series.clone(),
@@ -1704,6 +1709,14 @@ mod tests {
         );
         in_folder(&mut m, "Pateta Faz História (2001)");
         assert_eq!((m.title.as_str(), m.series_year), ("", Some(2001)));
+        // A shorter name for the folder's series is not a title.
+        let folder = "葬送のフリーレン Frieren [Sōsō no Furīren] (2020)";
+        let mut m = merge(&parse_name("FRIEREN v01", folder), &ComicInfo::default());
+        in_folder(&mut m, folder);
+        assert_eq!(
+            (m.series.as_str(), m.title.as_str(), m.volume),
+            ("葬送のフリーレン Frieren", "", Some(1))
+        );
     }
 
     #[test]

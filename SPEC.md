@@ -776,7 +776,8 @@ field, or a `<` with no `>` after it, is kept as typed (Windows refuses
 - A name that starts with its number (`19 - Story`) takes that number;
   bare numbers after it are no issue. An option (off by default) takes
   the series from the file's folder (without brackets and year), and what
-  the name had as its series becomes the title.
+  the name had as its series becomes the title (none when it is the
+  folder's series, or words of it: a shorter name for the same series).
 - Ready-made templates: Renome's default (Komga takes each folder as a
   series) and Kavita's (`{series} v{volume} #{number} c{chapter}
   ({year})`, no title); both turn series folders on.

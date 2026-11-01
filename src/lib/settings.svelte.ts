@@ -128,6 +128,9 @@ export async function saveSecrets() {
   secrets.stored = await invoke<boolean>("save_secrets", { secrets: values });
 }
 
+// Styles that differ on macOS (see app.css).
+if (navigator.userAgent.includes("Mac OS X")) document.documentElement.classList.add("mac");
+
 const dark = window.matchMedia("(prefers-color-scheme: dark)");
 
 export function applyTheme() {
