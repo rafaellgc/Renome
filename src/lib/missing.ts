@@ -218,7 +218,9 @@ export function missingTracks(albums: AlbumState[], items: PreviewItem[], descen
       const n = String(tr.position).padStart(2, "0");
       out.push({
         ghost: true,
-        key: `ghost:${a.choice!.id}:${tr.id || at}`,
+        // The same release in two folders (an album as FLAC and as MP3)
+        // shows its missing tracks in each.
+        key: `ghost:${a.dir}:${a.choice!.id}:${tr.id || at}`,
         kind: "track",
         group,
         season: tr.disc,

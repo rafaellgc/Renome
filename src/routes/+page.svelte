@@ -345,7 +345,7 @@
    *  issues from the series the listed comics are from, tracks from the
    *  albums, released movies from the collections and volumes between a
    *  book series' files. */
-  const ghosts = $derived([
+  const ghosts = $derived(unique([
     ...(seriesRule?.rule.type === "series" && seriesRule.rule.missing
       ? missingEpisodes(shows, episodeMatches, preview.items, sortDesc, today())
       : []),
@@ -357,7 +357,13 @@
       ? missingMovies(movieSets, setOf, Object.fromEntries(Object.entries(movieMatches).map(([p, m]) => [p, m.id])), preview.items, sortDesc, today())
       : []),
     ...(bookRule?.rule.type === "book" && bookRule.rule.missing ? missingBooks(books, preview.items, sortDesc) : []),
-  ]);
+  ]));
+  /** Each missing row once: the list is keyed by them, and a repeated key
+   *  stops it from being drawn at all. */
+  function unique<T extends { key: string }>(rows: T[]): T[] {
+    const seen = new Set<string>();
+    return rows.filter((r) => !seen.has(r.key) && !!seen.add(r.key));
+  }
   /** The words for each kind of missing item. */
   const MISSING = {
     episode: { count: "missingEpisodes", file: "defaultMissingName" },
