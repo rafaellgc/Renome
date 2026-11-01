@@ -283,13 +283,15 @@ impl PathKeys {
         if let Some(&v) = self.folded.get(dir) {
             return v;
         }
+        // ASCII letters only: every disk that ignores case ignores theirs,
+        // but FAT mounted with `iocharset=ascii` tells `ç` from `Ç`.
         let swap = |s: &str| -> String {
             s.chars()
-                .flat_map(|c| -> Vec<char> {
-                    if c.is_lowercase() {
-                        c.to_uppercase().collect()
+                .map(|c| {
+                    if c.is_ascii_lowercase() {
+                        c.to_ascii_uppercase()
                     } else {
-                        c.to_lowercase().collect()
+                        c.to_ascii_lowercase()
                     }
                 })
                 .collect()

@@ -1012,7 +1012,9 @@ field, or a `<` with no `>` after it, is kept as typed (Windows refuses
   window's thread; a preview that comes back after a newer one is dropped.
 - Names are compared without case where the file system ignores it:
   always on Windows and macOS, and on Linux where looking an existing name
-  up in the other case finds it (exFAT, FAT, NTFS mounted so).
+  up in the other case of its ASCII letters finds it (exFAT, FAT, NTFS
+  mounted so; FAT mounted with `iocharset=ascii` tells `ç` from `Ç`, so
+  only ASCII letters are swapped).
 - When the history entry cannot be written, nothing more (metadata files,
   covers, playlists, tags) is written for that rename.
 - Report at the end: successes and errors.
