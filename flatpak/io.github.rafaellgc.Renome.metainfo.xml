@@ -63,6 +63,11 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.20.1" date="2026-11-01">
+      <description>
+        <p>Artwork and .nfo files a media server left in a movie's folder now go with the movie to its new folder, also when copying or moving to another folder. Forced subtitles named with a dash keep their flag. The Rename button no longer counts a cover an album folder already has, and Discogs covers embedded in songs follow the cover size chosen.</p>
+      </description>
+    </release>
     <release version="0.20.0" date="2026-11-01">
       <description>
         <p>The list can show columns with what the files hold (artist, album, track, length, format, resolution, codec, photo date), sortable and exported. Discogs, with your personal token, finds albums MusicBrainz does not have. Songs repeated in other files (same title, artist and length) are marked. Keys, tokens and the Grand Comics Database account, now set in Options, are kept encrypted in the system's password store. Undo of written tags brings back fields other programs wrote, every field is now written in every format, and the missing rows can be hidden. Sticks formatted for Windows are recognised on Linux in more cases. On macOS checkboxes show and the title bar follows the theme; macOS 11 or newer is required.</p>
