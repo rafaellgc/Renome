@@ -17,10 +17,12 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 mod acoustid;
 mod comicvine;
+mod discogs;
 mod gcd;
 mod mangadex;
 mod musicbrainz;
 mod openlibrary;
+mod secrets;
 mod tmdb;
 
 /// The session's file list. It lives on the Rust side so the whole list
@@ -32,6 +34,8 @@ struct Session {
     undo: Vec<(Vec<FileEntry>, Overrides)>,
     /// Group of each file with an identical copy in the list.
     identical: HashMap<PathBuf, usize>,
+    /// Group of each song that is the same music as another in the list.
+    alike: HashMap<PathBuf, usize>,
 }
 
 /// How many list edits can be undone.
@@ -62,6 +66,8 @@ struct AppState {
     gcd: gcd::Client,
     /// MangaDex.
     md: mangadex::Client,
+    /// Discogs, with the user's token.
+    dg: discogs::Client,
 }
 
 type Overrides = HashMap<PathBuf, String>;
@@ -187,9 +193,32 @@ fn move_files(state: State<AppState>, paths: Vec<PathBuf>, delta: i32) {
     }
 }
 
+/// Sorts the list; by a column of details it reads the files, so in the
+/// background.
 #[tauri::command]
-fn sort_files(state: State<AppState>, key: SortKey, descending: bool) {
-    renome_core::sort_files(&mut state.session.lock().unwrap().files, key, descending);
+async fn sort_files(app: AppHandle, key: SortKey, descending: bool) -> Result<(), String> {
+    in_background(app, move |state| {
+        renome_core::sort_files(&mut state.session.lock().unwrap().files, key, descending);
+    })
+    .await
+}
+
+/// What the optional columns show about these files (read once each).
+#[tauri::command]
+async fn file_details(
+    app: AppHandle,
+    paths: Vec<PathBuf>,
+) -> Result<HashMap<PathBuf, renome_core::details::Details>, String> {
+    in_background(app, move |state| {
+        let want: HashSet<PathBuf> = paths.into_iter().collect();
+        let s = state.session.lock().unwrap();
+        s.files
+            .iter()
+            .filter(|f| want.contains(&f.path))
+            .map(|f| (f.path.clone(), renome_core::details::of(f)))
+            .collect()
+    })
+    .await
 }
 
 #[tauri::command]
@@ -202,6 +231,7 @@ async fn preview(
     in_background(app, move |state| {
         let s = state.session.lock().unwrap();
         view.identical = s.identical.clone();
+        view.alike = s.alike.clone();
         view.protected = protected_dirs();
         renome_core::preview(&s.files, &steps, &overrides, &view)
     })
@@ -227,11 +257,20 @@ fn stop_search(state: State<AppState>) {
     state.stop_run.fetch_add(1, Ordering::SeqCst);
 }
 
-/// Searches the list for files with identical content, in the background.
-/// Returns the groups, or `None` if a newer search replaced this one.
-/// Emits `identical-progress` while reading whole files.
+/// What the search for copies found: identical files, and songs that are
+/// the same music in different files.
+#[derive(Serialize)]
+struct Copies {
+    identical: Vec<Vec<PathBuf>>,
+    songs: Vec<Vec<PathBuf>>,
+}
+
+/// Searches the list for files with identical content, then for songs
+/// that are the same music, in the background. Returns the groups, or
+/// `None` if a newer search replaced this one. Emits `identical-progress`
+/// while reading whole files.
 #[tauri::command]
-async fn find_identical(app: AppHandle) -> Result<Option<Vec<Vec<PathBuf>>>, String> {
+async fn find_identical(app: AppHandle) -> Result<Option<Copies>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let run = state.identical_run.fetch_add(1, Ordering::SeqCst) + 1;
@@ -253,12 +292,33 @@ async fn find_identical(app: AppHandle) -> Result<Option<Vec<Vec<PathBuf>>>, Str
         if stale() {
             return None;
         }
-        state.session.lock().unwrap().identical = groups
-            .iter()
-            .enumerate()
-            .flat_map(|(i, g)| g.iter().map(move |p| (p.clone(), i)))
-            .collect();
-        Some(groups)
+        drop(hashes);
+        let by_group = |groups: &[Vec<PathBuf>]| -> HashMap<PathBuf, usize> {
+            groups
+                .iter()
+                .enumerate()
+                .flat_map(|(i, g)| g.iter().map(move |p| (p.clone(), i)))
+                .collect()
+        };
+        let identical = by_group(&groups);
+        // The songs' tags are read on the copy, without holding the list.
+        let songs = renome_core::alike::same_songs(&files, &identical, &stale)?;
+        if stale() {
+            return None;
+        }
+        let mut s = state.session.lock().unwrap();
+        s.identical = identical;
+        s.alike = by_group(&songs);
+        let read: HashMap<&PathBuf, &FileEntry> = files.iter().map(|f| (&f.path, f)).collect();
+        for f in s.files.iter_mut() {
+            if let Some(other) = read.get(&f.path) {
+                f.keep_read(other);
+            }
+        }
+        Some(Copies {
+            identical: groups,
+            songs,
+        })
     })
     .await
     .map_err(|e| e.to_string())
@@ -329,6 +389,7 @@ async fn apply(
     in_background(app, move |state| {
         let mut s = state.session.lock().unwrap();
         view.identical = s.identical.clone();
+        view.alike = s.alike.clone();
         view.protected = protected_dirs();
         // Recompute the preview here to apply exactly what is visible and valid right now.
         let ops = renome_core::preview(&s.files, &steps, &overrides, &view).operations();
@@ -549,19 +610,38 @@ async fn mb_lookup(
     let state = app.state::<AppState>();
     let services = musicbrainz::Services {
         mb: &state.mb,
+        dg: &state.dg,
         acoustid: &state.acoustid,
         heard: &state.heard,
     };
     Ok(musicbrainz::lookup(&app, &services, albums, unnamed, listen).await)
 }
 
-/// A search typed in the album review.
+/// A search typed in the album review, on MusicBrainz or Discogs.
 #[tauri::command]
 async fn mb_search(
     app: AppHandle,
     query: renome_core::musicbrainz::AlbumQuery,
+    discogs: Option<bool>,
 ) -> Result<Vec<renome_core::musicbrainz::Candidate>, String> {
-    app.state::<AppState>().mb.search(&query).await
+    let state = app.state::<AppState>();
+    if discogs == Some(true) {
+        state.dg.search(&query).await
+    } else {
+        state.mb.search(&query).await
+    }
+}
+
+/// The Discogs token from the options (empty: Discogs is not used).
+#[tauri::command]
+fn discogs_token(state: State<AppState>, token: String) {
+    state.dg.set_token(&token);
+}
+
+/// Checks a Discogs token.
+#[tauri::command]
+async fn discogs_check(app: AppHandle, token: String) -> Result<(), String> {
+    app.state::<AppState>().dg.check(&token).await
 }
 
 /// Matches an album's songs to the release the user chose.
@@ -577,7 +657,8 @@ async fn mb_choose(
     let (mut songs, unnamed) = songs_of(&app, &paths, from_name);
     songs = musicbrainz::albums(&songs).concat();
     songs.extend(unnamed);
-    musicbrainz::choose(&app.state::<AppState>().mb, &id, &songs).await
+    let state = app.state::<AppState>();
+    musicbrainz::choose(&state.mb, &state.dg, &id, &songs).await
 }
 
 /// Saves the albums' covers and records them like `write_sidecars`.
@@ -587,7 +668,8 @@ async fn write_covers(
     history_id: Option<String>,
     items: Vec<musicbrainz::CoverItem>,
 ) -> Result<tmdb::SidecarReport, String> {
-    let mut report = musicbrainz::covers(&app, &app.state::<AppState>().mb, items).await;
+    let state = app.state::<AppState>();
+    let mut report = musicbrainz::covers(&app, &state.mb, &state.dg, items).await;
     record_created(&app, history_id, &mut report);
     Ok(report)
 }
@@ -660,12 +742,15 @@ async fn write_tags(
     for (done, job) in items.into_iter().enumerate() {
         let image = if cover {
             if !covers.contains_key(&job.song.release) {
-                let mut found = state
-                    .mb
-                    .front_cover(&job.song.release, cover_size.unwrap_or(1200))
-                    .await
-                    .ok()
-                    .flatten();
+                let mut found = musicbrainz::front_cover(
+                    &state.mb,
+                    &state.dg,
+                    &job.song.release,
+                    cover_size.unwrap_or(1200),
+                )
+                .await
+                .ok()
+                .flatten();
                 if found.is_none() {
                     found = job.path.parent().and_then(folder_cover);
                 }
@@ -676,7 +761,11 @@ async fn write_tags(
             None
         };
         if !full.contains_key(&job.song.release) {
-            let r = state.mb.release_full(&job.song.release).await.ok();
+            let r = if renome_core::discogs::is_discogs(&job.song.release) {
+                state.dg.release(&job.song.release).await.ok()
+            } else {
+                state.mb.release_full(&job.song.release).await.ok()
+            };
             full.insert(job.song.release.clone(), r);
         }
         let mut fields = tagwrite::fields_of(&job.song);
@@ -808,22 +897,16 @@ async fn comic_check(app: AppHandle, key: String) -> Result<(), String> {
     app.state::<AppState>().cv.check(&key).await
 }
 
-/// Signs in to the Grand Comics Database for this session (kept in memory
-/// only), checking the account.
+/// The Grand Comics Database account from the options (empty: none).
 #[tauri::command]
-async fn gcd_sign_in(app: AppHandle, email: String, password: String) -> Result<(), String> {
-    let gcd = &app.state::<AppState>().gcd;
-    gcd.sign_in(email, password);
-    let checked = gcd.check().await;
-    if checked.is_err() {
-        gcd.sign_out();
-    }
-    checked
+fn gcd_account(state: State<AppState>, email: String, password: String) {
+    state.gcd.set_account(&email, &password);
 }
 
+/// Checks a Grand Comics Database account.
 #[tauri::command]
-fn gcd_sign_out(app: AppHandle) {
-    app.state::<AppState>().gcd.sign_out();
+async fn gcd_check(app: AppHandle, email: String, password: String) -> Result<(), String> {
+    app.state::<AppState>().gcd.check(&email, &password).await
 }
 
 /// Series with a name in a catalogue (`gcd`, `comicvine`, `mangadex`),
@@ -1024,21 +1107,115 @@ fn settings_path() -> PathBuf {
         .join("settings.json")
 }
 
-/// Saved settings; `None` on first run. The format is defined by the UI.
-#[tauri::command]
-fn load_settings() -> Option<Value> {
+fn read_settings_file() -> Option<Value> {
     let text = std::fs::read_to_string(settings_path()).ok()?;
     serde_json::from_str(&text).ok()
 }
 
-#[tauri::command]
-fn save_settings(settings: Value) -> Result<(), String> {
+fn write_settings_file(settings: &Value) -> Result<(), String> {
     let path = settings_path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    let text = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+    let text = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
     std::fs::write(path, text).map_err(|e| e.to_string())
+}
+
+/// The settings file is read and written whole by the settings and the
+/// secrets apart: one at a time.
+static SETTINGS_FILE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Saved settings; `None` on first run. The format is defined by the UI.
+/// Secrets come apart ([`load_secrets`]), unless the file still has them.
+#[tauri::command]
+fn load_settings() -> Option<Value> {
+    read_settings_file()
+}
+
+/// Saves the settings but their secrets, which [`save_secrets`] saves:
+/// those in the file are kept as they are.
+#[tauri::command]
+async fn save_settings(mut settings: Value) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let _file = SETTINGS_FILE.lock().unwrap();
+        let old = read_settings_file()
+            .and_then(|v| v.as_object().map(secrets::of))
+            .unwrap_or_default();
+        if let Some(obj) = settings.as_object_mut() {
+            for k in secrets::FIELDS {
+                obj.remove(k);
+            }
+            obj.extend(old);
+        }
+        write_settings_file(&settings)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The secrets from the system's password store, which may wait for the
+/// user to unlock it; `None` when there is no store (those in the file
+/// then hold). Secrets still in the file (from before the store was
+/// used) move to the store.
+#[tauri::command]
+async fn load_secrets() -> Option<serde_json::Map<String, Value>> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let mut stored = secrets::read()?;
+        let _file = SETTINGS_FILE.lock().unwrap();
+        let Some(mut file) = read_settings_file() else {
+            return Some(stored);
+        };
+        let Some(obj) = file.as_object_mut() else {
+            return Some(stored);
+        };
+        let old = secrets::of(obj);
+        if old.is_empty() {
+            return Some(stored);
+        }
+        for (k, v) in old {
+            let missing = stored
+                .get(&k)
+                .and_then(Value::as_str)
+                .is_none_or(str::is_empty);
+            if missing && v.as_str().is_some_and(|s| !s.is_empty()) {
+                stored.insert(k, v);
+            }
+        }
+        if secrets::write(&stored) {
+            for k in secrets::FIELDS {
+                obj.remove(k);
+            }
+            write_settings_file(&file).ok();
+        }
+        Some(stored)
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// Saves the secrets in the system's password store; in the settings
+/// file when the store does not take them. Whether the store took them.
+#[tauri::command]
+async fn save_secrets(secrets: serde_json::Map<String, Value>) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let secrets = secrets::of(&secrets);
+        let stored = secrets::write(&secrets);
+        let _file = SETTINGS_FILE.lock().unwrap();
+        let mut file = read_settings_file().unwrap_or_else(|| Value::Object(Default::default()));
+        if let Some(obj) = file.as_object_mut() {
+            for k in secrets::FIELDS {
+                obj.remove(k);
+            }
+            if !stored {
+                obj.extend(secrets);
+            }
+        }
+        write_settings_file(&file)?;
+        Ok(stored)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// System language (`pt_BR.UTF-8` → `pt`), from the locale variables.
@@ -1099,7 +1276,7 @@ pub fn run() {
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
     let mut session = Session::default();
     if !args.is_empty() {
-        let include_hidden = load_settings()
+        let include_hidden = read_settings_file()
             .and_then(|s| s.get("includeHidden")?.as_bool())
             .unwrap_or(false);
         let opts = ScanOptions {
@@ -1131,6 +1308,7 @@ pub fn run() {
             cv: comicvine::Client::default(),
             gcd: gcd::Client::default(),
             md: mangadex::Client::default(),
+            dg: discogs::Client::default(),
         })
         .invoke_handler(tauri::generate_handler![
             checkpoint,
@@ -1143,6 +1321,9 @@ pub fn run() {
             clear_files,
             move_files,
             sort_files,
+            file_details,
+            discogs_token,
+            discogs_check,
             preview,
             find_identical,
             tmdb_check,
@@ -1167,8 +1348,8 @@ pub fn run() {
             comic_search,
             comic_issues,
             comic_volume_of,
-            gcd_sign_in,
-            gcd_sign_out,
+            gcd_account,
+            gcd_check,
             save_text,
             tmdb_images,
             recover,
@@ -1182,6 +1363,8 @@ pub fn run() {
             load_preset,
             load_settings,
             save_settings,
+            load_secrets,
+            save_secrets,
             system_language,
         ])
         .run(tauri::generate_context!())

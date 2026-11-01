@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from "./api";
   import { t, tError } from "./i18n";
+  import { settings } from "./settings.svelte";
   import type { AlbumState, MbCandidate } from "./types";
 
   let {
@@ -26,6 +27,8 @@
   /** Results of a search typed here (replace the automatic ones). */
   let typed = $state<MbCandidate[] | null>(null);
   const candidates = $derived(typed ?? a?.candidates ?? []);
+  /** Where a typed search looks: Discogs only with the user's token. */
+  let source = $state<"musicbrainz" | "discogs">("musicbrainz");
   /** Release covers that failed to load. */
   let noCover = $state(new Set<string>());
 
@@ -36,6 +39,9 @@
     album = albums[queue[index]].query.album;
     typed = null;
     searchError = "";
+    // Found on Discogs: a new search looks there too.
+    const first = albums[queue[index]].choice ?? albums[queue[index]].candidates[0];
+    source = first?.id.startsWith("discogs:") && settings.discogsToken.trim() ? "discogs" : "musicbrainz";
   });
 
   function go(delta: number) {
@@ -63,7 +69,10 @@
     busy = true;
     searchError = "";
     try {
-      typed = await api.mbSearch({ artist: artist.trim(), album: album.trim(), year: a.query.year, tracks: a.files.length });
+      typed = await api.mbSearch(
+        { artist: artist.trim(), album: album.trim(), year: a.query.year, tracks: a.files.length },
+        source === "discogs" && !!settings.discogsToken.trim(),
+      );
     } catch (err) {
       searchError = tError(err);
     } finally {
@@ -80,7 +89,8 @@
   }
 
   const folder = (dir: string) => dir.split(/[\\/]/).pop() ?? dir;
-  const cover = (id: string) => `https://coverartarchive.org/release/${id}/front-250`;
+  const cover = (c: MbCandidate) => c.image || `https://coverartarchive.org/release/${c.id}/front-250`;
+  const fromDiscogs = (id: string) => id.startsWith("discogs:");
   const matched = $derived(a?.choice ? Object.keys(a.matches).length : 0);
 </script>
 
@@ -111,6 +121,12 @@
       <form class="search" onsubmit={search}>
         <input class="artist" bind:value={artist} placeholder={t("albumArtistField")} spellcheck="false" />
         <input class="album" bind:value={album} placeholder={t("albumField")} spellcheck="false" />
+        {#if settings.discogsToken.trim()}
+          <select bind:value={source} aria-label={t("albumSource")} title={t("albumSource")}>
+            <option value="musicbrainz">MusicBrainz</option>
+            <option value="discogs">Discogs</option>
+          </select>
+        {/if}
         <button type="submit" disabled={busy}>{t("reviewSearch")}</button>
       </form>
       {#if searchError || a.error}<p class="error">{searchError || tError(a.error)}</p>{/if}
@@ -123,13 +139,14 @@
               {#if noCover.has(c.id)}
                 <div class="nocover">♪</div>
               {:else}
-                <img src={cover(c.id)} alt="" loading="lazy" onerror={() => (noCover = new Set(noCover).add(c.id))} />
+                <img src={cover(c)} alt="" loading="lazy" onerror={() => (noCover = new Set(noCover).add(c.id))} />
               {/if}
               <span class="info">
                 <b>{c.title}</b>
                 <span>{c.artist}</span>
                 <span class="muted">{[c.date, c.country, c.format, c.label, c.kind].filter(Boolean).join(" · ")}</span>
-                <span class:same={c.tracks === a.files.length} class="tracks">{t("albumTracks", { n: c.tracks })}</span>
+                {#if c.tracks}<span class:same={c.tracks === a.files.length} class="tracks">{t("albumTracks", { n: c.tracks })}</span>{/if}
+                {#if fromDiscogs(c.id)}<span class="source">Discogs</span>{/if}
               </span>
               {#if i < 9}<kbd>{i + 1}</kbd>{/if}
             </button>
@@ -188,6 +205,7 @@
   .info .muted { font-size: 12px; }
   .tracks { font-size: 12px; color: var(--muted); }
   .tracks.same { color: #138a4e; font-weight: 600; }
+  .source { align-self: flex-start; padding: 0 6px; border: 1px solid var(--border); border-radius: 9px; font-size: 11px; color: var(--muted); }
   kbd {
     position: absolute;
     right: 6px;

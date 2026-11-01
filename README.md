@@ -126,7 +126,7 @@ Installers are attached to each [release](https://github.com/rafaellgc/Renome/re
 |---|---|
 | Linux | `.AppImage` (any distro), `.flatpak`, `.deb`, `.rpm` |
 | Windows | `-setup.exe` or `.msi` |
-| macOS | `.dmg` (Intel and Apple Silicon) |
+| macOS | `.dmg` (Intel and Apple Silicon; macOS 11 Big Sur or newer, with Safari 16.4 or newer) |
 
 The installers are not signed, so Windows (SmartScreen) and macOS
 (Gatekeeper) will show a warning the first time. On macOS, right-click the

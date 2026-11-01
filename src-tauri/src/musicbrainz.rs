@@ -254,6 +254,8 @@ fn query_of(songs: &[Song]) -> AlbumQuery {
 /// song was heard as (kept for the review's choices).
 pub struct Services<'a> {
     pub mb: &'a Client,
+    /// Asked when MusicBrainz finds nothing, if the user gave a token.
+    pub dg: &'a crate::discogs::Client,
     pub acoustid: &'a crate::acoustid::Client,
     pub heard: &'a Mutex<HashMap<PathBuf, Vec<String>>>,
 }
@@ -274,7 +276,7 @@ pub async fn lookup(
 ) -> Vec<AlbumLookup> {
     // What is not looked up before Stop is left out: it is still to do.
     let stopped = crate::stop_signal(app);
-    let looked = by_tags(app, s.mb, albums, &stopped).await;
+    let looked = by_tags(app, s, albums, &stopped).await;
     if !listen || stopped() {
         return looked.into_iter().map(|(a, _)| a).collect();
     }
@@ -322,7 +324,7 @@ pub async fn lookup(
 /// The lookups by tags, each with its songs.
 async fn by_tags(
     app: &AppHandle,
-    client: &Client,
+    s: &Services<'_>,
     albums: Vec<Vec<Song>>,
     stopped: &impl Fn() -> bool,
 ) -> Vec<(AlbumLookup, Vec<Song>)> {
@@ -354,19 +356,23 @@ async fn by_tags(
         let result = async {
             let release = if same_release {
                 // Tagged with its release already: no search needed.
-                let r = client.release(tagged).await?;
+                let r = s.mb.release(tagged).await?;
                 found.candidates = mb::rank(&query, std::slice::from_ref(&r));
                 Some(r)
             } else {
-                found.candidates = client.search(&query).await?;
+                found.candidates = s.mb.search(&query).await?;
                 // Nothing by the full name: without what is in brackets.
                 if found.candidates.is_empty()
                     && let Some(q) = mb::simpler(&query)
                 {
-                    found.candidates = client.search(&q).await?;
+                    found.candidates = s.mb.search(&q).await?;
+                }
+                // Nothing on MusicBrainz: Discogs, with the user's token.
+                if found.candidates.is_empty() && s.dg.ready() {
+                    found.candidates = s.dg.search(&query).await?;
                 }
                 match found.candidates.first() {
-                    Some(best) => Some(client.release(&best.id).await?),
+                    Some(best) => Some(release(s.mb, s.dg, &best.id).await?),
                     None => None,
                 }
             };
@@ -581,8 +587,40 @@ pub struct Chosen {
     agree: usize,
 }
 
-pub async fn choose(client: &Client, id: &str, songs: &[Song]) -> Result<Chosen, String> {
-    let r = client.release(id).await?;
+/// A release from MusicBrainz or, by its id, Discogs.
+pub async fn release(
+    mb: &Client,
+    dg: &crate::discogs::Client,
+    id: &str,
+) -> Result<Release, String> {
+    if renome_core::discogs::is_discogs(id) {
+        dg.release(id).await
+    } else {
+        mb.release(id).await
+    }
+}
+
+/// A release's front cover, from the Cover Art Archive or Discogs.
+pub async fn front_cover(
+    mb: &Client,
+    dg: &crate::discogs::Client,
+    id: &str,
+    size: u32,
+) -> Result<Option<Vec<u8>>, String> {
+    if renome_core::discogs::is_discogs(id) {
+        dg.front_cover(id).await
+    } else {
+        mb.front_cover(id, size).await
+    }
+}
+
+pub async fn choose(
+    client: &Client,
+    dg: &crate::discogs::Client,
+    id: &str,
+    songs: &[Song],
+) -> Result<Chosen, String> {
+    let r = release(client, dg, id).await?;
     let (matches, agree) = mb::match_tracks(&r, songs);
     Ok(Chosen {
         matches,
@@ -603,6 +641,7 @@ pub struct CoverItem {
 pub async fn covers(
     app: &AppHandle,
     client: &Client,
+    dg: &crate::discogs::Client,
     items: Vec<CoverItem>,
 ) -> crate::tmdb::SidecarReport {
     let mut report = crate::tmdb::SidecarReport::default();
@@ -621,7 +660,7 @@ pub async fn covers(
             .unwrap_or(true);
         if !has_cover {
             let path = item.dir.join("cover.jpg");
-            match client.front_cover(&item.release, 1200).await {
+            match front_cover(client, dg, &item.release, 1200).await {
                 Ok(Some(bytes)) => match crate::tmdb::write_new(&path, &bytes) {
                     Ok(()) => report.created.push(path),
                     Err(e) => report.errors.push(("cover.jpg".into(), e)),

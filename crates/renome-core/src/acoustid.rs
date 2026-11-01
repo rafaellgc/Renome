@@ -193,6 +193,7 @@ fn summary(r: &OnRelease, count: usize) -> Candidate {
         tracks: r.tracks,
         kind: r.kind.clone(),
         score: count as f64,
+        image: String::new(),
     }
 }
 

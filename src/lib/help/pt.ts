@@ -46,7 +46,11 @@ export const pt: Section[] = [
   <li><b>⤒ ⤓</b> movem os selecionados para cima ou para baixo, útil para acertar a numeração. Não funcionam na ordem por Novo nome.</li>
   <li><b>Remover</b> (ou <kbd>Delete</kbd>) tira os selecionados da lista; <b>Limpar</b> esvazia a lista. Os arquivos no disco não são tocados. O que as buscas acharam para eles também sai, e um arquivo adicionado de novo começa do zero (<kbd>Ctrl</kbd>+<kbd>Z</kbd> traz tudo de volta).</li>
   <li><kbd>Ctrl</kbd>+<kbd>Z</kbd> desfaz a última alteração na lista.</li>
-</ul>`,
+</ul>
+
+<h4>Colunas de informações</h4>
+<p>O botão <b>☰</b>, no canto esquerdo do cabeçalho da lista, liga colunas com o que os arquivos guardam: <b>Artista</b>, <b>Álbum</b>, <b>Título</b>, <b>Faixa</b>, <b>Ano</b>, <b>Gênero</b>, <b>Duração</b> e <b>Formato</b> (como <code>MP3 · 320 kbps</code> ou <code>FLAC · 24/96</code>) das músicas; <b>Resolução</b> e <b>Codec</b> dos vídeos; e <b>Data da foto</b>. A escolha fica salva. Clique no título de uma delas para ordenar a lista: ao ordenar por artista ou ano, cada álbum fica em ordem de disco e faixa. Arquivos sem a informação ficam no fim. O <b>Exportar lista</b> leva também as colunas ligadas.</p>
+<p><b>Limitações:</b> as informações são lidas do próprio arquivo, só quando a coluna está ligada; em pastas grandes ou discos lentos, ordenar por uma dessas colunas pela primeira vez leva um tempo, porque cada arquivo precisa ser lido. A resolução e o codec só saem dos formatos de vídeo que o Renome lê (MKV, WebM, MP4, MOV, AVI, MPEG e FLV), e a data da foto só sai de fotos com dados EXIF. Com muitas colunas ligadas numa janela estreita, a lista rola para os lados.</p>`,
   },
   {
     id: "rules",
@@ -404,6 +408,15 @@ ${ex("01.mp3", "01 - Título da Música.mp3")}
   <li>A gravação é feita numa cópia, que só toma o lugar do arquivo no fim; uma queda no meio não estraga a música. Se o programa for fechado ou o computador desligar durante a gravação, na próxima vez que o Renome abrir as músicas já gravadas vão para o <b>Histórico</b>, para desfazer, e a cópia que estava sendo gravada é apagada. Desfazer devolve as tags e as imagens antigas (no MP3 e no M4A, campos raros que a limpeza tirou e as tags ID3v1 e APE não voltam). A data de modificação muda, para que os players releiam as tags. Como o conteúdo muda, um torrent não reconhece mais esses arquivos.</li>
   <li>As consultas são espaçadas (uma a cada 2 segundos), como o MusicBrainz pede; cada álbum leva uns 4 segundos.</li>
 </ul>
+<h4>Discogs (opcional)</h4>
+<p>Muitos lançamentos regionais, independentes e em vinil estão no <b>Discogs</b> (discogs.com) e não no MusicBrainz. Para usá-lo, crie uma conta gratuita no Discogs, gere um <b>token pessoal</b> em Configurações → Desenvolvedores e cole-o em <b>Opções → Discogs</b>.</p>
+<ul>
+  <li>Com o token, quando o MusicBrainz não acha nada para um álbum, o programa procura no Discogs pelo artista e pelo nome do álbum. A edição é conferida do mesmo jeito (número de faixas, títulos e durações): se bate, é escolhida sozinha; senão, vai para a revisão. Os candidatos do Discogs têm a etiqueta <b>Discogs</b>.</li>
+  <li>Na revisão, ao lado de <b>Buscar</b>, escolha <b>MusicBrainz</b> ou <b>Discogs</b> para procurar na outra fonte, mesmo que a primeira tenha achado algo.</li>
+  <li>Os nomes, as pastas, a capa (<code>cover.jpg</code>), as faixas que faltam e a gravação das tags funcionam igual, com os dados do Discogs. Os discos saem da posição das faixas (<code>1-05</code>, <code>CD2-3</code>); lados de vinil (<code>A1</code>, <code>B2</code>) são numerados como um disco só. As partes de uma obra (<code>Sonata: I. Allegro</code>) contam como faixas.</li>
+  <li>Ao Discogs vão só o artista e o nome do álbum, com o seu token. O token fica salvo só neste computador, no cofre de senhas do sistema.</li>
+</ul>
+<p><b>Limitações do Discogs:</b> só é consultado quando o MusicBrainz não acha nada (ou quando você escolhe na revisão); a identificação pelo som não usa o Discogs. As tags gravadas a partir do Discogs têm menos campos: título, artistas, álbum, datas, faixa, disco, gravadora, número de catálogo, código de barras e gêneros (os estilos do Discogs entram primeiro); não há IDs, compositores, produtores nem ISRC, e por isso uma próxima busca procura de novo. A capa é a do Discogs, em geral com uns 600 pixels, e o <b>Tamanho da capa</b> não a reduz. O país e o ano mostrados na revisão são os da busca; o número de faixas só aparece depois de abrir a edição. O Discogs aceita cerca de 60 consultas por minuto; cada álbum usa 2 ou 3.</p>
 <h4>Identificar pelo som (AcoustID)</h4>
 <p>Com <b>Identificar pelo som</b> marcado (o padrão), a busca também cuida das músicas <b>sem título nas tags</b> (mesmo com <b>Completar pelo nome do arquivo</b>, já que o nome é só um palpite) e dos álbuns que a busca pelo nome não achou ou deixou em dúvida. Num álbum em dúvida, o resultado pelo som só vale se identificar um lançamento com segurança; senão, ficam os candidatos da busca. O programa ouve os 2 primeiros minutos de cada música, calcula a <b>impressão digital</b> do som e pergunta ao <b>AcoustID</b> (acoustid.org), um banco aberto de impressões digitais ligado ao MusicBrainz, qual gravação é aquela.</p>
 <ul>
@@ -420,7 +433,7 @@ ${ex("01.mp3", "01 - Título da Música.mp3")}
 <h4>Limitações</h4>
 <ul>
   <li>Sem a busca no MusicBrainz, o nome depende só das tags: tags erradas geram nomes errados.</li>
-  <li>Lançamentos regionais, independentes, piratas ou muito recentes podem não estar no MusicBrainz; aí valem as tags.</li>
+  <li>Lançamentos regionais, independentes, piratas ou muito recentes podem não estar no MusicBrainz; aí valem as tags, a não ser que o Discogs (com o seu token) os tenha.</li>
   <li>Pelo som, gravações muito parecidas (uma remasterização, uma regravação do próprio artista) podem ser confundidas. Quando o álbum fica em dúvida, ele vai para a revisão.</li>
   <li>Músicas em Opus, WMA e outros formatos não listados acima não são ouvidas.</li>
   <li>No MP3 e no M4A, desfazer a gravação das tags não traz de volta os campos raros nem as tags ID3v1 e APE.</li>
@@ -512,7 +525,7 @@ ${ex("Nome_da_Serie_012_(2019)_(Digital)_(grupo).cbz", "Nome da Série #012 (201
 <h4>Buscando num catálogo</h4>
 <p>Em <b>Onde buscar</b>, escolha o catálogo:</p>
 <ul>
-  <li><b>Grand Comics Database</b> (comics.org): feito por voluntários, com edições de muitos países, inclusive brasileiras. Dá o nome da série como foi publicada, o ano, a editora e os números das edições. Pede o <b>login de uma conta gratuita</b>: ele é pedido na hora da busca e fica <b>só na memória</b> até fechar o programa; nunca é gravado. Sem conta, o GCD aceita só umas 30 consultas por hora, e pode deixar de aceitar.</li>
+  <li><b>Grand Comics Database</b> (comics.org): feito por voluntários, com edições de muitos países, inclusive brasileiras. Dá o nome da série como foi publicada, o ano, a editora e os números das edições. Funciona melhor com uma <b>conta gratuita</b> do comics.org, posta em <b>Opções → Grand Comics Database</b>. Sem conta, o GCD aceita só umas 30 consultas por hora, e pode deixar de aceitar; na primeira busca sem conta, o programa avisa.</li>
   <li><b>MangaDex</b> (mangadex.org): mangás, sem conta nem chave. Dá o nome e o ano da série (no seu idioma, quando há, ou em inglês); o volume e o capítulo ficam os do arquivo.</li>
   <li><b>Comic Vine</b> (comicvine.gamespot.com): forte em quadrinhos americanos, com o título de cada edição. Pede uma chave gratuita, colada em <b>Opções</b>.</li>
 </ul>
@@ -592,7 +605,14 @@ ${ex("Nome_da_Serie_012_(2019)_(Digital)_(grupo).cbz", "Nome da Série #012 (201
   <li>O rodapé mostra quantos arquivos têm cópia. <b>Clique nele</b> para ver só esses arquivos, com as cópias lado a lado; clique de novo para ver todos. Daí você pode removê-los da lista ou renomeá-los à parte.</li>
   <li>Quando duas cópias iriam ficar com o mesmo nome, o conflito avisa que os arquivos são idênticos.</li>
 </ul>
-<p>A busca é feita em etapas para ser rápida: só arquivos do mesmo tamanho são comparados; depois, só o começo e o fim; o arquivo inteiro só é lido quando tudo isso coincide. Com arquivos grandes, o rodapé mostra o progresso. Arquivos vazios, pastas e atalhos (links simbólicos) ficam de fora.</p>`,
+<p>A busca é feita em etapas para ser rápida: só arquivos do mesmo tamanho são comparados; depois, só o começo e o fim; o arquivo inteiro só é lido quando tudo isso coincide. Com arquivos grandes, o rodapé mostra o progresso. Arquivos vazios, pastas e atalhos (links simbólicos) ficam de fora.</p>
+<h4>Músicas repetidas</h4>
+<p>Além das cópias idênticas, o programa acha a <b>mesma música em arquivos diferentes</b>: um MP3 e um FLAC da mesma faixa, ou uma música no seu álbum e de novo numa coletânea. Elas ganham uma etiqueta com contorno, <b>♪</b> e o número do grupo (passe o mouse para ver quais são as outras), e o rodapé mostra <b>N música(s) repetida(s)</b>: clique para ver só elas, agrupadas. Nada é apagado nem alterado.</p>
+<ul>
+  <li>Contam como a mesma música: mesmo <b>título</b> e mesmo <b>artista</b> nas tags, sem diferença de maiúsculas, acentos e pontuação, e sem o que está entre parênteses ou colchetes (<code>(Remaster 2011)</code>); participações (<code>feat.</code>) não contam. A <b>duração</b> precisa ser a mesma, com até 3 segundos de diferença.</li>
+  <li>Cópias idênticas de um mesmo arquivo já aparecem como cópias; só entram aqui quando há também outro arquivo da mesma música.</li>
+</ul>
+<p><b>Limitações:</b> só valem as tags, não o som. Músicas sem título, sem artista ou sem duração ficam de fora; tags erradas geram falsos alarmes ou deixam repetidas passarem. Uma versão ao vivo ou remixada com o mesmo título e quase a mesma duração conta como a mesma música, e a mesma gravação com títulos escritos de jeitos diferentes (<code>Pt. 1</code> e <code>Part One</code>) não é reconhecida. Na primeira vez, as tags de cada música da lista são lidas, o que demora um pouco em pastas grandes.</p>`,
   },
   {
     id: "apply",
@@ -678,6 +698,9 @@ ${ex("Serie.S01E02.720p.WEB.mkv", "Serie S01E02.mkv")}
   <li><b>Pedir confirmação antes de renomear</b>.</li>
   <li><b>Desligar as regras depois de renomear</b>.</li>
   <li><b>Avisar sobre nomes que o Windows não aceita</b>: caracteres como <code>:</code> e <code>?</code>, ponto ou espaço no fim, e nomes reservados como <code>CON</code> e <code>NUL</code>. Útil para arquivos que vão para o Windows. Num pendrive ou disco formatado para Windows (FAT, exFAT), esses nomes não são aceitos de jeito nenhum: lá eles são erro, com ou sem esta opção.</li>
+  <li><b>TMDB</b>, <b>Comic Vine</b>, <b>Grand Comics Database</b> e <b>Discogs</b>: as chaves, o token e a conta que as regras de filme, série, quadrinho e música usam; cada um tem um botão <b>Testar</b>.</li>
+  <li>As chaves, o token e a senha ficam só neste computador, <b>criptografados no cofre de senhas do sistema</b> (o Chaveiro do GNOME ou a Carteira do KDE no Linux, o Gerenciador de Credenciais no Windows, as Chaves no macOS), e não no arquivo de opções. Limitação: um sistema sem cofre de senhas (algumas instalações mínimas do Linux) não tem onde criptografá-los; aí eles ficam no arquivo de opções, sem criptografia, e as Opções avisam. O cofre protege contra quem lê os arquivos do disco, não contra outro programa aberto na sua própria sessão.</li>
+  <li>Quando o cofre está trancado (por exemplo, com login automático no Linux), o sistema pede a senha dele; o programa abre mesmo assim, e as chaves aparecem depois de destrancar. No macOS, como o Renome não é assinado pela Apple, o sistema pode perguntar se ele pode usar as Chaves, de novo a cada versão nova; escolha <b>Permitir sempre</b>.</li>
 </ul>
 <p>As opções ficam em <code>~/.config/renome</code> (Linux), <code>%APPDATA%\\renome</code> (Windows) ou <code>~/Library/Application Support/renome</code> (macOS). O histórico fica em <code>~/.local/share/renome/history</code> no Linux e na mesma pasta das opções nos outros sistemas.</p>`,
   },

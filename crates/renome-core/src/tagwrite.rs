@@ -191,7 +191,10 @@ pub type Fields = Vec<(Field, Vec<String>)>;
 /// The fields to write for a song matched to its release; what the release
 /// does not say is left as it is.
 pub fn fields_of(m: &SongMatch) -> Fields {
+    // A Discogs release's ids are not MusicBrainz's: they are not written.
+    let mb = !crate::discogs::is_discogs(&m.release);
     let one = |s: &str| (!s.is_empty()).then(|| vec![s.to_string()]);
+    let id = |s: &str| one(s).filter(|_| mb);
     let date = if m.date.is_empty() {
         m.year.map(|y| y.to_string()).unwrap_or_default()
     } else {
@@ -207,17 +210,17 @@ pub fn fields_of(m: &SongMatch) -> Fields {
         (Field::TrackTotal, Some(vec![m.track_total.to_string()])),
         (Field::Disc, Some(vec![m.disc.to_string()])),
         (Field::DiscTotal, Some(vec![m.disc_total.to_string()])),
-        (Field::ReleaseId, one(&m.release)),
-        (Field::RecordingId, one(&m.recording)),
-        (Field::TrackId, one(&m.track_id)),
-        (Field::ReleaseGroupId, one(&m.release_group)),
+        (Field::ReleaseId, id(&m.release)),
+        (Field::RecordingId, id(&m.recording)),
+        (Field::TrackId, id(&m.track_id)),
+        (Field::ReleaseGroupId, id(&m.release_group)),
         (
             Field::ArtistId,
-            (!m.artist_ids.is_empty()).then(|| m.artist_ids.clone()),
+            (mb && !m.artist_ids.is_empty()).then(|| m.artist_ids.clone()),
         ),
         (
             Field::AlbumArtistId,
-            (!m.album_artist_ids.is_empty()).then(|| m.album_artist_ids.clone()),
+            (mb && !m.album_artist_ids.is_empty()).then(|| m.album_artist_ids.clone()),
         ),
     ];
     fields

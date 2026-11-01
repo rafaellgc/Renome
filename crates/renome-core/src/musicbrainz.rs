@@ -291,6 +291,10 @@ pub struct Candidate {
     pub tracks: u32,
     pub kind: String,
     pub score: f64,
+    /// A small picture of the cover, when the source gives one with the
+    /// search (Discogs); else the app asks the Cover Art Archive.
+    #[serde(default)]
+    pub image: String,
 }
 
 fn year_of(date: &Option<String>) -> Option<u16> {
@@ -324,6 +328,7 @@ fn summary(r: &Release, score: f64) -> Candidate {
             .and_then(|g| g.primary_type.clone())
             .unwrap_or_default(),
         score,
+        image: String::new(),
     }
 }
 
@@ -419,9 +424,11 @@ impl SongMatch {
             || t.track_total != Some(self.track_total)
             || t.disc != Some(self.disc)
             || t.disc_total != Some(self.disc_total)
-            || t.mb_release != self.release
-            // Not written from this track yet (its other tags may be junk).
-            || (!self.track_id.is_empty() && t.mb_track != self.track_id)
+            // A Discogs release leaves no id in the tags.
+            || (!crate::discogs::is_discogs(&self.release)
+                && (t.mb_release != self.release
+                    // Not written from this track yet (its other tags may be junk).
+                    || (!self.track_id.is_empty() && t.mb_track != self.track_id)))
     }
 
     /// The tags with the release's details in place.

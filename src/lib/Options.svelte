@@ -2,7 +2,7 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { api } from "./api";
   import { LANG_NAMES, MOD, t, tError, type Key } from "./i18n";
-  import { applyTheme, settings, type Lang } from "./settings.svelte";
+  import { applyTheme, secrets, settings, type Lang } from "./settings.svelte";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -10,6 +10,40 @@
   let showKey = $state(false);
   let keyStatus = $state<{ ok: boolean; text: string } | null>(null);
   let testing = $state(false);
+
+  let showDgKey = $state(false);
+  let dgStatus = $state<{ ok: boolean; text: string } | null>(null);
+  let dgTesting = $state(false);
+
+  async function testDgKey() {
+    dgTesting = true;
+    dgStatus = null;
+    try {
+      await api.discogsCheck(settings.discogsToken.trim());
+      dgStatus = { ok: true, text: t("tmdbKeyOk") };
+    } catch (e) {
+      dgStatus = { ok: false, text: tError(e) };
+    } finally {
+      dgTesting = false;
+    }
+  }
+
+  let showGcd = $state(false);
+  let gcdStatus = $state<{ ok: boolean; text: string } | null>(null);
+  let gcdTesting = $state(false);
+
+  async function testGcd() {
+    gcdTesting = true;
+    gcdStatus = null;
+    try {
+      await api.gcdCheck(settings.gcdEmail.trim(), settings.gcdPassword);
+      gcdStatus = { ok: true, text: t("tmdbKeyOk") };
+    } catch (e) {
+      gcdStatus = { ok: false, text: tError(e) };
+    } finally {
+      gcdTesting = false;
+    }
+  }
 
   let showCvKey = $state(false);
   let cvStatus = $state<{ ok: boolean; text: string } | null>(null);
@@ -110,6 +144,7 @@
             id="opt-tmdb-key"
             type={showKey ? "text" : "password"}
             bind:value={settings.tmdbKey}
+            disabled={!secrets.ready}
             oninput={() => (keyStatus = null)}
             spellcheck="false"
             autocomplete="off"
@@ -141,6 +176,7 @@
             id="opt-cv-key"
             type={showCvKey ? "text" : "password"}
             bind:value={settings.comicVineKey}
+            disabled={!secrets.ready}
             oninput={() => (cvStatus = null)}
             spellcheck="false"
             autocomplete="off"
@@ -156,6 +192,71 @@
         </small>
       </div>
     </section>
+
+    <section>
+      <h3>Grand Comics Database</h3>
+      <div class="grid">
+        <label for="opt-gcd-email">{t("gcdEmail")}</label>
+        <input
+          id="opt-gcd-email"
+          type="email"
+          bind:value={settings.gcdEmail}
+            disabled={!secrets.ready}
+          oninput={() => (gcdStatus = null)}
+          spellcheck="false"
+          autocomplete="off"
+        />
+        <label for="opt-gcd-password">{t("gcdPassword")}</label>
+        <div class="key">
+          <input
+            id="opt-gcd-password"
+            type={showGcd ? "text" : "password"}
+            bind:value={settings.gcdPassword}
+            disabled={!secrets.ready}
+            oninput={() => (gcdStatus = null)}
+            autocomplete="off"
+          />
+          <button onclick={() => (showGcd = !showGcd)}>{t(showGcd ? "hide" : "show")}</button>
+          <button disabled={!settings.gcdEmail.trim() || !settings.gcdPassword || gcdTesting} onclick={testGcd}>{t("tmdbTest")}</button>
+        </div>
+        <span></span>
+        <small>
+          {#if gcdStatus}<b class:good={gcdStatus.ok} class:bad={!gcdStatus.ok}>{gcdStatus.text}</b> · {/if}
+          {t("gcdAccountHint")}
+          <button class="link" onclick={() => openUrl("https://www.comics.org/accounts/register/")}>{t("gcdRegister")}</button>
+        </small>
+      </div>
+    </section>
+
+    <section>
+      <h3>Discogs</h3>
+      <div class="grid">
+        <label for="opt-dg-key">{t("dgToken")}</label>
+        <div class="key">
+          <input
+            id="opt-dg-key"
+            type={showDgKey ? "text" : "password"}
+            bind:value={settings.discogsToken}
+            disabled={!secrets.ready}
+            oninput={() => (dgStatus = null)}
+            spellcheck="false"
+            autocomplete="off"
+          />
+          <button onclick={() => (showDgKey = !showDgKey)}>{t(showDgKey ? "hide" : "show")}</button>
+          <button disabled={!settings.discogsToken.trim() || dgTesting} onclick={testDgKey}>{t("tmdbTest")}</button>
+        </div>
+        <span></span>
+        <small>
+          {#if dgStatus}<b class:good={dgStatus.ok} class:bad={!dgStatus.ok}>{dgStatus.text}</b> · {/if}
+          {t("dgKeyHint")}
+          <button class="link" onclick={() => openUrl("https://www.discogs.com/settings/developers")}>{t("dgGetKey")}</button>
+        </small>
+      </div>
+    </section>
+
+    <p class="stored" class:bad={secrets.ready && !secrets.stored}>
+      {t(!secrets.ready ? "secretsWaiting" : secrets.stored ? "secretsInStore" : "secretsInFile")}
+    </p>
 
     <section>
       <h3>{t("sectionShortcuts")}</h3>
@@ -184,6 +285,7 @@
   .check input { margin-top: 2px; }
   .check span { display: flex; flex-direction: column; }
   small { color: var(--muted); font-size: 12px; }
+  .stored { margin: 0 0 16px; font-size: 12px; color: var(--muted); }
   .foot { display: flex; justify-content: flex-end; }
   .key { display: flex; gap: 6px; }
   .key input { flex: 1; }

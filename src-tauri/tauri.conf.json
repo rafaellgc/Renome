@@ -37,6 +37,9 @@
     "category": "Utility",
     "copyright": "Copyright (c) 2026 Rafael Luciano Gonçalves Correia",
     "license": "MIT",
-    "shortDescription": "Batch file renamer"
+    "shortDescription": "Batch file renamer",
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    }
   }
 }

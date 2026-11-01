@@ -1,10 +1,12 @@
 <script lang="ts">
   import { tick } from "svelte";
+  import { api } from "./api";
+  import { COL_LABEL, detailText } from "./details";
   import { diff, type Seg } from "./diff";
   import { LOCALES, t } from "./i18n";
   import { interleave, type Ghost, type Row } from "./missing";
-  import { settings } from "./settings.svelte";
-  import type { Copies, MovieStatus, PreviewItem, ViewSort } from "./types";
+  import { saveSettings, settings } from "./settings.svelte";
+  import { DETAIL_COLUMNS, type Copies, type DetailColumn, type Details, type MovieStatus, type PreviewItem, type ViewSort } from "./types";
 
   let {
     items,
@@ -14,6 +16,7 @@
     onsort,
     onoverride,
     copies = {},
+    alike = {},
     matches = {},
     onmatch,
     ghosts = [],
@@ -27,6 +30,8 @@
     onoverride: (path: string, name: string | null) => void;
     /** Identical copies of each file in the list. */
     copies?: Record<string, Copies>;
+    /** Songs that are the same music as others in the list. */
+    alike?: Record<string, Copies>;
     /** TMDB state of each file (and its tooltip), while a movie or
      *  series rule is on. */
     matches?: Record<string, { status: MovieStatus; tip: string }>;
@@ -213,7 +218,9 @@
 
   const byPath = $derived(new Map(items.map((i) => [i.path, i])));
   /** Copies of the selected files, highlighted so you can find them. */
-  const twins = $derived(new Set([...selected].flatMap((p) => copies[p]?.others ?? []).filter((p) => !selected.has(p))));
+  const twins = $derived(
+    new Set([...selected].flatMap((p) => [...(copies[p]?.others ?? []), ...(alike[p]?.others ?? [])]).filter((p) => !selected.has(p))),
+  );
   const base = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
   function note(item: PreviewItem) {
@@ -226,18 +233,92 @@
     return "";
   }
 
-  const columns: { key: Exclude<ViewSort, "manual">; label: "colOriginal" | "colNew" | "colDir" | "colSize" | "colModified"; cls: string }[] = [
+  /** Columns of numbers, narrow and aligned to the right. */
+  const NARROW: DetailColumn[] = ["track", "year", "length"];
+  const WIDTH: Record<DetailColumn, string> = {
+    artist: "minmax(90px, 0.8fr)", album: "minmax(90px, 0.8fr)", title: "minmax(90px, 0.8fr)", genre: "minmax(70px, 0.5fr)",
+    track: "48px", year: "48px", length: "56px", quality: "112px", resolution: "64px", codec: "64px", taken: "120px",
+  };
+  const extra = $derived(DETAIL_COLUMNS.filter((c) => settings.columns.includes(c)));
+  const extraWidths = $derived(extra.map((c) => WIDTH[c]).join(" "));
+
+  type Col = { key: Exclude<ViewSort, "manual">; label: Parameters<typeof t>[0]; cls: string };
+  const columns = $derived<Col[]>([
     { key: "name", label: "colOriginal", cls: "c-orig" },
     { key: "newName", label: "colNew", cls: "c-new" },
     { key: "dir", label: "colDir", cls: "c-dir" },
+    ...extra.map((c) => ({ key: c, label: COL_LABEL[c], cls: `c-x${NARROW.includes(c) ? " num" : ""}` })),
     { key: "size", label: "colSize", cls: "c-size" },
     { key: "modified", label: "colModified", cls: "c-date" },
-  ];
+  ]);
+
+  let columnsMenu = $state(false);
+  let headWrap = $state<HTMLDivElement>();
+  let winWidth = $state(1200);
+  const MIN: Record<DetailColumn, number> = {
+    artist: 90, album: 90, title: 90, genre: 70, track: 48, year: 48, length: 56, quality: 112, resolution: 64, codec: 64, taken: 120,
+  };
+  /** The narrowest the columns go: past it, the list scrolls sideways. */
+  const minWidth = $derived.by(() => {
+    if (!extra.length) return 0;
+    const wide = winWidth > 1000;
+    const base = wide ? 28 + 140 + 160 + 90 + 76 + 120 : 28 + 120 + 140 + 80;
+    const count = (wide ? 6 : 4) + extra.length;
+    return base + extra.reduce((n, c) => n + MIN[c], 0) + 8 * (count - 1) + 20;
+  });
+  function toggleColumn(c: DetailColumn) {
+    settings.columns = settings.columns.includes(c) ? settings.columns.filter((x) => x !== c) : [...settings.columns, c];
+    saveSettings();
+  }
+
+  /** What the optional columns show, read for the rows in view; read
+   *  again when the file changed (its size or date). */
+  let details = $state<Record<string, Details>>({});
+  const readAs: Record<string, string> = {};
+  const stampOf = (i: PreviewItem) => `${i.size}:${i.modified}`;
+  let detailTimer: ReturnType<typeof setTimeout> | undefined;
+  $effect(() => {
+    if (!extra.length) return;
+    const want = visible.filter((r): r is PreviewItem => !isGhost(r) && !r.isDir && readAs[r.path] !== stampOf(r));
+    if (!want.length) return;
+    clearTimeout(detailTimer);
+    detailTimer = setTimeout(async () => {
+      for (const i of want) readAs[i.path] = stampOf(i);
+      try {
+        const got = await api.fileDetails(want.map((i) => i.path));
+        details = { ...details, ...got };
+      } catch {
+        for (const i of want) delete readAs[i.path];
+      }
+    }, 60);
+  });
 </script>
 
-<div class="table">
-  <div class="head">
-    <span class="c-status"></span>
+<svelte:window bind:innerWidth={winWidth} onkeydown={(e) => { if (columnsMenu && e.key === "Escape") { e.stopPropagation(); columnsMenu = false; } }} />
+
+<div class="table" style:--extra={extraWidths || undefined}>
+  {#if columnsMenu}
+    <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+    <div class="cols-back" onclick={() => (columnsMenu = false)}></div>
+    <div class="cols-menu" role="group" aria-label={t("columnsMenu")}>
+      <p class="cols-title">{t("columnsMenu")}</p>
+      {#each DETAIL_COLUMNS as c (c)}
+        <label class="cols-item">
+          <input type="checkbox" checked={settings.columns.includes(c)} onchange={() => toggleColumn(c)} />
+          {t(COL_LABEL[c])}
+        </label>
+      {/each}
+      <p class="cols-hint">{t("columnsHint")}</p>
+    </div>
+  {/if}
+  <!-- Scrolled sideways with the list when the columns do not fit. -->
+  <div class="head-wrap" bind:this={headWrap}>
+  <div class="head" style:min-width={minWidth ? `${minWidth}px` : undefined}>
+    <span class="c-status">
+      <button class="icon cols" class:on={extra.length > 0} title={t("columnsMenu")} aria-label={t("columnsMenu")} aria-expanded={columnsMenu} onclick={() => (columnsMenu = !columnsMenu)}>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M2 3h12v1.5H2zm0 4.25h12v1.5H2zM2 11.5h12V13H2z" /></svg>
+      </button>
+    </span>
     {#each columns as col (col.key)}
       <button class="th {col.cls}" class:active={sortKey === col.key} onclick={() => onsort(col.key)}>
         {t(col.label)}
@@ -245,18 +326,22 @@
       </button>
     {/each}
   </div>
+  </div>
   <div
     class="viewport"
     bind:this={viewport}
     bind:clientHeight={height}
-    onscroll={() => (scrollTop = viewport.scrollTop)}
+    onscroll={() => {
+      scrollTop = viewport.scrollTop;
+      if (headWrap) headWrap.scrollLeft = viewport.scrollLeft;
+    }}
     role="grid"
     tabindex="0"
     aria-label={t("fileList")}
     aria-multiselectable="true"
     onkeydown={onkeys}
   >
-    <div class="spacer" style:height="{rows.length * ROW}px">
+    <div class="spacer" style:height="{rows.length * ROW}px" style:min-width={minWidth ? `${minWidth}px` : undefined}>
       {#each visible as item, k (keyOf(item))}
         {@const index = start + k}
         {#if isGhost(item)}
@@ -266,6 +351,7 @@
             <span class="c-orig"><span class="missing">{t("missingRow")}</span>{item.group}</span>
             <span class="c-new"><span class="name">{item.code}{item.title ? ` · ${item.title}` : ""}</span></span>
             <span class="c-dir"></span>
+            {#each extra as c (c)}<span class="c-x"></span>{/each}
             <span class="c-size"></span>
             <span class="c-date">{item.date ? day(item.date) : ""}</span>
           </div>
@@ -278,6 +364,7 @@
           class:sel={selected.has(item.path)}
           class:twin={twins.has(item.path)}
           style:top="{index * ROW}px"
+         
           role="row"
           tabindex="-1"
           onclick={(e) => select(e, index)}
@@ -288,7 +375,7 @@
             {:else if item.status === "ok"}<span class="dot good">●</span>{/if}
           </span>
           <span class="c-orig" title={item.path}>
-            {#if copies[item.path]}{@const c = copies[item.path]}{@const same = t("identicalTo", { names: c.others.map(base).join(", ") })}<span class="copy g{c.group % 6}" title={same} role="img" aria-label={same}><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M5 1.5h7A1.5 1.5 0 0 1 13.5 3v8.5H12V3H5zM2.5 4.5A1.5 1.5 0 0 1 4 3h6a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 10 15H4a1.5 1.5 0 0 1-1.5-1.5zM4 4.5v9h6v-9z" /></svg>{c.group + 1}</span>{/if}{#if outside[item.path]}<span class="outside" title={outside[item.path]}>{t("outsideRow")}</span>{/if}{#if item.isDir}<svg class="folder" viewBox="0 0 16 16" aria-label={t("isFolder")}><path fill="currentColor" d="M1.5 3.5A1 1 0 0 1 2.5 2.5h3.6l1.5 1.5h5.9a1 1 0 0 1 1 1v7.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" /></svg>{/if}{#if d}{@render segs(d[0], "del")}{:else}{item.original}{/if}
+            {#if copies[item.path]}{@const c = copies[item.path]}{@const same = t("identicalTo", { names: c.others.map(base).join(", ") })}<span class="copy g{c.group % 6}" title={same} role="img" aria-label={same}><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M5 1.5h7A1.5 1.5 0 0 1 13.5 3v8.5H12V3H5zM2.5 4.5A1.5 1.5 0 0 1 4 3h6a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 10 15H4a1.5 1.5 0 0 1-1.5-1.5zM4 4.5v9h6v-9z" /></svg>{c.group + 1}</span>{/if}{#if alike[item.path]}{@const s = alike[item.path]}{@const same = t("sameSongAs", { names: s.others.map(base).join(", ") })}<span class="copy song g{s.group % 6}" title={same} role="img" aria-label={same}>♪{s.group + 1}</span>{/if}{#if outside[item.path]}<span class="outside" title={outside[item.path]}>{t("outsideRow")}</span>{/if}{#if item.isDir}<svg class="folder" viewBox="0 0 16 16" aria-label={t("isFolder")}><path fill="currentColor" d="M1.5 3.5A1 1 0 0 1 2.5 2.5h3.6l1.5 1.5h5.9a1 1 0 0 1 1 1v7.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" /></svg>{/if}{#if d}{@render segs(d[0], "del")}{:else}{item.original}{/if}
           </span>
           <span class="c-new" role="gridcell" tabindex="-1" ondblclick={() => startEdit(item)} title={note(item) || t("editHint")}>
             {#if editing === item.path}
@@ -322,6 +409,10 @@
           {:else}
             <span class="c-dir" title={item.dir}>{dir(item.dir)}</span>
           {/if}
+          {#each extra as c (c)}
+            {@const v = detailText(c, details[item.path])}
+            <span class="c-x" class:num={NARROW.includes(c)} title={v}>{v}</span>
+          {/each}
           <span class="c-size">{item.isDir ? "" : size(item.size)}</span>
           <span class="c-date">{date(item.modified)}</span>
         </div>
@@ -335,6 +426,7 @@
 
 <style>
   .table {
+    position: relative;
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -346,16 +438,12 @@
   }
   .head, .row {
     display: grid;
-    grid-template-columns: 28px minmax(140px, 1fr) minmax(160px, 1.2fr) minmax(90px, 0.8fr) 76px 120px;
+    grid-template-columns: 28px minmax(140px, 1fr) minmax(160px, 1.2fr) minmax(90px, 0.8fr) var(--extra, ) 76px 120px;
     align-items: center;
     gap: 8px;
     padding: 0 10px;
   }
-  .head {
-    height: 32px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface-2);
-  }
+  .head { height: 32px; }
   .th {
     height: 26px;
     padding: 0 4px;
@@ -371,12 +459,35 @@
   }
   /* Narrow windows: size and date give way to the names. */
   @media (max-width: 1000px) {
-    .head, .row { grid-template-columns: 28px minmax(120px, 1fr) minmax(140px, 1.2fr) minmax(80px, 0.6fr); }
+    .head, .row { grid-template-columns: 28px minmax(120px, 1fr) minmax(140px, 1.2fr) minmax(80px, 0.6fr) var(--extra, ); }
     .c-size, .c-date { display: none; }
   }
   .th:hover:not(:disabled) { background: var(--hover); color: var(--text); }
   .th.active { color: var(--accent); }
-  .th.c-size, .th.c-date { text-align: right; }
+  .th.c-size, .th.c-date, .th.num { text-align: right; }
+  .row .c-x { color: var(--muted); }
+  .row .c-x.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .head-wrap { flex: none; overflow: hidden; border-bottom: 1px solid var(--border); background: var(--surface-2); }
+  .cols { width: 22px; height: 22px; padding: 3px; color: var(--muted); }
+  .cols.on { color: var(--accent); }
+  .cols svg { width: 14px; height: 14px; display: block; }
+  .cols-back { position: fixed; inset: 0; z-index: 20; }
+  .cols-menu {
+    position: absolute;
+    top: 30px;
+    left: 4px;
+    z-index: 21;
+    min-width: 200px;
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: 0 6px 24px rgb(0 0 0 / 0.18);
+  }
+  .cols-title { margin: 2px 6px 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
+  .cols-item { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 5px; font-size: 13px; }
+  .cols-item:hover { background: var(--hover); }
+  .cols-hint { max-width: 220px; margin: 6px 6px 2px; font-size: 11px; color: var(--muted); }
   .arrow { font-size: 9px; margin-left: 2px; }
   .viewport { flex: 1; overflow: auto; position: relative; }
   .viewport:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -446,6 +557,8 @@
     background: color-mix(in srgb, var(--g) 15%, transparent);
   }
   .copy svg { width: 11px; height: 11px; }
+  /* The same song in another file: outlined, to tell it from a copy. */
+  .copy.song { background: none; box-shadow: inset 0 0 0 1px var(--g); }
   .g0 { --g: #2f6fde; }
   .g1 { --g: #138a5e; }
   .g2 { --g: #c26100; }

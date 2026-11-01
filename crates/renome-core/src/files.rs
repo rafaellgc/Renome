@@ -10,7 +10,7 @@ use crate::music::AudioTags;
 
 /// A file (or folder) in the list, with its name already split into stem
 /// and extension.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct FileEntry {
     pub path: PathBuf,
@@ -125,6 +125,23 @@ impl FileEntry {
         }
     }
 
+    /// Takes what `other` (a copy of this entry) read and this one has
+    /// not, so reading done on a copy is not done again.
+    pub fn keep_read(&mut self, other: &FileEntry) {
+        if self.path != other.path || self.size != other.size || self.modified != other.modified {
+            return;
+        }
+        if let (None, Some(t)) = (self.tags.get(), other.tags.get()) {
+            let _ = self.tags.set(t.clone());
+        }
+        if let (None, Some(v)) = (self.video.get(), other.video.get()) {
+            let _ = self.video.set(v.clone());
+        }
+        if let (None, Some(d)) = (self.taken.get(), other.taken.get()) {
+            let _ = self.taken.set(*d);
+        }
+    }
+
     pub fn file_name(&self) -> String {
         join_name(&self.stem, &self.ext)
     }
@@ -174,9 +191,25 @@ pub enum SortKey {
     Dir,
     Modified,
     Size,
+    // What the files hold (see [`crate::details`]).
+    Artist,
+    Album,
+    Title,
+    Track,
+    Year,
+    Genre,
+    Length,
+    Quality,
+    Resolution,
+    Codec,
+    Taken,
 }
 
 pub fn sort_files(files: &mut [FileEntry], key: SortKey, descending: bool) {
+    if crate::details::reads(key) {
+        files.sort_by(|a, b| crate::details::compare(key, a, b, descending));
+        return;
+    }
     // sort_by is stable: ties keep their previous order.
     files.sort_by(|a, b| {
         let ord = match key {
@@ -185,6 +218,7 @@ pub fn sort_files(files: &mut [FileEntry], key: SortKey, descending: bool) {
             SortKey::Dir => natural_cmp(&a.dir.to_string_lossy(), &b.dir.to_string_lossy()),
             SortKey::Modified => a.modified.cmp(&b.modified),
             SortKey::Size => a.size.cmp(&b.size),
+            _ => Ordering::Equal,
         };
         if descending { ord.reverse() } else { ord }
     });

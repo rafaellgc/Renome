@@ -7,19 +7,25 @@
 //! - [`plan`]: computes the preview and checks for conflicts.
 //! - [`apply`]: renames in two phases, with a history for undo.
 //! - [`identical`]: finds files with identical content.
+//! - [`alike`]: finds songs that are the same music in different files.
 //! - [`music`]: tags of audio files and the names built from them.
 //! - [`musicbrainz`]: albums from MusicBrainz (ranking, matching tracks).
+//! - [`discogs`]: albums from Discogs, read as MusicBrainz's.
 //! - [`ebook`]: details of book files (EPUB, MOBI, PDF, FB2) and ISBNs.
 //! - [`books`]: books from Open Library (guessing, ranking, names).
 //! - [`comics`]: comics (`ComicInfo.xml`, numbers in names, names).
 //! - [`tmdb`]: movie title guessing, ranking and `.nfo` files for TMDB.
 //! - [`tv`]: season and episode numbers, and matching files to a show.
 //! - [`video`]: a video's picture size and codec, from its headers.
+//! - [`details`]: what the optional columns of the list show.
 
 pub mod acoustid;
+pub mod alike;
 pub mod apply;
 pub mod books;
 pub mod comics;
+pub mod details;
+pub mod discogs;
 pub mod ebook;
 pub mod files;
 pub mod filter;

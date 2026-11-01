@@ -62,6 +62,11 @@ pub struct View {
     /// Group of each file with identical copies (filled in by the app).
     #[serde(skip)]
     pub identical: HashMap<PathBuf, usize>,
+    /// Shows only songs that are the same music as another, grouped.
+    pub alike_only: bool,
+    /// Group of each such song (filled in by the app; see [`crate::alike`]).
+    #[serde(skip)]
+    pub alike: HashMap<PathBuf, usize>,
     /// The movie chosen for each file (TMDB), for the movie rule.
     pub movies: HashMap<PathBuf, MovieMatch>,
     /// The episode chosen for each file (TMDB), for the series rule.
@@ -848,6 +853,7 @@ pub fn preview(
         .iter()
         .filter(|f| filter.matches(&f.file_name()))
         .filter(|f| !view.identical_only || view.identical.contains_key(&f.path))
+        .filter(|f| !view.alike_only || view.alike.contains_key(&f.path))
         .enumerate()
         .map(|(index, file)| {
             let n = per_folder.entry(&file.dir).or_default();
@@ -1212,6 +1218,9 @@ pub fn preview(
     if view.identical_only {
         // Copies side by side; the order above holds within each group.
         items.sort_by_key(|i| view.identical.get(&i.path).copied());
+    }
+    if view.alike_only {
+        items.sort_by_key(|i| view.alike.get(&i.path).copied());
     }
 
     let changed = items.iter().filter(|i| i.status == Status::Ok).count();

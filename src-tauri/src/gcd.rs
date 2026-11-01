@@ -1,8 +1,7 @@
 //! Grand Comics Database client (comics.org): series by name and the
 //! numbers of their issues. Without an account the service allows about
 //! 30 requests an hour, for testing; with one, about 25 a minute. The
-//! account's email and password are kept in memory only, never written to
-//! disk, and forgotten when the program closes.
+//! account comes from the options (kept in the system's password store).
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -20,7 +19,7 @@ fn api_base() -> String {
 pub struct Client {
     http: reqwest::Client,
     last: tokio::sync::Mutex<Option<Instant>>,
-    /// The account signed in for this session (email, password).
+    /// The account from the options (email, password).
     login: std::sync::Mutex<Option<(String, String)>>,
     /// Answers by request, for the session.
     cache: tokio::sync::Mutex<HashMap<String, Value>>,
@@ -98,12 +97,11 @@ fn volume(v: &Value) -> Volume {
 }
 
 impl Client {
-    pub fn sign_in(&self, email: String, password: String) {
-        *self.login.lock().unwrap() = Some((email, password));
-    }
-
-    pub fn sign_out(&self) {
-        *self.login.lock().unwrap() = None;
+    /// The account from the options; empty: none.
+    pub fn set_account(&self, email: &str, password: &str) {
+        let email = email.trim();
+        *self.login.lock().unwrap() =
+            (!email.is_empty() && !password.is_empty()).then(|| (email.into(), password.into()));
     }
 
     /// A request at least 2.5 seconds after the last (25 a minute with an
@@ -113,12 +111,18 @@ impl Client {
             return Ok(v.clone());
         }
         let login = self.login.lock().unwrap().clone();
+        let v = self.request(url, login.as_ref()).await?;
+        self.cache.lock().await.insert(url.to_string(), v.clone());
+        Ok(v)
+    }
+
+    async fn request(&self, url: &str, login: Option<&(String, String)>) -> Result<Value, String> {
         let mut last = self.last.lock().await;
         if let Some(t) = *last {
             tokio::time::sleep(Duration::from_millis(2500).saturating_sub(t.elapsed())).await;
         }
         let mut req = self.http.get(url);
-        if let Some((email, password)) = &login {
+        if let Some((email, password)) = login {
             req = req.basic_auth(email, Some(password));
         }
         let res = req.send().await;
@@ -134,16 +138,19 @@ impl Client {
             code => return Err(format!("gcdNetwork: HTTP {code}")),
         }
         let v: Value = res.json().await.map_err(net_error)?;
-        self.cache.lock().await.insert(url.to_string(), v.clone());
         Ok(v)
     }
 
-    /// Whether the account signed in works: a request for one publisher
-    /// (that exists) answers, or refuses the account.
-    pub async fn check(&self) -> Result<(), String> {
-        self.get(&format!("{}/publisher/4999/?format=json", api_base()))
-            .await
-            .map(|_| ())
+    /// Whether an account (from the options) works: a request for one
+    /// publisher (that exists) answers, or refuses the account.
+    pub async fn check(&self, email: &str, password: &str) -> Result<(), String> {
+        let login = (email.trim().to_string(), password.to_string());
+        self.request(
+            &format!("{}/publisher/4999/?format=json", api_base()),
+            Some(&login),
+        )
+        .await
+        .map(|_| ())
     }
 
     /// Series whose names contain the words (as typed, and without

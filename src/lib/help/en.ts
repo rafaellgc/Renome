@@ -46,7 +46,11 @@ export const en: Section[] = [
   <li><b>⤒ ⤓</b> move the selected files up or down, handy to set the numbering. They do not work when sorting by New name.</li>
   <li><b>Remove</b> (or <kbd>Delete</kbd>) takes the selected files out of the list; <b>Clear</b> empties it. Files on disk are not touched. What the lookups found for them goes too, and a file added again starts fresh (<kbd>Ctrl</kbd>+<kbd>Z</kbd> brings it all back).</li>
   <li><kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes the last change to the list.</li>
-</ul>`,
+</ul>
+
+<h4>Information columns</h4>
+<p>The <b>☰</b> button, at the left end of the list's header, turns on columns with what the files hold: the songs' <b>Artist</b>, <b>Album</b>, <b>Title</b>, <b>Track</b>, <b>Year</b>, <b>Genre</b>, <b>Length</b> and <b>Format</b> (like <code>MP3 · 320 kbps</code> or <code>FLAC · 24/96</code>); the videos' <b>Resolution</b> and <b>Codec</b>; and the <b>Date taken</b> of photos. Your choice is saved. Click the title of one to sort the list by it: sorting by artist or year keeps each album in disc and track order. Files without the information go last. <b>Export list</b> includes the columns that are on.</p>
+<p><b>Limitations:</b> the information is read from the file itself, only while the column is on; in big folders or on slow disks, sorting by one of these columns the first time takes a while, because each file has to be read. Resolution and codec come only from the video formats Renome reads (MKV, WebM, MP4, MOV, AVI, MPEG and FLV), and the date taken only from photos with EXIF data. With many columns on in a narrow window, the list scrolls sideways.</p>`,
   },
   {
     id: "rules",
@@ -404,6 +408,15 @@ ${ex("01.mp3", "01 - Song Title.mp3")}
   <li>The writing is done on a copy, which only takes the file's place at the end; a crash midway does not spoil the song. If the program is closed or the computer goes off while writing, the next time Renome opens the songs already written go into the <b>History</b>, to undo, and the copy being written is deleted. Undo puts the old tags and pictures back (in MP3 and M4A, rare fields cleaning took out and the ID3v1 and APE tags do not come back). The modification date changes, so players read the tags again. Since the content changes, a torrent no longer recognises these files.</li>
   <li>Lookups are spaced out (one every 2 seconds), as MusicBrainz asks; each album takes about 4 seconds.</li>
 </ul>
+<h4>Discogs (optional)</h4>
+<p>Many regional, independent and vinyl releases are on <b>Discogs</b> (discogs.com) and not on MusicBrainz. To use it, create a free Discogs account, generate a <b>personal token</b> under Settings → Developers and paste it in <b>Options → Discogs</b>.</p>
+<ul>
+  <li>With the token, when MusicBrainz finds nothing for an album, the program searches Discogs by artist and album name. The edition is checked the same way (number of tracks, titles and lengths): if it fits, it is chosen by itself; if not, it goes to the review. Discogs candidates carry a <b>Discogs</b> label.</li>
+  <li>In the review, next to <b>Search</b>, pick <b>MusicBrainz</b> or <b>Discogs</b> to search the other source, even when the first one found something.</li>
+  <li>Names, folders, the cover (<code>cover.jpg</code>), missing tracks and writing tags work the same, with Discogs' data. Discs come from the track positions (<code>1-05</code>, <code>CD2-3</code>); vinyl sides (<code>A1</code>, <code>B2</code>) are numbered as one disc. The parts of a work (<code>Sonata: I. Allegro</code>) count as tracks.</li>
+  <li>Only the artist and album name go to Discogs, with your token. The token is stored only on this computer, in the system's password store.</li>
+</ul>
+<p><b>Discogs limitations:</b> it is asked only when MusicBrainz finds nothing (or when you choose it in the review); identifying by sound does not use Discogs. Tags written from Discogs have fewer fields: title, artists, album, dates, track, disc, label, catalog number, barcode and genres (Discogs' styles first); there are no ids, composers, producers or ISRCs, so a later search looks the album up again. The cover is Discogs', usually about 600 pixels, and <b>Cover size</b> does not shrink it. The country and year shown in the review are the search's; the number of tracks shows only after the edition is opened. Discogs allows about 60 requests a minute; each album uses 2 or 3.</p>
 <h4>Identify by sound (AcoustID)</h4>
 <p>With <b>Identify by sound</b> checked (the default), the search also takes care of songs <b>without a title in their tags</b> (even with <b>Fill in from the file name</b>, since the name is only a guess) and of albums the search by name did not find or left in doubt. For an album in doubt, what was heard counts only if it identifies a release with certainty; otherwise the search's candidates stay. The program listens to the first 2 minutes of each song, computes the sound's <b>fingerprint</b> and asks <b>AcoustID</b> (acoustid.org), an open fingerprint database linked to MusicBrainz, which recording it is.</p>
 <ul>
@@ -420,7 +433,7 @@ ${ex("01.mp3", "01 - Song Title.mp3")}
 <h4>Limitations</h4>
 <ul>
   <li>Without the MusicBrainz search, names depend on the tags alone: wrong tags make wrong names.</li>
-  <li>Regional, independent, bootleg or very recent releases may be missing from MusicBrainz; then the tags are used.</li>
+  <li>Regional, independent, bootleg or very recent releases may be missing from MusicBrainz; then the tags are used, unless Discogs (with your token) has them.</li>
   <li>By sound, very similar recordings (a remaster, an artist's own re-recording) may be mixed up. When the album is in doubt, it goes to the review.</li>
   <li>Songs in Opus, WMA and other formats not listed above are not listened to.</li>
   <li>For MP3 and M4A, undoing written tags does not bring back rare fields or ID3v1 and APE tags.</li>
@@ -512,7 +525,7 @@ ${ex("Series_Name_012_(2019)_(Digital)_(group).cbz", "Series Name #012 (2019).cb
 <h4>Looking it up in a catalog</h4>
 <p>In <b>Where to look</b>, choose the catalog:</p>
 <ul>
-  <li><b>Grand Comics Database</b> (comics.org): made by volunteers, with editions from many countries. It gives the series' name as published, the year, the publisher and the issues' numbers. It asks for the <b>sign-in of a free account</b>: asked when you search and kept <b>only in memory</b> until the program closes; it is never saved. Without an account, the GCD takes only about 30 requests an hour, and may stop taking them.</li>
+  <li><b>Grand Comics Database</b> (comics.org): made by volunteers, with editions from many countries. It gives the series' name as published, the year, the publisher and the issues' numbers. It works best with a <b>free comics.org account</b>, entered in <b>Options → Grand Comics Database</b>. Without an account, the GCD takes only about 30 requests an hour, and may stop taking them; the first search without one says so.</li>
   <li><b>MangaDex</b> (mangadex.org): manga, with no account or key. It gives the series' name and year (in your language, when there is one, or in English); the volume and chapter stay the file's.</li>
   <li><b>Comic Vine</b> (comicvine.gamespot.com): strong in American comics, with each issue's title. It asks for a free key, pasted in <b>Options</b>.</li>
 </ul>
@@ -592,7 +605,14 @@ ${ex("Series_Name_012_(2019)_(Digital)_(group).cbz", "Series Name #012 (2019).cb
   <li>The footer shows how many files have a copy. <b>Click it</b> to see only those files, with the copies side by side; click again to see all. From there you can remove them from the list or rename them separately.</li>
   <li>When two copies would get the same name, the conflict says the files are identical.</li>
 </ul>
-<p>The search runs in stages to be fast: only files of the same size are compared; then only their start and end; a whole file is read only when all of that matches. With large files, the footer shows the progress. Empty files, folders and symbolic links are left out.</p>`,
+<p>The search runs in stages to be fast: only files of the same size are compared; then only their start and end; a whole file is read only when all of that matches. With large files, the footer shows the progress. Empty files, folders and symbolic links are left out.</p>
+<h4>Repeated songs</h4>
+<p>Besides identical copies, the program finds the <b>same song in different files</b>: an MP3 and a FLAC of one track, or a song on its album and again on a compilation. They get an outlined tag, <b>♪</b> and the group number (hover to see the others), and the footer shows <b>N repeated song(s)</b>: click it to see only them, grouped. Nothing is deleted or changed.</p>
+<ul>
+  <li>They count as the same song when the tags have the same <b>title</b> and <b>artist</b>, regardless of case, accents and punctuation, and without what is in brackets (<code>(Remaster 2011)</code>); guests (<code>feat.</code>) do not count. The <b>length</b> must be the same, within 3 seconds.</li>
+  <li>Identical copies of one file already show as copies; they come in here only when another file of the same song is there too.</li>
+</ul>
+<p><b>Limitations:</b> only the tags count, not the sound. Songs without a title, an artist or a length are left out; wrong tags give false alarms or let repeats through. A live or remixed version with the same title and nearly the same length counts as the same song, and the same recording with titles written differently (<code>Pt. 1</code> and <code>Part One</code>) is not recognized. The first time, the tags of every song in the list are read, which takes a while in big folders.</p>`,
   },
   {
     id: "apply",
@@ -678,6 +698,9 @@ ${ex("Show.S01E02.720p.WEB.mkv", "Show S01E02.mkv")}
   <li><b>Ask for confirmation before renaming</b>.</li>
   <li><b>Turn rules off after renaming</b>.</li>
   <li><b>Warn about names Windows does not accept</b>: characters such as <code>:</code> and <code>?</code>, a dot or space at the end, and reserved names such as <code>CON</code> and <code>NUL</code>. Useful for files headed to Windows. On a USB stick or disk formatted for Windows (FAT, exFAT), such names are not accepted at all: there they are an error, with or without this option.</li>
+  <li><b>TMDB</b>, <b>Comic Vine</b>, <b>Grand Comics Database</b> and <b>Discogs</b>: the keys, the token and the account the movie, series, comic and music rules use; each has a <b>Test</b> button.</li>
+  <li>The keys, the token and the password stay only on this computer, <b>encrypted in the system's password store</b> (GNOME Keyring or KDE Wallet on Linux, Credential Manager on Windows, Keychain on macOS), not in the options file. Limitation: a system without a password store (some minimal Linux installs) has nowhere to encrypt them; then they stay in the options file, unencrypted, and the Options say so. The store protects them from whoever reads the disk's files, not from another program running in your own session.</li>
+  <li>When the store is locked (for example, with automatic login on Linux), the system asks for its password; the program opens anyway, and the keys appear once it is unlocked. On macOS, as Renome is not signed by Apple, the system may ask whether it can use the Keychain, again with each new version; choose <b>Always Allow</b>.</li>
 </ul>
 <p>Options are stored in <code>~/.config/renome</code> (Linux), <code>%APPDATA%\\renome</code> (Windows) or <code>~/Library/Application Support/renome</code> (macOS). The history is in <code>~/.local/share/renome/history</code> on Linux and in the same folder as the options on the other systems.</p>`,
   },

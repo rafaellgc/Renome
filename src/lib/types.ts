@@ -100,6 +100,8 @@ export interface View {
   sortByNewName: boolean;
   descending: boolean;
   identicalOnly: boolean;
+  /** Only songs that are the same music as another, grouped. */
+  alikeOnly: boolean;
   /** The movie chosen for each file, for the movie rule. */
   movies: Record<string, MovieMatch>;
   /** The episode chosen for each file, for the series rule. */
@@ -128,6 +130,8 @@ export interface MbCandidate {
   tracks: number;
   kind: string;
   score: number;
+  /** A small cover from the search (Discogs); else the Cover Art Archive's. */
+  image?: string;
 }
 
 export interface SongMatch {
@@ -407,8 +411,29 @@ export interface Copies {
   others: string[];
 }
 
+/** The optional columns of the list: what the files hold. */
+export const DETAIL_COLUMNS = ["artist", "album", "title", "track", "year", "genre", "length", "quality", "resolution", "codec", "taken"] as const;
+export type DetailColumn = (typeof DETAIL_COLUMNS)[number];
+
+/** What the optional columns show about a file (empty: it has none). */
+export interface Details {
+  artist: string;
+  album: string;
+  title: string;
+  track: string;
+  year: number | null;
+  genre: string;
+  /** Seconds. */
+  length: number | null;
+  quality: string;
+  resolution: string;
+  codec: string;
+  /** Unix seconds of the photo's local time. */
+  taken: number | null;
+}
+
 /** File list sort orders (done in Rust). */
-export type SortKey = "name" | "ext" | "dir" | "modified" | "size";
+export type SortKey = "name" | "ext" | "dir" | "modified" | "size" | DetailColumn;
 /** Displayed order: a column, the new name or the manual order. */
 export type ViewSort = SortKey | "newName" | "manual";
 

@@ -263,7 +263,7 @@ static FEATURING: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\s+(?:feat\.?|ft\.|featuring|with)\s.*$").unwrap());
 
 /// The main artist: `Banda Azul feat. Rui` → `Banda Azul`.
-fn main_artist(artist: &str) -> String {
+pub(crate) fn main_artist(artist: &str) -> String {
     FEATURING.replace(artist, "").trim().to_string()
 }
 

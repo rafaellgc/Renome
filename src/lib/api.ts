@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AlbumLookup, AlbumQuery, ApplyReport, BookCandidate, BookLookup, BookMatch, Candidate, ComicIssue, ComicMatch, ComicSource, ComicVolume, EpisodeLookup, MbCandidate, SongMatch, HistoryEntry, ListedTrack, Lookup, MovieSet, Preview, ScanOptions, Show, SortKey, Step, View } from "./types";
+import type { AlbumLookup, AlbumQuery, ApplyReport, BookCandidate, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, EpisodeLookup, MbCandidate, SongMatch, HistoryEntry, ListedTrack, Lookup, MovieSet, Preview, ScanOptions, Show, SortKey, Step, View } from "./types";
 
 type Overrides = Record<string, string>;
 type TvItem = { path: string; name: string; isDir: boolean };
@@ -14,9 +14,12 @@ export const api = {
   clearFiles: () => invoke<void>("clear_files"),
   moveFiles: (paths: string[], delta: -1 | 1) => invoke<void>("move_files", { paths, delta }),
   sortFiles: (key: SortKey, descending: boolean) => invoke<void>("sort_files", { key, descending }),
+  fileDetails: (paths: string[]) => invoke<Record<string, Details>>("file_details", { paths }),
   /** Stops the searches under way; they keep what they found. */
   stopSearch: () => invoke<void>("stop_search"),
-  findIdentical: () => invoke<string[][] | null>("find_identical"),
+  /** Identical files, and songs that are the same music; null when a
+   *  newer search replaced this one. */
+  findIdentical: () => invoke<{ identical: string[][]; songs: string[][] } | null>("find_identical"),
   preview: (steps: Step[], overrides: Overrides, view: View) =>
     invoke<Preview>("preview", { steps, overrides, view }),
   apply: (steps: Step[], overrides: Overrides, view: View) =>
@@ -37,7 +40,10 @@ export const api = {
   tvGroups: (items: TvItem[]) => invoke<{ groups: string[][]; loose: string[] }>("tv_groups", { items }),
   mbLookup: (paths: string[], fromName: boolean, listen: boolean) =>
     invoke<AlbumLookup[]>("mb_lookup", { paths, fromName, listen }),
-  mbSearch: (query: AlbumQuery) => invoke<MbCandidate[]>("mb_search", { query }),
+  mbSearch: (query: AlbumQuery, discogs = false) => invoke<MbCandidate[]>("mb_search", { query, discogs }),
+  /** The Discogs token from the options (empty: Discogs is not used). */
+  discogsToken: (token: string) => invoke<void>("discogs_token", { token }),
+  discogsCheck: (token: string) => invoke<void>("discogs_check", { token }),
   mbChoose: (id: string, paths: string[], fromName: boolean) =>
     invoke<{ matches: [string, SongMatch][]; tracks: ListedTrack[]; agree: number }>("mb_choose", { id, paths, fromName }),
   /** `names`: the name each file is read by (null: its own). */
@@ -52,8 +58,8 @@ export const api = {
   comicIssues: (source: ComicSource, key: string, id: string, comics: ComicMatch[]) =>
     invoke<{ volume: ComicVolume; issues: ComicIssue[]; found: (string | null)[] }>("comic_issues", { source, key, id, comics }),
   comicVolumeOf: (key: string, issue: string) => invoke<string>("comic_volume_of", { key, issue }),
-  gcdSignIn: (email: string, password: string) => invoke<void>("gcd_sign_in", { email, password }),
-  gcdSignOut: () => invoke<void>("gcd_sign_out"),
+  gcdAccount: (email: string, password: string) => invoke<void>("gcd_account", { email, password }),
+  gcdCheck: (email: string, password: string) => invoke<void>("gcd_check", { email, password }),
   bookLookup: (lang: string, items: { path: string; name: string }[]) =>
     invoke<BookLookup[]>("book_lookup", { lang, items }),
   bookSearch: (lang: string, title: string, author: string) =>

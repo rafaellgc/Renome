@@ -14,7 +14,6 @@
   import BookReview from "$lib/BookReview.svelte";
   import ComicPicker from "$lib/ComicPicker.svelte";
   import ComicReview from "$lib/ComicReview.svelte";
-  import GcdLogin from "$lib/GcdLogin.svelte";
   import EpisodeReview from "$lib/EpisodeReview.svelte";
   import { missingBooks, missingEpisodes, missingFolder, missingIssues, missingMovies, missingTracks, today, type Ghost } from "$lib/missing";
   import MovieReview from "$lib/MovieReview.svelte";
@@ -23,11 +22,13 @@
   import ShowPicker from "$lib/ShowPicker.svelte";
   import { LOCALES, MOD, t, tError, type Key } from "$lib/i18n";
   import { RULE_TYPES, byFit, isAudio, isBook, isComic, isScreen, isVideo, newRule, newStep, splitExt } from "$lib/rules";
-  import { loadSettings, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
+  import { loadSecrets, loadSettings, saveSecrets, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
     AlbumState, ApplyReport, BookCandidate, BookMatch, BookState, Candidate, ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, Copies, MbCandidate, SongMatch, EpKey, EpisodeMatch, EpisodeState, MovieMatch, MovieSet, MovieState, MovieStatus, HistoryEntry,
     OpError, Preview, PreviewItem, Rule, RuleType, Show, Step, View, ViewSort,
   } from "$lib/types";
+  import { DETAIL_COLUMNS } from "$lib/types";
+  import { COL_LABEL, detailText } from "$lib/details";
 
   let ready = $state(false);
   let steps = $state<Step[]>([]);
@@ -48,7 +49,7 @@
   }
   let busy = $state(false);
   /** What `busy` is doing, for the indicator over the list. */
-  let task = $state<"add" | "rename" | "undo" | null>(null);
+  let task = $state<"add" | "rename" | "undo" | "sort" | null>(null);
   let dragging = $state(false);
   let history = $state<HistoryEntry[] | null>(null);
   let showOptions = $state(false);
@@ -56,6 +57,10 @@
   /** Identical copies of each file in the list. */
   let copies = $state<Record<string, Copies>>({});
   let identicalOnly = $state(false);
+  /** Songs that are the same music as another (other files, not copies). */
+  let alike = $state<Record<string, Copies>>({});
+  let alikeOnly = $state(false);
+  const alikeCount = $derived(Object.keys(alike).length);
   /** Search progress (0–1) while reading whole files; null when idle. */
   let identicalProgress = $state<number | null>(null);
   const identicalCount = $derived(Object.keys(copies).length);
@@ -125,7 +130,7 @@
         mbProgress.kind === "search" || mbProgress.kind === "listen",
       );
     if (tvProgress) return { label: tvProgress, stop: true };
-    if (comicProgress && !comicPick && !gcdLogin) return { label: comicProgress, stop: true };
+    if (comicProgress && !comicPick) return { label: comicProgress, stop: true };
     if (task === "rename" && applyProgress?.total)
       return {
         label: t(sendTo?.copy ? "workingCopy" : "workingMove", { p: Math.floor((applyProgress.done / applyProgress.total) * 100) }),
@@ -133,7 +138,7 @@
         total: applyProgress.total,
         stop: true,
       };
-    if (task) return { label: t({ add: "workingAdd", rename: "workingRename", undo: "workingUndo" }[task] as "workingAdd") };
+    if (task) return { label: t({ add: "workingAdd", rename: "workingRename", undo: "workingUndo", sort: "workingSort" }[task] as "workingAdd") };
     return null;
   });
   /** Bumped by Stop: a search loop that sees a newer number stops. */
@@ -197,10 +202,8 @@
   let comicReview = $state<string[] | null>(null);
   /** The series picker, while open. */
   let comicPick = $state<{ source: ComicSource; query: string; files: number; highest: number; candidates: ComicVolume[]; resolve: (v: ComicVolume | null) => void } | null>(null);
-  /** The Grand Comics Database sign-in, while asked. */
-  let gcdLogin = $state<{ resolve: (how: "in" | "anonymous" | null) => void } | null>(null);
-  /** How this session uses the GCD: signed in, without an account, or not asked yet. */
-  let gcdSession = $state<"in" | "anonymous" | null>(null);
+  /** Whether this session was told that the GCD works better with an account. */
+  let gcdWarned = false;
   let comicProgress = $state<string | null>(null);
   const comicRule = $derived(steps.find((s) => s.enabled && s.rule.type === "comic"));
   /** A comic named after its issue: series, number, title, year and
@@ -399,7 +402,10 @@
     }
     if (musicRule) {
       const tip = { auto: "albumAuto", chosen: "albumChosen", choose: "albumChoose", none: "albumNone" } as const;
-      for (const a of albums) for (const p of a.files) out[p] = { status: a.status, tip: t(tip[a.status]) };
+      for (const a of albums) {
+        const key = a.status === "auto" && a.choice?.id.startsWith("discogs:") ? "albumAutoDiscogs" : tip[a.status];
+        for (const p of a.files) out[p] = { status: a.status, tip: t(key) };
+      }
       for (const i of preview.items) if (i.untagged) out[i.path] = { status: "none", tip: t("musicUntaggedTip") };
     }
     return out;
@@ -447,7 +453,7 @@
     return out;
   });
 
-  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, movies: movieMatches, episodes: episodeMatches, songs: songMatches, books: bookMatches, comics: comicMatches, leftoverSuffix: t("leftoverSuffix"), sendTo });
+  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, alikeOnly, movies: movieMatches, episodes: episodeMatches, songs: songMatches, books: bookMatches, comics: comicMatches, leftoverSuffix: t("leftoverSuffix"), sendTo });
   /** Example name for rule cards: the first file in natural name order, so
    *  it does not jump around while the preview re-sorts. */
   const collator = new Intl.Collator(undefined, { numeric: true });
@@ -506,7 +512,7 @@
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
   $effect(() => {
     const deps = [settings.lang, settings.theme, settings.includeHidden, settings.confirmApply,
-      settings.disableRulesAfterApply, settings.warnWindows, settings.rememberRules, settings.tmdbKey, settings.tmdbLang,
+      settings.disableRulesAfterApply, settings.warnWindows, settings.rememberRules, settings.tmdbLang,
       JSON.stringify(steps)];
     if (!ready || !deps) return;
     clearTimeout(saveTimer);
@@ -516,8 +522,25 @@
     }, 400);
   });
 
+  // The keys and the GCD account go to the system's password store, apart.
+  let secretsTimer: ReturnType<typeof setTimeout> | undefined;
+  $effect(() => {
+    const deps = [settings.tmdbKey, settings.comicVineKey, settings.discogsToken, settings.gcdEmail, settings.gcdPassword];
+    if (!ready || !deps) return;
+    clearTimeout(secretsTimer);
+    secretsTimer = setTimeout(() => saveSecrets().catch(() => {}), 600);
+  });
+
   $effect(() => {
     document.documentElement.lang = LOCALES[settings.lang];
+  });
+
+  // Discogs is asked when MusicBrainz finds nothing, with the user's token.
+  $effect(() => {
+    api.discogsToken(settings.discogsToken).catch(() => {});
+  });
+  $effect(() => {
+    api.gcdAccount(settings.gcdEmail, settings.gcdPassword).catch(() => {});
   });
 
   /** Re-sorts the list in Rust by the chosen column. */
@@ -528,12 +551,26 @@
   }
 
   async function sortBy(key: Exclude<ViewSort, "manual">) {
+    if (busy) return;
     if (key === sortKey) sortDesc = !sortDesc;
     else {
       sortKey = key;
       sortDesc = false;
     }
-    await applySort();
+    // By what the files hold: each file is read (once), which takes a while.
+    const reads = (DETAIL_COLUMNS as readonly string[]).includes(key);
+    if (reads) {
+      busy = true;
+      task = "sort";
+    }
+    try {
+      await applySort();
+    } finally {
+      if (reads) {
+        busy = false;
+        task = null;
+      }
+    }
     await refresh();
   }
 
@@ -855,14 +892,19 @@
    *  A newer search replaces an older one, which then returns null. */
   async function checkIdentical() {
     try {
-      const groups = await api.findIdentical();
-      if (!groups) return;
-      const map: Record<string, Copies> = {};
-      groups.forEach((g, group) => {
-        for (const p of g) map[p] = { group, others: g.filter((x) => x !== p) };
-      });
-      copies = map;
-      if (!groups.length) identicalOnly = false;
+      const found = await api.findIdentical();
+      if (!found) return;
+      const byGroup = (groups: string[][]) => {
+        const map: Record<string, Copies> = {};
+        groups.forEach((g, group) => {
+          for (const p of g) map[p] = { group, others: g.filter((x) => x !== p) };
+        });
+        return map;
+      };
+      copies = byGroup(found.identical);
+      alike = byGroup(found.songs);
+      if (!found.identical.length) identicalOnly = false;
+      if (!found.songs.length) alikeOnly = false;
       identicalProgress = null;
       await refresh();
     } catch (e) {
@@ -1011,12 +1053,14 @@
       if (ok) showOptions = true;
       return;
     }
-    // The GCD wants an account: asked once per session, kept in memory only.
-    if (source === "gcd" && gcdSession === null) {
-      const chosen = await new Promise<"in" | "anonymous" | null>((resolve) => (gcdLogin = { resolve }));
-      gcdLogin = null;
-      if (!chosen) return;
-      gcdSession = chosen;
+    // Without an account the GCD takes few searches: said once per session.
+    if (source === "gcd" && !gcdWarned && !(settings.gcdEmail.trim() && settings.gcdPassword)) {
+      gcdWarned = true;
+      const ok = await confirm({ title: t("rule.comic"), text: t("gcdNoAccount"), ok: t("options"), cancel: t("gcdAnonymous") });
+      if (ok) {
+        showOptions = true;
+        return;
+      }
     }
     const files = preview.items.filter((i) => !i.isDir && isComic(i.original));
     if (!files.length) {
@@ -1130,12 +1174,12 @@
       if (Object.values(comics).some((c) => c.status === "choose")) openComicReview();
     } catch (e) {
       const err = String(e);
-      // A refused sign-in is asked again next time.
+      // A refused account is fixed in the options.
       if (err.startsWith("gcdBadLogin")) {
-        gcdSession = null;
-        api.gcdSignOut();
+        if (await confirm({ title: t("rule.comic"), text: tError(e), ok: t("options"), cancel: t("close") })) showOptions = true;
+      } else {
+        await notify({ title: t("rule.comic"), text: tError(e) });
       }
-      await notify({ title: t("rule.comic"), text: tError(e) });
     } finally {
       comicProgress = null;
       comicPick = null;
@@ -1521,8 +1565,11 @@
       defaultPath: t("defaultCsvName"),
     });
     if (!path) return;
+    // The optional columns shown go too.
+    const extra = DETAIL_COLUMNS.filter((c) => settings.columns.includes(c));
+    const details = extra.length ? await api.fileDetails(preview.items.map((i) => i.path)) : {};
     await saveCsv(path, t("exportCsv"), t("csvSaved"), [
-      [t("csv.folder"), t("csv.original"), t("csv.new"), t("csv.dest"), t("csv.status"), t("csv.problem")],
+      [t("csv.folder"), t("csv.original"), t("csv.new"), t("csv.dest"), t("csv.status"), t("csv.problem"), ...extra.map((c) => t(COL_LABEL[c]))],
       ...preview.items.map((i) => [
         i.dir,
         i.original,
@@ -1530,6 +1577,7 @@
         i.folder ?? "",
         t(`csv.${i.status}`),
         i.problem ? t(`problem.${i.problem}`) : "",
+        ...extra.map((c) => detailText(c, details[i.path])),
       ]),
     ]);
   }
@@ -1614,14 +1662,13 @@
       comicReview = null;
       showPick?.resolve(null);
       comicPick?.resolve(null);
-      gcdLogin?.resolve(null);
     }
     if (e.key === "F1") {
       e.preventDefault();
       help ??= "manual";
       return;
     }
-    if (history || showOptions || help || review || episodeReview || albumReview || bookReview || comicReview || comicPick || gcdLogin || showPick || busy || working) return;
+    if (history || showOptions || help || review || episodeReview || albumReview || bookReview || comicReview || comicPick || showPick || busy || working) return;
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
     // These work even while typing in a rule.
@@ -1686,6 +1733,8 @@
     });
     (async () => {
       await loadSettings();
+      // The password store may wait to be unlocked: the program does not.
+      loadSecrets();
       if (settings.rememberRules) steps = settings.rules.map((s) => newStep(s.rule, s.enabled));
       // A rename the program could not finish (it was closed, the
       // computer went off) is put back first.
@@ -1887,6 +1936,7 @@
           onsort={sortBy}
           onoverride={setOverride}
           {copies}
+          {alike}
           {matches}
           {ghosts}
           {outside}
@@ -1939,6 +1989,15 @@
         <svg class="copy-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M5 1.5h7A1.5 1.5 0 0 1 13.5 3v8.5H12V3H5zM2.5 4.5A1.5 1.5 0 0 1 4 3h6a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 10 15H4a1.5 1.5 0 0 1-1.5-1.5zM4 4.5v9h6v-9z" /></svg>
         {t("identicalCount", { n: identicalCount })}
       </button>
+    {/if}
+    {#if alikeCount && identicalProgress === null}
+      <button
+        class="link"
+        class:on={alikeOnly}
+        aria-pressed={alikeOnly}
+        title={t("alikeFilterHint")}
+        onclick={() => (alikeOnly = !alikeOnly)}
+      >♪ {t("alikeCount", { n: alikeCount })}</button>
     {/if}
     {#if preview.items.length}
       <button class="link" title={t("exportCsvHint")} onclick={exportCsv}>{t("exportCsv")}</button>
@@ -2046,10 +2105,6 @@
 
 {#if comicPick}
   <ComicPicker source={comicPick.source} query={comicPick.query} files={comicPick.files} highest={comicPick.highest} candidates={comicPick.candidates} onpick={(v) => comicPick?.resolve(v)} />
-{/if}
-
-{#if gcdLogin}
-  <GcdLogin onclose={(how) => gcdLogin?.resolve(how)} />
 {/if}
 
 {#if albumReview}

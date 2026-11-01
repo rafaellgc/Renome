@@ -1,6 +1,9 @@
 # Renome — functional specification
 
 Batch file renamer for Linux, Windows and macOS (Rust + Tauri + Svelte).
+On macOS it needs version 11 or newer with Safari 16.4 or newer (the
+interface runs in the system's WebKit; older ones show a blank window), and
+the installer says so (`minimumSystemVersion`).
 
 This document describes **what** the program does, not **how**.
 
@@ -35,9 +38,22 @@ This document describes **what** the program does, not **how**.
   `Mario` → `Mário`); words that are on both sides but moved are marked
   apart (dotted underline), and the common start and end (the
   extension) are never marked.
+- **Optional columns** (☰ button at the left of the header; the choice is
+  saved in the settings): a song's artist, album, title, track (`2-05` on
+  albums of several discs), year, genre, length and format (`MP3 · 320
+  kbps`, `FLAC · 24/96`), a video's resolution and codec, a photo's date
+  taken (EXIF; only image formats are opened for it). They sit between
+  folder and size; past their minimum widths the list (with its header)
+  scrolls sideways. Values are read only for the rows in view, once per
+  file (cached with the file; read again when its size or date change),
+  and "Export list" adds the columns that are on.
 - Sort by clicking a header (click again to reverse): **new name**
   (default; the list re-sorts as the rules change), current name (natural
-  order, `2 < 10`), folder, size, date.
+  order, `2 < 10`), folder, size, date, or an optional column. Sorting by
+  an optional column reads every file (in the background, with a "reading
+  the files" notice); files without the value go last either way, and
+  ties go by album, disc and track (by disc and track when sorting by
+  album), so each album stays in order.
 - Move items up/down (manual order; unavailable when sorting by new name),
   remove selected, clear all. What the lookups found (movie, episode,
   book, comic, album) goes with the files taken out, and clearing also
@@ -516,6 +532,42 @@ field, or a `<` with no `>` after it, is kept as typed (Windows refuses
   title (≥ 0.8), each track once; a song that fits no track keeps its
   tags. "Picked without doubt" also needs every song matched this way.
   A song heard on AcoustID (below) is matched first by its recording.
+- Discogs (optional; the user's personal token, set in Options → Discogs
+  with a Test button that runs a one-result search, kept in the settings
+  and handed to the backend at start and on every change; requests carry
+  `Authorization: Discogs token=…` and `User-Agent: Renome/<version>
+  +<repo>`, at least 1.1 s apart; 429 is retried twice after 20 s;
+  401/403 is "invalid token"). With a token, an album MusicBrainz finds
+  nothing for (after the bracket-less retry) is searched on Discogs
+  (`/database/search`, `type=release`, `release_title` and `artist`,
+  the artist left out for Various Artists, 25 results; when nothing is
+  found, once more as free text `q="<artist> <album>"`), ranked as
+  above (the search gives no track counts) and the best fetched
+  (`/releases/<id>`, and its master's year, `/masters/<id>`, as the
+  original year; both kept for the session) and picked under the same
+  rule. Releases are read as MusicBrainz's, with ids `discogs:<n>` (tracks
+  `discogs:<n>:<disc>-<position>`): artists as credited (`anv`, else the
+  name without Discogs' `(2)`; "Various" → Various Artists) joined as
+  Discogs joins them; `released` with its zero parts dropped
+  (`1987-07-00` → `1987-07`), else the year; headings left out; an index
+  track's parts are tracks of their own (`Work: Part`) unless their
+  positions end in a letter (`3a`, `3b`: one track, its length the sum);
+  the disc from the position (`1-05`, `CD2-3`, `2.1`), else disc 1
+  (vinyl sides `A1`, `B2` number on as one disc), positions renumbered
+  1, 2, 3… per disc; durations `m:ss`/`h:mm:ss`; labels (without
+  `(n)`) and catalog numbers (not "none"); the barcode's digits; styles
+  then genres as genres; no country in the tags (Discogs names
+  countries, not codes). The review offers MusicBrainz or Discogs for a
+  typed search when a token is set (Discogs by default when the album's
+  release is Discogs'); Discogs candidates show the search's thumbnail
+  and a "Discogs" label, and no track count. The cover (`cover.jpg` and
+  the embedded one) is the release's primary image (else its first), as
+  Discogs serves it (about 600 px; the cover size is not applied).
+  Writing tags from a Discogs release writes no MusicBrainz ids, and a
+  match from Discogs does not call for writing because the tags lack its
+  id. Credited in Help with Discogs' notice (not affiliated, sponsored or
+  endorsed; trademark of Zink Media, LLC). Identifying by sound uses only
+  MusicBrainz. Only the artist and album name are sent.
 - "Identify by sound (AcoustID)", on by default: after the search, the
   songs of albums without a release picked (none found, or in doubt) and
   the visible songs without a title in their tags (even with one taken
@@ -729,9 +781,11 @@ field, or a `<` with no `>` after it, is kept as typed (Windows refuses
   series) and Kavita's (`{series} v{volume} #{number} c{chapter}
   ({year})`, no title); both turn series folders on.
 - Catalogues, chosen in the rule: the Grand Comics Database (default;
-  HTTP Basic sign-in of the user's free account, asked when searching and
-  kept in memory only, never on disk; without one, anonymous access of
-  about 30 requests an hour; requests 2.5 s apart), MangaDex (no account;
+  HTTP Basic sign-in of the user's free account, from the options (checked
+  there with Test; the first search without one in a session offers the
+  options or going on without); a refused account offers the options;
+  without one, anonymous access of about 30 requests an hour; requests
+  2.5 s apart), MangaDex (no account;
   series only, titled in the reader's language when it has one, else in
   English; fan works left out) and Comic Vine (the user's key; about 200
   requests an hour; requests 1.1 s apart; a `ComicInfo.xml` link gives the
@@ -860,6 +914,20 @@ field, or a `<` with no `>` after it, is kept as typed (Windows refuses
   while whole files are read;
   clicking it shows only those files, grouped.
 - A "same name" conflict between identical files says so.
+- **Repeated songs**: after the identical files, the same search finds
+  songs that are the same music in different files (an MP3 and a FLAC,
+  an album track and its compilation copy), by their tags only: same
+  title and main artist (artist, else album artist, without `feat.`/`ft.`/
+  `featuring`/`with` and what follows), compared without accents, case,
+  punctuation, bracketed parts or a trailing `- … Remaster(ed)/Remix/
+  Mono/Stereo …`; and lengths within 3 s of the group's shortest. Songs
+  without a title, artist or length are left out; a group made only of
+  identical copies of one file is left out (they are copies already).
+  The tags are read on a copy of the list, without holding it, and kept
+  for the list afterwards. Rows get an outlined tag (♪ and the group
+  number; hover: which files), selecting one highlights the others, and
+  the footer shows how many songs are repeated; clicking it shows only
+  those, grouped. Nothing is changed.
 
 - "Export list" (footer) saves the list as shown to a CSV file: folder,
   current name, new name, folder it moves into, status, problem; UTF-8
@@ -1016,6 +1084,22 @@ A "?" button (or F1) opens a window with three tabs:
 
 Saved in the user's config folder (e.g. `~/.config/renome/settings.json`).
 
+The secrets (TMDB, Comic Vine and Discogs keys, GCD email and password)
+are not in that file: they go, as one JSON entry (service
+`io.github.rafaellgc.Renome`, account `credentials`), to the system's
+password store (Secret Service on Linux, Credential Manager on Windows,
+Keychain on macOS; the `keyring` crate), encrypted there. Unchanged
+secrets are not written again; when all are empty the entry is removed.
+Secrets found in the file (from earlier versions) move to the store when
+the settings load. When the store cannot be reached, the secrets stay in
+the file, unencrypted, and the options say so. The store may wait to be
+unlocked (the system asks for its password), so the settings load
+without it (`load_settings`) and the secrets apart (`load_secrets`); until
+they come, the options show them waiting and their fields are off.
+Secrets are saved apart too (`save_secrets`); `save_settings` keeps the
+file's secret fields as they are. On macOS, an app not signed by Apple
+may be asked about the Keychain again with each version.
+
 - Language: English, Portuguese, Spanish. On first run, the system's.
 - Theme: light, dark or system (default).
 - Remember the rules between sessions (on).
@@ -1023,3 +1107,6 @@ Saved in the user's config folder (e.g. `~/.config/renome/settings.json`).
 - Ask for confirmation before renaming (on).
 - Turn the rules off after renaming (on).
 - Warn about characters Windows does not accept (on).
+- Services: TMDB key and title language, Comic Vine key, GCD account
+  (email and password), Discogs token; each with a Test button. A line
+  says whether they are in the system's password store or in the file.

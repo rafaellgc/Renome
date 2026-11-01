@@ -42,13 +42,14 @@
   const DONATE = "https://ko-fi.com/rafaellgc";
 
   /** The services the lookups use, credited as their terms ask. */
-  const SOURCES: { key: "sourcesMusic" | "sourcesBooks" | "sourcesComics"; items: { name: string; url: string; note?: "gcdLicense" | "acoustidTerms" }[] }[] = [
+  const SOURCES: { key: "sourcesMusic" | "sourcesBooks" | "sourcesComics"; items: { name: string; url: string; note?: "gcdLicense" | "acoustidTerms" | "discogsNotice" }[] }[] = [
     {
       key: "sourcesMusic",
       items: [
         { name: "MusicBrainz", url: "https://musicbrainz.org" },
         { name: "Cover Art Archive", url: "https://coverartarchive.org" },
         { name: "AcoustID", url: "https://acoustid.org", note: "acoustidTerms" },
+        { name: "Discogs", url: "https://www.discogs.com", note: "discogsNotice" },
       ],
     },
     {

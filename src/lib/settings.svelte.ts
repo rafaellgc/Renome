@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { Step } from "./types";
+import type { DetailColumn, Step } from "./types";
 
 export type Lang = "pt" | "en" | "es";
 export type Theme = "light" | "dark" | "system";
@@ -19,8 +19,15 @@ export interface Settings {
   tmdbLang: string;
   /** Comic Vine API key (empty: not set up). */
   comicVineKey: string;
+  /** Discogs personal token (empty: not set up). */
+  discogsToken: string;
+  /** Grand Comics Database account (empty: searched without one). */
+  gcdEmail: string;
+  gcdPassword: string;
   /** Rules from the last session (when `rememberRules`). */
   rules: Step[];
+  /** The optional columns shown in the list, in their order. */
+  columns: DetailColumn[];
 }
 
 const DEFAULTS: Settings = {
@@ -34,7 +41,11 @@ const DEFAULTS: Settings = {
   tmdbKey: "",
   tmdbLang: "",
   comicVineKey: "",
+  discogsToken: "",
+  gcdEmail: "",
+  gcdPassword: "",
   rules: [],
+  columns: [],
 };
 
 export const settings = $state<Settings>({ ...DEFAULTS });
@@ -86,6 +97,35 @@ export function tmdbLang() {
 
 export function saveSettings() {
   return invoke<void>("save_settings", { settings: $state.snapshot(settings) });
+}
+
+/** The settings kept in the system's password store, not in the file. */
+export const SECRET_FIELDS = ["tmdbKey", "comicVineKey", "discogsToken", "gcdEmail", "gcdPassword"] as const;
+
+/** Whether the secrets came (the store may wait to be unlocked), and
+ *  where they are kept: in the password store, or (when the system has
+ *  none) in the settings file. */
+export const secrets = $state<{ ready: boolean; stored: boolean | null }>({ ready: false, stored: null });
+
+/** Fills the secrets from the system's password store, when it answers;
+ *  without a store, those in the settings file hold. */
+export async function loadSecrets() {
+  try {
+    const found = await invoke<Partial<Settings> | null>("load_secrets");
+    if (found) {
+      for (const k of SECRET_FIELDS) if (typeof found[k] === "string" && found[k]) settings[k] = found[k];
+    }
+    secrets.stored = found !== null;
+  } catch {
+    secrets.stored = false;
+  }
+  secrets.ready = true;
+}
+
+export async function saveSecrets() {
+  if (!secrets.ready) return;
+  const values = Object.fromEntries(SECRET_FIELDS.map((k) => [k, settings[k]]));
+  secrets.stored = await invoke<boolean>("save_secrets", { secrets: values });
 }
 
 const dark = window.matchMedia("(prefers-color-scheme: dark)");
