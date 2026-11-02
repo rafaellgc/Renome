@@ -337,12 +337,6 @@ struct Progress {
 /// Looks up many files, a few at a time. Files with the same guessed title
 /// and year (a movie and its subtitles) share one search.
 #[derive(Deserialize)]
-struct InSet {
-    #[serde(default)]
-    belongs_to_collection: Option<tmdb::Collection>,
-}
-
-#[derive(Deserialize)]
 struct RawSet {
     #[serde(default)]
     name: String,
@@ -383,22 +377,36 @@ pub struct SetPart {
 pub struct MovieSets {
     of: Vec<(u64, Option<u64>)>,
     sets: Vec<MovieSet>,
+    /// Each movie's template fields (genre, director…).
+    extras: Vec<(u64, renome_core::fields::Extra)>,
 }
 
-/// The collections the movies belong to, with their movies.
-pub async fn collections(client: &Client, ids: Vec<u64>) -> MovieSets {
-    let of: Vec<(u64, Option<u64>)> = stream::iter(ids)
+/// The movies' details (the same request the `.nfo` makes, so kept
+/// answers serve both): their template fields, and, with `sets`, the
+/// collections they belong to, with their movies.
+pub async fn collections(client: &Client, ids: Vec<u64>, sets: bool) -> MovieSets {
+    let found: Vec<(u64, Option<u64>, renome_core::fields::Extra)> = stream::iter(ids)
         .map(|id| {
             let client = client.clone();
             async move {
-                let r: Result<InSet, String> = client.get(&format!("/movie/{id}"), &[]).await;
-                r.ok().map(|m| (id, m.belongs_to_collection.map(|c| c.id)))
+                let d = client.details(id).await.ok()?;
+                let extra = tmdb::movie_extra(&d, &client.lang);
+                Some((id, d.belongs_to_collection.map(|c| c.id), extra))
             }
         })
         .buffer_unordered(6)
         .filter_map(|x| async move { x })
         .collect()
         .await;
+    let extras = found.iter().map(|(id, _, e)| (*id, e.clone())).collect();
+    let of: Vec<(u64, Option<u64>)> = found.iter().map(|(id, s, _)| (*id, *s)).collect();
+    if !sets {
+        return MovieSets {
+            of,
+            sets: Vec::new(),
+            extras,
+        };
+    }
     let mut wanted: Vec<u64> = of.iter().filter_map(|(_, s)| *s).collect();
     wanted.sort_unstable();
     wanted.dedup();
@@ -426,7 +434,7 @@ pub async fn collections(client: &Client, ids: Vec<u64>) -> MovieSets {
         .filter_map(|x| async move { x })
         .collect()
         .await;
-    MovieSets { of, sets }
+    MovieSets { of, sets, extras }
 }
 
 pub async fn lookup(app: &AppHandle, client: &Client, items: Vec<LookupItem>) -> Vec<Lookup> {
@@ -846,6 +854,7 @@ pub async fn tv_sidecars(
             season: item.season,
             episodes: item.episodes.clone(),
             titles: Vec::new(),
+            extra: Default::default(),
         };
         // Moved into `Show/Season NN`: the show's folder is the one above.
         // A file that stayed out of one (hand-named, or already in place)

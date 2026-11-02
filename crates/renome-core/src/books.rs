@@ -347,8 +347,8 @@ pub fn pick_author<'a>(name: &str, docs: &'a [AuthorDoc]) -> Option<&'a AuthorDo
 
 /// The fields asked of the search, edition ones included.
 pub const FIELDS: &str = "key,title,subtitle,author_name,first_publish_year,cover_i,edition_count,language,\
-editions,editions.key,editions.title,editions.subtitle,editions.publish_date,editions.publisher,\
-editions.language,editions.cover_i,editions.isbn";
+number_of_pages_median,editions,editions.key,editions.title,editions.subtitle,editions.publish_date,\
+editions.publisher,editions.language,editions.cover_i,editions.isbn,editions.number_of_pages";
 
 #[derive(Debug, Default, Deserialize)]
 pub struct SearchPage {
@@ -373,6 +373,8 @@ pub struct Doc {
     pub cover_i: Option<i64>,
     #[serde(default)]
     pub edition_count: u32,
+    #[serde(default)]
+    pub number_of_pages_median: Option<u32>,
     #[serde(default)]
     pub editions: Option<EditionPage>,
     /// The first result of a search by title ([`Query::Titled`]): some
@@ -403,6 +405,8 @@ pub struct Edition {
     pub cover_i: Option<i64>,
     #[serde(default)]
     pub isbn: Vec<String>,
+    #[serde(default)]
+    pub number_of_pages: Option<u32>,
 }
 
 /// A book offered to the user, best first.
@@ -424,6 +428,8 @@ pub struct Candidate {
     pub publisher: String,
     pub isbn: String,
     pub language: String,
+    /// The edition's pages (the work's usual count when not found by ISBN).
+    pub pages: Option<u32>,
     /// Open Library cover id.
     pub cover: Option<i64>,
     /// How many editions the work has: how well known it is.
@@ -794,7 +800,12 @@ pub fn rank(g: &Guess, docs: Vec<Doc>, isbn: Option<&str>, lang: &str) -> (Vec<C
             edition_year,
             publisher: ed.publisher.first().cloned().unwrap_or_default(),
             isbn: isbn_here,
-            language: ed.language.first().cloned().unwrap_or_default(),
+            language: language(ed.language.first().map_or("", String::as_str)),
+            pages: match by_isbn {
+                true => ed.number_of_pages.or(doc.number_of_pages_median),
+                false => doc.number_of_pages_median,
+            }
+            .filter(|&p| p > 0),
             cover: ed.cover_i.or(doc.cover_i),
             editions: doc.edition_count,
             exact: by_isbn,
@@ -1068,6 +1079,10 @@ pub struct BookMatch {
     /// From the file's details.
     pub series: String,
     pub series_index: String,
+    /// What else is known (language, pages, translator), see
+    /// [`crate::fields`].
+    #[serde(default)]
+    pub extra: crate::fields::Extra,
 }
 
 /// A name as libraries sort it, by surname: `Moraes, C. S.`, `Alvarenga,
@@ -1131,6 +1146,7 @@ pub fn book_name(template: &str, m: &BookMatch, colon: &str) -> String {
     let publisher = safe(&m.publisher);
     let series = safe(&m.series);
     let volume = safe(&volume(&m.series_index));
+    let extra = crate::fields::safe(&m.extra, colon);
     let out = crate::rules::expand(template, |key| match key {
         "author" | "autor" => Some(author.as_str()),
         "author sort" | "autor invertido" => Some(sorted.as_str()),
@@ -1148,7 +1164,7 @@ pub fn book_name(template: &str, m: &BookMatch, colon: &str) -> String {
         "series" | "série" | "serie" => Some(series.as_str()),
         "volume" | "volumen" | "número" | "numero" => Some(volume.as_str()),
         "id" | "olid" => Some(m.work.as_str()),
-        _ => None,
+        key => crate::fields::get(&extra, key),
     });
     tidy(&out)
 }

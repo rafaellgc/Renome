@@ -344,6 +344,12 @@ pub struct TvDetails {
     /// Asked for with `append_to_response=alternative_titles`.
     #[serde(default)]
     pub alternative_titles: Option<AltTitles>,
+    #[serde(default)]
+    pub networks: Vec<crate::tmdb::Named>,
+    #[serde(default)]
+    pub genres: Vec<crate::tmdb::Named>,
+    #[serde(default)]
+    pub origin_country: Vec<String>,
     #[serde(flatten)]
     pub appended: HashMap<String, serde_json::Value>,
 }
@@ -424,6 +430,10 @@ pub struct Show {
     /// files from another show's.
     #[serde(default)]
     pub aliases: Vec<String>,
+    /// The show's template fields (network, genre, language, country),
+    /// see [`crate::fields`].
+    #[serde(default)]
+    pub extra: crate::fields::Extra,
 }
 
 static GENERIC: LazyLock<Regex> = LazyLock::new(|| {
@@ -490,6 +500,23 @@ pub fn build_show(d: &TvDetails, by_lang: &[Vec<ApiEpisode>], names: &[String]) 
         overview: d.overview.clone().unwrap_or_default(),
         poster_path: d.poster_path.clone(),
         episodes,
+        extra: {
+            use crate::fields::add;
+            let mut e = crate::fields::Extra::new();
+            let first =
+                |v: &[crate::tmdb::Named]| v.first().map(|n| n.name.clone()).unwrap_or_default();
+            add(&mut e, "network", &first(&d.networks));
+            add(&mut e, "genre", &first(&d.genres));
+            let genres: Vec<&str> = d.genres.iter().take(3).map(|g| g.name.as_str()).collect();
+            add(&mut e, "genres", &genres.join(", "));
+            add(&mut e, "language", &d.original_language);
+            add(
+                &mut e,
+                "country",
+                d.origin_country.first().map_or("", String::as_str),
+            );
+            e
+        },
         aliases: {
             let mut aliases: Vec<String> = Vec::new();
             let alt = d.alternative_titles.iter().flat_map(|a| &a.results);
@@ -862,6 +889,10 @@ pub struct EpisodeMatch {
     pub episodes: Vec<u16>,
     #[serde(default)]
     pub titles: Vec<String>,
+    /// What else TMDB tells (network, genre, air date, absolute number),
+    /// see [`crate::fields`]; with what the file's name tells.
+    #[serde(default)]
+    pub extra: crate::fields::Extra,
 }
 
 /// The new name from the rule's template: `{show}`, `{original}`,
@@ -894,6 +925,7 @@ pub fn episode_name(
     }
     let title = safe_title(&titles.join(" & "), colon);
     let id = m.id.to_string();
+    let extra = crate::fields::safe(&m.extra, colon);
     let out = crate::rules::expand(template, |key| match key {
         "show" | "série" | "serie" | "series" => Some(show.as_str()),
         "original" => Some(original.as_str()),
@@ -902,7 +934,7 @@ pub fn episode_name(
         "episode" | "episódio" | "episodio" => Some(episode.as_str()),
         "title" | "título" | "titulo" => Some(title.as_str()),
         "id" | "tmdbid" => Some(id.as_str()),
-        key => video.get(key),
+        key => video.get(key).or_else(|| crate::fields::get(&extra, key)),
     });
     let out = out.replace("()", "").replace("[]", "");
     // A missing title leaves a dangling " - ".
@@ -1453,6 +1485,7 @@ mod tests {
 
     fn show() -> Show {
         Show {
+            extra: Default::default(),
             id: 1,
             name: "Breaking Bad".into(),
             original_name: "Breaking Bad".into(),
@@ -1621,6 +1654,7 @@ mod tests {
     #[test]
     fn names() {
         let m = EpisodeMatch {
+            extra: Default::default(),
             id: 1396,
             show: "Breaking Bad".into(),
             original_show: String::new(),
@@ -1672,6 +1706,7 @@ mod tests {
     #[test]
     fn folders() {
         let m = EpisodeMatch {
+            extra: Default::default(),
             id: 1396,
             show: "Breaking Bad: A Química do Mal".into(),
             original_show: "Breaking Bad".into(),

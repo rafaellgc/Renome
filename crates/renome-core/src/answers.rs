@@ -57,7 +57,9 @@ impl Store {
         }
         let path = self.path(service, question);
         let modified = std::fs::metadata(&path).ok()?.modified().ok()?;
-        let age = SystemTime::now().duration_since(modified).unwrap_or_default();
+        let age = SystemTime::now()
+            .duration_since(modified)
+            .unwrap_or_default();
         if age > self.max_age(service) {
             let _ = std::fs::remove_file(&path);
             return None;

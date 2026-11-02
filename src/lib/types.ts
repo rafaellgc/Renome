@@ -216,7 +216,10 @@ export interface Candidate {
   score: number;
 }
 
-export type MovieMatch = Pick<Candidate, "id" | "title" | "originalTitle" | "year">;
+export type MovieMatch = Pick<Candidate, "id" | "title" | "originalTitle" | "year"> & {
+  /** Template fields from TMDB (genre, director…), by field. */
+  extra?: Record<string, string>;
+};
 
 export interface Guess {
   title: string;
@@ -268,6 +271,7 @@ export interface BookCandidate {
   publisher: string;
   isbn: string;
   language: string;
+  pages: number | null;
   cover: number | null;
   editions: number;
   /** Found by the file's ISBN: edition, publisher and ISBN are its own. */
@@ -286,6 +290,8 @@ export interface BookMatch {
   isbn: string;
   series: string;
   seriesIndex: string;
+  /** Template fields (language, pages), by field. */
+  extra?: Record<string, string>;
 }
 
 export interface BookLookup {
@@ -328,6 +334,8 @@ export interface Show {
   episodes: Episode[];
   /** Its other titles. */
   aliases: string[];
+  /** Template fields (network, genre…), by field. */
+  extra?: Record<string, string>;
 }
 
 export interface EpisodeGuess {
@@ -367,6 +375,9 @@ export interface EpisodeMatch {
   season: number;
   episodes: number[];
   titles: string[];
+  /** Template fields: the show's, the first episode's air date and
+   *  absolute number. */
+  extra?: Record<string, string>;
 }
 
 export type ErrorKind = "tempExists" | "targetExists" | "notFound" | "permissionDenied" | "otherDisk" | "io" | "restoreFailed" | "history" | "tags";
@@ -452,6 +463,8 @@ export interface ComicMatch {
   artist: string;
   /** The issue on Comic Vine. */
   id: string;
+  /** Template fields (cover date, story arc, colorist…), by field. */
+  extra?: Record<string, string>;
 }
 
 /** Where comics are looked up. */

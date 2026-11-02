@@ -28,9 +28,10 @@ export const api = {
   tmdbCheck: (key: string) => invoke<void>("tmdb_check", { key }),
   tmdbLookup: (key: string, lang: string, items: { path: string; name: string }[]) =>
     invoke<Lookup[]>("tmdb_lookup", { key, lang, items }),
-  /** Each movie's collection (null: none) and the collections. */
-  tmdbCollections: (key: string, lang: string, ids: number[]) =>
-    invoke<{ of: [number, number | null][]; sets: MovieSet[] }>("tmdb_collections", { key, lang, ids }),
+  /** Each movie's template fields and collection (null: none), and,
+   *  with `sets`, the collections. */
+  tmdbCollections: (key: string, lang: string, ids: number[], sets: boolean) =>
+    invoke<{ of: [number, number | null][]; sets: MovieSet[]; extras: [number, Record<string, string>][] }>("tmdb_collections", { key, lang, ids, sets }),
   tmdbSearch: (key: string, lang: string, title: string, year: number | null) =>
     invoke<Candidate[]>("tmdb_search", { key, lang, title, year }),
   tvSearch: (key: string, lang: string, query: string, items: TvItem[]) =>

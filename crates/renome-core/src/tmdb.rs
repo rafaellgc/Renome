@@ -250,6 +250,11 @@ pub struct MovieMatch {
     pub original_title: String,
     #[serde(default)]
     pub year: Option<u16>,
+    /// What else TMDB tells (genre, country, director…), see
+    /// [`crate::fields`]; with what the file's name tells (edition,
+    /// source, release group).
+    #[serde(default)]
+    pub extra: crate::fields::Extra,
 }
 
 /// Makes a title safe for a file name: `:` becomes `colon` (" - " by
@@ -287,6 +292,7 @@ pub fn movie_name(
     let year = m.year.map(|y| y.to_string()).unwrap_or_default();
     let id = m.id.to_string();
     let video = crate::video::Fields::of(video);
+    let extra = crate::fields::safe(&m.extra, colon);
     let out = crate::rules::expand(template, |key| match key {
         "title" | "titulo" | "título" => Some(title.as_str()),
         "original" | "original title" | "título original" | "titulo original" => {
@@ -294,7 +300,7 @@ pub fn movie_name(
         }
         "year" | "ano" | "año" => Some(year.as_str()),
         "id" | "tmdbid" => Some(id.as_str()),
-        key => video.get(key),
+        key => video.get(key).or_else(|| crate::fields::get(&extra, key)),
     });
     let out = out.replace("()", "").replace("[]", "");
     text::collapse_spaces(&out)
@@ -304,7 +310,7 @@ pub fn movie_name(
         .to_string()
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct Named {
     #[serde(default)]
     pub name: String,
@@ -439,6 +445,8 @@ pub struct Details {
     #[serde(default)]
     pub imdb_id: Option<String>,
     #[serde(default)]
+    pub original_language: String,
+    #[serde(default)]
     pub poster_path: Option<String>,
     #[serde(default)]
     pub backdrop_path: Option<String>,
@@ -538,6 +546,50 @@ pub(crate) fn crew(all: &[Crew], pred: impl Fn(&Crew) -> bool) -> Vec<&Crew> {
 
 /// The age rating in Jellyfin's TMDB form: `PG-13` in the US, `BR-12`
 /// elsewhere.
+/// The template fields a movie's details give (see [`crate::fields`]):
+/// genre(s), country, language, runtime, the age rating of `lang`'s
+/// country (`pt-BR`: Brazil's), director, studio, collection and release
+/// date.
+pub fn movie_extra(d: &Details, lang: &str) -> crate::fields::Extra {
+    use crate::fields::add;
+    let region = lang.split_once('-').map_or("US", |(_, r)| r);
+    let mut e = crate::fields::Extra::new();
+    let names = |v: &[Named], n: usize| {
+        v.iter()
+            .take(n)
+            .map(|x| x.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    add(&mut e, "genre", &names(&d.genres, 1));
+    add(&mut e, "genres", &names(&d.genres, 3));
+    add(&mut e, "country", &names(&d.production_countries, 1));
+    add(&mut e, "language", &d.original_language);
+    add(&mut e, "runtime", &number(d.runtime));
+    let cert = d
+        .release_dates
+        .results
+        .iter()
+        .find(|c| c.iso_3166_1.eq_ignore_ascii_case(region))
+        .and_then(|c| c.release_dates.iter().find(|r| !r.certification.is_empty()))
+        .map(|r| r.certification.as_str())
+        .unwrap_or_default();
+    add(&mut e, "certification", cert);
+    let director = crew(&d.credits.crew, |c| c.job == "Director")
+        .first()
+        .map(|c| c.name.as_str())
+        .unwrap_or_default();
+    add(&mut e, "director", director);
+    add(&mut e, "studio", &names(&d.production_companies, 1));
+    if let Some(c) = &d.belongs_to_collection {
+        add(&mut e, "collection", &c.name);
+    }
+    if let Some(date) = &d.release_date {
+        crate::fields::add_date(&mut e, date);
+    }
+    e
+}
+
 pub(crate) fn rating_for(region: &str, cert: &str) -> String {
     if cert.is_empty() {
         String::new()
@@ -871,6 +923,7 @@ mod tests {
     #[test]
     fn names() {
         let m = MovieMatch {
+            extra: Default::default(),
             id: 120,
             title: "O Senhor dos Anéis: A Sociedade do Anel".into(),
             original_title: "The Lord of the Rings".into(),
@@ -881,6 +934,7 @@ mod tests {
             "O Senhor dos Anéis - A Sociedade do Anel (2001) [tmdbid-120]"
         );
         let m = MovieMatch {
+            extra: Default::default(),
             id: 7,
             title: "What About Bob? / AC/DC".into(),
             original_title: String::new(),

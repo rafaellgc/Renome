@@ -1933,6 +1933,7 @@ mod tests {
     fn movie_into_folder() {
         let d = tempfile::tempdir().unwrap();
         let m = MovieMatch {
+            extra: Default::default(),
             id: 1,
             title: "Filme".into(),
             original_title: String::new(),
@@ -1989,6 +1990,7 @@ mod tests {
     fn forced_subtitle_stays_forced() {
         let d = tempfile::tempdir().unwrap();
         let m = MovieMatch {
+            extra: Default::default(),
             id: 12155,
             title: "Alice no País das Maravilhas".into(),
             original_title: String::new(),
@@ -2037,6 +2039,7 @@ mod tests {
     fn movie_versions_by_picture() {
         let d = tempfile::tempdir().unwrap();
         let m = MovieMatch {
+            extra: Default::default(),
             id: 1,
             title: "Filme".into(),
             original_title: String::new(),
@@ -2114,6 +2117,7 @@ mod tests {
             view.movies.insert(
                 here[0].path.clone(),
                 MovieMatch {
+                    extra: Default::default(),
                     id: n as u64 + 1,
                     title: format!("Filme {dir}"),
                     original_title: String::new(),
@@ -2170,6 +2174,7 @@ mod tests {
         fs::write(&movie, "v").unwrap();
         files.extend(entries(d.path(), &["f.2001.mkv"]));
         let m = MovieMatch {
+            extra: Default::default(),
             id: 1,
             title: "Filme".into(),
             original_title: String::new(),
@@ -2304,6 +2309,7 @@ mod tests {
     fn episode_keeps_subtitle_language() {
         let d = tempfile::tempdir().unwrap();
         let m = EpisodeMatch {
+            extra: Default::default(),
             id: 1,
             show: "Show".into(),
             original_show: String::new(),
@@ -2352,6 +2358,7 @@ mod tests {
         let old = d.path().join("Show/Season 1");
         fs::create_dir_all(&old).unwrap();
         let m = EpisodeMatch {
+            extra: Default::default(),
             id: 7,
             show: "Show".into(),
             original_show: String::new(),
@@ -2406,6 +2413,7 @@ mod tests {
 
     fn episode(n: u16) -> EpisodeMatch {
         EpisodeMatch {
+            extra: Default::default(),
             id: 7,
             show: "Show".into(),
             original_show: String::new(),
@@ -2681,6 +2689,7 @@ mod tests {
     fn movie_release_folder_is_renamed_beside() {
         let d = tempfile::tempdir().unwrap();
         let m = MovieMatch {
+            extra: Default::default(),
             id: 1,
             title: "Filme".into(),
             original_title: String::new(),

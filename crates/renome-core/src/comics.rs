@@ -41,6 +41,9 @@ pub struct ComicInfo {
     /// Often a Comic Vine page of the issue.
     pub web: String,
     pub manga: bool,
+    /// The other fields that go into names (cover date, story arc,
+    /// colorist…), see [`crate::fields`].
+    pub extra: crate::fields::Extra,
 }
 
 /// Reads the `ComicInfo.xml` inside a CBZ, CB7, CBT or EPUB; `None` for
@@ -152,6 +155,50 @@ pub fn parse_info(xml: &str) -> Option<ComicInfo> {
         penciller: field("Penciller"),
         web: field("Web"),
         manga: field("Manga").to_lowercase().starts_with("yes"),
+        extra: {
+            let mut e = crate::fields::Extra::new();
+            let number = |name: &str| field(name).parse::<u8>().ok();
+            crate::fields::add_ymd(
+                &mut e,
+                field("Year")
+                    .parse()
+                    .ok()
+                    .filter(|y| (1800..=2200).contains(y)),
+                number("Month"),
+                number("Day"),
+            );
+            for (tag, key) in [
+                ("StoryArc", "story arc"),
+                ("Imprint", "imprint"),
+                ("Format", "format"),
+                ("Genre", "genre"),
+                ("Inker", "inker"),
+                ("Colorist", "colorist"),
+                ("Letterer", "letterer"),
+                ("CoverArtist", "cover artist"),
+                ("Editor", "editor"),
+                ("Translator", "translator"),
+                ("PageCount", "pages"),
+                ("AgeRating", "age rating"),
+                ("LanguageISO", "language"),
+                ("AlternateSeries", "alternate series"),
+                ("AlternateNumber", "alternate number"),
+                ("ScanInformation", "scan info"),
+                ("GTIN", "gtin"),
+            ] {
+                crate::fields::add(&mut e, key, &field(tag));
+            }
+            // "Unknown" is no rating.
+            if e.get("age rating")
+                .is_some_and(|r| r.eq_ignore_ascii_case("unknown"))
+            {
+                e.remove("age rating");
+            }
+            if e.get("pages").is_some_and(|p| p == "0") {
+                e.remove("pages");
+            }
+            e
+        },
     };
     (!info.series.is_empty() || !info.number.is_empty()).then_some(info)
 }
@@ -175,6 +222,9 @@ pub struct ComicGuess {
     pub count: Option<u32>,
     /// What follows the number (`Series 012 - Title`).
     pub title: String,
+    /// Who scanned it: the last note in brackets that is not a year, a
+    /// count or a known word (`(Zone-Empire)`), or what follows `--`.
+    pub scan: String,
 }
 
 static BRACKETS: LazyLock<Regex> =
@@ -185,7 +235,7 @@ static OF: LazyLock<Regex> =
 /// Words of release notes, not of the name.
 static JUNK: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)\b(?:digital|webrip|web-?dl|c2c|hq|hd|scan(?:ned)?|repack|fixed|cbz|cbr|cb7|cbt|pdf|epub|\d{3,4}p|ctc|noads|no ads)\b",
+        r"(?i)\b(?:digital|webrip|web-?dl|c2c|fcbd|hq|hd|scan(?:ned)?|repack|fixed|cbz|cbr|cb7|cbt|pdf|epub|\d{3,4}p|ctc|noads|no ads)\b",
     )
     .unwrap()
 });
@@ -237,6 +287,16 @@ fn volume_number(s: &str) -> Option<u32> {
 /// name has none, and the series' year.
 pub fn parse_name(stem: &str, folder: &str) -> ComicGuess {
     let mut g = ComicGuess::default();
+    // What follows `--` or `__` is a note, not the name.
+    let (stem, note) = match [stem.find("--"), stem.find("__")]
+        .into_iter()
+        .flatten()
+        .min()
+    {
+        Some(i) if i > 0 => (&stem[..i], stem[i + 2..].trim_matches(['-', '_', ' '])),
+        _ => (stem, ""),
+    };
+    g.scan = note.replace('_', " ").trim().to_string();
     // `Series.012.2019`: dots stand for spaces, but not in `12.1`.
     let mut s = unescape(&colons(stem)).replace('_', " ");
     if !s.contains(' ') {
@@ -271,6 +331,13 @@ pub fn parse_name(stem: &str, folder: &str) -> ComicGuess {
             g.year = inner.parse().ok();
         } else if let Some(n) = OF.captures(inner) {
             g.count = n[1].parse().ok();
+        } else if !inner.is_empty()
+            && !YEAR.is_match(inner)
+            && JUNK.replace_all(inner, "").trim().len() > 1
+            && VOLUME.find(inner).is_none_or(|v| v.start() > 0)
+            && !inner.chars().all(|c| c.is_ascii_digit() || c == '-')
+        {
+            g.scan = inner.to_string();
         }
     }
     // A volume in brackets (`Series (Vol.03) - Story`) is read as if it
@@ -503,6 +570,10 @@ pub struct ComicMatch {
     pub artist: String,
     /// The issue on Comic Vine.
     pub id: String,
+    /// What else the `ComicInfo.xml`, the catalogue or the name tell
+    /// (cover date, story arc, colorist…), see [`crate::fields`].
+    #[serde(default)]
+    pub extra: crate::fields::Extra,
 }
 
 /// What the file says about itself: its `ComicInfo.xml` first, its name
@@ -616,6 +687,16 @@ pub fn merge(g: &ComicGuess, info: &ComicInfo) -> ComicMatch {
         writer: info.writer.clone(),
         artist: info.penciller.clone(),
         id: comic_vine_id(&info.web).unwrap_or_default(),
+        extra: {
+            let mut e = info.extra.clone();
+            if !e.contains_key("scan info") {
+                crate::fields::add(&mut e, "scan info", &g.scan);
+            }
+            if !e.contains_key("date") {
+                crate::fields::add_ymd(&mut e, info.year.or(g.year), None, None);
+            }
+            e
+        },
     }
 }
 
@@ -667,6 +748,7 @@ pub fn comic_name(template: &str, m: &ComicMatch, colon: &str) -> String {
     let series_year = m.series_year.map(|y| y.to_string()).unwrap_or_default();
     let count = m.count.map(|c| c.to_string()).unwrap_or_default();
     let (publisher, writer, artist) = (safe(&m.publisher), safe(&m.writer), safe(&m.artist));
+    let extra = crate::fields::safe(&m.extra, colon);
     let value = |key: &str| -> Option<&str> {
         Some(match key {
             "series" | "série" | "serie" => &series,
@@ -681,7 +763,7 @@ pub fn comic_name(template: &str, m: &ComicMatch, colon: &str) -> String {
             "writer" | "roteiro" | "guion" | "guión" => &writer,
             "artist" | "arte" | "dibujo" => &artist,
             "id" => &m.id,
-            _ => return None,
+            key => return crate::fields::get(&extra, key),
         })
     };
     // A separator left before a bracket or at the end, by an empty title.
@@ -1189,6 +1271,24 @@ pub fn with_issue(own: &ComicMatch, volume: &Volume, issue: Option<&Issue>) -> C
         },
         artist: own.artist.clone(),
         id: issue.map_or_else(|| volume.id.clone(), |i| i.id.clone()),
+        extra: {
+            let mut e = own.extra.clone();
+            // The catalogue's cover date over the file's.
+            if !date.is_empty() {
+                for k in [
+                    "date",
+                    "month",
+                    "day",
+                    "month name",
+                    "month name pt",
+                    "month name es",
+                ] {
+                    e.remove(k);
+                }
+                crate::fields::add_date(&mut e, date);
+            }
+            e
+        },
     }
 }
 
@@ -1347,6 +1447,29 @@ mod tests {
             (x.series.as_str(), x.volume, x.chapter.as_str()),
             ("Vinland Saga", Some(2), "7")
         );
+    }
+
+    #[test]
+    fn more_fields() {
+        let info = parse_info(
+            r#"<ComicInfo><Series>Linha Azul</Series><Number>3</Number><Year>1987</Year>
+            <Month>5</Month><Colorist>Ana Prado</Colorist><StoryArc>Volta</StoryArc>
+            <AgeRating>Unknown</AgeRating></ComicInfo>"#,
+        )
+        .unwrap();
+        let m = merge(&parse_name("Linha Azul 003 (1987) (Grupo Scan)", ""), &info);
+        let name = comic_name(
+            "{series} #{number} - {nome do mês} {ano} [{colorista}] <{arco}> <{faixa etária}> ({scan})",
+            &m,
+            " - ",
+        );
+        assert_eq!(name, "Linha Azul #003 - maio 1987 [Ana Prado] Volta (Grupo Scan)");
+        // What follows `--` is a note.
+        let g = parse_name("Linha Azul 004--notas do grupo", "");
+        assert_eq!((g.series.as_str(), g.number.as_str()), ("Linha Azul", "004"));
+        assert_eq!(g.scan, "notas do grupo");
+        // Words of release notes are no scanner.
+        assert_eq!(parse_name("Linha Azul 005 (digital) (c2c)", "").scan, "");
     }
 
     #[test]

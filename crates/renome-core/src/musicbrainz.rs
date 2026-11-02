@@ -449,6 +449,7 @@ impl SongMatch {
             }
         };
         take(&mut t.label, &self.label);
+        take(&mut t.date, &self.date);
         take(&mut t.catalog, &self.catalog);
         take(&mut t.artist_sort, &self.artist_sort);
         take(&mut t.album_artist_sort, &self.album_artist_sort);

@@ -71,13 +71,15 @@
   let review = $state<string[] | null>(null);
   let tmdbProgress = $state<{ done: number; total: number; kind: "search" | "save" | "saveTv" } | null>(null);
   const movieRule = $derived(steps.find((s) => s.enabled && s.rule.type === "movie"));
+  /** Each chosen movie's template fields (genre, director…), by id. */
+  let movieExtra = $state<Record<number, Record<string, string>>>({});
   const movieMatches = $derived(
     Object.fromEntries(
       Object.entries(movies)
         .filter(([, m]) => m.choice)
         .map(([p, m]): [string, MovieMatch] => {
           const c = m.choice!;
-          return [p, { id: c.id, title: c.title, originalTitle: c.originalTitle, year: c.year }];
+          return [p, { id: c.id, title: c.title, originalTitle: c.originalTitle, year: c.year, extra: movieExtra[c.id] }];
         }),
     ),
   );
@@ -94,16 +96,21 @@
   let setOf = $state<Record<number, number | null>>({});
   let movieSets = $state<Record<number, MovieSet>>({});
   /** Movies already asked about (an answer may not come). */
-  const setAsked = new Set<number>();
+  const setAsked = new Set<string>();
   $effect(() => {
-    if (movieRule?.rule.type !== "movie" || !movieRule.rule.missing || !settings.tmdbKey) return;
-    const ids = [...new Set(Object.values(movieMatches).map((m) => m.id))].filter((id) => !setAsked.has(id));
+    if (movieRule?.rule.type !== "movie" || !settings.tmdbKey) return;
+    const sets = movieRule.rule.missing;
+    // Read without tracking the fields: they come from this.
+    const ids = [...new Set(Object.values(movies).flatMap((m) => (m.choice ? [m.choice.id] : [])))].filter(
+      (id) => !setAsked.has(`${id}:${sets}`) && !(sets ? false : setAsked.has(`${id}:true`)),
+    );
     if (!ids.length) return;
-    for (const id of ids) setAsked.add(id);
-    api.tmdbCollections(settings.tmdbKey, tmdbLang(), ids).then(
+    for (const id of ids) setAsked.add(`${id}:${sets}`);
+    api.tmdbCollections(settings.tmdbKey, tmdbLang(), ids, sets).then(
       (r) => {
         for (const [id, set] of r.of) setOf[id] = set;
         for (const set of r.sets) movieSets[set.id] = set;
+        for (const [id, extra] of r.extras) movieExtra[id] = extra;
       },
       () => {},
     );
@@ -168,6 +175,9 @@
       publisher: c.exact ? c.publisher : b.guess.publisher,
       isbn: c.exact ? c.isbn : (b.guess.isbns[0] ?? ""),
       series: b.guess.series, seriesIndex: b.guess.seriesIndex,
+      extra: Object.fromEntries(
+        [["language", c.exact ? c.language : b.guess.language || c.language], ["pages", c.pages ? String(c.pages) : ""]].filter(([, v]) => v),
+      ),
     };
   }
   const bookMatches = $derived.by(() => {
@@ -237,7 +247,16 @@
       writer: own.writer || volume.writer,
       artist: own.artist,
       id: issue ? issue.id : volume.id,
+      extra: withCoverDate(own.extra ?? {}, issue?.coverDate ?? ""),
     };
+  }
+
+  /** The catalogue's cover date over the file's (its parts come from it). */
+  function withCoverDate(extra: Record<string, string>, date: string): Record<string, string> {
+    if (!date) return extra;
+    const out = Object.fromEntries(Object.entries(extra).filter(([k]) => !["date", "month", "day"].includes(k) && !k.startsWith("month name")));
+    out.date = date;
+    return out;
   }
   const comicMatches = $derived(
     Object.fromEntries(
@@ -333,6 +352,17 @@
     }
     return { found, choose, none };
   });
+  /** An episode's template fields: the show's, its air date and its
+   *  number counted from the first episode (specials apart). */
+  function episodeExtra(show: Show, season: number, number: number): Record<string, string> {
+    const extra: Record<string, string> = { ...(show.extra ?? {}) };
+    const ep = show.episodes.find((x) => x.season === season && x.number === number);
+    if (ep?.airDate) extra.date = ep.airDate;
+    if (season > 0 && ep) {
+      extra.absolute = String(show.episodes.filter((x) => x.season > 0 && (x.season < season || (x.season === season && x.number <= number))).length);
+    }
+    return extra;
+  }
   const episodeMatches = $derived(
     Object.fromEntries(
       Object.entries(series)
@@ -348,6 +378,7 @@
             season: keys[0][0],
             episodes: keys.map((k) => k[1]),
             titles: keys.map((k) => show.episodes.find((x) => x.season === k[0] && x.number === k[1])?.name ?? ""),
+            extra: episodeExtra(show, keys[0][0], keys[0][1]),
           }];
         }),
     ),

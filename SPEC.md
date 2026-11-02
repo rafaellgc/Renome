@@ -121,6 +121,38 @@ whole number in the value with N digits (`{episode:3}`: `001-E002`;
 `{track:1}`: `5`), leaving decimals (`12.1`), a disc before a track
 (`1-05`) and text without numbers as they are.
 
+**More fields** (`fields.rs`; each also in Portuguese and Spanish, an
+empty one is empty, not unknown): dates give `{date}` (`2010-05-03`, or
+the part known), `{month}` (two digits), `{day}` and the month's name in
+the language of the key (`{month name}` May, `{nome do mês}` maio,
+`{nombre del mes}` mayo).
+- Movie (from the details the collections already fetch, one request per
+  chosen movie, kept like any answer): `{genre}`, `{genres}` (three),
+  `{country}`, `{language}` (original), `{runtime}` (minutes),
+  `{certification}` (the titles' language's country's), `{director}`,
+  `{studio}`, `{collection}`, release date.
+- TV show (from the show and its episodes): `{network}`, `{genre}`,
+  `{genres}`, `{language}`, `{country}`, the episode's air date,
+  `{absolute}` (counted from the first episode, specials apart).
+- Movie and TV show, from the file's name: `{edition}` (Director's Cut,
+  Extended, Unrated, Uncut, Theatrical, Remastered, IMAX, Criterion,
+  Special/Ultimate Edition, Final Cut, Anniversary), `{source}` (Remux,
+  BluRay, WEB-DL, WEBRip, WEB, HDTV, DVDRip, DVD, HDRip, TVRip, VHSRip)
+  and `{release group}` (`[Group]` at the start, or `-GROUP` at the end of
+  a name with a source or resolution, not a codec).
+- Music: the release date (tags' date, or the MusicBrainz release's).
+- Book: `{language}` (two letters), `{pages}` (the edition's found by
+  ISBN, else Open Library's median among editions).
+- Comic (`ComicInfo.xml`): `{story arc}`, `{imprint}`, `{format}`,
+  `{genre}`, `{inker}`, `{colorist}`, `{letterer}`, `{cover artist}`,
+  `{editor}`, `{translator}`, `{pages}`, `{age rating}` (not "Unknown"),
+  `{language}`, `{alternate series}`, `{alternate number}`, `{gtin}`,
+  `{scan info}`, and the cover date (`Year`/`Month`/`Day`, replaced by the
+  catalogue issue's cover date). From the name: the scanner is the last
+  bracketed note that is not a year, a count, a volume or release words,
+  or what follows `--`/`__` (never part of the series); `c2c` and `FCBD`
+  are release words.
+
 ### 2.1 Movies (TMDB)
 
 - Needs a TMDB API key (v3 key or v4 read token) in Options, plus the

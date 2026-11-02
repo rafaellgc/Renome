@@ -28,6 +28,7 @@ pub mod comics;
 pub mod details;
 pub mod discogs;
 pub mod ebook;
+pub mod fields;
 pub mod files;
 pub mod filter;
 pub mod fingerprint;

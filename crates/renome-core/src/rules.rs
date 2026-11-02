@@ -990,6 +990,7 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             template, colon, ..
         } => {
             if let Some(m) = ctx.movie {
+                let m = &with_release_movie(m, ctx.file);
                 let name = tmdb::movie_name(template, m, colon, video_of(ctx, template));
                 if !name.is_empty() {
                     let suffix = if ctx.as_folder {
@@ -1006,6 +1007,7 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             template, colon, ..
         } => {
             if let Some(m) = ctx.episode {
+                let m = &with_release_episode(m, ctx.file);
                 let name = tv::episode_name(template, m, colon, video_of(ctx, template));
                 if !name.is_empty() {
                     *stem = name + &tmdb::subtitle_tags(stem, ext);
@@ -1088,6 +1090,20 @@ fn folder_name(file: &FileEntry) -> String {
 static LEADING_NUMBER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\s*(?:\d{1,2}[-.])?\d{1,3}(?:\s*[-.)_]\s*|\s+)(?:[-–]\s*)?").unwrap()
 });
+
+/// The movie with what its file's name tells (edition, source, group).
+fn with_release_movie(m: &MovieMatch, file: &FileEntry) -> MovieMatch {
+    let mut m = m.clone();
+    crate::fields::add_release(&mut m.extra, &file.stem);
+    m
+}
+
+/// The episode with what its file's name tells.
+fn with_release_episode(m: &EpisodeMatch, file: &FileEntry) -> EpisodeMatch {
+    let mut m = m.clone();
+    crate::fields::add_release(&mut m.extra, &file.stem);
+    m
+}
 
 /// A template key's value. `{a|b|c}` is the first of those keys with a
 /// value (`{title|year}`: the title, else the year); empty when all of

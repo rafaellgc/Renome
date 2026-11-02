@@ -30,6 +30,9 @@ pub struct AudioTags {
     pub disc_total: Option<u32>,
     pub genre: String,
     pub composer: String,
+    /// The release date as far as the tags tell it (`1985-06-01`,
+    /// `1985-06`, `1985`).
+    pub date: String,
     /// The year the album (or the song) first came out (`ORIGINALDATE`).
     pub original_year: Option<u16>,
     pub label: String,
@@ -125,6 +128,15 @@ pub fn probe(path: &Path) -> Option<AudioTags> {
         year: tags
             .iter()
             .find_map(|t| t.date().map(|d| d.year).filter(|&y| y > 0)),
+        date: tags
+            .iter()
+            .find_map(|t| t.date().filter(|d| d.year > 0))
+            .map(|d| match (d.month, d.day) {
+                (Some(m), Some(day)) => format!("{:04}-{m:02}-{day:02}", d.year),
+                (Some(m), None) => format!("{:04}-{m:02}", d.year),
+                _ => format!("{:04}", d.year),
+            })
+            .unwrap_or_default(),
         track: number_of(&tags, Accessor::track),
         track_total: number_of(&tags, Accessor::track_total),
         disc: number_of(&tags, Accessor::disk),
@@ -591,6 +603,8 @@ fn expand_as(
         })
         .unwrap_or_default();
     let bits = t.audio.bits.map(|b| b.to_string()).unwrap_or_default();
+    let mut extra = crate::fields::Extra::new();
+    crate::fields::add_date(&mut extra, &t.date);
     let several_discs = t.disc_total.is_some_and(|n| n > 1) || t.disc.is_some_and(|d| d > 1);
     // An album of one disc has no disc to tell.
     let disc = t
@@ -639,7 +653,7 @@ fn expand_as(
         "bitrate" | "taxa de bits" | "tasa de bits" => Some(bitrate.as_str()),
         "sample rate" | "amostragem" | "muestreo" => Some(sample_rate.as_str()),
         "bits" => Some(bits.as_str()),
-        _ => None,
+        key => crate::fields::get(&extra, key),
     });
     let out = out.replace("()", "").replace("[]", "");
     let out = text::collapse_spaces(&out);
