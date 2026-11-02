@@ -63,6 +63,11 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.22.0" date="2026-11-02">
+      <description>
+        <p>Templates have many more fields: a movie's genre, country, director, studio, collection and age rating; a show's network and absolute episode number; edition, source and release group from video file names; release dates with the month's name; a book's language and pages; and a comic's story arc, colorist, letterer, cover artist, imprint, scanner and more. Online answers are kept on disk for the days chosen in Options, so searching the same files again is instant. Only one lookup rule (movie, show, music, book or comic) is used at a time, and the optional columns show only those that fit it.</p>
+      </description>
+    </release>
     <release version="0.21.0" date="2026-11-02">
       <description>
         <p>The Extension rule can set each file's extension from what it really is: a .jpg that is a PNG becomes .png, a .cbz that is a RAR becomes .cbr, a file with no extension gets one, and a text file named .pdf becomes .txt (or keeps a fitting extension already in its name, like movie.nfo). Templates can name a fallback, {title|year}, and the number of digits, {episode:3}. Comic details are read from archives whose extension does not match their type.</p>
