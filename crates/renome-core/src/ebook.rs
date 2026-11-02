@@ -44,6 +44,7 @@ pub fn read(path: &Path) -> BookMeta {
         .extension()
         .map(|e| e.to_string_lossy().to_lowercase())
         .unwrap_or_default();
+    let own_path = path.to_path_buf();
     let path = path.to_path_buf();
     let m = std::panic::catch_unwind(move || match ext.as_str() {
         "epub" | "kepub" => epub(&path),
@@ -53,6 +54,9 @@ pub fn read(path: &Path) -> BookMeta {
         _ => None,
     });
     let mut m = m.ok().flatten().unwrap_or_default();
+    if let Some(side) = sidecar(&own_path) {
+        m = with_sidecar(m, side);
+    }
     m.title = clean_title(&m.title);
     // Some books put everyone in one field (`Author;Other;tradução de X`):
     // a name never has a `;`, and translators and the like are not authors.
@@ -74,6 +78,67 @@ pub fn read(path: &Path) -> BookMeta {
     m.series = m.series.trim().to_string();
     m.series_index = series_index(&m.series_index);
     m
+}
+
+/// The details a library manager (or Renome) left beside the book: its
+/// own `<name>.opf`, or the folder's `metadata.opf` when the folder holds
+/// no other book.
+fn sidecar(book: &Path) -> Option<BookMeta> {
+    let dir = book.parent()?;
+    let stem = book.file_stem()?.to_string_lossy();
+    let own = dir.join(format!("{stem}.opf"));
+    let path = if own.is_file() {
+        own
+    } else {
+        let shared = dir.join("metadata.opf");
+        let books = std::fs::read_dir(dir)
+            .ok()?
+            .flatten()
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .is_some_and(|x| is_book(&x.to_string_lossy().to_lowercase()))
+            })
+            .take(2)
+            .count();
+        if !shared.is_file() || books != 1 {
+            return None;
+        }
+        shared
+    };
+    if std::fs::metadata(&path).ok()?.len() > 1 << 20 {
+        return None;
+    }
+    let text = std::fs::read_to_string(&path).ok()?;
+    let doc = roxmltree::Document::parse(text.trim_start_matches('\u{feff}')).ok()?;
+    let m = opf_meta(&doc);
+    (!m.title.is_empty() || !m.isbns.is_empty()).then_some(m)
+}
+
+/// The book's own details with the sidecar's over them: someone chose
+/// those.
+fn with_sidecar(own: BookMeta, side: BookMeta) -> BookMeta {
+    let pick = |a: String, b: String| if b.trim().is_empty() { a } else { b };
+    let mut isbns = side.isbns;
+    for i in own.isbns {
+        if !isbns.contains(&i) {
+            isbns.push(i);
+        }
+    }
+    BookMeta {
+        title: pick(own.title, side.title),
+        authors: if side.authors.is_empty() {
+            own.authors
+        } else {
+            side.authors
+        },
+        isbns,
+        year: side.year.or(own.year),
+        publisher: pick(own.publisher, side.publisher),
+        language: pick(own.language, side.language),
+        series: pick(own.series, side.series),
+        series_index: pick(own.series_index, side.series_index),
+    }
 }
 
 /// `1.0` → `1`; anything else as it is.
@@ -759,6 +824,28 @@ mod tests {
         assert_eq!(clean_title("..."), "");
         assert!(is_junk_author("Usuário"));
         assert!(!is_junk_author("Tomé de Alvarenga"));
+    }
+
+    #[test]
+    fn opf_beside_the_book() {
+        let d = tempfile::tempdir().unwrap();
+        let opf = r#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <dc:title>A Casa Azul</dc:title><dc:creator>Ana Prado</dc:creator><dc:language>pt</dc:language>
+            </metadata></package>"#;
+        let book = d.path().join("livro.pdf");
+        std::fs::write(&book, b"not a pdf").unwrap();
+        std::fs::write(d.path().join("metadata.opf"), opf).unwrap();
+        let m = read(&book);
+        assert_eq!(
+            (m.title.as_str(), m.authors.as_slice()),
+            ("A Casa Azul", &["Ana Prado".to_string()][..])
+        );
+        // Another book in the folder: the shared one is nobody's.
+        std::fs::write(d.path().join("outro.epub"), b"x").unwrap();
+        assert_eq!(read(&book).title, "");
+        // Its own name is always its own.
+        std::fs::write(d.path().join("livro.opf"), opf).unwrap();
+        assert_eq!(read(&book).title, "A Casa Azul");
     }
 
     #[test]

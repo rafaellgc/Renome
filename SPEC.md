@@ -121,6 +121,31 @@ whole number in the value with N digits (`{episode:3}`: `001-E002`;
 `{track:1}`: `5`), leaving decimals (`12.1`), a disc before a track
 (`1-05`) and text without numbers as they are.
 
+**What is already there** is read before searching:
+- Movie: the `.nfo` beside the video (`<name>.nfo`, else the folder's
+  `movie.nfo`; a movie folder's own `movie.nfo`): a `<movie>` document's
+  `uniqueid type="tmdb"`/`tmdbid`, else its IMDb id (`uniqueid
+  type="imdb"`, `imdbid`, `id` starting with `tt`), else TMDB movie or
+  IMDb title links anywhere in the text (Kodi's link after the document,
+  release notes). The TMDB id becomes the guess's id; an IMDb id is
+  turned into one with TMDB's `/find` (kept like any answer).
+- TV show, when no show is typed: the first `tvshow.nfo` (in a file's
+  folder or the one above it) with a TMDB or IMDb id names the show.
+- Book: `<name>.opf` beside the book, or `metadata.opf` when the folder
+  holds no other book (under 1 MB, with a title or ISBN): its title,
+  authors, year, publisher, language and series win over the file's own;
+  its ISBNs come first.
+- Comic: without a `ComicInfo.xml`, the `MetronInfo.xml` (series name,
+  volume, issue count, format, number, stories joined by ` / ` or the
+  collection title, cover date, publisher and imprint, credits by role:
+  writer/script/story/plot, artist/penciller/illustrator/breakdowns/
+  layouts, inker/embellisher/finishes, colorist, letterer, cover, editor,
+  translator; arcs, first genre, pages, age rating, series language,
+  alternative number, ISBN or UPC, the Comic Vine id); without either, a
+  zip's comment with ComicBookInfo 1.x JSON (series, issue, volume,
+  title, publisher, publication year and month, issue count, genre,
+  language, credits by role).
+
 **More fields** (`fields.rs`; each also in Portuguese and Spanish, an
 empty one is empty, not unknown): dates give `{date}` (`2010-05-03`, or
 the part known), `{month}` (two digits), `{day}` and the month's name in
@@ -819,6 +844,8 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
 ### 2.5 Comics (ComicInfo.xml, Comic Vine)
 
 - Applies to CBZ, CBR, CB7, CBT, PDF and EPUB files. The `ComicInfo.xml`
+  (else `MetronInfo.xml`, else ComicBookInfo; see "What is already
+  there")
   inside a CBZ/EPUB (zip), CB7 (7z; solid archives over 300 MB skipped)
   or CBT (tar) is read: series, number, count, volume (a number, or the
   series' first year when it is one), title, year, publisher, writer,

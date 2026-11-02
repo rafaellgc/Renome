@@ -546,6 +546,109 @@ pub(crate) fn crew(all: &[Crew], pred: impl Fn(&Crew) -> bool) -> Vec<&Crew> {
 
 /// The age rating in Jellyfin's TMDB form: `PG-13` in the US, `BR-12`
 /// elsewhere.
+/// The ids an `.nfo` gives: Kodi's, Jellyfin's and Emby's (`uniqueid`,
+/// `tmdbid`, `imdbid`), or links to TMDB and IMDb in any text (a release's
+/// notes).
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct NfoIds {
+    pub tmdb: Option<u64>,
+    pub imdb: Option<String>,
+}
+
+impl NfoIds {
+    pub fn any(&self) -> bool {
+        self.tmdb.is_some() || self.imdb.is_some()
+    }
+}
+
+/// Reads the ids of a movie (`root` = `movie`) or a show (`tvshow`) from
+/// an `.nfo`'s text; a document about something else gives none of its
+/// fields, only links of the right kind.
+pub fn nfo_ids(text: &str, root: &str) -> NfoIds {
+    static TMDB_LINK: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"themoviedb\.org/(movie|tv)/(\d+)").unwrap());
+    static IMDB_LINK: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"imdb\.com/title/(tt\d{6,10})").unwrap());
+    let mut ids = NfoIds::default();
+    let text = text.trim_start_matches('\u{feff}');
+    // Kodi allows a link after the document: the document is what comes
+    // before it.
+    let xml = text.rfind('>').map_or(text, |i| &text[..=i]);
+    if let Ok(doc) = roxmltree::Document::parse(xml)
+        && doc
+            .root_element()
+            .tag_name()
+            .name()
+            .eq_ignore_ascii_case(root)
+    {
+        for n in doc.root_element().children().filter(|n| n.is_element()) {
+            let value = n.text().unwrap_or_default().trim();
+            let name = n.tag_name().name().to_lowercase();
+            let kind = n.attribute("type").unwrap_or_default().to_lowercase();
+            match (name.as_str(), kind.as_str()) {
+                ("uniqueid", "tmdb") | ("tmdbid", _) => {
+                    ids.tmdb = ids.tmdb.or(value.parse().ok().filter(|&n| n > 0));
+                }
+                ("uniqueid", "imdb") | ("imdbid", _) | ("imdb_id", _) | ("id", _)
+                    if value.starts_with("tt") =>
+                {
+                    ids.imdb.get_or_insert_with(|| value.to_string());
+                }
+                _ => {}
+            }
+        }
+    }
+    let kind = if root == "movie" { "movie" } else { "tv" };
+    if ids.tmdb.is_none() {
+        ids.tmdb = TMDB_LINK
+            .captures_iter(text)
+            .find(|c| &c[1] == kind)
+            .and_then(|c| c[2].parse().ok());
+    }
+    if ids.imdb.is_none() {
+        ids.imdb = IMDB_LINK.captures(text).map(|c| c[1].to_string());
+    }
+    ids
+}
+
+fn read_nfo(path: &Path, root: &str) -> NfoIds {
+    match std::fs::metadata(path) {
+        Ok(m) if m.is_file() && m.len() < 1 << 20 => {}
+        _ => return NfoIds::default(),
+    }
+    std::fs::read(path)
+        .map(|b| nfo_ids(&String::from_utf8_lossy(&b), root))
+        .unwrap_or_default()
+}
+
+/// The ids of the movie a video (or a movie's folder) is, from the `.nfo`
+/// beside it (`<name>.nfo`) or its folder's `movie.nfo`.
+pub fn movie_nfo(path: &Path) -> NfoIds {
+    if path.is_dir() {
+        return read_nfo(&path.join("movie.nfo"), "movie");
+    }
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    let dir = path.parent().unwrap_or(Path::new(""));
+    let own = read_nfo(&dir.join(format!("{stem}.nfo")), "movie");
+    if own.any() {
+        return own;
+    }
+    read_nfo(&dir.join("movie.nfo"), "movie")
+}
+
+/// The ids of the show a folder holds, from its `tvshow.nfo` (or the one
+/// of the folder above, for a season folder).
+pub fn show_nfo(folder: &Path) -> NfoIds {
+    let own = read_nfo(&folder.join("tvshow.nfo"), "tvshow");
+    if own.any() {
+        return own;
+    }
+    folder
+        .parent()
+        .map(|up| read_nfo(&up.join("tvshow.nfo"), "tvshow"))
+        .unwrap_or_default()
+}
+
 /// The template fields a movie's details give (see [`crate::fields`]):
 /// genre(s), country, language, runtime, the age rating of `lang`'s
 /// country (`pt-BR`: Brazil's), director, studio, collection and release
@@ -989,6 +1092,32 @@ mod tests {
         assert_eq!(subtitle_suffix("Matrix.1999.pt", "mkv"), "");
         assert_eq!(subtitle_suffix("Movie.It", "srt"), "");
         assert_eq!(subtitle_suffix("pt", "srt"), "");
+    }
+
+    #[test]
+    fn ids_from_nfo() {
+        let kodi = r#"<?xml version="1.0"?><movie><title>X</title>
+            <uniqueid type="imdb">tt0000001</uniqueid><uniqueid type="tmdb" default="true">42</uniqueid></movie>"#;
+        assert_eq!(
+            nfo_ids(kodi, "movie"),
+            NfoIds {
+                tmdb: Some(42),
+                imdb: Some("tt0000001".into())
+            }
+        );
+        // A show's document gives nothing to a movie.
+        let show = r#"<tvshow><uniqueid type="tmdb">7</uniqueid></tvshow>"#;
+        assert_eq!(nfo_ids(show, "movie"), NfoIds::default());
+        assert_eq!(nfo_ids(show, "tvshow").tmdb, Some(7));
+        // A document and a link after it; plain notes with links.
+        let linked = "<movie><title>X</title></movie>\nhttps://www.themoviedb.org/movie/99-x";
+        assert_eq!(nfo_ids(linked, "movie").tmdb, Some(99));
+        let notes = "RELEASE NOTES\n  imdb: https://www.imdb.com/title/tt1234567/\n";
+        assert_eq!(nfo_ids(notes, "movie").imdb.as_deref(), Some("tt1234567"));
+        assert_eq!(
+            nfo_ids("https://www.themoviedb.org/tv/5", "movie").tmdb,
+            None
+        );
     }
 
     #[test]

@@ -46,9 +46,21 @@ pub struct ComicInfo {
     pub extra: crate::fields::Extra,
 }
 
-/// Reads the `ComicInfo.xml` inside a CBZ, CB7, CBT or EPUB; `None` for
-/// other files, files without one and unreadable files. The archive type
-/// is told by the content, not the name (a `.cbz` is sometimes a 7z).
+/// What a comic carries about itself, in the formats there are.
+enum Carried {
+    /// `ComicInfo.xml`.
+    Info(String),
+    /// `MetronInfo.xml`.
+    Metron(String),
+    /// ComicBookInfo: JSON in the zip's comment.
+    Cbi(String),
+}
+
+/// Reads what a CBZ, CB7, CBT or EPUB says about itself: its
+/// `ComicInfo.xml`, else its `MetronInfo.xml`, else (a zip) the
+/// ComicBookInfo in its comment; `None` for other files, files without
+/// any and unreadable files. The archive type is told by the content, not
+/// the name (a `.cbz` is sometimes a 7z).
 pub fn read(path: &Path) -> Option<ComicInfo> {
     let mut head = [0u8; 262];
     let n = File::open(path).ok()?.read(&mut head).ok()?;
@@ -66,39 +78,71 @@ pub fn read(path: &Path) -> Option<ComicInfo> {
     })
     .ok()
     .flatten()?;
-    parse_info(&xml)
+    match xml {
+        Carried::Info(x) => parse_info(&x),
+        Carried::Metron(x) => parse_metron(&x),
+        Carried::Cbi(j) => parse_cbi(&j),
+    }
 }
 
 const INFO: &str = "comicinfo.xml";
+const METRON: &str = "metroninfo.xml";
 /// A `ComicInfo.xml` is a few kilobytes; more is not one.
 const MAX_INFO: u64 = 1 << 20;
 
-fn is_info(name: &str) -> bool {
+fn is_named(name: &str, file: &str) -> bool {
     name.rsplit(['/', '\\'])
         .next()
-        .is_some_and(|n| n.eq_ignore_ascii_case(INFO))
+        .is_some_and(|n| n.eq_ignore_ascii_case(file))
 }
 
-fn from_zip(path: &Path) -> Option<String> {
+fn is_info(name: &str) -> bool {
+    is_named(name, INFO) || is_named(name, METRON)
+}
+
+/// The text of the best of the files found (`ComicInfo.xml` first).
+fn carried(name: &str, text: String) -> Carried {
+    if is_named(name, INFO) {
+        Carried::Info(text)
+    } else {
+        Carried::Metron(text)
+    }
+}
+
+fn from_zip(path: &Path) -> Option<Carried> {
     let mut zip = zip::ZipArchive::new(File::open(path).ok()?).ok()?;
-    let name = zip
+    let names: Vec<String> = zip
         .file_names()
         .filter_map(Result::ok)
-        .find(|n| is_info(n))?
-        .into_owned();
-    let entry = zip.by_name(&name).ok()?;
-    let mut text = String::new();
-    entry.take(MAX_INFO).read_to_string(&mut text).ok()?;
-    Some(text)
+        .map(|n| n.into_owned())
+        .collect();
+    let name = names
+        .iter()
+        .find(|n| is_named(n, INFO))
+        .or_else(|| names.iter().find(|n| is_named(n, METRON)));
+    if let Some(name) = name {
+        let entry = zip.by_name(name).ok()?;
+        let mut text = String::new();
+        entry.take(MAX_INFO).read_to_string(&mut text).ok()?;
+        return Some(carried(name, text));
+    }
+    let comment = String::from_utf8_lossy(zip.comment()).into_owned();
+    comment
+        .contains("ComicBookInfo/1")
+        .then_some(Carried::Cbi(comment))
 }
 
-fn from_7z(path: &Path) -> Option<String> {
+fn from_7z(path: &Path) -> Option<Carried> {
     // A solid archive decodes everything before the file asked for: big
     // ones are not worth it for a few lines of text.
     let size = std::fs::metadata(path).ok()?.len();
     let mut reader =
         sevenz_rust2::ArchiveReader::open(path, sevenz_rust2::Password::empty()).ok()?;
-    let entry = reader.archive().files.iter().find(|f| is_info(f.name()))?;
+    let files = &reader.archive().files;
+    let entry = files
+        .iter()
+        .find(|f| is_named(f.name(), INFO))
+        .or_else(|| files.iter().find(|f| is_named(f.name(), METRON)))?;
     // Read whole: one claiming to be bigger than a `ComicInfo.xml` is not.
     if entry.size() > MAX_INFO {
         return None;
@@ -108,21 +152,25 @@ fn from_7z(path: &Path) -> Option<String> {
         return None;
     }
     let bytes = reader.read_file(&name).ok()?;
-    String::from_utf8(bytes).ok()
+    Some(carried(&name, String::from_utf8(bytes).ok()?))
 }
 
-fn from_tar(path: &Path) -> Option<String> {
+fn from_tar(path: &Path) -> Option<Carried> {
     let mut archive = tar::Archive::new(File::open(path).ok()?);
+    let mut metron = None;
     for entry in archive.entries().ok()? {
         let entry = entry.ok()?;
         let name = entry.path().ok()?.to_string_lossy().into_owned();
         if is_info(&name) {
             let mut text = String::new();
             entry.take(MAX_INFO).read_to_string(&mut text).ok()?;
-            return Some(text);
+            match carried(&name, text) {
+                c @ Carried::Info(_) => return Some(c),
+                c => metron = Some(c),
+            }
         }
     }
-    None
+    metron
 }
 
 /// The fields of a `ComicInfo.xml` text.
@@ -199,6 +247,252 @@ pub fn parse_info(xml: &str) -> Option<ComicInfo> {
             }
             e
         },
+    };
+    (!info.series.is_empty() || !info.number.is_empty()).then_some(info)
+}
+
+/// The fields of a `MetronInfo.xml` text, as a `ComicInfo.xml`'s.
+pub fn parse_metron(xml: &str) -> Option<ComicInfo> {
+    use crate::fields::add;
+    let doc = roxmltree::Document::parse(xml.trim_start_matches('\u{feff}')).ok()?;
+    let root = doc.root_element();
+    if !root.tag_name().name().eq_ignore_ascii_case("MetronInfo") {
+        return None;
+    }
+    let tidy = |t: &str| text::nfc(&text::collapse_spaces(t.trim()));
+    fn child<'a, 'i>(n: roxmltree::Node<'a, 'i>, name: &str) -> Option<roxmltree::Node<'a, 'i>> {
+        n.children()
+            .find(|c| c.is_element() && c.tag_name().name().eq_ignore_ascii_case(name))
+    }
+    let text_of =
+        |n: Option<roxmltree::Node<'_, '_>>| n.and_then(|n| n.text()).map(tidy).unwrap_or_default();
+    let at = |path: &[&str]| {
+        let mut n = Some(root);
+        for p in path {
+            n = n.and_then(|n| child(n, p));
+        }
+        text_of(n)
+    };
+    let all = |list: &str, item: &str| -> Vec<String> {
+        child(root, list)
+            .map(|l| {
+                l.children()
+                    .filter(|c| c.is_element() && c.tag_name().name().eq_ignore_ascii_case(item))
+                    .map(|c| {
+                        // An arc's name is a child of its own.
+                        let named = child(c, "Name");
+                        tidy(
+                            named
+                                .and_then(|n| n.text())
+                                .or(c.text())
+                                .unwrap_or_default(),
+                        )
+                    })
+                    .filter(|t| !t.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    // Who did what: each role's people, in order.
+    let mut roles: Vec<(String, String)> = Vec::new();
+    if let Some(credits) = child(root, "Credits") {
+        for c in credits.children().filter(|c| c.is_element()) {
+            let who = text_of(child(c, "Creator"));
+            if who.is_empty() {
+                continue;
+            }
+            for r in child(c, "Roles")
+                .into_iter()
+                .flat_map(|r| r.children().filter(|x| x.is_element()))
+            {
+                roles.push((
+                    tidy(r.text().unwrap_or_default()).to_lowercase(),
+                    who.clone(),
+                ));
+            }
+        }
+    }
+    let people = |wanted: &[&str]| {
+        let mut out: Vec<&str> = Vec::new();
+        for (role, who) in &roles {
+            if wanted.contains(&role.as_str()) && !out.contains(&who.as_str()) {
+                out.push(who);
+            }
+        }
+        out.join(", ")
+    };
+    let cover_date = at(&["CoverDate"]);
+    let mut extra = crate::fields::Extra::new();
+    crate::fields::add_date(&mut extra, &cover_date);
+    add(&mut extra, "story arc", &all("Arcs", "Arc").join(", "));
+    add(&mut extra, "imprint", &at(&["Publisher", "Imprint"]));
+    add(&mut extra, "format", &at(&["Series", "Format"]));
+    add(
+        &mut extra,
+        "genre",
+        all("Genres", "Genre").first().map_or("", String::as_str),
+    );
+    add(
+        &mut extra,
+        "inker",
+        &people(&["inker", "embellisher", "finishes"]),
+    );
+    add(
+        &mut extra,
+        "colorist",
+        &people(&["colorist", "color separations"]),
+    );
+    add(&mut extra, "letterer", &people(&["letterer"]));
+    add(&mut extra, "cover artist", &people(&["cover"]));
+    add(
+        &mut extra,
+        "editor",
+        &people(&["editor", "editor in chief", "senior editor"]),
+    );
+    add(&mut extra, "translator", &people(&["translator"]));
+    let pages = at(&["PageCount"]);
+    if pages != "0" {
+        add(&mut extra, "pages", &pages);
+    }
+    let rating = at(&["AgeRating"]);
+    if !rating.eq_ignore_ascii_case("unknown") {
+        add(&mut extra, "age rating", &rating);
+    }
+    add(
+        &mut extra,
+        "language",
+        child(root, "Series")
+            .and_then(|s| s.attribute("lang"))
+            .unwrap_or_default(),
+    );
+    add(&mut extra, "alternate number", &at(&["AlternativeNumber"]));
+    let mut gtin = at(&["GTIN", "ISBN"]);
+    if gtin.is_empty() {
+        gtin = at(&["GTIN", "UPC"]);
+    }
+    add(&mut extra, "gtin", &gtin);
+    // A Comic Vine id, as a link the rest already reads.
+    let comic_vine = child(root, "IDS")
+        .into_iter()
+        .flat_map(|ids| ids.children().filter(|c| c.is_element()))
+        .find(|c| {
+            c.attribute("source")
+                .is_some_and(|s| s.eq_ignore_ascii_case("Comic Vine"))
+        })
+        .and_then(|c| c.text())
+        .map(|id| id.trim().to_string())
+        .filter(|id| id.chars().all(|c| c.is_ascii_digit()) && !id.is_empty());
+    let stories = all("Stories", "Story");
+    let title = match stories.is_empty() {
+        true => at(&["CollectionTitle"]),
+        false => stories.join(" / "),
+    };
+    let info = ComicInfo {
+        series: at(&["Series", "Name"]),
+        number: at(&["Number"]),
+        count: at(&["Series", "IssueCount"])
+            .parse()
+            .ok()
+            .filter(|n| *n > 0),
+        volume: at(&["Series", "Volume"]),
+        title,
+        year: cover_date
+            .get(..4)
+            .and_then(|y| y.parse().ok())
+            .filter(|y| (1800..=2200).contains(y)),
+        publisher: at(&["Publisher", "Name"]),
+        writer: people(&["writer", "script", "story", "plot"]),
+        penciller: people(&[
+            "artist",
+            "penciller",
+            "illustrator",
+            "breakdowns",
+            "layouts",
+        ]),
+        web: comic_vine
+            .map(|id| format!("https://comicvine.gamespot.com/issue/4000-{id}/"))
+            .unwrap_or_default(),
+        manga: false,
+        extra,
+    };
+    (!info.series.is_empty() || !info.number.is_empty()).then_some(info)
+}
+
+/// The fields of a ComicBookInfo (JSON in a zip's comment).
+pub fn parse_cbi(json: &str) -> Option<ComicInfo> {
+    use crate::fields::add;
+    let v: serde_json::Value = serde_json::from_str(json.trim()).ok()?;
+    let c = v
+        .as_object()?
+        .iter()
+        .find(|(k, _)| k.starts_with("ComicBookInfo/1"))?
+        .1;
+    let s = |k: &str| match &c[k] {
+        serde_json::Value::String(t) => text::nfc(&text::collapse_spaces(t.trim())),
+        serde_json::Value::Number(n) => n.to_string(),
+        _ => String::new(),
+    };
+    let n = |k: &str| c[k].as_u64().or_else(|| s(k).parse().ok());
+    let credits: Vec<(String, String)> = c["credits"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|x| {
+            Some((
+                x["role"].as_str()?.trim().to_lowercase(),
+                x["person"].as_str()?.trim().to_string(),
+            ))
+        })
+        .collect();
+    let people = |wanted: &[&str]| {
+        let mut out: Vec<&str> = Vec::new();
+        for (role, who) in &credits {
+            if wanted.contains(&role.as_str()) && !who.is_empty() && !out.contains(&who.as_str()) {
+                out.push(who);
+            }
+        }
+        out.join(", ")
+    };
+    let year = n("publicationYear")
+        .and_then(|y| u16::try_from(y).ok())
+        .filter(|y| (1800..=2200).contains(y));
+    let mut extra = crate::fields::Extra::new();
+    crate::fields::add_ymd(
+        &mut extra,
+        year,
+        n("publicationMonth").and_then(|m| u8::try_from(m).ok()),
+        None,
+    );
+    add(&mut extra, "genre", &s("genre"));
+    add(&mut extra, "language", &s("language"));
+    add(&mut extra, "inker", &people(&["inker"]));
+    add(
+        &mut extra,
+        "colorist",
+        &people(&["colorist", "colourist", "colorer"]),
+    );
+    add(&mut extra, "letterer", &people(&["letterer"]));
+    add(
+        &mut extra,
+        "cover artist",
+        &people(&["cover", "cover artist", "coverartist"]),
+    );
+    add(&mut extra, "editor", &people(&["editor"]));
+    let info = ComicInfo {
+        series: s("series"),
+        number: s("issue"),
+        count: n("numberOfIssues")
+            .and_then(|x| u32::try_from(x).ok())
+            .filter(|x| *x > 0),
+        volume: s("volume"),
+        title: s("title"),
+        year,
+        publisher: s("publisher"),
+        writer: people(&["writer", "plotter", "scripter"]),
+        penciller: people(&["artist", "penciller", "penciler"]),
+        web: String::new(),
+        manga: false,
+        extra,
     };
     (!info.series.is_empty() || !info.number.is_empty()).then_some(info)
 }
@@ -1450,6 +1744,58 @@ mod tests {
     }
 
     #[test]
+    fn metron_and_cbi() {
+        let metron = r#"<?xml version="1.0"?><MetronInfo>
+          <IDS><ID source="Metron" primary="true">9</ID><ID source="Comic Vine">123456</ID></IDS>
+          <Publisher><Name>Editora Sol</Name><Imprint>Selo Lua</Imprint></Publisher>
+          <Series lang="pt-BR"><Name>Linha Azul</Name><Volume>2</Volume><Format>Single Issue</Format></Series>
+          <Number>7</Number><Stories><Story>A Volta</Story></Stories>
+          <CoverDate>1990-03-01</CoverDate><PageCount>32</PageCount>
+          <Arcs><Arc><Name>Inverno</Name></Arc></Arcs>
+          <Credits>
+            <Credit><Creator>Ana Prado</Creator><Roles><Role>Writer</Role><Role>Cover</Role></Roles></Credit>
+            <Credit><Creator>Rui Lima</Creator><Roles><Role>Penciller</Role></Roles></Credit>
+            <Credit><Creator>Eva Reis</Creator><Roles><Role>Colorist</Role></Roles></Credit>
+          </Credits></MetronInfo>"#;
+        let i = parse_metron(metron).unwrap();
+        assert_eq!(
+            (i.series.as_str(), i.number.as_str(), i.volume.as_str()),
+            ("Linha Azul", "7", "2")
+        );
+        assert_eq!(
+            (i.title.as_str(), i.year, i.publisher.as_str()),
+            ("A Volta", Some(1990), "Editora Sol")
+        );
+        assert_eq!(
+            (i.writer.as_str(), i.penciller.as_str()),
+            ("Ana Prado", "Rui Lima")
+        );
+        assert_eq!(comic_vine_id(&i.web).as_deref(), Some("123456"));
+        let get = |k: &str| i.extra.get(k).map(String::as_str);
+        assert_eq!(get("colorist"), Some("Eva Reis"));
+        assert_eq!(get("cover artist"), Some("Ana Prado"));
+        assert_eq!(get("story arc"), Some("Inverno"));
+        assert_eq!(get("imprint"), Some("Selo Lua"));
+        assert_eq!(get("month"), Some("03"));
+        assert_eq!(get("language"), Some("pt-BR"));
+        let cbi = r#"{"appID":"x","ComicBookInfo/1.0":{"series":"Linha Azul","issue":"8",
+            "publicationYear":1990,"publicationMonth":4,"publisher":"Editora Sol",
+            "credits":[{"person":"Ana Prado","role":"Writer","primary":true},
+                       {"person":"Eva Reis","role":"Colorist"}]}}"#;
+        let i = parse_cbi(cbi).unwrap();
+        assert_eq!(
+            (i.series.as_str(), i.number.as_str(), i.year),
+            ("Linha Azul", "8", Some(1990))
+        );
+        assert_eq!(i.writer, "Ana Prado");
+        assert_eq!(
+            i.extra.get("month name pt").map(String::as_str),
+            Some("abril")
+        );
+        assert_eq!(parse_cbi("{}"), None);
+    }
+
+    #[test]
     fn more_fields() {
         let info = parse_info(
             r#"<ComicInfo><Series>Linha Azul</Series><Number>3</Number><Year>1987</Year>
@@ -1463,10 +1809,16 @@ mod tests {
             &m,
             " - ",
         );
-        assert_eq!(name, "Linha Azul #003 - maio 1987 [Ana Prado] Volta (Grupo Scan)");
+        assert_eq!(
+            name,
+            "Linha Azul #003 - maio 1987 [Ana Prado] Volta (Grupo Scan)"
+        );
         // What follows `--` is a note.
         let g = parse_name("Linha Azul 004--notas do grupo", "");
-        assert_eq!((g.series.as_str(), g.number.as_str()), ("Linha Azul", "004"));
+        assert_eq!(
+            (g.series.as_str(), g.number.as_str()),
+            ("Linha Azul", "004")
+        );
         assert_eq!(g.scan, "notas do grupo");
         // Words of release notes are no scanner.
         assert_eq!(parse_name("Linha Azul 005 (digital) (c2c)", "").scan, "");

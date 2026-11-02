@@ -112,6 +112,49 @@ impl Client {
         }
     }
 
+    /// The TMDB id of a movie (`tv` false) or show an IMDb id names.
+    pub async fn find_imdb(&self, imdb: &str, tv: bool) -> Option<u64> {
+        #[derive(Deserialize)]
+        struct Found {
+            #[serde(default)]
+            movie_results: Vec<Id>,
+            #[serde(default)]
+            tv_results: Vec<Id>,
+        }
+        #[derive(Deserialize)]
+        struct Id {
+            id: u64,
+        }
+        let f: Found = self
+            .get(&format!("/find/{imdb}"), &[("external_source", "imdb_id")])
+            .await
+            .ok()?;
+        let list = if tv { f.tv_results } else { f.movie_results };
+        list.first().map(|i| i.id)
+    }
+
+    /// The show's id from a `tvshow.nfo` in the files' folders (or the
+    /// ones above them), when one has it.
+    pub async fn show_from_nfo(&self, folders: &[PathBuf]) -> Option<u64> {
+        let mut seen = Vec::new();
+        for f in folders {
+            if seen.contains(f) {
+                continue;
+            }
+            seen.push(f.clone());
+            let ids = tmdb::show_nfo(f);
+            if let Some(id) = ids.tmdb {
+                return Some(id);
+            }
+            if let Some(imdb) = ids.imdb
+                && let Some(id) = self.find_imdb(&imdb, true).await
+            {
+                return Some(id);
+            }
+        }
+        None
+    }
+
     /// Checks the key with a cheap request.
     pub async fn check(&self) -> Result<(), String> {
         self.get::<serde_json::Value>("/configuration", &[])
@@ -438,10 +481,23 @@ pub async fn collections(client: &Client, ids: Vec<u64>, sets: bool) -> MovieSet
 }
 
 pub async fn lookup(app: &AppHandle, client: &Client, items: Vec<LookupItem>) -> Vec<Lookup> {
-    let guesses: Vec<(PathBuf, Guess)> = items
+    let mut guesses: Vec<(PathBuf, Guess)> = items
         .into_iter()
         .map(|i| (i.path, tmdb::guess(&i.name)))
         .collect();
+    // The `.nfo` beside a video says which movie it is (an IMDb id is
+    // asked to TMDB).
+    for (path, g) in &mut guesses {
+        if g.id.is_some() {
+            continue;
+        }
+        let ids = tmdb::movie_nfo(path);
+        g.id = match (ids.tmdb, ids.imdb) {
+            (Some(id), _) => Some(id),
+            (None, Some(imdb)) => client.find_imdb(&imdb, false).await,
+            _ => None,
+        };
+    }
     let mut unique: Vec<Guess> = Vec::new();
     for (_, g) in &guesses {
         if !g.title.is_empty() && !unique.contains(g) {
@@ -539,7 +595,16 @@ pub async fn search_show(
             .iter()
             .map(|i| (i.stem().to_string(), i.folder()))
             .collect();
-        ShowQuery::Name(tv::guess_show(&names))
+        let mut g = tv::guess_show(&names);
+        if g.id.is_none() {
+            let folders: Vec<PathBuf> = items.iter().map(TvItem::folder).collect();
+            g.id = client.show_from_nfo(&folders).await;
+        }
+        // A show known by its id needs no name.
+        match (g.title.is_empty(), g.id) {
+            (true, Some(id)) => ShowQuery::Id(id),
+            _ => ShowQuery::Name(g),
+        }
     } else {
         tv::show_query(query)
     };
