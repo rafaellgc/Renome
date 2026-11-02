@@ -25,7 +25,7 @@ export type Rule =
       inclusive: boolean;
     }
   | { type: "charAt"; position: number; fromEnd: boolean; onlyIf: string; caseSensitive: boolean; replace: string }
-  | { type: "extension"; mode: "set" | "lower" | "upper" | "remove"; value: string }
+  | { type: "extension"; mode: "set" | "lower" | "upper" | "remove" | "content"; value: string }
   | { type: "rearrange"; separator: string; order: string; target: Target }
   | { type: "movie"; template: string; colon: string; sidecar: boolean; fanart: boolean; folder: boolean; missing: boolean }
   | {

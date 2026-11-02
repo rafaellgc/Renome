@@ -237,12 +237,16 @@
               <option value="upper">{t("extUpper")}</option>
               <option value="set">{t("extSet")}</option>
               <option value="remove">{t("extRemove")}</option>
+              <option value="content">{t("extContent")}</option>
             </select>
           </label>
           {#if r.mode === "set"}
             <label>{t("newExt")} <input bind:value={r.value} spellcheck="false" placeholder="jpg" /></label>
           {/if}
         </div>
+        {#if r.mode === "content"}
+          <p class="hint">{t("extContentHint")}</p>
+        {/if}
       {:else if r.type === "movie"}
         <p class="hint top">{t("movieHint")}</p>
         <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>

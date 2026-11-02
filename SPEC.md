@@ -89,7 +89,7 @@ before it is read. The preview sends that name to the app
 | Convert characters | fix broken accents: each run of non-ASCII characters is turned back into the Windows-1252/Latin-1 bytes it was read as and, when those are UTF-8, decoded (up to 3 times, for text broken more than once; `SÃ£o` → `São`, `â€™` → `’`); text that does not decode stays; other alphabets in Latin letters: Cyrillic (Russian, Ukrainian, Belarusian, Serbian, Macedonian letters; `щ` → `shch`, `ъ`/`ь` dropped) and Greek (accents dropped, `ου` → `ou`), a capital as `Sh`, or `SH` inside a word in capitals; a web-safe name: the name in plain Latin letters (as above and with the accents rule's letters), then only ASCII letters, digits and dots, every other run of characters becoming one `-` or `_` (the user's choice), none at the ends |
 | Remove range | from: position N or first occurrence of a text; to: end, position N or occurrence of a text; include the delimiters or not |
 | Character at position | position N; optionally only if the current character is X (case-insensitive unless asked); replace with Y or delete |
-| Extension | set a new one; lowercase/uppercase; remove |
+| Extension | set a new one; lowercase/uppercase; remove; from the content: the extension the file's first bytes call for (pictures, camera RAW, audio, video, PDF, books, archives, Office/OpenDocument, fonts; zips told apart by what they hold: EPUB, Office, pictures only = comic), kept when it already fits (`.nef` is TIFF inside, `.m4b` is MP4), comic extensions turned into the comic one of the real archive (`.cbz` that is RAR → `.cbr`), UPPERCASE kept, split parts (`.r00`, `.001`) never touched; text (UTF-8, UTF-16 with its mark, Windows-1252 without controls) replaces only the extension of a format that is not text (`.pdf` → `.txt`, or `.html`, `.xml`, `.svg`, `.json`, `.srt`, `.vtt`, `.ass`, `.m3u8` when the start tells), never a text one or none; after a dot that starts no extension (`v1.0_x86[0]`) the new one is added; a fitting extension already in the name before the wrong one (one of the content's; for text, a free text format's — `txt`, `nfo`, `csv`, `log`… — or a structured one's only when the content was told as it: `json` valid JSON, `xml`/`opf`/`ncx` XML, `html`, `srt`/`vtt`/`ass`, `m3u`) is kept and the wrong one only taken off (`movie.nfo.pdf` → `movie.nfo`, `photo.png.jpg` → `photo.png`) |
 | Movie (TMDB) | template with `{title}`, `{original}`, `{year}`, `{id}`, `{resolution}`, `{video codec}` (default `{title} ({year}) [tmdbid-{id}]`); what `:` becomes (default ` - `); a folder for each movie; save `.nfo` and poster (optionally fanart and logo) next to renamed videos; show the collection's missing movies. See 2.1 |
 | TV show (TMDB) | the show (name, TMDB id or link; empty: from the files); template with `{show}`, `{original}`, `{year}`, `{season}`, `{episode}`, `{title}`, `{id}`, `{resolution}`, `{video codec}` (as for movies, see 2.1; not in the show folder) (default `{show} ({year}) - S{season}E{episode} - {title}`); what `:` becomes; show and season folders (show folder template, default `{show} ({year}) [tmdbid-{id}]`); save `.nfo` files and images (optionally fanart and logo); show the missing episodes. See 2.2 |
 | Music (tags) | template with `{track}`, `{title}`, `{artist}`, `{album artist}`, `{album}`, `{year}`, `{disc}`, `{genre}`, `{composer}`, `{total tracks}`, `{total discs}`, `{original year}`, `{label}`, `{catalog}`, `{artist sort}`, `{album artist sort}`, `{initial}`, `{format}`, `{bitrate}`, `{sample rate}`, `{bits}` (default `{track} - {title}`); what `:` becomes; disc number in the track on multi-disc albums; fill in from the file name; artist and album folders (default `{album artist}/{album} ({year})`); show the missing tracks. See 2.3 |
@@ -105,6 +105,14 @@ every `{field}` in it has a value, and left out otherwise
 not nest and do not span a `/` folder level; a `<...>` with no known
 field, or a `<` with no `>` after it, is kept as typed (Windows refuses
 `<` and `>` in names anyway, so no name needed them).
+
+A key may name **fallbacks**: `{a|b|c}` is the first of those keys with
+a value (`{title|year}`: the title, else the year), empty when all are
+empty; unknown choices are skipped, and one with no known key is kept as
+typed. It works inside optional parts. `{key:N}` (N from 1 to 9) writes each
+whole number in the value with N digits (`{episode:3}`: `001-E002`;
+`{track:1}`: `5`), leaving decimals (`12.1`), a disc before a track
+(`1-05`) and text without numbers as they are.
 
 ### 2.1 Movies (TMDB)
 
@@ -775,8 +783,9 @@ field, or a `<` with no `>` after it, is kept as typed (Windows refuses
   inside a CBZ/EPUB (zip), CB7 (7z; solid archives over 300 MB skipped)
   or CBT (tar) is read: series, number, count, volume (a number, or the
   series' first year when it is one), title, year, publisher, writer,
-  penciller, web (a Comic Vine issue link gives its id). CBR (RAR) is
-  never opened: no RAR reader has a free licence.
+  penciller, web (a Comic Vine issue link gives its id). The archive type
+  is told by the first bytes, not the extension (a `.cbz` that is a 7z is
+  read). CBR (RAR) is never opened: no RAR reader has a free licence.
 - The file name is read for what that lacks: release notes in brackets
   are dropped (a year among them is the issue's, `(of N)` the count),
   dots and underscores stand for spaces (not in `12.1`), then a chapter

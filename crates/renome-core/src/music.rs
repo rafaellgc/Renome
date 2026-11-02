@@ -514,11 +514,11 @@ static REPEATED_DASH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r" [-–](?:
 /// In a compilation, a template without the artist gets it before the
 /// title.
 pub fn expand(template: &str, t: &AudioTags, colon: &str, disc_prefix: bool) -> String {
-    const ARTIST: [&str; 2] = ["{artist}", "{artista}"];
+    const ARTIST: [&str; 2] = ["artist", "artista"];
     const TITLE: [&str; 3] = ["{title}", "{título}", "{titulo}"];
     if t.compilation
         && !t.artist.is_empty()
-        && !ARTIST.iter().any(|k| template.contains(k))
+        && !ARTIST.iter().any(|k| crate::rules::uses_key(template, k))
         && let Some(at) = TITLE.iter().find_map(|k| template.find(k))
     {
         let template = format!("{}{{artist}} - {}", &template[..at], &template[at..]);
@@ -553,7 +553,9 @@ fn expand_as(
     // An album named with its date (`Show 12 (2025-05-04)`) needs no year
     // again beside it.
     let mut year = t.year.map(|y| y.to_string()).unwrap_or_default();
-    let names_album = ["{album}", "{álbum}"].iter().any(|k| template.contains(k));
+    let names_album = ["album", "álbum"]
+        .iter()
+        .any(|k| crate::rules::uses_key(template, k));
     if names_album && !year.is_empty() && YEAR_IN_NAME.is_match(&t.album) {
         year.clear();
     }

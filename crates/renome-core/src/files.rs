@@ -41,6 +41,9 @@ pub struct FileEntry {
     /// A video's picture size and codec, read on first use.
     #[serde(skip)]
     pub(crate) video: OnceLock<Option<crate::video::VideoInfo>>,
+    /// What the content really is (see [`crate::kind`]), read on first use.
+    #[serde(skip)]
+    pub(crate) kind: OnceLock<Option<crate::kind::Kind>>,
 }
 
 impl FileEntry {
@@ -68,6 +71,7 @@ impl FileEntry {
             tags: OnceLock::new(),
             comic: OnceLock::new(),
             video: OnceLock::new(),
+            kind: OnceLock::new(),
         })
     }
 
@@ -99,6 +103,16 @@ impl FileEntry {
         }
         self.video
             .get_or_init(|| crate::video::read(&self.path))
+            .as_ref()
+    }
+
+    /// What the file's content really is. Read once and cached.
+    pub fn kind(&self) -> Option<&crate::kind::Kind> {
+        if self.is_dir {
+            return None;
+        }
+        self.kind
+            .get_or_init(|| crate::kind::read(&self.path))
             .as_ref()
     }
 
@@ -139,6 +153,9 @@ impl FileEntry {
         }
         if let (None, Some(d)) = (self.taken.get(), other.taken.get()) {
             let _ = self.taken.set(*d);
+        }
+        if let (None, Some(k)) = (self.kind.get(), other.kind.get()) {
+            let _ = self.kind.set(k.clone());
         }
     }
 

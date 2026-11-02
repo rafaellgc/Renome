@@ -64,7 +64,7 @@ const KEYS: [&str; 10] = [
 
 /// Whether a template has a key that needs the video read.
 pub fn wanted(template: &str) -> bool {
-    KEYS.iter().any(|k| template.contains(&format!("{{{k}}}")))
+    KEYS.iter().any(|k| crate::rules::uses_key(template, k))
 }
 
 /// The video's values for templates: resolution and codec, empty when

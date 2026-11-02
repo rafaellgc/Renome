@@ -1,6 +1,7 @@
 //! Renaming rules. Each [`Step`] is a rule that can be turned on or off;
 //! the [`Pipeline`] compiles the list and applies the rules in order.
 
+use std::borrow::Cow;
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
@@ -88,6 +89,9 @@ pub enum ExtMode {
     Lower,
     Upper,
     Remove,
+    /// The one the content calls for (a `.jpg` that is a PNG becomes
+    /// `.png`); a fitting one, or content not told, stays.
+    Content,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -966,6 +970,12 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             ExtMode::Lower => *ext = ext.to_lowercase(),
             ExtMode::Upper => *ext = ext.to_uppercase(),
             ExtMode::Remove => ext.clear(),
+            ExtMode::Content => {
+                if let Some((s, e)) = ctx.file.kind().and_then(|k| k.fix_name(stem, ext)) {
+                    *stem = s;
+                    *ext = e;
+                }
+            }
         },
 
         Rule::Rearrange {
@@ -1079,6 +1089,89 @@ static LEADING_NUMBER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\s*(?:\d{1,2}[-.])?\d{1,3}(?:\s*[-.)_]\s*|\s+)(?:[-–]\s*)?").unwrap()
 });
 
+/// A template key's value. `{a|b|c}` is the first of those keys with a
+/// value (`{title|year}`: the title, else the year); empty when all of
+/// them are, unknown when none is known. `{key:N}` writes its numbers
+/// with N digits (`{episode:3}`: `001`; `{track:1}`: `1`).
+pub(crate) fn key_value<'a>(
+    value: &impl Fn(&str) -> Option<&'a str>,
+    key: &str,
+) -> Option<Cow<'a, str>> {
+    if let Some((base, width)) = split_width(key) {
+        return key_value(value, base).map(|v| Cow::Owned(digits(&v, width)));
+    }
+    if !key.contains('|') {
+        return value(key).map(Cow::Borrowed);
+    }
+    let mut known = None;
+    for k in key.split('|').map(str::trim) {
+        if let Some(v) = value(k) {
+            if !v.trim().is_empty() {
+                return Some(Cow::Borrowed(v));
+            }
+            known.get_or_insert(Cow::Borrowed(v));
+        }
+    }
+    known
+}
+
+/// `key:N` → (`key`, N), for N from 1 to 9.
+fn split_width(key: &str) -> Option<(&str, usize)> {
+    let (base, width) = key.rsplit_once(':')?;
+    let width = width.trim().parse::<usize>().ok()?;
+    (1..=9).contains(&width).then_some((base, width))
+}
+
+/// Writes each whole number in `s` with `width` digits (more when it has
+/// them), leaving decimals (`12.1`) and a disc before a track (`1-05`) as
+/// they are: `01-E02` → `001-E002` with 3.
+fn digits(s: &str, width: usize) -> String {
+    let b = s.as_bytes();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < b.len() {
+        if !b[i].is_ascii_digit() {
+            let ch = s[i..].chars().next().unwrap_or_default();
+            out.push(ch);
+            i += ch.len_utf8().max(1);
+            continue;
+        }
+        let start = i;
+        while i < b.len() && b[i].is_ascii_digit() {
+            i += 1;
+        }
+        let run = &s[start..i];
+        let decimal = start > 0 && b[start - 1] == b'.';
+        let disc = b.get(i) == Some(&b'-') && b.get(i + 1).is_some_and(u8::is_ascii_digit);
+        if decimal || disc {
+            out.push_str(run);
+        } else {
+            let whole = run.trim_start_matches('0');
+            let whole = if whole.is_empty() { "0" } else { whole };
+            out.push_str(&format!("{whole:0>width$}"));
+        }
+    }
+    out
+}
+
+/// Whether a template uses `key`, alone or among the choices of a
+/// `{a|b}`.
+pub(crate) fn uses_key(template: &str, key: &str) -> bool {
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        let Some(close) = rest[open..].find('}') else {
+            return false;
+        };
+        let inner = &rest[open + 1..open + close];
+        let inner = split_width(inner).map_or(inner, |(base, _)| base);
+        if inner.split('|').any(|k| k.trim() == key) {
+            return true;
+        }
+        rest = &rest[open + close + 1..];
+    }
+    false
+}
+
 /// Resolves the optional sections of a template: `<...>` is kept (without
 /// the `<>`) when every key in it has a value, else dropped
 /// (`{album}< - CD{disc}>`). A section without known keys, or a `<` with
@@ -1103,7 +1196,7 @@ pub(crate) fn optional_sections<'a>(
             let Some(end) = scan[start..].find('}') else {
                 break;
             };
-            if let Some(v) = value(&scan[start + 1..start + end]) {
+            if let Some(v) = key_value(&value, &scan[start + 1..start + end]) {
                 keys += 1;
                 filled &= !v.trim().is_empty();
             }
@@ -1132,10 +1225,10 @@ pub(crate) fn expand<'a>(template: &str, value: impl Fn(&str) -> Option<&'a str>
         let tail = &rest[open..];
         match tail
             .find('}')
-            .and_then(|close| Some((close, value(&tail[1..close])?)))
+            .and_then(|close| Some((close, key_value(&value, &tail[1..close])?)))
         {
             Some((close, v)) => {
-                out.push_str(v);
+                out.push_str(&v);
                 rest = &tail[close + 1..];
             }
             None => {
@@ -1279,6 +1372,7 @@ mod tests {
             tags: Default::default(),
             comic: Default::default(),
             video: Default::default(),
+            kind: Default::default(),
         }
     }
 
@@ -1339,6 +1433,43 @@ mod tests {
         assert_eq!(expand("{a} <{a}", value), "A <A");
         // Values are not read as sections.
         assert_eq!(expand("{a}<{a}>", |_| Some("<x>")), "<x><x>");
+    }
+
+    #[test]
+    fn fallback_keys() {
+        let value = |key: &str| match key {
+            "a" => Some("A"),
+            "empty" => Some(""),
+            _ => None,
+        };
+        assert_eq!(expand("{empty|a}", value), "A");
+        assert_eq!(expand("{a|empty}", value), "A");
+        assert_eq!(expand("{ empty | a }", value), "A");
+        assert_eq!(expand("x{empty|empty}y", value), "xy");
+        // Unknown choices are skipped; none known stays as typed.
+        assert_eq!(expand("{zzz|a}", value), "A");
+        assert_eq!(expand("{zzz|yyy}", value), "{zzz|yyy}");
+        assert_eq!(expand("<({empty|a})>", value), "(A)");
+        assert_eq!(expand("<({empty|empty})>z", value), "z");
+        assert!(uses_key("{title|year} - x", "year"));
+        assert!(uses_key("{episode:3}", "episode"));
+        let n = |key: &str| match key {
+            "ep" => Some("01-E02"),
+            "track" => Some("1-05"),
+            "num" => Some("12.1"),
+            "word" => Some("III"),
+            "empty" => Some(""),
+            _ => None,
+        };
+        assert_eq!(expand("{ep:3}", n), "001-E002");
+        assert_eq!(expand("{ep:1}", n), "1-E2");
+        assert_eq!(expand("{track:3}", n), "1-005");
+        assert_eq!(expand("{num:3}", n), "012.1");
+        assert_eq!(expand("{word:3}", n), "III");
+        assert_eq!(expand("<#{empty:3}>x", n), "x");
+        assert_eq!(expand("{empty|num:2}", n), "12.1");
+        assert_eq!(expand("{x:3}", n), "{x:3}");
+        assert!(!uses_key("{album artist}", "artist"));
     }
 
     #[test]
@@ -1485,6 +1616,40 @@ mod tests {
         jpg.extend(app1);
         jpg.extend([0xFF, 0xD9]);
         jpg
+    }
+
+    #[test]
+    fn extension_from_content() {
+        let d = tempfile::tempdir().unwrap();
+        let png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
+        let entry =
+            |p: &std::path::Path| FileEntry::from_path(p, &std::fs::metadata(p).unwrap()).unwrap();
+        let rule = Pipeline::new(&[Step {
+            enabled: true,
+            rule: Rule::Extension {
+                mode: ExtMode::Content,
+                value: String::new(),
+            },
+        }]);
+        for (name, want) in [
+            ("photo.JPG", "photo.PNG"),
+            ("photo.png", "photo.png"),
+            ("photo", "photo.png"),
+            ("tool_1.0_x86[0]", "tool_1.0_x86[0].png"),
+            ("photo.png.jpg", "photo.png"),
+            ("photo.gif.jpg", "photo.gif.png"),
+            ("v1.2.jpg", "v1.2.png"),
+            ("notes.txt", "notes.txt"),
+        ] {
+            let p = d.path().join(name);
+            let bytes: &[u8] = if name == "notes.txt" {
+                b"plain text"
+            } else {
+                png
+            };
+            std::fs::write(&p, bytes).unwrap();
+            assert_eq!(run_on(&rule, &entry(&p), 0), want);
+        }
     }
 
     #[test]

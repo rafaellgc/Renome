@@ -31,6 +31,7 @@ pub mod files;
 pub mod filter;
 pub mod fingerprint;
 pub mod identical;
+pub mod kind;
 pub mod music;
 pub mod musicbrainz;
 pub mod plan;

@@ -44,14 +44,22 @@ pub struct ComicInfo {
 }
 
 /// Reads the `ComicInfo.xml` inside a CBZ, CB7, CBT or EPUB; `None` for
-/// other files, files without one and unreadable files.
+/// other files, files without one and unreadable files. The archive type
+/// is told by the content, not the name (a `.cbz` is sometimes a 7z).
 pub fn read(path: &Path) -> Option<ComicInfo> {
-    let ext = path.extension()?.to_string_lossy().to_lowercase();
-    let xml = std::panic::catch_unwind(|| match ext.as_str() {
-        "cbz" | "zip" | "epub" => from_zip(path),
-        "cb7" | "7z" => from_7z(path),
-        "cbt" | "tar" => from_tar(path),
-        _ => None,
+    let mut head = [0u8; 262];
+    let n = File::open(path).ok()?.read(&mut head).ok()?;
+    let head = &head[..n];
+    let xml = std::panic::catch_unwind(|| {
+        if head.starts_with(b"PK\x03\x04") || head.starts_with(b"PK\x05\x06") {
+            from_zip(path)
+        } else if head.starts_with(&[0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]) {
+            from_7z(path)
+        } else if head.len() >= 262 && &head[257..262] == b"ustar" {
+            from_tar(path)
+        } else {
+            None
+        }
     })
     .ok()
     .flatten()?;
@@ -696,7 +704,7 @@ fn expand_labeled<'a>(template: &str, value: impl Fn(&str) -> Option<&'a str>) -
         let tail = &rest[open..];
         match tail
             .find('}')
-            .and_then(|close| Some((close, value(&tail[1..close])?)))
+            .and_then(|close| Some((close, crate::rules::key_value(&value, &tail[1..close])?)))
         {
             Some((close, v)) => {
                 if v.is_empty() {
@@ -718,7 +726,7 @@ fn expand_labeled<'a>(template: &str, value: impl Fn(&str) -> Option<&'a str>) -
                         }
                     }
                 } else {
-                    out.push_str(v);
+                    out.push_str(&v);
                 }
                 rest = &tail[close + 1..];
             }
