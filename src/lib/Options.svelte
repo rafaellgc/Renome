@@ -75,6 +75,19 @@
     }
   }
 
+  let cacheBytes = $state<number | null>(null);
+  api.cacheSize().then((n) => (cacheBytes = n)).catch(() => {});
+
+  async function clearCache() {
+    await api.clearCache().catch(() => 0);
+    cacheBytes = await api.cacheSize().catch(() => 0);
+  }
+
+  function size(bytes: number): string {
+    if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  }
+
   const shortcuts: [string, Key][] = $derived([
     [`${MOD}+Enter`, "kRename"],
     [`${MOD}+Z`, "kUndo"],
@@ -133,6 +146,25 @@
         <input type="checkbox" bind:checked={settings.warnWindows} />
         <span>{t("warnWindows")}</span>
       </label>
+    </section>
+
+    <section>
+      <h3>{t("sectionOnline")}</h3>
+      <div class="grid">
+        <label for="opt-cache">{t("cacheDays")}</label>
+        <select id="opt-cache" bind:value={settings.cacheDays}>
+          <option value={0}>{t("cacheOff")}</option>
+          <option value={1}>{t("cache1")}</option>
+          <option value={7}>{t("cache7")}</option>
+          <option value={30}>{t("cache30")}</option>
+          <option value={180}>{t("cache180")}</option>
+        </select>
+      </div>
+      <small>{t("cacheHint")}</small>
+      <div class="cache">
+        <small>{cacheBytes === null ? "…" : t("cacheSize").replace("{size}", size(cacheBytes))}</small>
+        <button onclick={clearCache} disabled={!cacheBytes}>{t("cacheClear")}</button>
+      </div>
     </section>
 
     <section>
@@ -296,6 +328,7 @@
   small { color: var(--muted); font-size: 12px; }
   .stored { margin: 0 0 16px; font-size: 12px; color: var(--muted); }
   .foot { display: flex; justify-content: flex-end; }
+  .cache { display: flex; align-items: center; gap: 10px; }
   .key { display: flex; gap: 6px; }
   .key input { flex: 1; }
   .good { color: #138a4e; }

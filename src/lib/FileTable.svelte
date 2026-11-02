@@ -21,6 +21,7 @@
     onmatch,
     ghosts = [],
     outside = {},
+    available = [],
   }: {
     items: PreviewItem[];
     selected: Set<string>;
@@ -36,6 +37,8 @@
      *  series rule is on. */
     matches?: Record<string, { status: MovieStatus; tip: string }>;
     onmatch?: (path: string) => void;
+    /** The optional columns that make sense with the rules in use. */
+    available?: DetailColumn[];
     /** Missing episodes, shown faded between the files. */
     ghosts?: Ghost[];
     /** Files the lookup rules leave alone, with why. */
@@ -239,7 +242,10 @@
     artist: "minmax(90px, 0.8fr)", album: "minmax(90px, 0.8fr)", title: "minmax(90px, 0.8fr)", genre: "minmax(70px, 0.5fr)",
     track: "48px", year: "48px", length: "56px", quality: "112px", resolution: "64px", codec: "64px", taken: "120px",
   };
-  const extra = $derived(DETAIL_COLUMNS.filter((c) => settings.columns.includes(c)));
+  const extra = $derived(DETAIL_COLUMNS.filter((c) => available.includes(c) && settings.columns.includes(c)));
+  $effect(() => {
+    if (!available.length) columnsMenu = false;
+  });
   const extraWidths = $derived(extra.map((c) => WIDTH[c]).join(" "));
 
   type Col = { key: Exclude<ViewSort, "manual">; label: Parameters<typeof t>[0]; cls: string };
@@ -302,7 +308,7 @@
     <div class="cols-back" onclick={() => (columnsMenu = false)}></div>
     <div class="cols-menu" role="group" aria-label={t("columnsMenu")}>
       <p class="cols-title">{t("columnsMenu")}</p>
-      {#each DETAIL_COLUMNS as c (c)}
+      {#each DETAIL_COLUMNS.filter((c) => available.includes(c)) as c (c)}
         <label class="cols-item">
           <input type="checkbox" checked={settings.columns.includes(c)} onchange={() => toggleColumn(c)} />
           {t(COL_LABEL[c])}
@@ -315,9 +321,11 @@
   <div class="head-wrap" bind:this={headWrap}>
   <div class="head" style:min-width={minWidth ? `${minWidth}px` : undefined}>
     <span class="c-status">
+      {#if available.length}
       <button class="icon cols" class:on={extra.length > 0} title={t("columnsMenu")} aria-label={t("columnsMenu")} aria-expanded={columnsMenu} onclick={() => (columnsMenu = !columnsMenu)}>
         <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M2 3h12v1.5H2zm0 4.25h12v1.5H2zM2 11.5h12V13H2z" /></svg>
       </button>
+      {/if}
     </span>
     {#each columns as col (col.key)}
       <button class="th {col.cls}" class:active={sortKey === col.key} onclick={() => onsort(col.key)}>

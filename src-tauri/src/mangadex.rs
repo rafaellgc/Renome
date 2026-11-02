@@ -139,6 +139,37 @@ impl Client {
         if let Some(v) = self.cache.lock().await.get(&key) {
             return Ok(v.clone());
         }
+        let question = format!("{year:?} {query}");
+        let v = match crate::kept::<Value>("mangadex", &question) {
+            Some(v) => v,
+            None => self.ask(query, year, &question).await?,
+        };
+        // Fan works (doujinshi) are not the series.
+        let fan = |m: &&Value| {
+            m["attributes"]["tags"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|t| {
+                    t["attributes"]["name"]["en"]
+                        .as_str()
+                        .is_some_and(|n| n.eq_ignore_ascii_case("doujinshi"))
+                })
+        };
+        let found: Vec<Volume> = v["data"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|m| !fan(m))
+            .map(|m| volume(m, lang))
+            .collect();
+        let ranked = renome_core::comics::rank_volumes(query, found, "");
+        self.cache.lock().await.insert(key, ranked.clone());
+        Ok(ranked)
+    }
+
+    /// Asks MangaDex for manga with a title (and year), keeping the answer.
+    async fn ask(&self, query: &str, year: Option<u16>, question: &str) -> Result<Value, String> {
         let mut last = self.last.lock().await;
         if let Some(t) = *last {
             tokio::time::sleep(Duration::from_millis(500).saturating_sub(t.elapsed())).await;
@@ -173,28 +204,7 @@ impl Client {
             429 => return Err("mdBusy".into()),
             code => return Err(format!("mdNetwork: HTTP {code}")),
         }
-        let v: Value = res.json().await.map_err(net_error)?;
-        // Fan works (doujinshi) are not the series.
-        let fan = |m: &&Value| {
-            m["attributes"]["tags"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .any(|t| {
-                    t["attributes"]["name"]["en"]
-                        .as_str()
-                        .is_some_and(|n| n.eq_ignore_ascii_case("doujinshi"))
-                })
-        };
-        let found: Vec<Volume> = v["data"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|m| !fan(m))
-            .map(|m| volume(m, lang))
-            .collect();
-        let ranked = renome_core::comics::rank_volumes(query, found, "");
-        self.cache.lock().await.insert(key, ranked.clone());
-        Ok(ranked)
+        let body = res.bytes().await.map_err(net_error)?;
+        crate::keep("mangadex", question, &body).map_err(|e| format!("mdNetwork: {e}"))
     }
 }

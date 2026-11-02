@@ -108,6 +108,12 @@ impl Client {
         if let Some(v) = self.cache.lock().await.get(&id) {
             return Ok(v.clone());
         }
+        // The key's check asks every time.
+        let keep = path != "types";
+        if keep && let Some(v) = crate::kept::<Value>("comicvine", &id) {
+            self.cache.lock().await.insert(id, v.clone());
+            return Ok(v);
+        }
         let url = format!("{}/{path}/", api_base());
         let mut params = vec![("api_key", key), ("format", "json")];
         params.extend_from_slice(query);
@@ -132,7 +138,8 @@ impl Client {
                 }
                 code => return Err(format!("cvNetwork: HTTP {code}")),
             }
-            let v: Value = res.json().await.map_err(net_error)?;
+            let body = res.bytes().await.map_err(net_error)?;
+            let v: Value = serde_json::from_slice(&body).map_err(|e| format!("cvNetwork: {e}"))?;
             // The service's own codes: 1 is fine.
             match v["status_code"].as_u64() {
                 Some(1) => {}
@@ -140,6 +147,9 @@ impl Client {
                 Some(101) => return Err("cvNotFound".into()),
                 Some(107) => return Err("cvBusy".into()),
                 _ => return Err(format!("cvNetwork: {}", v["error"].as_str().unwrap_or("?"))),
+            }
+            if keep {
+                crate::ANSWERS.put("comicvine", &id, &body);
             }
             self.cache.lock().await.insert(id, v.clone());
             return Ok(v);

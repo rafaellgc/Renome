@@ -102,8 +102,13 @@ impl Client {
         path: &str,
         query: &[(&str, &str)],
     ) -> Result<T, String> {
+        let question = format!("{path} {query:?}");
+        if let Some(v) = crate::kept("openlibrary", &question) {
+            return Ok(v);
+        }
         let res = self.send(&format!("{}{path}", api_base()), query).await?;
-        res.json().await.map_err(net_error)
+        let body = res.bytes().await.map_err(net_error)?;
+        crate::keep("openlibrary", &question, &body).map_err(|e| format!("olNetwork: {e}"))
     }
 
     async fn search(&self, q: &Query, lang: &str) -> Result<SearchPage, String> {

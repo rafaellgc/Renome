@@ -52,6 +52,10 @@ impl Client {
     /// The recordings and releases the song was heard as.
     pub async fn lookup(&self, print: &Print) -> Result<Heard, String> {
         let duration = print.duration.to_string();
+        let question = format!("{duration} {}", print.fingerprint);
+        if let Some(body) = crate::kept::<Response>("acoustid", &question) {
+            return Ok(ac::heard(&body));
+        }
         let form = [
             ("client", KEY),
             ("format", "json"),
@@ -85,7 +89,8 @@ impl Client {
                 continue;
             }
             // Errors come as JSON too (an invalid key is a 400).
-            let body: Response = match res.json().await {
+            let bytes = res.bytes().await.unwrap_or_default();
+            let body: Response = match serde_json::from_slice(&bytes) {
                 Ok(b) => b,
                 Err(_) if code == 200 => return Err("acoustidNetwork: invalid answer".into()),
                 Err(_) => return Err(format!("acoustidNetwork: HTTP {code}")),
@@ -96,6 +101,9 @@ impl Client {
                     4 | 14 => "acoustidKey".into(),
                     _ => format!("acoustidNetwork: {}", e.message),
                 });
+            }
+            if code == 200 {
+                crate::ANSWERS.put("acoustid", &question, &bytes);
             }
             return Ok(ac::heard(&body));
         }

@@ -81,6 +81,12 @@ impl Client {
         path: &str,
         query: &[(&str, &str)],
     ) -> Result<T, String> {
+        // The key's check asks every time.
+        let question = format!("{lang} {path} {query:?}");
+        let keep = path != "/configuration";
+        if keep && let Some(v) = crate::kept("tmdb", &question) {
+            return Ok(v);
+        }
         let mut req = self
             .http
             .get(format!("{}{path}", api_base()))
@@ -94,6 +100,10 @@ impl Client {
         };
         let res = req.send().await.map_err(net_error)?;
         match res.status().as_u16() {
+            200 if keep => {
+                let body = res.bytes().await.map_err(net_error)?;
+                crate::keep("tmdb", &question, &body).map_err(|e| format!("tmdbNetwork: {e}"))
+            }
             200 => res.json().await.map_err(net_error),
             401 => Err("tmdbInvalidKey".into()),
             404 => Err("tmdbNotFound".into()),

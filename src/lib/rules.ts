@@ -141,6 +141,28 @@ export function splitExt(name: string): [string, string] {
 
 let counter = 0;
 /** Options added in later versions take their defaults in saved rules. */
+/** The rules that look the files up in a catalogue: one at a time. */
+export const LOOKUP_TYPES: RuleType[] = ["movie", "series", "music", "book", "comic"];
+
+export const isLookup = (type: RuleType) => LOOKUP_TYPES.includes(type);
+
+/** Steps with only their first lookup rule; the others are left out and
+ *  returned apart (saved before they were one at a time). */
+export function oneLookup(steps: Step[]): { steps: Step[]; dropped: RuleType[] } {
+  let seen = false;
+  const dropped: RuleType[] = [];
+  const kept = steps.filter((s) => {
+    if (!isLookup(s.rule.type)) return true;
+    if (seen) {
+      dropped.push(s.rule.type);
+      return false;
+    }
+    seen = true;
+    return true;
+  });
+  return { steps: kept, dropped };
+}
+
 export function newStep(rule: Rule, enabled = true): Step {
   const full = { ...newRule(rule.type), ...rule } as Rule;
   return { id: `s${Date.now().toString(36)}${counter++}`, enabled, rule: full };

@@ -21,13 +21,13 @@
   import RuleCard from "$lib/RuleCard.svelte";
   import ShowPicker from "$lib/ShowPicker.svelte";
   import { LOCALES, MOD, t, tError, type Key } from "$lib/i18n";
-  import { RULE_TYPES, byFit, isAudio, isBook, isComic, isScreen, isVideo, newRule, newStep, splitExt } from "$lib/rules";
+  import { RULE_TYPES, LOOKUP_TYPES, isLookup, oneLookup, byFit, isAudio, isBook, isComic, isScreen, isVideo, newRule, newStep, splitExt } from "$lib/rules";
   import { loadSecrets, loadSettings, saveSecrets, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
     AlbumState, ApplyReport, BookCandidate, BookMatch, BookState, Candidate, ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, Copies, MbCandidate, SongMatch, EpKey, EpisodeMatch, EpisodeState, MovieMatch, MovieSet, MovieState, MovieStatus, HistoryEntry,
     OpError, Preview, PreviewItem, Rule, RuleType, Show, Step, View, ViewSort,
   } from "$lib/types";
-  import { DETAIL_COLUMNS } from "$lib/types";
+  import { DETAIL_COLUMNS, type DetailColumn } from "$lib/types";
   import { COL_LABEL, detailText } from "$lib/details";
 
   let ready = $state(false);
@@ -476,6 +476,23 @@
    *  it does not jump around while the preview re-sorts. */
   const collator = new Intl.Collator(undefined, { numeric: true });
   /** "+ Rule" menu in alphabetical order of the current language. */
+  /** The lookup rule in the stack (on or off): the others wait until it
+   *  is removed. */
+  const lookupType = $derived(steps.find((s) => isLookup(s.rule.type))?.rule.type ?? null);
+  /** The optional columns that make sense with the rules in the stack. */
+  const availableColumns = $derived.by<DetailColumn[]>(() => {
+    const cols: DetailColumn[] = [];
+    if (lookupType === "music") cols.push("artist", "album", "title", "track", "year", "genre", "length", "quality");
+    if (lookupType === "movie" || lookupType === "series") cols.push("resolution", "codec");
+    if (steps.some((s) => s.rule.type === "insert" && s.rule.source === "taken")) cols.push("taken");
+    return cols;
+  });
+  // Sorted by a column no longer shown: the order stays, as a hand-made one.
+  $effect(() => {
+    if ((DETAIL_COLUMNS as readonly string[]).includes(sortKey) && !availableColumns.includes(sortKey as DetailColumn)) {
+      sortKey = "manual";
+    }
+  });
   const ruleTypes = $derived(
     [...RULE_TYPES].sort((a, b) => t(`rule.${a}`).localeCompare(t(`rule.${b}`), LOCALES[settings.lang])),
   );
@@ -664,8 +681,18 @@
   }
 
   function addRule(type: RuleType) {
+    if (lookupType && isLookup(type)) return;
     steps.push(newStep(newRule(type)));
     ruleMenu = false;
+  }
+
+  /** Loaded steps with one lookup rule at most; the notice says which
+   *  were left out, else `done` (when given). */
+  function loadSteps(loaded: Step[], done = ""): Step[] {
+    const { steps: kept, dropped } = oneLookup(loaded);
+    if (dropped.length) notice = t("lookupsDropped", { rules: dropped.map((r) => t(`rule.${r}`)).join(", ") });
+    else if (done) notice = done;
+    return kept.map((s) => newStep(s.rule, s.enabled));
   }
 
   function moveStep(i: number, delta: -1 | 1) {
@@ -1664,8 +1691,7 @@
     const path = await open({ title: t("openRules"), filters: presetFilter() });
     if (typeof path !== "string") return;
     try {
-      steps = (await api.loadPreset(path)).map((s) => newStep(s.rule, s.enabled));
-      notice = t("rulesLoaded");
+      steps = loadSteps(await api.loadPreset(path), t("rulesLoaded"));
     } catch (e) {
       await notify({ title: t("openRules"), text: tError(e) });
     }
@@ -1762,7 +1788,7 @@
       await loadSettings();
       // The password store may wait to be unlocked: the program does not.
       loadSecrets();
-      if (settings.rememberRules) steps = settings.rules.map((s) => newStep(s.rule, s.enabled));
+      if (settings.rememberRules) steps = loadSteps(settings.rules);
       // A rename the program could not finish (it was closed, the
       // computer went off) is put back first.
       try {
@@ -1866,7 +1892,8 @@
           {#if ruleMenu}
             <div class="menu">
               {#each ruleTypes as type (type)}
-                <button onclick={() => addRule(type)}>{t(`rule.${type}`)}</button>
+                {@const locked = !!lookupType && isLookup(type)}
+                <button disabled={locked} title={locked ? t("oneLookup", { rule: t(`rule.${lookupType}`) }) : undefined} onclick={() => addRule(type)}>{t(`rule.${type}`)}</button>
               {/each}
             </div>
           {/if}
@@ -1967,6 +1994,7 @@
           {matches}
           ghosts={settings.showMissing ? ghosts : []}
           {outside}
+          available={availableColumns}
           onmatch={(p) => {
             if (seriesRule && series[p]) openEpisodeReview(p);
             else if (movieRule && movies[p]) openReview(p);

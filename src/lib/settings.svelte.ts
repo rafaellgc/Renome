@@ -30,6 +30,8 @@ export interface Settings {
   columns: DetailColumn[];
   /** The faded rows of what is missing are shown (they are still counted). */
   showMissing: boolean;
+  /** Days the catalogues' answers are kept on disk; 0: not kept. */
+  cacheDays: number;
 }
 
 const DEFAULTS: Settings = {
@@ -49,6 +51,7 @@ const DEFAULTS: Settings = {
   rules: [],
   columns: [],
   showMissing: true,
+  cacheDays: 7,
 };
 
 export const settings = $state<Settings>({ ...DEFAULTS });

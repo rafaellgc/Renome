@@ -68,6 +68,10 @@ impl Client {
         path: &str,
         query: &[(&str, &str)],
     ) -> Result<T, String> {
+        let question = format!("{path} {query:?}");
+        if let Some(v) = crate::kept("musicbrainz", &question) {
+            return Ok(v);
+        }
         for attempt in 0..4 {
             // One request every 2 seconds, well within the service's limit (one
             // per second on average); the lock keeps others waiting.
@@ -87,7 +91,11 @@ impl Client {
             drop(last);
             let res = res.map_err(net_error)?;
             match res.status().as_u16() {
-                200 => return res.json().await.map_err(net_error),
+                200 => {
+                    let body = res.bytes().await.map_err(net_error)?;
+                    return crate::keep("musicbrainz", &question, &body)
+                        .map_err(|e| format!("mbNetwork: {e}"));
+                }
                 404 => return Err("mbNotFound".into()),
                 // Busy (it sheds load now and then, whatever the pace) or
                 // too fast: wait as long as it asks, at least 3 seconds.

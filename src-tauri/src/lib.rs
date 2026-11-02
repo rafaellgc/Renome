@@ -72,6 +72,58 @@ struct AppState {
 
 type Overrides = HashMap<PathBuf, String>;
 
+/// The catalogues' answers kept on disk (see [`renome_core::answers`]);
+/// how long comes from the settings (`cacheDays`, 7 by default).
+pub(crate) static ANSWERS: std::sync::LazyLock<renome_core::answers::Store> =
+    std::sync::LazyLock::new(|| {
+        let dir = dirs::cache_dir()
+            .unwrap_or_else(std::env::temp_dir)
+            .join("renome")
+            .join("answers");
+        renome_core::answers::Store::new(dir, cache_days(read_settings_file().as_ref()))
+    });
+
+fn cache_days(settings: Option<&Value>) -> u32 {
+    settings
+        .and_then(|s| s.get("cacheDays")?.as_u64())
+        .map_or(7, |d| d.min(365) as u32)
+}
+
+/// A kept answer, read as `T`.
+pub(crate) fn kept<T: for<'de> serde::Deserialize<'de>>(
+    service: &str,
+    question: &str,
+) -> Option<T> {
+    serde_json::from_slice(&ANSWERS.get(service, question)?).ok()
+}
+
+/// Keeps an answer and reads it as `T`.
+pub(crate) fn keep<T: for<'de> serde::Deserialize<'de>>(
+    service: &str,
+    question: &str,
+    body: &[u8],
+) -> Result<T, String> {
+    let v = serde_json::from_slice(body).map_err(|e| e.to_string())?;
+    ANSWERS.put(service, question, body);
+    Ok(v)
+}
+
+/// The bytes the kept answers take.
+#[tauri::command]
+async fn cache_size() -> u64 {
+    tauri::async_runtime::spawn_blocking(|| ANSWERS.size())
+        .await
+        .unwrap_or(0)
+}
+
+/// Forgets the kept answers; returns the bytes freed.
+#[tauri::command]
+async fn clear_cache() -> u64 {
+    tauri::async_runtime::spawn_blocking(|| ANSWERS.clear())
+        .await
+        .unwrap_or(0)
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AddResult {
@@ -1160,6 +1212,7 @@ async fn save_settings(mut settings: Value) -> Result<(), String> {
             }
             obj.extend(old);
         }
+        ANSWERS.set_days(cache_days(Some(&settings)));
         write_settings_file(&settings)
     })
     .await
@@ -1288,6 +1341,9 @@ fn sync_titlebar_buttons() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Answers too old to use go, out of the way of the start.
+    std::thread::spawn(|| ANSWERS.purge());
+
     let history_dir = dirs::data_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("renome")
@@ -1381,6 +1437,8 @@ pub fn run() {
             undo,
             delete_history,
             clear_history,
+            cache_size,
+            clear_cache,
             save_preset,
             load_preset,
             load_settings,

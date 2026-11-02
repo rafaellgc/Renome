@@ -100,6 +100,10 @@ export const api = {
   recover: () => invoke<{ restored: number; renamed: number; undone: number; tagged: number; stuck: { from: string; to: string }[] }>("recover"),
   deleteHistory: (id: string) => invoke<void>("delete_history", { id }),
   clearHistory: () => invoke<number>("clear_history"),
+  /** Bytes the kept answers of the catalogues take. */
+  cacheSize: () => invoke<number>("cache_size"),
+  /** Forgets the kept answers; the bytes freed. */
+  clearCache: () => invoke<number>("clear_cache"),
   savePreset: (path: string, steps: Step[]) => invoke<void>("save_preset", { path, steps }),
   loadPreset: (path: string) => invoke<Step[]>("load_preset", { path }),
 };

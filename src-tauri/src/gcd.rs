@@ -110,8 +110,15 @@ impl Client {
         if let Some(v) = self.cache.lock().await.get(url) {
             return Ok(v.clone());
         }
+        if let Some(v) = crate::kept::<Value>("gcd", url) {
+            self.cache.lock().await.insert(url.to_string(), v.clone());
+            return Ok(v);
+        }
         let login = self.login.lock().unwrap().clone();
         let v = self.request(url, login.as_ref()).await?;
+        if let Ok(body) = serde_json::to_vec(&v) {
+            crate::ANSWERS.put("gcd", url, &body);
+        }
         self.cache.lock().await.insert(url.to_string(), v.clone());
         Ok(v)
     }

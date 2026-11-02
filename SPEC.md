@@ -38,8 +38,11 @@ This document describes **what** the program does, not **how**.
   `Mario` → `Mário`); words that are on both sides but moved are marked
   apart (dotted underline), and the common start and end (the
   extension) are never marked.
-- **Optional columns** (☰ button at the left of the header; the choice is
-  saved in the settings): a song's artist, album, title, track (`2-05` on
+- **Optional columns** (☰ button at the left of the header, shown only
+  when a column fits the rules in the stack: the music rule's song columns,
+  the movie or TV show rule's resolution and codec, Insert's photo date
+  when it inserts the date taken; sorted by a column no longer shown, the
+  order stays as a manual one; the choice is saved in the settings): a song's artist, album, title, track (`2-05` on
   albums of several discs), year, genre, length and format (`MP3 · 320
   kbps`, `FLAC · 24/96`), a video's resolution and codec, a photo's date
   taken (EXIF; only image formats are opened for it). They sit between
@@ -63,7 +66,11 @@ This document describes **what** the program does, not **how**.
 
 ## 2. Rules (pipeline)
 
-Transformations are **rules** stacked and applied in sequence to the name.
+Transformations are **rules** stacked and applied in sequence to the name. Only one
+lookup rule (movie, TV show, music, book, comic) may be in the stack: with
+one there, on or off, the others are disabled in the "+ Rule" menu until it
+is removed; a preset or remembered set with more keeps the first and says
+which were left out.
 Each rule can be turned on/off, reordered and removed; a rule turned off
 is locked (no option changes, no searches) until turned on. The preview updates
 live. The rule set can be saved and loaded as a *preset* (JSON).
@@ -831,7 +838,8 @@ whole number in the value with N digits (`{episode:3}`: `001-E002`;
   series only, titled in the reader's language when it has one, else in
   English; fan works left out) and Comic Vine (the user's key; about 200
   requests an hour; requests 1.1 s apart; a `ComicInfo.xml` link gives the
-  series directly). Answers are cached for the session.
+  series directly). Answers are kept for the session, and on disk as the
+  options say (see 7).
 - Files are grouped by the series typed, else by their own; loose
   chapters are not looked up (but on MangaDex). A search that finds
   nothing for `Series: Story` tries `Series`. Found series are ranked by
@@ -1159,6 +1167,17 @@ may be asked about the Keychain again with each version.
 - Ask for confirmation before renaming (on).
 - Turn the rules off after renaming (on).
 - Warn about characters Windows does not accept (on).
+- Online searches: keep the answers for 1 day, 7 days (default), 30
+  days, 6 months, or not at all (`cacheDays`), with the space they take
+  and Clear. The answers (raw response bodies of TMDB, MusicBrainz,
+  AcoustID, Discogs, Open Library, the GCD, Comic Vine and MangaDex; not
+  images, not failures, never the key and account checks) are kept one
+  file each in the user's cache folder (`~/.cache/renome/answers/<service>/`),
+  named by a hash of the question (path, query and language, without keys
+  or passwords), written whole (`.part`, then renamed), and their age is
+  the file's date. TMDB's are kept at most 6 months (its terms), Discogs'
+  at most 6 hours, whatever the choice. Expired ones are deleted when
+  read and at start, in the background.
 - Services: TMDB key and title language, Comic Vine key, GCD account
   (email and password), Discogs token; each with a Test button. A line
   says whether they are in the system's password store or in the file.

@@ -73,6 +73,12 @@ impl Client {
         query: &[(&str, &str)],
         token: Option<&str>,
     ) -> Result<T, String> {
+        // A token's check asks every time.
+        let keep = token.is_none();
+        let question = format!("{path} {query:?}");
+        if keep && let Some(v) = crate::kept("discogs", &question) {
+            return Ok(v);
+        }
         let token = match token {
             Some(t) => t.trim().to_string(),
             None => self.token.lock().unwrap().clone(),
@@ -99,6 +105,11 @@ impl Client {
             drop(last);
             let res = res.map_err(net_error)?;
             match res.status().as_u16() {
+                200 if keep => {
+                    let body = res.bytes().await.map_err(net_error)?;
+                    return crate::keep("discogs", &question, &body)
+                        .map_err(|e| format!("dgNetwork: {e}"));
+                }
                 200 => return res.json().await.map_err(net_error),
                 401 | 403 => return Err("dgBadKey".into()),
                 404 => return Err("dgNotFound".into()),
