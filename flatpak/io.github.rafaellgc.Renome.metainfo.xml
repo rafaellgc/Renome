@@ -63,6 +63,11 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.21.0" date="2026-11-02">
+      <description>
+        <p>The Extension rule can set each file's extension from what it really is: a .jpg that is a PNG becomes .png, a .cbz that is a RAR becomes .cbr, a file with no extension gets one, and a text file named .pdf becomes .txt (or keeps a fitting extension already in its name, like movie.nfo). Templates can name a fallback, {title|year}, and the number of digits, {episode:3}. Comic details are read from archives whose extension does not match their type.</p>
+      </description>
+    </release>
     <release version="0.20.1" date="2026-11-01">
       <description>
         <p>Artwork and .nfo files a media server left in a movie's folder now go with the movie to its new folder, also when copying or moving to another folder. Forced subtitles named with a dash keep their flag. The Rename button no longer counts a cover an album folder already has, and Discogs covers embedded in songs follow the cover size chosen.</p>
