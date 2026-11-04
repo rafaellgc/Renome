@@ -63,6 +63,11 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.24.0" date="2026-11-04">
+      <description>
+        <p>The comic rule can write ComicInfo.xml inside CBZ files and the book rule the details inside EPUB files, with undo. Comics in CBR, CB7 and CBT, and PDFs, can be converted to CBZ, keeping the original beside or sending it to the trash. PDF pages keep their pictures as they are; pages that are more than one picture are drawn, or the PDF can be left as it is.</p>
+      </description>
+    </release>
     <release version="0.23.0" date="2026-11-02">
       <description>
         <p>What other programs already recorded is used before searching by name: the .nfo files Jellyfin, Kodi and Emby keep beside movies and in show folders (TMDB or IMDb ids), the metadata.opf of library managers beside books, and the MetronInfo.xml or ComicBookInfo details inside comics.</p>
