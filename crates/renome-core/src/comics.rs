@@ -15,12 +15,12 @@ use crate::files::FileEntry;
 use crate::text;
 use crate::tmdb::safe_title;
 
-/// Extensions of comic files. CBR (RAR) is named from its file name only:
-/// no RAR reader has a free licence.
+/// Extensions of comic files: comics are also kept as PDFs, EPUBs and
+/// Kindle books.
 pub fn is_comic(ext: &str) -> bool {
     matches!(
         ext.to_lowercase().as_str(),
-        "cbz" | "cbr" | "cb7" | "cbt" | "pdf" | "epub"
+        "cbz" | "cbr" | "cb7" | "cbt" | "pdf" | "epub" | "mobi" | "azw3" | "azw"
     )
 }
 
@@ -62,6 +62,27 @@ enum Carried {
 /// any and unreadable files. The archive type is told by the content, not
 /// the name (a `.cbz` is sometimes a 7z).
 pub fn read(path: &Path) -> Option<ComicInfo> {
+    // A folder of pages: the file beside them.
+    if path.is_dir() {
+        let mut found = None;
+        for e in std::fs::read_dir(path).ok()?.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if is_named(&name, INFO) || (found.is_none() && is_named(&name, METRON)) {
+                let text = std::fs::read(e.path())
+                    .ok()
+                    .filter(|t| t.len() as u64 <= MAX_INFO)?;
+                found = Some(carried(&name, String::from_utf8_lossy(&text).into_owned()));
+                if is_named(&name, INFO) {
+                    break;
+                }
+            }
+        }
+        return match found? {
+            Carried::Info(x) => parse_info(&x),
+            Carried::Metron(x) => parse_metron(&x),
+            Carried::Cbi(j) => parse_cbi(&j),
+        };
+    }
     let mut head = [0u8; 262];
     let n = File::open(path).ok()?.read(&mut head).ok()?;
     let head = &head[..n];
@@ -957,11 +978,16 @@ pub fn in_folder(m: &mut ComicMatch, folder: &str) {
 
 /// Like [`from_name`], for a path; `stem`, when given, is read as its name.
 pub fn from_path(path: &Path, stem: Option<&str>, by_folder: bool) -> Option<ComicMatch> {
-    let ext = path.extension()?.to_string_lossy();
-    if !is_comic(&ext) {
+    let folder_comic = path.is_dir();
+    if !folder_comic && !is_comic(&path.extension()?.to_string_lossy()) {
         return None;
     }
-    let own = path.file_stem()?.to_string_lossy();
+    // A folder's name has no extension.
+    let own = if folder_comic {
+        path.file_name()?.to_string_lossy()
+    } else {
+        path.file_stem()?.to_string_lossy()
+    };
     let stem = stem.unwrap_or(&own);
     let folder = path
         .parent()?

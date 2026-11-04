@@ -44,10 +44,10 @@ pub struct FileEntry {
     /// What the content really is (see [`crate::kind`]), read on first use.
     #[serde(skip)]
     pub(crate) kind: OnceLock<Option<crate::kind::Kind>>,
-    /// A PDF the comic rule can convert, and how many of its pages would
-    /// be drawn (see [`crate::convert::pdf_check`]); checked on first use.
+    /// A comic the comic rule can convert, and how many of its pages would
+    /// be drawn (see [`crate::convert::check`]); checked on first use.
     #[serde(skip)]
-    pub(crate) pdf_pictures: OnceLock<Option<usize>>,
+    pub(crate) convert_pages: OnceLock<Option<usize>>,
 }
 
 impl FileEntry {
@@ -76,7 +76,7 @@ impl FileEntry {
             comic: OnceLock::new(),
             video: OnceLock::new(),
             kind: OnceLock::new(),
-            pdf_pictures: OnceLock::new(),
+            convert_pages: OnceLock::new(),
         })
     }
 
@@ -121,20 +121,18 @@ impl FileEntry {
             .as_ref()
     }
 
-    /// A PDF the comic rule can convert to CBZ: how many of its pages
-    /// would be drawn; `None` when it cannot be. Checked once and cached.
-    pub fn pdf_drawn_pages(&self) -> Option<usize> {
-        if self.is_dir {
-            return None;
-        }
+    /// A comic the comic rule can convert to CBZ (a PDF, EPUB or Kindle
+    /// book): how many of its pages would be drawn; `None` when it cannot
+    /// be. Checked once and cached.
+    pub fn convert_check(&self) -> Option<usize> {
         *self
-            .pdf_pictures
-            .get_or_init(|| crate::convert::pdf_check(&self.path))
+            .convert_pages
+            .get_or_init(|| crate::convert::check(&self.path))
     }
 
     /// The `ComicInfo.xml` inside a comic file. Read once and cached.
     pub fn comic_info(&self) -> Option<&crate::comics::ComicInfo> {
-        if self.is_dir || !crate::comics::is_comic(&self.ext) {
+        if !self.is_dir && !crate::comics::is_comic(&self.ext) {
             return None;
         }
         self.comic
@@ -149,11 +147,16 @@ impl FileEntry {
         self.comic = OnceLock::new();
         // A comic converted to CBZ is now a zip.
         self.kind = OnceLock::new();
-        self.pdf_pictures = OnceLock::new();
+        self.convert_pages = OnceLock::new();
         if let Some(fresh) = std::fs::metadata(&self.path)
             .ok()
             .and_then(|m| Self::from_path(&self.path, &m))
         {
+            // A folder of pictures converted is a file now.
+            if fresh.is_dir != self.is_dir {
+                *self = fresh;
+                return;
+            }
             self.size = fresh.size;
             self.modified = fresh.modified;
         }

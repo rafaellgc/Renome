@@ -535,7 +535,7 @@
       // Songs bring their lyrics, cue sheets, playlists and covers along.
       [!!musicRule, (i) => !i.isDir && (isAudio(i.original) || /\.(lrc|cue|m3u8?|pls|jpe?g|png|webp)$/i.test(i.original)), "outsideMusic"],
       [!!bookRule, (i) => !i.isDir && isBook(i.original), "outsideBook"],
-      [!!comicRule, (i) => !i.isDir && isComic(i.original), "outsideComic"],
+      [!!comicRule, (i) => (i.isDir ? i.convert : isComic(i.original)), "outsideComic"],
     ];
     const on = kinds.filter(([enabled]) => enabled);
     if (!on.length) return {};
@@ -1228,7 +1228,8 @@
         return;
       }
     }
-    const files = preview.items.filter((i) => !i.isDir && isComic(i.original));
+    // A folder of pictures too, when it becomes a CBZ.
+    const files = preview.items.filter((i) => (i.isDir ? i.convert : isComic(i.original)));
     if (!files.length) {
       notice = t("comicNoFiles");
       return;
@@ -1238,7 +1239,7 @@
     try {
       const owns = await api.comicGuesses(
         files.map((f) => f.path),
-        files.map((f) => (f.lookupName ? splitExt(f.lookupName)[0] : null)),
+        files.map((f) => (f.lookupName ? (f.isDir ? f.lookupName : splitExt(f.lookupName)[0]) : null)),
         !!rule.byFolder,
       );
       const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();

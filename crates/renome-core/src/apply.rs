@@ -680,7 +680,7 @@ enum TagStep {
     /// A song is about to be written.
     Start(PathBuf),
     /// It was: what it held, for undo.
-    Done(crate::tagwrite::Backup),
+    Done(Box<crate::tagwrite::Backup>),
 }
 
 /// Songs whose tags are being written for a history entry. Each is noted
@@ -737,7 +737,15 @@ fn trashed_originals(j: &mut Journal, backups: &[crate::tagwrite::Backup]) {
         if !b.converted.as_ref().is_some_and(|c| c.original.is_none()) {
             continue;
         }
+        let folder = b.converted.as_ref().is_some_and(|c| c.folder);
         for op in j.ops.iter_mut().filter(|op| !op.copy && op.to == b.path) {
+            // A folder's name has no extension to replace.
+            if folder {
+                let mut name = op.from.file_name().unwrap_or_default().to_os_string();
+                name.push(".cbz");
+                op.from = op.from.with_file_name(name);
+                continue;
+            }
             let cbz = op
                 .from
                 .extension()
@@ -945,7 +953,7 @@ impl History {
                 TagStep::Start(song) => {
                     let _ = fs::remove_file(crate::tagwrite::temp_of(&song));
                 }
-                TagStep::Done(b) => done.push(b),
+                TagStep::Done(b) => done.push(*b),
             }
         }
         let Ok(mut j) = self.read(id) else {
@@ -1509,7 +1517,10 @@ mod tests {
             .unwrap();
         let mut done = convert(&cbz, &[], Original::Keep).unwrap();
         fs::remove_file(p.join("Hero 001.cbr")).unwrap();
-        done.backup.converted = Some(Converted { original: None });
+        done.backup.converted = Some(Converted {
+            original: None,
+            folder: false,
+        });
         h.add_tags(&id, vec![done.backup]).unwrap();
         let u = h.undo(&id).unwrap();
         assert!(u.errors.is_empty(), "{:?}", u.errors);

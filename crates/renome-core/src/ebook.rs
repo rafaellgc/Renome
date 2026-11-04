@@ -315,7 +315,7 @@ fn unpercent(s: &str) -> String {
 }
 
 /// A path inside the book, relative to the folder of `base`.
-fn join_zip(base: &str, href: &str) -> String {
+pub(crate) fn join_zip(base: &str, href: &str) -> String {
     let href = unpercent(href.split('#').next().unwrap_or_default());
     let mut parts: Vec<&str> = base
         .rsplit_once('/')
@@ -348,7 +348,7 @@ fn strip_tags(html: &str) -> String {
         .replace("&amp;", "&")
 }
 
-fn epub(path: &Path) -> Option<BookMeta> {
+pub(crate) fn epub(path: &Path) -> Option<BookMeta> {
     let mut zip = zip::ZipArchive::new(BufReader::new(File::open(path).ok()?)).ok()?;
     let container = entry(&mut zip, "META-INF/container.xml", 1 << 20)?;
     let opf_path = {
@@ -495,7 +495,7 @@ fn be32(b: &[u8], at: usize) -> Option<u32> {
 
 /// MOBI and AZW3 (Kindle): the full title and the EXTH records of the
 /// first record's header.
-fn mobi(path: &Path) -> Option<BookMeta> {
+pub(crate) fn mobi(path: &Path) -> Option<BookMeta> {
     let mut f = File::open(path).ok()?;
     let mut head = [0u8; 86];
     f.read_exact(&mut head).ok()?;

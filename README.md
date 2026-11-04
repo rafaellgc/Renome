@@ -74,7 +74,7 @@ A built-in manual (F1) explains every rule with examples.
   `Author/Title` folders and saves `cover.jpg` and a `metadata.opf`
   (read by Audiobookshelf and e-book managers), and can write the details
   inside EPUBs (undone like any rename).
-- Comics: names CBZ, CBR, CB7, CBT, PDF and EPUB files by series and
+- Comics: names CBZ, CBR, CB7, CBT, PDF, EPUB and MOBI/AZW3 files by series and
   number (`Series #012 (2019)`, `Series v03` for manga volumes), from the
   `ComicInfo.xml` inside the file or from its name (issue numbers,
   volumes, tomes, chapters, years; release notes ignored), offline.
@@ -85,7 +85,9 @@ A built-in manual (F1) explains every rule with examples.
   missing from your series show up as faded rows, and can be exported to
   a CSV file. Optionally writes the details into each CBZ's
   `ComicInfo.xml`, pages untouched, and converts CBR (RAR), CB7, CBT and
-  PDF files to CBZ (pictures taken out as they are; other pages drawn), keeping or deleting the original (undone like any
+  PDF files to CBZ (pictures taken out as they are; other pages drawn),
+  as well as EPUB and Kindle (MOBI/AZW3) comics whose pages are all
+  pictures, and folders of pictures, keeping or deleting the original (undone like any
   rename). RAR files are read with libarchive, built into the app.
 - Movie, TV show, book and comic lookups read the name as the rules above
   them leave it, so a "Replace text" can fix an abbreviation first.

@@ -864,7 +864,9 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
 
 ### 2.5 Comics (ComicInfo.xml, Comic Vine)
 
-- Applies to CBZ, CBR, CB7, CBT, PDF and EPUB files. The `ComicInfo.xml`
+- Applies to CBZ, CBR, CB7, CBT, PDF, EPUB, MOBI, AZW3 and AZW files (and
+  to folders of pictures listed as items, when "Convert" turns them into
+  CBZ: named from the folder's whole name, its `ComicInfo.xml` read). The `ComicInfo.xml`
   (else `MetronInfo.xml`, else ComicBookInfo; see "What is already
   there")
   inside a CBZ/EPUB (zip), CBR (RAR 4 and 5, read with the copy of
@@ -999,7 +1001,8 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   rows count (in the Rename button) when their `ComicInfo.xml` (or other
   details read, see "What is already there") says something else
   (`retag`). A `MetronInfo.xml` is never updated.
-- "Convert CBR, CB7, CBT and PDF to CBZ" (off by default), with "The
+- "Convert CBR, CB7, CBT, PDF, EPUB, MOBI/AZW3 and picture folders to CBZ"
+  (off by default), with "The
   original file": keep beside (default) or delete; "PDF pages that are
   not just a picture": draw them (default) or leave such PDFs as they are
   (`drawPages`; then only PDFs with no page to draw are offered, and one
@@ -1010,7 +1013,9 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   `pdf_check`), shown as a tag; the conversion's notice says how many
   were drawn (`drawn` in `write_inside`'s report). In the preview, a comic
   file (`.cbz`/`.cbr`/`.cb7`/`.cbt`) whose content is a RAR, 7z or tar, or
-  a `.pdf`, gets the extension `cbz` (`convert` on the row; a
+  a `.pdf`, or an EPUB, MOBI, AZW3 or AZW of pictures only, or a folder
+  of pictures only (its name gets `.cbz`), gets the extension `cbz`
+  (`convert` on the row; a
   `.cbz` that is a RAR keeps its name and counts in the Rename button as
   unchanged). A PDF (checked once per file: it opens
   without a password, with lopdf or else hayro; `pdf_of_pictures`) is
@@ -1057,7 +1062,49 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   drawn pages. Pages are numbered `001`… in page order (more digits past
   999); with "Write the details" on, the PDF's own title and author (its
   Info) go into the `ComicInfo.xml` as Title and Writer when the values
-  have none. After renaming,
+  have none (an EPUB's or Kindle book's title and authors too, read as
+  for books).
+- An EPUB (a zip whose first entry `mimetype` says
+  `application/epub+zip`, or holding `META-INF/container.xml`;
+  `pages::epub`) is a comic when every spine item is a picture item
+  (not SVG) or a page whose markup, without its head, scripts, styles and
+  comments, shows at most 20 letters (entities count one; spaces not) and
+  one picture (`img src`, `image href`/`xlink:href`, links resolved and
+  `%`-decoded; a page with none and no letters is blank and left out);
+  at least one picture; pictures JPEG, PNG, GIF, WebP, AVIF or JPEG XL.
+  A cover item (`properties="cover-image"`, else `<meta name="cover">`)
+  no page shows goes first. A page or picture listed in
+  `META-INF/encryption.xml` → `archiveLocked`. Pictures are copied as
+  `NNN.<ext>` (`.jpeg` → `.jpg`) with their zip dates; a `ComicInfo.xml`
+  in the EPUB goes along.
+- A Kindle book (`BOOKMOBI` at byte 60; `pages::kindle`): its first
+  record's header gives the text records, compression (none or PalmDOC;
+  the dictionary one → `comicUnsupported`), encryption (any →
+  `archiveLocked`), first picture record, trailing-entry flags, version
+  (8: KF8) and, from EXTH, the KF8 part's record (121) and the cover
+  (201). The KF8 part, when there is one, is tried first, then the old
+  one. The text (trailing entries stripped, decompressed, at most 64 MB)
+  must show at most 20 letters per picture, as for EPUB; pictures are
+  taken in the text's order from `kindle:embed:XXXX` (base 32) in KF8,
+  `hirecindex`, else `recindex`, else `lorecindex` in the old kind, as
+  records counted from the first picture (in a KF8 part after an old one,
+  from the file's start or the part's: the count that lands every one on
+  a picture); an unused cover first. A record is a picture when JPEG, PNG
+  or GIF (inside a `CRES` record past its 12-byte head); copied as
+  `NNN.<ext>`. The original kept beside is `.azw3` when the file holds a
+  KF8 part only, else `.mobi`.
+- A folder of pictures (`convert::folder_pages`): files JPEG, PNG, GIF,
+  WebP, AVIF or JPEG XL and `ComicInfo.xml`, in subfolders up to 3 deep,
+  hidden files, `Thumbs.db`, `desktop.ini` and `ehthumbs.db` left out;
+  anything else (another file, a link, a deeper folder) → not a comic;
+  at least one picture. Entries keep their paths under the folder, in
+  natural order (digit runs by value, case ignored), with their dates.
+  The rename names the folder `Name.cbz`; converting it writes the zip,
+  renames the folder to `Name` beside and the zip to `Name.cbz` (no
+  permissions copied); undo removes the CBZ before putting the folder
+  back; with the folder in the trash, the rename that made it gets `.cbz`
+  added to its old name (`Converted::folder`). After converting, the
+  list's row is read again as a file. After renaming,
   each is converted (`convert::convert`): every file entry, in the
   archive's order, is written into `.<name>.renome-tags` beside it
   (pictures stored, other files deflated, dates kept; folders and links

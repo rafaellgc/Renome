@@ -1078,7 +1078,9 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             draw_pages,
             ..
         } => {
-            if let Some(m) = comic_of(ctx, *by_folder, stem) {
+            // A folder only when it becomes a CBZ.
+            let folder_ok = !ctx.file.is_dir || (*convert && converts(ctx.file, *draw_pages));
+            if folder_ok && let Some(m) = comic_of(ctx, *by_folder, stem) {
                 let name = comics::comic_name(template, &m, colon);
                 if !name.is_empty() {
                     *stem = name;
@@ -1095,16 +1097,20 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
 
 /// A comic the comic rule's "convert" turns into a CBZ: a RAR, 7z or tar
 /// inside, named as a comic, or a PDF that opens (with `draw` off, only
-/// one with no page to draw).
+/// one with no page to draw), or an EPUB, Kindle book or folder of
+/// pictures only.
 pub fn converts(file: &crate::files::FileEntry, draw: bool) -> bool {
     if file.is_dir {
-        return false;
+        return file.convert_check().is_some();
     }
     let ext = file.ext.to_lowercase();
     let kind = file.kind();
     if ext == "pdf" {
         return kind.is_some_and(|k| k.names.contains(&"pdf"))
-            && file.pdf_drawn_pages().is_some_and(|n| draw || n == 0);
+            && file.convert_check().is_some_and(|n| draw || n == 0);
+    }
+    if matches!(ext.as_str(), "epub" | "mobi" | "azw3" | "azw") {
+        return file.convert_check().is_some();
     }
     matches!(ext.as_str(), "cbz" | "cbr" | "cb7" | "cbt")
         && kind.and_then(|k| k.comic).is_some_and(|c| c != "cbz")
@@ -1113,7 +1119,7 @@ pub fn converts(file: &crate::files::FileEntry, draw: bool) -> bool {
 /// The comic a file is: the issue chosen for it, else what it says about
 /// itself, its name being `stem` (what the rules above made of it).
 fn comic_of(ctx: &Ctx, by_folder: bool, stem: &str) -> Option<comics::ComicMatch> {
-    if ctx.file.is_dir || !comics::is_comic(&ctx.file.ext) {
+    if !ctx.file.is_dir && !comics::is_comic(&ctx.file.ext) {
         return None;
     }
     ctx.comic
@@ -1440,7 +1446,7 @@ mod tests {
             comic: Default::default(),
             video: Default::default(),
             kind: Default::default(),
-            pdf_pictures: Default::default(),
+            convert_pages: Default::default(),
         }
     }
 

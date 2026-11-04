@@ -78,7 +78,7 @@ export const isAudio = (name: string) => AUDIO.has(splitExt(name)[1].toLowerCase
 const BOOK = new Set(["epub", "kepub", "mobi", "azw", "azw3", "prc", "pdf", "fb2", "djvu", "djv"]);
 export const isBook = (name: string) => BOOK.has(splitExt(name)[1].toLowerCase());
 /** Comic formats (as the Rust core). */
-const COMIC = new Set(["cbz", "cbr", "cb7", "cbt", "pdf", "epub"]);
+const COMIC = new Set(["cbz", "cbr", "cb7", "cbt", "pdf", "epub", "mobi", "azw3", "azw"]);
 export const isComic = (name: string) => COMIC.has(splitExt(name)[1].toLowerCase());
 
 export function newRule(type: RuleType): Rule {

@@ -1,9 +1,11 @@
 //! Comics turned into CBZ: a CBR (RAR), CB7 (7z) or CBT (tar), whatever its
 //! name says, is written again as a zip with the same pages, in the same
-//! order, and the details of [`crate::inside`] when asked. So is a PDF
-//! whose every page is one picture (a scan): the pictures are taken out
-//! as they are (see [`pdf_pages`]); a PDF with drawn pages (text, lines)
-//! is not converted. Pictures are
+//! order, and the details of [`crate::inside`] when asked. So is a PDF,
+//! page by page: each page's picture taken out as it is when it can be,
+//! else the page drawn (see [`pdf_pages`]). And an EPUB or a Kindle book
+//! (MOBI, AZW3) whose every page is one picture, its pictures taken as
+//! they are (see [`crate::pages`]). And a folder of pictures (see
+//! [`folder_pages`]). Pictures are
 //! stored as they are (they do not get smaller compressed); other files
 //! are compressed. RAR archives are read with libarchive (see
 //! `renome-archive`); they cannot be written, so a CBR's details can only
@@ -33,6 +35,11 @@ pub enum Kind {
     SevenZip,
     Tar,
     Pdf,
+    Epub,
+    /// MOBI or AZW3.
+    Kindle,
+    /// A folder of pictures.
+    Folder,
 }
 
 impl Kind {
@@ -44,12 +51,18 @@ impl Kind {
             Kind::SevenZip => "cb7",
             Kind::Tar => "cbt",
             Kind::Pdf => "pdf",
+            Kind::Epub => "epub",
+            Kind::Kindle => "mobi",
+            Kind::Folder => "",
         }
     }
 }
 
 /// The kind of the archive at `path`, by its first bytes.
 pub fn kind(path: &Path) -> Option<Kind> {
+    if fs::symlink_metadata(path).ok()?.is_dir() {
+        return Some(Kind::Folder);
+    }
     let mut head = [0u8; 262];
     let mut f = File::open(path).ok()?;
     let mut n = 0;
@@ -62,7 +75,11 @@ pub fn kind(path: &Path) -> Option<Kind> {
     }
     let h = &head[..n];
     if h.starts_with(b"PK\x03\x04") || h.starts_with(b"PK\x05\x06") {
-        Some(Kind::Zip)
+        Some(if is_epub(path, h) {
+            Kind::Epub
+        } else {
+            Kind::Zip
+        })
     } else if renome_archive::is_rar(h) {
         Some(Kind::Rar)
     } else if h.starts_with(&[0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]) {
@@ -71,26 +88,165 @@ pub fn kind(path: &Path) -> Option<Kind> {
         Some(Kind::Tar)
     } else if h.windows(5).any(|w| w == b"%PDF-") {
         Some(Kind::Pdf)
+    } else if h.get(60..68) == Some(b"BOOKMOBI") {
+        Some(Kind::Kindle)
     } else {
         None
     }
 }
 
-/// Comics that can be converted: a comic's extension (or `.pdf`), with a
-/// RAR, 7z or tar inside, or a PDF of pictures only.
+/// A zip that is an EPUB: says so in its first file (`mimetype`), or
+/// has an EPUB's container.
+fn is_epub(path: &Path, head: &[u8]) -> bool {
+    if head.get(30..38) == Some(b"mimetype") {
+        return head
+            .get(38..)
+            .is_some_and(|r| r.starts_with(b"application/epub+zip"));
+    }
+    File::open(path)
+        .ok()
+        .and_then(|f| zip::ZipArchive::new(f).ok())
+        .is_some_and(|z| z.index_for_name("META-INF/container.xml").is_some())
+}
+
+/// Comics that can be converted: a comic's extension (or a PDF's, an
+/// EPUB's or a Kindle book's), with a RAR, 7z or tar inside, or a PDF, or
+/// an EPUB or Kindle book of pictures only.
 pub fn convertible(path: &Path) -> bool {
+    if path.is_dir() {
+        return folder_pages(path).is_ok();
+    }
     let ext = path
         .extension()
         .map(|e| e.to_string_lossy().to_lowercase())
         .unwrap_or_default();
-    if !matches!(ext.as_str(), "cbz" | "cbr" | "cb7" | "cbt" | "pdf") {
+    if !matches!(
+        ext.as_str(),
+        "cbz" | "cbr" | "cb7" | "cbt" | "pdf" | "epub" | "mobi" | "azw3" | "azw"
+    ) {
         return false;
     }
     match kind(path) {
-        Some(Kind::Rar | Kind::SevenZip | Kind::Tar) => ext != "pdf",
-        Some(Kind::Pdf) => pdf_of_pictures(path),
-        _ => false,
+        Some(Kind::Rar | Kind::SevenZip | Kind::Tar) => {
+            matches!(ext.as_str(), "cbz" | "cbr" | "cb7" | "cbt")
+        }
+        Some(k) => check_kind(path, k).is_some(),
+        None => false,
     }
+}
+
+/// Whether the comic at `path` can be converted, and how many of its
+/// pages would be drawn (only a PDF's are, see [`pdf_check`]). `None`: it
+/// cannot be (an EPUB or Kindle book with text or DRM, a PDF that does
+/// not open, already a CBZ…).
+pub fn check(path: &Path) -> Option<usize> {
+    check_kind(path, kind(path)?)
+}
+
+fn check_kind(path: &Path, kind: Kind) -> Option<usize> {
+    match kind {
+        Kind::Pdf => pdf_check(path),
+        Kind::Epub => crate::pages::epub(path).ok().map(|_| 0),
+        Kind::Kindle => crate::pages::kindle(path).ok().map(|_| 0),
+        Kind::Folder => folder_pages(path).ok().map(|_| 0),
+        Kind::Rar | Kind::SevenZip | Kind::Tar => Some(0),
+        Kind::Zip => None,
+    }
+}
+
+/// Files a folder of pages may hold besides them, left out.
+fn folder_junk(name: &str) -> bool {
+    name.starts_with('.')
+        || ["thumbs.db", "desktop.ini", "ehthumbs.db"]
+            .iter()
+            .any(|j| name.eq_ignore_ascii_case(j))
+}
+
+/// Pictures a CBZ holds.
+fn is_page(name: &str) -> bool {
+    let ext = name
+        .rsplit_once('.')
+        .map(|(_, e)| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    matches!(
+        ext.as_str(),
+        "jpg" | "jpeg" | "png" | "gif" | "webp" | "avif" | "jxl"
+    )
+}
+
+/// Folders inside a folder of pages (chapters): at most this deep.
+const FOLDER_DEPTH: usize = 3;
+
+/// The pages of a folder of pictures (a comic not yet put in a CBZ): its
+/// files, under it, in order (numbers by their value), and its
+/// `ComicInfo.xml`. Anything else in it (a video, a document, a link)
+/// makes it no comic: `comicUnsupported`.
+pub fn folder_pages(dir: &Path) -> Result<Vec<(PathBuf, String)>, String> {
+    fn walk(
+        dir: &Path,
+        under: &str,
+        depth: usize,
+        out: &mut Vec<(PathBuf, String)>,
+    ) -> Result<(), String> {
+        for e in fs::read_dir(dir).map_err(|e| e.to_string())? {
+            let e = e.map_err(|e| e.to_string())?;
+            let name = e.file_name().to_string_lossy().into_owned();
+            if folder_junk(&name) {
+                continue;
+            }
+            let t = e.file_type().map_err(|e| e.to_string())?;
+            let inner = if under.is_empty() {
+                name.clone()
+            } else {
+                format!("{under}/{name}")
+            };
+            if t.is_dir() && depth < FOLDER_DEPTH {
+                walk(&e.path(), &inner, depth + 1, out)?;
+            } else if t.is_file() && (is_page(&name) || name.eq_ignore_ascii_case("ComicInfo.xml"))
+            {
+                out.push((e.path(), inner));
+            } else {
+                return Err("comicUnsupported".into());
+            }
+        }
+        Ok(())
+    }
+    let mut out = Vec::new();
+    walk(dir, "", 0, &mut out)?;
+    if !out.iter().any(|(_, n)| is_page(n)) {
+        return Err("comicUnsupported".into());
+    }
+    out.sort_by(|a, b| natural(&a.1, &b.1));
+    Ok(out)
+}
+
+/// Names in the order a person reads them: `2` before `10`.
+fn natural(a: &str, b: &str) -> std::cmp::Ordering {
+    let parts = |s: &str| -> Vec<(bool, String)> {
+        let mut v: Vec<(bool, String)> = Vec::new();
+        for c in s.to_lowercase().chars() {
+            let digit = c.is_ascii_digit();
+            match v.last_mut() {
+                Some((d, part)) if *d == digit => part.push(c),
+                _ => v.push((digit, c.to_string())),
+            }
+        }
+        v
+    };
+    let (pa, pb) = (parts(a), parts(b));
+    for (x, y) in pa.iter().zip(&pb) {
+        let o = match (x.0, y.0) {
+            (true, true) => {
+                let (tx, ty) = (x.1.trim_start_matches('0'), y.1.trim_start_matches('0'));
+                tx.len().cmp(&ty.len()).then_with(|| tx.cmp(ty))
+            }
+            _ => x.1.cmp(&y.1),
+        };
+        if o != std::cmp::Ordering::Equal {
+            return o;
+        }
+    }
+    pa.len().cmp(&pb.len()).then_with(|| a.cmp(b))
 }
 
 /// What becomes of the original once converted.
@@ -109,6 +265,9 @@ pub struct Converted {
     /// Where the original was left (beside the CBZ); undo puts it back in
     /// the CBZ's place. `None`: it went to the trash.
     pub original: Option<PathBuf>,
+    /// The original was a folder of pictures.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub folder: bool,
 }
 
 /// The outcome of [`convert`].
@@ -217,6 +376,63 @@ fn each_file(
             Ok(())
         }
         Kind::Pdf => pdf_files(path, &mut each, drawn_pages, opts),
+        Kind::Epub => {
+            let comic = crate::pages::epub(path)?;
+            let mut zip = zip::ZipArchive::new(std::io::BufReader::new(
+                File::open(path).map_err(|e| e.to_string())?,
+            ))
+            .map_err(|e| broken(e.to_string()))?;
+            let digits = comic.pages.len().to_string().len().max(3);
+            for (i, page) in comic.pages.iter().enumerate() {
+                let mut entry = zip
+                    .by_name(&page.entry)
+                    .map_err(|e| broken(e.to_string()))?;
+                let modified = entry.last_modified().and_then(zip_secs);
+                let name = format!("{:0digits$}.{}", i + 1, page.ext);
+                each(&Page { name, modified }, &mut entry)?;
+            }
+            if let Some(info) = comic.info {
+                let mut entry = zip.by_name(&info).map_err(|e| broken(e.to_string()))?;
+                let page = Page {
+                    name: "ComicInfo.xml".into(),
+                    modified: None,
+                };
+                each(&page, &mut entry)?;
+            }
+            Ok(())
+        }
+        Kind::Kindle => {
+            let pages = crate::pages::kindle(path)?;
+            let mut file = File::open(path).map_err(|e| e.to_string())?;
+            let digits = pages.len().to_string().len().max(3);
+            for (i, page) in pages.iter().enumerate() {
+                use std::io::Seek;
+                file.seek(std::io::SeekFrom::Start(page.start))
+                    .map_err(|e| broken(e.to_string()))?;
+                let name = format!("{:0digits$}.{}", i + 1, page.ext);
+                let mut data = (&mut file).take(page.len);
+                each(
+                    &Page {
+                        name,
+                        modified: None,
+                    },
+                    &mut data,
+                )?;
+            }
+            Ok(())
+        }
+        Kind::Folder => {
+            for (file, name) in folder_pages(path)? {
+                let modified = fs::metadata(&file)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs() as i64);
+                let mut f = File::open(&file).map_err(|e| e.to_string())?;
+                each(&Page { name, modified }, &mut f)?;
+            }
+            Ok(())
+        }
         Kind::Zip => Err("comicUnsupported".into()),
     }
 }
@@ -437,8 +653,8 @@ pub struct PdfOptions {
     /// The long side, in pixels, of a drawn page with no picture (one with
     /// pictures is drawn at the sharpest one's resolution).
     pub size: u32,
-    /// The PDF's title and author go into the `ComicInfo.xml` when the
-    /// values do not have them.
+    /// The file's own title and author (a PDF's, an EPUB's, a Kindle
+    /// book's) go into the `ComicInfo.xml` when the values do not have them.
     pub info: bool,
 }
 
@@ -1954,6 +2170,35 @@ fn pdf_files(
     Ok(())
 }
 
+/// The title and authors a PDF, EPUB or Kindle book has, as
+/// `ComicInfo.xml` values.
+fn own_info(path: &Path, kind: Kind) -> Vec<(&'static str, String)> {
+    let book = match kind {
+        Kind::Pdf => return pdf_info(path),
+        Kind::Epub => crate::ebook::epub(path),
+        Kind::Kindle => crate::ebook::mobi(path),
+        _ => None,
+    };
+    let Some(m) = book else {
+        return Vec::new();
+    };
+    let mut v = Vec::new();
+    let title = m.title.trim();
+    if !title.is_empty() {
+        v.push(("Title", title.to_string()));
+    }
+    let authors: Vec<&str> = m
+        .authors
+        .iter()
+        .map(|a| a.trim())
+        .filter(|a| !a.is_empty())
+        .collect();
+    if !authors.is_empty() {
+        v.push(("Writer", authors.join(", ")));
+    }
+    v
+}
+
 /// The PDF's title and author, as `ComicInfo.xml` values.
 fn pdf_info(path: &Path) -> Vec<(&'static str, String)> {
     let Ok(m) = lopdf::Document::load_metadata(path) else {
@@ -1980,6 +2225,16 @@ fn stored(name: &str) -> bool {
         ext.as_str(),
         "jpg" | "jpeg" | "png" | "gif" | "webp" | "avif" | "jxl" | "heic" | "heif" | "zip" | "rar"
     )
+}
+
+/// A zip entry's date, as seconds since 1970 (local time).
+fn zip_secs(t: zip::DateTime) -> Option<i64> {
+    let d = chrono::NaiveDate::from_ymd_opt(t.year() as i32, t.month() as u32, t.day() as u32)?
+        .and_hms_opt(t.hour() as u32, t.minute() as u32, t.second() as u32)?;
+    Local
+        .from_local_datetime(&d)
+        .single()
+        .map(|t| t.timestamp())
 }
 
 fn zip_time(secs: Option<i64>) -> zip::DateTime {
@@ -2088,7 +2343,9 @@ fn write_zip(
     }
     let w = zout.finish().map_err(err)?;
     let file = w.into_inner().map_err(|e| e.error().to_string())?;
-    if let Ok(m) = fs::metadata(path) {
+    if let Ok(m) = fs::metadata(path)
+        && !m.is_dir()
+    {
         let _ = file.set_permissions(m.permissions());
     }
     file.sync_all().map_err(|e| e.to_string())?;
@@ -2102,8 +2359,11 @@ fn write_zip(
 }
 
 /// Where the original is left: beside, named as the comic with its own
-/// extension.
+/// extension (`.azw3` for a Kindle book of the newer kind only).
 pub fn beside(path: &Path, kind: Kind) -> PathBuf {
+    if kind == Kind::Kindle && crate::pages::kindle_is_kf8(path) {
+        return path.with_extension("azw3");
+    }
     path.with_extension(kind.ext())
 }
 
@@ -2135,7 +2395,7 @@ pub fn convert_with(
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("cbz"));
     let kind = match kind(path) {
-        Some(k @ (Kind::Rar | Kind::SevenZip | Kind::Tar | Kind::Pdf)) if named_cbz => k,
+        Some(k) if named_cbz && k != Kind::Zip => k,
         _ => return Err("comicUnsupported".into()),
     };
     let left = beside(path, kind);
@@ -2145,8 +2405,8 @@ pub fn convert_with(
     let tmp = temp_of(path);
     // A PDF's own title and author, where the values have none.
     let mut values = values.to_vec();
-    if kind == Kind::Pdf && pdf.info {
-        for (k, v) in pdf_info(path) {
+    if pdf.info {
+        for (k, v) in own_info(path, kind) {
             if !values.iter().any(|(key, _)| *key == k) {
                 values.push((k, v));
             }
@@ -2190,7 +2450,10 @@ pub fn convert_with(
             raw: Vec::new(),
             kept_text: Vec::new(),
             entry: None,
-            converted: Some(Converted { original: kept }),
+            converted: Some(Converted {
+                original: kept,
+                folder: kind == Kind::Folder,
+            }),
         },
         not_trashed,
         drawn_pages,
@@ -2212,8 +2475,12 @@ pub fn restore(path: &Path, c: &Converted) -> Result<(), String> {
     let Some(original) = &c.original else {
         return Ok(());
     };
-    if fs::symlink_metadata(original).is_err() {
+    let Ok(m) = fs::symlink_metadata(original) else {
         return Err("originalGone".into());
+    };
+    // A folder does not replace a file: the CBZ goes first.
+    if m.is_dir() && fs::symlink_metadata(path).is_ok_and(|p| !p.is_dir()) {
+        fs::remove_file(path).map_err(|e| e.to_string())?;
     }
     fs::rename(original, path).map_err(|e| e.to_string())
 }
@@ -3069,6 +3336,141 @@ mod tests {
         assert!(xml.contains("<Title>A Title</Title>"), "{xml}");
         assert!(xml.contains("<Writer>Someone</Writer>"), "{xml}");
         assert!(xml.contains("<Series>Hero</Series>"), "{xml}");
+    }
+
+    #[test]
+    fn an_epub_of_pictures_becomes_a_cbz() {
+        use crate::pages::tests::{epub_of, page};
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("Um Quadrinho.epub");
+        let one: &[u8] = b"\xff\xd8\xff\xe0one";
+        let two: &[u8] = b"\x89PNG\r\n\x1a\ntwo";
+        let (p1, p2) = (page("../Images/1.jpeg"), page("../Images/2.png"));
+        epub_of(
+            &path,
+            &[("Text/a.xhtml", &p1), ("Text/b.xhtml", &p2)],
+            &[("Images/2.png", two), ("Images/1.jpeg", one)],
+            "",
+        );
+        let epub = fs::read(&path).unwrap();
+        assert_eq!(kind(&path), Some(Kind::Epub));
+        assert_eq!(check(&path), Some(0));
+        // Renamed `.cbz` first by the plan.
+        let cbz = d.path().join("Um Quadrinho.cbz");
+        fs::rename(&path, &cbz).unwrap();
+        assert!(convertible(&cbz));
+        let opts = PdfOptions {
+            info: true,
+            ..Default::default()
+        };
+        let values = vec![("Number", "1".to_string())];
+        let done = convert_with(&cbz, &values, Original::Keep, opts).unwrap();
+        assert_eq!(done.drawn_pages, 0);
+        assert_eq!(zip_names(&cbz), ["001.jpg", "002.png", "ComicInfo.xml"]);
+        assert_eq!(zip_read(&cbz, "001.jpg"), one);
+        assert_eq!(zip_read(&cbz, "002.png"), two);
+        let xml = String::from_utf8(zip_read(&cbz, "ComicInfo.xml")).unwrap();
+        assert!(xml.contains("<Title>Um Quadrinho</Title>"), "{xml}");
+        assert!(xml.contains("<Writer>Fulano de Tal</Writer>"), "{xml}");
+        assert_eq!(fs::read(d.path().join("Um Quadrinho.epub")).unwrap(), epub);
+        // A book of text is not one.
+        let book = d.path().join("livro.epub");
+        let text = "<html><body><p>Era uma vez um reino muito, muito distante.</p></body></html>";
+        epub_of(&book, &[("a.xhtml", text)], &[], "");
+        assert_eq!(check(&book), None);
+        assert!(!convertible(&book));
+    }
+
+    #[test]
+    fn a_kindle_comic_becomes_a_cbz() {
+        use crate::pages::tests::kindle_of;
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("k.cbz");
+        let a: &[u8] = b"\xff\xd8\xff\xe0aaaa";
+        let b: &[u8] = b"\x89PNG\r\n\x1a\nbbbb";
+        let text = r#"<html><body><img src="kindle:embed:0002"/><img src="kindle:embed:0001"/></body></html>"#;
+        kindle_of(&path, text, &[a, b], true, false);
+        assert_eq!(kind(&path), Some(Kind::Kindle));
+        assert!(convertible(&path));
+        convert(&path, &[], Original::Keep).unwrap();
+        assert_eq!(zip_names(&path), ["001.png", "002.jpg"]);
+        assert_eq!(zip_read(&path, "001.png"), b);
+        assert_eq!(zip_read(&path, "002.jpg"), a);
+        // The newer kind alone is an AZW3.
+        assert!(d.path().join("k.azw3").exists());
+    }
+
+    #[test]
+    fn a_folder_of_pictures_becomes_a_cbz_and_comes_back() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("Some Hero 001");
+        fs::create_dir_all(dir.join("Cap 2")).unwrap();
+        for (name, data) in [
+            ("10.jpg", &b"ten"[..]),
+            ("2.jpg", b"two"),
+            ("1.png", b"one"),
+            (
+                "ComicInfo.xml",
+                b"<ComicInfo><Series>Old</Series></ComicInfo>",
+            ),
+            ("Thumbs.db", b"junk"),
+            (".hidden", b"junk"),
+            ("Cap 2/3.jpg", b"three"),
+        ] {
+            fs::write(dir.join(name), data).unwrap();
+        }
+        assert_eq!(kind(&dir), Some(Kind::Folder));
+        assert_eq!(check(&dir), Some(0));
+        // Renamed `Name.cbz` first by the plan.
+        let path = d.path().join("Some Hero 001.cbz");
+        fs::rename(&dir, &path).unwrap();
+        assert!(convertible(&path));
+        let values = vec![("Series", "Some Hero".to_string())];
+        let done = convert(&path, &values, Original::Keep).unwrap();
+        assert!(path.is_file());
+        assert_eq!(
+            zip_names(&path),
+            ["1.png", "2.jpg", "10.jpg", "Cap 2/3.jpg", "ComicInfo.xml"]
+        );
+        let xml = String::from_utf8(zip_read(&path, "ComicInfo.xml")).unwrap();
+        assert!(xml.contains("<Series>Some Hero</Series>"), "{xml}");
+        assert!(dir.join("Thumbs.db").exists());
+        let c = done.backup.converted.unwrap();
+        assert!(c.folder);
+        assert_eq!(c.original.as_deref(), Some(dir.as_path()));
+        // Undo: the folder takes the CBZ's place.
+        restore(&path, &c).unwrap();
+        assert!(path.is_dir() && !dir.exists());
+        assert_eq!(fs::read(path.join("Cap 2/3.jpg")).unwrap(), b"three");
+        // Anything but pictures: not a comic.
+        fs::write(path.join("video.mp4"), b"x").unwrap();
+        assert!(!convertible(&path));
+        let empty = d.path().join("vazia");
+        fs::create_dir(&empty).unwrap();
+        assert_eq!(check(&empty), None);
+    }
+
+    #[test]
+    fn names_sort_as_read() {
+        let mut v = vec!["p10.jpg", "p2.jpg", "P1.jpg", "p02b.jpg", "a.jpg"];
+        v.sort_by(|a, b| natural(a, b));
+        assert_eq!(v, ["a.jpg", "P1.jpg", "p2.jpg", "p02b.jpg", "p10.jpg"]);
+    }
+
+    /// The comic EPUBs and Kindle books found on this computer (set
+    /// `RENOME_EBOOKS` to a file listing their paths): none breaks, and
+    /// the books of text are left alone.
+    #[test]
+    fn real_ebooks() {
+        let Ok(list) = std::env::var("RENOME_EBOOKS") else {
+            return;
+        };
+        for line in fs::read_to_string(list).unwrap().lines() {
+            let p = Path::new(line);
+            let k = kind(p);
+            let c = std::panic::catch_unwind(|| check(p)).expect(line);
+            println!("{k:?}\t{c:?}\t{line}");
+        }
     }
 
     #[test]

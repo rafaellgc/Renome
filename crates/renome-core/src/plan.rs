@@ -1081,7 +1081,14 @@ pub fn preview(
             let (paths, mut found): (Vec<&Path>, Vec<ComicMatch>) = shown
                 .iter()
                 .map(|&(_, _, f)| f)
-                .filter(|f| !f.is_dir && comics::is_comic(&f.ext))
+                .filter(|f| {
+                    if f.is_dir {
+                        // A folder of pictures, when it becomes a CBZ.
+                        converts.is_some_and(|draw| crate::rules::converts(f, draw))
+                    } else {
+                        comics::is_comic(&f.ext)
+                    }
+                })
                 .filter_map(|f| {
                     let stem = lookup.get(f.path.as_path()).map_or(&f.stem, |(s, _)| s);
                     let m = view
@@ -1197,7 +1204,7 @@ pub fn preview(
             let junk = matched.is_some() && own.junk;
             let convert = converts.is_some_and(|draw| crate::rules::converts(file, draw));
             let drawn = convert
-                .then(|| file.pdf_drawn_pages())
+                .then(|| file.convert_check())
                 .flatten()
                 .filter(|n| *n > 0 && file.ext.eq_ignore_ascii_case("pdf"));
             PreviewItem {
@@ -2973,6 +2980,13 @@ mod tests {
             fs::write(&p, data).unwrap();
             files.push(FileEntry::from_path(&p, &fs::metadata(&p).unwrap()).unwrap());
         }
+        // Folders: one of pages, one with a video.
+        for (name, inside) in [("Herói 005", "01.jpg"), ("Filme", "filme.mp4")] {
+            let p = d.path().join(name);
+            fs::create_dir(&p).unwrap();
+            fs::write(p.join(inside), b"x").unwrap();
+            files.push(FileEntry::from_path(&p, &fs::metadata(&p).unwrap()).unwrap());
+        }
         let comic = |convert| {
             vec![Step {
                 enabled: true,
@@ -3007,6 +3021,9 @@ mod tests {
                 ("c.cbr", "c.cbr", false),
                 // Not a comic.
                 ("d.rar", "d.rar", false),
+                // A folder of pages becomes one, named as a comic.
+                ("Herói 005", "Herói 005.cbz", true),
+                ("Filme", "Filme", false),
             ]
         );
         let p = preview(&files, &comic(false), &HashMap::new(), &View::default());
