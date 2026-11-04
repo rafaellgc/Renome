@@ -101,7 +101,7 @@ before it is read. The preview sends that name to the app
 | TV show (TMDB) | the show (name, TMDB id or link; empty: from the files); template with `{show}`, `{original}`, `{year}`, `{season}`, `{episode}`, `{title}`, `{id}`, `{resolution}`, `{video codec}` (as for movies, see 2.1; not in the show folder) (default `{show} ({year}) - S{season}E{episode} - {title}`); what `:` becomes; show and season folders (show folder template, default `{show} ({year}) [tmdbid-{id}]`); save `.nfo` files and images (optionally fanart and logo); show the missing episodes. See 2.2 |
 | Music (tags) | template with `{track}`, `{title}`, `{artist}`, `{album artist}`, `{album}`, `{year}`, `{disc}`, `{genre}`, `{composer}`, `{total tracks}`, `{total discs}`, `{original year}`, `{label}`, `{catalog}`, `{artist sort}`, `{album artist sort}`, `{initial}`, `{format}`, `{bitrate}`, `{sample rate}`, `{bits}` (default `{track} - {title}`); what `:` becomes; disc number in the track on multi-disc albums; fill in from the file name; artist and album folders (default `{album artist}/{album} ({year})`); show the missing tracks. See 2.3 |
 | Book (Open Library) | template with `{author}`, `{authors}`, `{author sort}`, `{initial}`, `{title}`, `{original}`, `{year}`, `{edition year}`, `{publisher}`, `{isbn}`, `{series}`, `{volume}`, `{id}` (default `{author} - {title} ({year})`); what `:` becomes; author and book folders (default `{author}/{title}`); save the cover and `metadata.opf`; write the details inside EPUBs; show the series' missing volumes. See 2.4 |
-| Comic (ComicInfo.xml, GCD, Comic Vine, MangaDex) | template with `{series}`, `{series year}`, `{number}`, `{volume}`, `{chapter}`, `{title}`, `{year}`, `{count}`, `{publisher}`, `{writer}`, `{artist}`, `{id}` (default `{series} v{volume} #{number} c{chapter} - {title} ({year})`); what `:` becomes; the series (empty: from the files); the catalogue; series folders (default `{series} ({series year})`); series from the folder; write `ComicInfo.xml` into CBZs; convert CBR, CB7 and CBT to CBZ (the original kept beside or deleted); show the missing issues. See 2.5 |
+| Comic (ComicInfo.xml, GCD, Comic Vine, MangaDex) | template with `{series}`, `{series year}`, `{number}`, `{volume}`, `{chapter}`, `{title}`, `{year}`, `{count}`, `{publisher}`, `{writer}`, `{artist}`, `{id}` (default `{series} v{volume} #{number} c{chapter} - {title} ({year})`); what `:` becomes; the series (empty: from the files); the catalogue; series folders (default `{series} ({series year})`); series from the folder; write `ComicInfo.xml` into CBZs; convert CBR, CB7, CBT and PDF to CBZ (the original kept beside or deleted); show the missing issues. See 2.5 |
 
 Positions count **visible characters** (Unicode graphemes), starting at 1.
 
@@ -999,11 +999,65 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   rows count (in the Rename button) when their `ComicInfo.xml` (or other
   details read, see "What is already there") says something else
   (`retag`). A `MetronInfo.xml` is never updated.
-- "Convert CBR, CB7 and CBT to CBZ" (off by default), with "The original
-  file": keep beside (default) or delete. In the preview, a comic file
-  (`.cbz`/`.cbr`/`.cb7`/`.cbt`) whose content is a RAR, 7z or tar gets the
-  extension `cbz` (`convert` on the row; a `.cbz` that is a RAR keeps its
-  name and counts in the Rename button as unchanged). After renaming,
+- "Convert CBR, CB7, CBT and PDF to CBZ" (off by default), with "The
+  original file": keep beside (default) or delete; "PDF pages that are
+  not just a picture": draw them (default) or leave such PDFs as they are
+  (`drawPages`; then only PDFs with no page to draw are offered, and one
+  found to need drawing when converting fails with `pdfDrawn`); "Size of
+  drawn pages": 1600, 2400 (default) or 3200 (`pageSize`, the long side
+  of a drawn page with no picture). A converted PDF's row has `drawn`
+  (pages that would be drawn, estimated without the pictures' data;
+  `pdf_check`), shown as a tag; the conversion's notice says how many
+  were drawn (`drawn` in `write_inside`'s report). In the preview, a comic
+  file (`.cbz`/`.cbr`/`.cb7`/`.cbt`) whose content is a RAR, 7z or tar, or
+  a `.pdf`, gets the extension `cbz` (`convert` on the row; a
+  `.cbz` that is a RAR keeps its name and counts in the Rename button as
+  unchanged). A PDF (checked once per file: it opens
+  without a password, with lopdf or else hayro; `pdf_of_pictures`) is
+  converted page by page, each in the way that keeps the most
+  (`pdf_files`). A page's content is followed through form XObjects
+  (their `Matrix`, their own resources else the page's, up to 8 deep)
+  with `q`/`Q`, `cm`, fill color and text rendering mode tracked; it draws
+  pictures (image XObjects, and inline images, read by lopdf only when
+  not compressed) and shapes (path painting, `sh`, text in a mode other
+  than 3 or 7). A page drawing nothing becomes a white 1-bit PNG the size
+  most other pages' pictures have (as shown). The page's picture is taken
+  out when the biggest picture (by pixels) is the last thing drawn
+  (itself again is fine), with nothing before it or, before it,
+  decoration only (anything) while it covers 85% of the page's crop box
+  (else media box); no visible annotation with an appearance (not Link
+  or Popup, not hidden); its orientation (matrix and inherited `Rotate`)
+  a quarter turn and/or mirror; an image mask only painted black on
+  nothing; no `Mask` or `SMaskInData`; a soft mask only when it hides
+  nothing (every value the highest); `Decode` only when it changes
+  nothing, or `[1 0]` for one value (inverted). Then: a JPEG
+  (`DCTDecode` after plain layers — Flate, LZW, ASCII85, ASCIIHex,
+  RunLength, Brotli —, gray or RGB, upright) is copied as `NNN.jpg`; a
+  CMYK JPEG is decoded and made RGB (approximate colors, `1 - c` times
+  `1 - k`) and written as a JPEG (quality 95); JPEG 2000 (hayro-jpeg2000;
+  transparency laid on white, CMYK made RGB), JBIG2 (hayro-jbig2, with
+  `JBIG2Globals`) and fax Group 4 (`fax`; others are drawn) are decoded
+  and written as PNG; raw pixels (plain layers only; gray at 1, 2, 4, 8
+  or 16 bits, RGB at 8 or 16, CMYK at 8 made RGB, indexed with a gray,
+  RGB, CMYK or one-ink palette at 1, 2, 4 or 8, one ink — Separation or
+  a one-colorant DeviceN — as gray the other way round) go as they are
+  into a lossless `NNN.png` (indexed ones with the palette). Not upright,
+  a JPEG is turned without decoding by libjpeg-turbo (built in by
+  `turbojpeg-sys`, no system library; "perfect" transforms only, i.e.
+  when the edges that move are whole blocks), else the pixels are turned
+  back into a PNG (a JPEG decoded first, values below 8 bits widened to
+  8). Anything else, or a picture that fails to
+  decode, and a PDF lopdf cannot read: the page is drawn with hayro, on
+  white, at the scale of its sharpest picture (pixels over the points it
+  is shown at) or `pageSize` pixels on the long side, at most 6000 (and
+  16000 in any case), several pages at once (one hayro reader per worker,
+  up to 8, sharing the file's bytes, which are read once; batches of 16
+  pages kept in order), as a PNG (gray when every pixel is within 8 of gray)
+  unless a JPEG (quality 92) is under two thirds of it; `Done` counts the
+  drawn pages. Pages are numbered `001`… in page order (more digits past
+  999); with "Write the details" on, the PDF's own title and author (its
+  Info) go into the `ComicInfo.xml` as Title and Writer when the values
+  have none. After renaming,
   each is converted (`convert::convert`): every file entry, in the
   archive's order, is written into `.<name>.renome-tags` beside it
   (pictures stored, other files deflated, dates kept; folders and links
@@ -1020,8 +1074,11 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   Errors, the comic as it was: `archiveLocked` (a password),
   `archiveBroken: …` (damaged, or a RAR libarchive cannot decode),
   `convertTaken` (the original's name beside exists), `comicUnsupported`
-  (not named `.cbz`, or a zip). A RAR split in parts is read as a broken
-  one. Recorded like written details (a backup with `converted`): undo
+  (not named `.cbz`, or a zip), `pdfLocked`. A RAR split in
+  parts is read as a broken one. A comic the rename named `.cbz` that
+  could not be converted takes its real extension back
+  (`History::retarget`: the rename in the entry now ends there, or goes
+  when that is its old name; an entry left empty goes). Recorded like written details (a backup with `converted`): undo
   renames a kept original back over the CBZ (`originalGone` when it is not
   there), before the renames take it back to its old name; with the
   original in the trash, the CBZ stays and the rename that made it gets

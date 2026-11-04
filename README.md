@@ -84,8 +84,8 @@ A built-in manual (F1) explains every rule with examples.
   series folders (with ready-made templates for Komga and Kavita). Issues
   missing from your series show up as faded rows, and can be exported to
   a CSV file. Optionally writes the details into each CBZ's
-  `ComicInfo.xml`, pages untouched, and converts CBR (RAR), CB7 and CBT
-  files to CBZ, keeping or deleting the original (undone like any
+  `ComicInfo.xml`, pages untouched, and converts CBR (RAR), CB7, CBT and
+  PDF files to CBZ (pictures taken out as they are; other pages drawn), keeping or deleting the original (undone like any
   rename). RAR files are read with libarchive, built into the app.
 - Movie, TV show, book and comic lookups read the name as the rules above
   them leave it, so a "Replace text" can fix an abbreviation first.

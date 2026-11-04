@@ -737,6 +737,8 @@ struct TagJob {
 #[serde(rename_all = "camelCase")]
 struct TagReport {
     written: usize,
+    /// PDF pages drawn while converting comics (see `write_inside`).
+    drawn: usize,
     /// File name and reason.
     errors: Vec<(String, String)>,
 }
@@ -893,6 +895,10 @@ struct InsideJob {
     /// given), its original kept beside or sent to the trash.
     #[serde(default)]
     convert: Option<renome_core::convert::Original>,
+    /// How PDFs are converted (whether pages may be drawn, at what size,
+    /// whether their own title and author go in).
+    #[serde(default)]
+    pdf: renome_core::convert::PdfOptions,
 }
 
 /// Writes each comic's details into its `ComicInfo.xml` (CBZ) and each
@@ -955,9 +961,12 @@ async fn write_inside(
     );
     let mut backups = Vec::new();
     let mut written = Vec::new();
+    let pages = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     for (done, job) in items.into_iter().enumerate() {
         let (path, store) = (job.path.clone(), store.clone());
         let job_path = job.path.clone();
+        let converting = job.convert.is_some();
+        let drawn = pages.clone();
         note.start(&path);
         let result = tauri::async_runtime::spawn_blocking(move || {
             let values = || {
@@ -967,8 +976,12 @@ async fn write_inside(
                     .unwrap_or_default()
             };
             match (job.convert, &job.comic, &job.book) {
-                (Some(original), _, _) => convert::convert(&path, &values(), original)
-                    .map(|d| (Some(d.backup), d.not_trashed)),
+                (Some(original), _, _) => {
+                    convert::convert_with(&path, &values(), original, job.pdf).map(|d| {
+                        drawn.fetch_add(d.drawn_pages, std::sync::atomic::Ordering::Relaxed);
+                        (Some(d.backup), d.not_trashed)
+                    })
+                }
                 (_, Some(_), _) => inside::write_comic(&path, &values(), &store).map(|b| (b, None)),
                 (_, _, Some(b)) => {
                     inside::write_book(&path, &inside::book_values(b, &job.language), &store)
@@ -993,7 +1006,28 @@ async fn write_inside(
                 backups.push(b);
             }
             Ok(None) => {}
-            Err(e) => report.errors.push((job_path.display().to_string(), e)),
+            Err(e) => {
+                // Named `.cbz` to be converted, it could not be: its own
+                // extension back.
+                if converting
+                    && let Some(k) = convert::kind(&job_path).filter(|k| *k != convert::Kind::Zip)
+                {
+                    let back = convert::beside(&job_path, k);
+                    if state.history.retarget(&id, &job_path, &back) == Ok(true) {
+                        let moved = renome_core::apply::ApplyReport {
+                            done: vec![renome_core::apply::Operation {
+                                from: job_path.clone(),
+                                to: back,
+                                copy: false,
+                                within: None,
+                            }],
+                            ..Default::default()
+                        };
+                        refresh_renamed(&mut state.session.lock().unwrap().files, &moved);
+                    }
+                }
+                report.errors.push((job_path.display().to_string(), e));
+            }
         }
         let _ = app.emit(
             "inside-progress",
@@ -1001,9 +1035,14 @@ async fn write_inside(
         );
     }
     report.written = backups.len();
+    report.drawn = pages.load(std::sync::atomic::Ordering::Relaxed);
     let saved = if backups.is_empty() {
         if own_entry {
             let _ = state.history.delete(&id);
+        } else {
+            // Comics that could not be converted may have taken back the
+            // only renames.
+            let _ = state.history.drop_if_empty(&id);
         }
         Ok(())
     } else {

@@ -351,6 +351,21 @@
               <option value="delete">{t("comicOriginalDelete")}</option>
             </select>
           </label>
+          <label class="sub" title={t("comicDrawPagesHint")}>{t("comicDrawPages")}
+            <select bind:value={r.drawPages}>
+              <option value={true}>{t("comicDrawPagesYes")}</option>
+              <option value={false}>{t("comicDrawPagesNo")}</option>
+            </select>
+          </label>
+          {#if r.drawPages !== false}
+            <label class="sub" title={t("comicPageSizeHint")}>{t("comicPageSize")}
+              <select bind:value={r.pageSize}>
+                <option value={1600}>1600 px</option>
+                <option value={2400}>{t("comicPageSize2400")}</option>
+                <option value={3200}>3200 px</option>
+              </select>
+            </label>
+          {/if}
         {/if}
         <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("comicMissingLabel")}<small>{t("comicMissingHint")}</small></span></label>
         {#if r.folders}

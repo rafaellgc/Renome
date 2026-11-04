@@ -145,10 +145,14 @@ pub struct PreviewItem {
     pub retag: bool,
     /// A matched song with tags that cleaning would take away.
     pub junk: bool,
-    /// A comic the comic rule converts to CBZ (a RAR, 7z or tar inside;
-    /// see [`crate::convert`]), named `.cbz` here.
+    /// A comic the comic rule converts to CBZ (a RAR, 7z or tar inside, or
+    /// a PDF; see [`crate::convert`]), named `.cbz` here.
     #[serde(default)]
     pub convert: bool,
+    /// A PDF converted: how many of its pages would be drawn (none:
+    /// `None`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drawn: Option<usize>,
     /// The name the lookups (movie, series, book, comic) read: what the
     /// rules above the first lookup rule make of it, when not the original.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1191,7 +1195,11 @@ pub fn preview(
                         && crate::inside::comic_differs(m, file.comic_info())
                 });
             let junk = matched.is_some() && own.junk;
-            let convert = converts && crate::rules::converts(file);
+            let convert = converts.is_some_and(|draw| crate::rules::converts(file, draw));
+            let drawn = convert
+                .then(|| file.pdf_drawn_pages())
+                .flatten()
+                .filter(|n| *n > 0 && file.ext.eq_ignore_ascii_case("pdf"));
             PreviewItem {
                 path: file.path.clone(),
                 dir: file.dir.clone(),
@@ -1210,6 +1218,7 @@ pub fn preview(
                 retag,
                 junk,
                 convert,
+                drawn,
                 lookup_name,
                 within: view.send_to.as_ref().map(|_| file.base.clone()),
             }
@@ -2977,6 +2986,8 @@ mod tests {
                     by_folder: false,
                     missing: false,
                     convert,
+                    draw_pages: true,
+                    page_size: 2400,
                 },
             }]
         };
@@ -3041,6 +3052,8 @@ mod tests {
                 by_folder: false,
                 missing: false,
                 convert: false,
+                draw_pages: true,
+                page_size: 2400,
             },
         }];
         let p = preview(&files, &steps, &HashMap::new(), &view);

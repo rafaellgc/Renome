@@ -37,7 +37,7 @@ export type Rule =
       folders: boolean; folderTemplate: string; cover: boolean; playlist: boolean; listen: boolean; writeTags: boolean; embedCover: boolean; coverSize: number; cleanTags: boolean; missing: boolean;
     }
   | { type: "book"; template: string; colon: string; folders: boolean; folderTemplate: string; cover: boolean; opf: boolean; writeEpub?: boolean; missing: boolean }
-  | { type: "comic"; template: string; colon: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; byFolder: boolean; writeInfo?: boolean; convert?: boolean; original?: "keep" | "delete"; missing: boolean };
+  | { type: "comic"; template: string; colon: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; byFolder: boolean; writeInfo?: boolean; convert?: boolean; original?: "keep" | "delete"; drawPages?: boolean; pageSize?: number; missing: boolean };
 
 export type RuleType = Rule["type"];
 
@@ -72,8 +72,10 @@ export interface PreviewItem {
   retag: boolean;
   /** Matched, with tags that cleaning would take away. */
   junk: boolean;
-  /** A comic the comic rule converts to CBZ (a RAR, 7z or tar inside). */
+  /** A comic the comic rule converts to CBZ (a RAR, 7z or tar inside, or a PDF). */
   convert: boolean;
+  /** A PDF converted: how many of its pages would be drawn. */
+  drawn?: number;
   /** The name the lookups read, when the rules above the first lookup rule
    *  change it (else the original). */
   lookupName?: string;

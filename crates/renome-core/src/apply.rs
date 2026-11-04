@@ -1143,6 +1143,38 @@ impl History {
         self.write(id, &j)
     }
 
+    /// A file entry `id` renamed to `at` moves on to `to` (a comic named
+    /// `.cbz` to be converted that could not be: its own extension back).
+    /// Nothing happens (`Ok(false)`) when the entry did not rename a file
+    /// to `at`, or `to` is taken.
+    pub fn retarget(&self, id: &str, at: &Path, to: &Path) -> Result<bool, String> {
+        let mut j = self.read(id)?;
+        let Some(i) = j.ops.iter().position(|op| !op.copy && op.to == at) else {
+            return Ok(false);
+        };
+        if rename_new(at, to).is_err() {
+            return Ok(false);
+        }
+        if j.ops[i].from == to {
+            // Back to its old name: nothing left to undo for it (an entry
+            // left empty goes with [`History::drop_if_empty`]).
+            j.ops.remove(i);
+        } else {
+            j.ops[i].to = to.to_path_buf();
+        }
+        self.write(id, &j)?;
+        Ok(true)
+    }
+
+    /// Deletes entry `id` when nothing is left in it to undo.
+    pub fn drop_if_empty(&self, id: &str) -> Result<(), String> {
+        let j = self.read(id)?;
+        if j.ops.is_empty() && j.extra_files.is_empty() && j.lists.is_empty() && j.tags.is_empty() {
+            self.delete(id)?;
+        }
+        Ok(())
+    }
+
     /// Starts writing tags for entry `id` (see [`Tagging`]).
     pub fn tagging(&self, id: &str) -> Result<Tagging, String> {
         let path = self.path(id)?.with_extension("tagging");
@@ -1486,6 +1518,38 @@ mod tests {
             Some(crate::convert::Kind::Zip)
         );
         assert!(!p.join("old.cbr").exists() && !cbz.exists());
+    }
+
+    #[test]
+    fn a_comic_not_converted_gets_its_extension_back() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        fs::write(p.join("old.cbr"), b"Rar!\x1a\x07\x00 damaged").unwrap();
+        fs::write(p.join("b.cbr"), b"Rar!\x1a\x07\x00 damaged").unwrap();
+        let h = History::new(p.join("hist"));
+        let id = h
+            .apply(&[op(p, "old.cbr", "Hero 001.cbz"), op(p, "b.cbr", "b.cbz")])
+            .history_id
+            .unwrap();
+        let cbz = p.join("Hero 001.cbz");
+        assert!(h.retarget(&id, &cbz, &p.join("Hero 001.cbr")).unwrap());
+        assert!(p.join("Hero 001.cbr").exists() && !cbz.exists());
+        // Back to its old name: out of the entry, which stays for the other.
+        assert!(h.retarget(&id, &p.join("b.cbz"), &p.join("b.cbr")).unwrap());
+        assert!(p.join("b.cbr").exists());
+        assert!(
+            !h.retarget(&id, &p.join("none.cbz"), &p.join("none.cbr"))
+                .unwrap()
+        );
+        h.drop_if_empty(&id).unwrap();
+        let u = h.undo(&id).unwrap();
+        assert!(u.errors.is_empty(), "{:?}", u.errors);
+        assert!(p.join("old.cbr").exists() && p.join("b.cbr").exists());
+        // Left with nothing: it goes.
+        let id = h.apply(&[op(p, "b.cbr", "b.cbz")]).history_id.unwrap();
+        assert!(h.retarget(&id, &p.join("b.cbz"), &p.join("b.cbr")).unwrap());
+        h.drop_if_empty(&id).unwrap();
+        assert!(h.list().iter().all(|e| e.id != id));
     }
 
     #[test]

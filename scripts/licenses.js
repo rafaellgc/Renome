@@ -59,6 +59,24 @@ function pickTexts(expression, files) {
 /** The first license named in an expression ("MIT OR Apache-2.0" → "MIT"). */
 const firstLicense = (expression) => (expression.match(/[A-Za-z0-9.+-]+/) ?? [""])[0];
 
+/** The copy of libjpeg-turbo that `turbojpeg-sys` builds into the program. */
+function libjpegTurbo(pkg) {
+  const dir = path.join(path.dirname(pkg.manifest_path), "libjpeg-turbo");
+  const cmake = fs.readFileSync(path.join(dir, "CMakeLists.txt"), "utf8");
+  const files = ["LICENSE.md", "README.ijg"]
+    .filter((n) => fs.existsSync(path.join(dir, n)))
+    .map((n) => ({ name: n, text: fs.readFileSync(path.join(dir, n), "utf8") }));
+  return {
+    name: "libjpeg-turbo",
+    version: /set\(VERSION ([^)]+)\)/.exec(cmake)?.[1] ?? "",
+    license: "IJG AND BSD-3-Clause AND Zlib",
+    url: "https://libjpeg-turbo.org",
+    authors: ["libjpeg-turbo contributors", "Independent JPEG Group"],
+    kind: "c",
+    files,
+  };
+}
+
 function rustPackages(root, warn) {
   const triple = process.env.TAURI_ENV_TARGET_TRIPLE;
   let target = triple && !triple.includes("universal") ? triple : "";
@@ -88,6 +106,8 @@ function rustPackages(root, warn) {
     }
     const linked = [...seen].map((id) => byId.get(id));
     const own = linked.some((p) => p.name === "renome-archive") ? [libarchive(root)] : [];
+    const turbo = linked.find((p) => p.name === "turbojpeg-sys");
+    if (turbo) own.push(libjpegTurbo(turbo));
     return linked
       .filter((p) => !OWN.has(p.name))
       .map((p) => ({

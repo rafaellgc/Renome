@@ -79,10 +79,17 @@ export const api = {
   writeInside: (
     historyId: string | null,
     items: (
-      | { path: string; comic?: ComicMatch; web?: string; manga?: boolean; convert?: "keep" | "delete" }
+      | {
+          path: string;
+          comic?: ComicMatch;
+          web?: string;
+          manga?: boolean;
+          convert?: "keep" | "delete";
+          pdf?: { draw: boolean; size: number; info: boolean };
+        }
       | { path: string; book: BookMatch; language: string }
     )[],
-  ) => invoke<{ written: number; errors: [string, string][] }>("write_inside", { historyId, items }),
+  ) => invoke<{ written: number; drawn: number; errors: [string, string][] }>("write_inside", { historyId, items }),
   writePlaylists: (historyId: string | null, dirs: string[]) =>
     invoke<{ created: string[]; errors: [string, string][]; kept: number }>("write_playlists", { historyId, dirs }),
   writeCovers: (historyId: string | null, items: { dir: string; release: string }[]) =>

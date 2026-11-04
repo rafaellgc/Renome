@@ -8,11 +8,16 @@ description = "Renome core: renaming rules, preview and safe apply"
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
 encoding_rs = "0.8"
+fax = "0.3.0"
 globset = "0.4"
+hayro = "0.9.0"
+hayro-jbig2 = "0.4.0"
+hayro-jpeg2000 = "0.5.0"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 kamadak-exif = "0.6"
 lofty = "0.25.4"
 lopdf = { version = "0.46", default-features = false }
+png = "0.18"
 regex = "1"
 renome-archive = { path = "../renome-archive" }
 roxmltree = "0.21"
@@ -23,6 +28,7 @@ sevenz-rust2 = { version = "0.24", default-features = false }
 symphonia = { version = "0.6", features = ["mp3", "aac", "isomp4", "alac", "aiff"] }
 tar = { version = "0.4", default-features = false }
 trash = "5"
+turbojpeg = { version = "1.5.1", default-features = false, features = ["cmake"] }
 unicode-normalization = "0.1"
 unicode-segmentation = "1"
 walkdir = "2"

@@ -303,7 +303,8 @@
   function comicInsideItem(key: string, path: string, convert: boolean) {
     const r = comicRule?.rule;
     const original = r?.type === "comic" && r.convert && convert ? (r.original ?? "keep") : undefined;
-    if (!(r?.type === "comic" && r.writeInfo && comicMatches[key] && comics[key])) return { path, convert: original };
+    const pdf = r?.type === "comic" ? { draw: r.drawPages !== false, size: r.pageSize ?? 2400, info: !!r.writeInfo } : undefined;
+    if (!(r?.type === "comic" && r.writeInfo && comicMatches[key] && comics[key])) return { path, convert: original, pdf };
     const c = comics[key];
     const [source, volume] = [c.volumeKey.slice(0, c.volumeKey.indexOf(":")), c.volumeKey.slice(c.volumeKey.indexOf(":") + 1)];
     const issue = c.choice || "";
@@ -313,7 +314,7 @@
         : source === "gcd"
           ? issue ? `https://www.comics.org/issue/${issue}/` : `https://www.comics.org/series/${volume}/`
           : source === "mangadex" ? `https://mangadex.org/title/${volume}` : "";
-    return { path, comic: comicMatches[key], web, manga: source === "mangadex", convert: original };
+    return { path, comic: comicMatches[key], web, manga: source === "mangadex", convert: original, pdf };
   }
   /** TMDB episodes per file, for the series rule. */
   let series = $state<Record<string, EpisodeState>>({});
@@ -939,6 +940,7 @@
         }
       }
       let inside = 0;
+      let drawnPages = 0;
       {
         const crule = comicRule?.rule;
         const items = [
@@ -957,6 +959,7 @@
           try {
             const res = await api.writeInside(r.historyId, $state.snapshot(items));
             inside = res.written;
+            drawnPages = res.drawn;
             if (res.errors.length) {
               await notify({
                 title: t("insideTitle"),
@@ -1000,6 +1003,7 @@
         keptLists ? t("playlistsKeptN", { n: keptLists }) : "",
         tagged ? t("tagsN", { n: tagged }) : "",
         inside ? t("insideN", { n: inside }) : "",
+        drawnPages ? t("insideDrawnN", { n: drawnPages }) : "",
         r.errors.length ? t("errorsN", { n: r.errors.length }) : "",
       ].filter(Boolean).join(" · ");
       await refresh();

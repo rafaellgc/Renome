@@ -30,6 +30,10 @@ fn yes() -> bool {
     true
 }
 
+fn page_size() -> u32 {
+    2400
+}
+
 /// Part of the name a text rule acts on.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -377,11 +381,19 @@ pub enum Rule {
         /// (used by the app, not here).
         #[serde(default = "yes")]
         missing: bool,
-        /// CBR, CB7 and CBT files (and `.cbz` files that are not zips) are
-        /// named `.cbz`: the app then converts them (see
+        /// CBR, CB7 and CBT files (and `.cbz` files that are not zips) and
+        /// PDFs are named `.cbz`: the app then converts them (see
         /// [`crate::convert`]).
         #[serde(default)]
         convert: bool,
+        /// PDF pages that are not just a picture are drawn; else such PDFs
+        /// are not converted.
+        #[serde(default = "yes")]
+        draw_pages: bool,
+        /// The long side, in pixels, of a drawn page with no picture (used
+        /// by the app).
+        #[serde(default = "page_size")]
+        page_size: u32,
     },
 }
 
@@ -521,11 +533,16 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    /// A comic rule converts comics to CBZ.
-    pub fn converts_comics(&self) -> bool {
-        self.steps
-            .iter()
-            .any(|s| matches!(s, Compiled::Plain(Rule::Comic { convert: true, .. })))
+    /// A comic rule converts comics to CBZ: whether it draws PDF pages.
+    pub fn converts_comics(&self) -> Option<bool> {
+        self.steps.iter().find_map(|s| match s {
+            Compiled::Plain(Rule::Comic {
+                convert: true,
+                draw_pages,
+                ..
+            }) => Some(*draw_pages),
+            _ => None,
+        })
     }
 
     /// Compiles the enabled rules. Invalid rules are skipped and reported in
@@ -1058,6 +1075,7 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             colon,
             by_folder,
             convert,
+            draw_pages,
             ..
         } => {
             if let Some(m) = comic_of(ctx, *by_folder, stem) {
@@ -1066,7 +1084,7 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
                     *stem = name;
                 }
             }
-            if *convert && converts(ctx.file) {
+            if *convert && converts(ctx.file, *draw_pages) {
                 *ext = "cbz".into();
             }
         }
@@ -1076,17 +1094,20 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
 }
 
 /// A comic the comic rule's "convert" turns into a CBZ: a RAR, 7z or tar
-/// inside, named as a comic.
-pub fn converts(file: &crate::files::FileEntry) -> bool {
-    !file.is_dir
-        && matches!(
-            file.ext.to_lowercase().as_str(),
-            "cbz" | "cbr" | "cb7" | "cbt"
-        )
-        && file
-            .kind()
-            .and_then(|k| k.comic)
-            .is_some_and(|c| c != "cbz")
+/// inside, named as a comic, or a PDF that opens (with `draw` off, only
+/// one with no page to draw).
+pub fn converts(file: &crate::files::FileEntry, draw: bool) -> bool {
+    if file.is_dir {
+        return false;
+    }
+    let ext = file.ext.to_lowercase();
+    let kind = file.kind();
+    if ext == "pdf" {
+        return kind.is_some_and(|k| k.names.contains(&"pdf"))
+            && file.pdf_drawn_pages().is_some_and(|n| draw || n == 0);
+    }
+    matches!(ext.as_str(), "cbz" | "cbr" | "cb7" | "cbt")
+        && kind.and_then(|k| k.comic).is_some_and(|c| c != "cbz")
 }
 
 /// The comic a file is: the issue chosen for it, else what it says about
@@ -1419,6 +1440,7 @@ mod tests {
             comic: Default::default(),
             video: Default::default(),
             kind: Default::default(),
+            pdf_pictures: Default::default(),
         }
     }
 
