@@ -140,10 +140,15 @@ pub struct PreviewItem {
     /// A song the music rule cannot name (no title in its tags).
     pub untagged: bool,
     /// A song matched to a release whose tags say something else (the
-    /// music rule can write them).
+    /// music rule can write them), or a CBZ matched to an issue its
+    /// `ComicInfo.xml` does not tell (the comic rule can write it).
     pub retag: bool,
     /// A matched song with tags that cleaning would take away.
     pub junk: bool,
+    /// A comic the comic rule converts to CBZ (a RAR, 7z or tar inside;
+    /// see [`crate::convert`]), named `.cbz` here.
+    #[serde(default)]
+    pub convert: bool,
     /// The name the lookups (movie, series, book, comic) read: what the
     /// rules above the first lookup rule make of it, when not the original.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -948,6 +953,7 @@ pub fn preview(
     };
 
     let music = pipeline.music();
+    let converts = pipeline.converts_comics();
     // Songs' tags, with the album-wide fields agreed across each album.
     let songs: HashMap<&Path, AudioTags> = match music {
         None => HashMap::new(),
@@ -1179,8 +1185,13 @@ pub fn preview(
             });
             let own = file.audio_tags().cloned().unwrap_or_default();
             let matched = view.songs.get(&file.path);
-            let retag = matched.is_some_and(|m| m.differs(&own));
+            let retag = matched.is_some_and(|m| m.differs(&own))
+                || view.comics.get(&file.path).is_some_and(|m| {
+                    file.ext.eq_ignore_ascii_case("cbz")
+                        && crate::inside::comic_differs(m, file.comic_info())
+                });
             let junk = matched.is_some() && own.junk;
+            let convert = converts && crate::rules::converts(file);
             PreviewItem {
                 path: file.path.clone(),
                 dir: file.dir.clone(),
@@ -1198,6 +1209,7 @@ pub fn preview(
                 untagged,
                 retag,
                 junk,
+                convert,
                 lookup_name,
                 within: view.send_to.as_ref().map(|_| file.base.clone()),
             }
@@ -2938,6 +2950,63 @@ mod tests {
     }
 
     #[test]
+    fn comics_to_convert_are_named_cbz() {
+        let d = tempfile::tempdir().unwrap();
+        let rar = include_bytes!("../../renome-archive/tests/data/rar4.rar");
+        let mut files = Vec::new();
+        for (name, data) in [
+            ("a.cbr", &rar[..]),
+            ("b.cbz", &rar[..]),
+            ("c.cbr", b"PK\x05\x06\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"),
+            ("d.rar", &rar[..]),
+        ] {
+            let p = d.path().join(name);
+            fs::write(&p, data).unwrap();
+            files.push(FileEntry::from_path(&p, &fs::metadata(&p).unwrap()).unwrap());
+        }
+        let comic = |convert| {
+            vec![Step {
+                enabled: true,
+                rule: Rule::Comic {
+                    template: "{series} {number}".into(),
+                    colon: " - ".into(),
+                    series: String::new(),
+                    source: "gcd".into(),
+                    folders: false,
+                    folder_template: String::new(),
+                    by_folder: false,
+                    missing: false,
+                    convert,
+                },
+            }]
+        };
+        let p = preview(&files, &comic(true), &HashMap::new(), &View::default());
+        let got: Vec<(&str, &str, bool)> = p
+            .items
+            .iter()
+            .map(|i| (i.original.as_str(), i.new_name.as_str(), i.convert))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("a.cbr", "a.cbz", true),
+                // A RAR named `.cbz`: the name stays, the content changes.
+                ("b.cbz", "b.cbz", true),
+                // Already a zip: only named right (not here: no change).
+                ("c.cbr", "c.cbr", false),
+                // Not a comic.
+                ("d.rar", "d.rar", false),
+            ]
+        );
+        let p = preview(&files, &comic(false), &HashMap::new(), &View::default());
+        assert!(
+            p.items
+                .iter()
+                .all(|i| !i.convert && i.new_name == i.original)
+        );
+    }
+
+    #[test]
     fn series_folder_known_by_what_it_holds() {
         let d = tempfile::tempdir().unwrap();
         let old = d.path().join("my comics");
@@ -2971,6 +3040,7 @@ mod tests {
                 folder_template: "{series} ({series year})".into(),
                 by_folder: false,
                 missing: false,
+                convert: false,
             },
         }];
         let p = preview(&files, &steps, &HashMap::new(), &view);

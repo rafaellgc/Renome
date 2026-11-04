@@ -458,6 +458,14 @@ pub struct Backup {
     /// identifier.
     #[serde(default)]
     pub kept_text: Vec<(String, String)>,
+    /// A comic's or book's details written inside it (see
+    /// [`crate::inside`]); the rest is then empty.
+    #[serde(default)]
+    pub entry: Option<crate::inside::Entry>,
+    /// A comic converted to CBZ (see [`crate::convert`]); the rest is then
+    /// empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub converted: Option<crate::convert::Converted>,
 }
 
 /// The copy a song's tags are written in before it takes the song's place.
@@ -888,6 +896,8 @@ pub fn write(
         removed: Vec::new(),
         raw: Vec::new(),
         kept_text: Vec::new(),
+        entry: None,
+        converted: None,
     };
     let mut saved: Result<(), String> = Ok(());
     let changed = edit(path, clean, |tag, rest| {
@@ -983,6 +993,12 @@ pub fn write(
 
 /// Puts back what [`write`] changed (pictures and data from `store`).
 pub fn restore(b: &Backup, store: &Path) -> Result<(), String> {
+    if let Some(c) = &b.converted {
+        return crate::convert::restore(&b.path, c);
+    }
+    if let Some(e) = &b.entry {
+        return crate::inside::restore(&b.path, e, store);
+    }
     let read = |f: &str| fs::read(store.join(f)).map_err(|e| e.to_string());
     let pictures = match &b.pictures {
         Some(saved) => Some(

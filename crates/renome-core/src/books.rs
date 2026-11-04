@@ -1253,7 +1253,7 @@ impl Text {
 }
 
 /// Open Library language codes (`por`) as the two-letter ones readers use.
-fn language(code: &str) -> String {
+pub(crate) fn language(code: &str) -> String {
     let two = match code {
         "por" => "pt",
         "eng" => "en",

@@ -126,10 +126,13 @@ impl FileEntry {
             .as_ref()
     }
 
-    /// Forgets the tags read, after they were written.
-    /// After its tags were written: read again, with the new size and date.
+    /// After its tags (or a comic's details) were written, or the comic
+    /// converted: they are read again, and the new size and date taken.
     pub fn forget_tags(&mut self) {
         self.tags = OnceLock::new();
+        self.comic = OnceLock::new();
+        // A comic converted to CBZ is now a zip.
+        self.kind = OnceLock::new();
         if let Some(fresh) = std::fs::metadata(&self.path)
             .ok()
             .and_then(|m| Self::from_path(&self.path, &m))

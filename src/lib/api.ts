@@ -76,6 +76,13 @@ export const api = {
   coverDirs: (dirs: string[]) => invoke<string[]>("cover_dirs", { dirs }),
   writeTags: (historyId: string | null, items: { path: string; song: SongMatch }[], cover: boolean, clean: boolean, coverSize: number) =>
     invoke<{ written: number; errors: [string, string][] }>("write_tags", { historyId, items, cover, clean, coverSize }),
+  writeInside: (
+    historyId: string | null,
+    items: (
+      | { path: string; comic?: ComicMatch; web?: string; manga?: boolean; convert?: "keep" | "delete" }
+      | { path: string; book: BookMatch; language: string }
+    )[],
+  ) => invoke<{ written: number; errors: [string, string][] }>("write_inside", { historyId, items }),
   writePlaylists: (historyId: string | null, dirs: string[]) =>
     invoke<{ created: string[]; errors: [string, string][]; kept: number }>("write_playlists", { historyId, dirs }),
   writeCovers: (historyId: string | null, items: { dir: string; release: string }[]) =>

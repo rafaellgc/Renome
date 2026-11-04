@@ -10,7 +10,22 @@ import path from "node:path";
 
 const LICENSE_FILE = /^(licen[cs]e|copying|notice)/i;
 /** Our own packages: their license is shown on its own. */
-const OWN = new Set(["renome", "renome-core"]);
+const OWN = new Set(["renome", "renome-core", "renome-archive"]);
+
+/** The copy of libarchive that `renome-archive` builds into the program. */
+function libarchive(root) {
+  const dir = path.join(root, "crates/renome-archive/libarchive");
+  const header = fs.readFileSync(path.join(dir, "libarchive/archive.h"), "utf8");
+  return {
+    name: "libarchive",
+    version: /ARCHIVE_VERSION_ONLY_STRING "([^"]+)"/.exec(header)?.[1] ?? "",
+    license: "BSD-2-Clause",
+    url: "https://www.libarchive.org",
+    authors: ["Tim Kientzle", "libarchive contributors"],
+    kind: "c",
+    files: licenseFiles(dir),
+  };
+}
 
 /** License and notice files in a package folder, sorted. */
 function licenseFiles(dir) {
@@ -71,8 +86,9 @@ function rustPackages(root, warn) {
         if (d.dep_kinds.some((k) => k.kind === null)) stack.push(d.pkg);
       }
     }
-    return [...seen]
-      .map((id) => byId.get(id))
+    const linked = [...seen].map((id) => byId.get(id));
+    const own = linked.some((p) => p.name === "renome-archive") ? [libarchive(root)] : [];
+    return linked
       .filter((p) => !OWN.has(p.name))
       .map((p) => ({
         name: p.name,
@@ -82,7 +98,8 @@ function rustPackages(root, warn) {
         authors: (p.authors ?? []).map((a) => a.replace(/\s*<[^>]*>/, "")),
         kind: "rust",
         files: licenseFiles(path.dirname(p.manifest_path)),
-      }));
+      }))
+      .concat(own);
   } catch (e) {
     warn(`Rust licenses not collected: ${e.message}`);
     return [];

@@ -377,6 +377,11 @@ pub enum Rule {
         /// (used by the app, not here).
         #[serde(default = "yes")]
         missing: bool,
+        /// CBR, CB7 and CBT files (and `.cbz` files that are not zips) are
+        /// named `.cbz`: the app then converts them (see
+        /// [`crate::convert`]).
+        #[serde(default)]
+        convert: bool,
     },
 }
 
@@ -516,6 +521,13 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
+    /// A comic rule converts comics to CBZ.
+    pub fn converts_comics(&self) -> bool {
+        self.steps
+            .iter()
+            .any(|s| matches!(s, Compiled::Plain(Rule::Comic { convert: true, .. })))
+    }
+
     /// Compiles the enabled rules. Invalid rules are skipped and reported in
     /// `errors`, so the preview keeps working while the user is typing.
     pub fn new(steps: &[Step]) -> Self {
@@ -1045,6 +1057,7 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             template,
             colon,
             by_folder,
+            convert,
             ..
         } => {
             if let Some(m) = comic_of(ctx, *by_folder, stem) {
@@ -1053,10 +1066,27 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
                     *stem = name;
                 }
             }
+            if *convert && converts(ctx.file) {
+                *ext = "cbz".into();
+            }
         }
 
         Rule::Replace { .. } | Rule::Regex { .. } => unreachable!("compiled separately"),
     }
+}
+
+/// A comic the comic rule's "convert" turns into a CBZ: a RAR, 7z or tar
+/// inside, named as a comic.
+pub fn converts(file: &crate::files::FileEntry) -> bool {
+    !file.is_dir
+        && matches!(
+            file.ext.to_lowercase().as_str(),
+            "cbz" | "cbr" | "cb7" | "cbt"
+        )
+        && file
+            .kind()
+            .and_then(|k| k.comic)
+            .is_some_and(|c| c != "cbz")
 }
 
 /// The comic a file is: the issue chosen for it, else what it says about

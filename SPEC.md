@@ -100,8 +100,8 @@ before it is read. The preview sends that name to the app
 | Movie (TMDB) | template with `{title}`, `{original}`, `{year}`, `{id}`, `{resolution}`, `{video codec}` (default `{title} ({year}) [tmdbid-{id}]`); what `:` becomes (default ` - `); a folder for each movie; save `.nfo` and poster (optionally fanart and logo) next to renamed videos; show the collection's missing movies. See 2.1 |
 | TV show (TMDB) | the show (name, TMDB id or link; empty: from the files); template with `{show}`, `{original}`, `{year}`, `{season}`, `{episode}`, `{title}`, `{id}`, `{resolution}`, `{video codec}` (as for movies, see 2.1; not in the show folder) (default `{show} ({year}) - S{season}E{episode} - {title}`); what `:` becomes; show and season folders (show folder template, default `{show} ({year}) [tmdbid-{id}]`); save `.nfo` files and images (optionally fanart and logo); show the missing episodes. See 2.2 |
 | Music (tags) | template with `{track}`, `{title}`, `{artist}`, `{album artist}`, `{album}`, `{year}`, `{disc}`, `{genre}`, `{composer}`, `{total tracks}`, `{total discs}`, `{original year}`, `{label}`, `{catalog}`, `{artist sort}`, `{album artist sort}`, `{initial}`, `{format}`, `{bitrate}`, `{sample rate}`, `{bits}` (default `{track} - {title}`); what `:` becomes; disc number in the track on multi-disc albums; fill in from the file name; artist and album folders (default `{album artist}/{album} ({year})`); show the missing tracks. See 2.3 |
-| Book (Open Library) | template with `{author}`, `{authors}`, `{author sort}`, `{initial}`, `{title}`, `{original}`, `{year}`, `{edition year}`, `{publisher}`, `{isbn}`, `{series}`, `{volume}`, `{id}` (default `{author} - {title} ({year})`); what `:` becomes; author and book folders (default `{author}/{title}`); save the cover and `metadata.opf`; show the series' missing volumes. See 2.4 |
-| Comic (ComicInfo.xml, GCD, Comic Vine, MangaDex) | template with `{series}`, `{series year}`, `{number}`, `{volume}`, `{chapter}`, `{title}`, `{year}`, `{count}`, `{publisher}`, `{writer}`, `{artist}`, `{id}` (default `{series} v{volume} #{number} c{chapter} - {title} ({year})`); what `:` becomes; the series (empty: from the files); the catalogue; series folders (default `{series} ({series year})`); series from the folder; show the missing issues. See 2.5 |
+| Book (Open Library) | template with `{author}`, `{authors}`, `{author sort}`, `{initial}`, `{title}`, `{original}`, `{year}`, `{edition year}`, `{publisher}`, `{isbn}`, `{series}`, `{volume}`, `{id}` (default `{author} - {title} ({year})`); what `:` becomes; author and book folders (default `{author}/{title}`); save the cover and `metadata.opf`; write the details inside EPUBs; show the series' missing volumes. See 2.4 |
+| Comic (ComicInfo.xml, GCD, Comic Vine, MangaDex) | template with `{series}`, `{series year}`, `{number}`, `{volume}`, `{chapter}`, `{title}`, `{year}`, `{count}`, `{publisher}`, `{writer}`, `{artist}`, `{id}` (default `{series} v{volume} #{number} c{chapter} - {title} ({year})`); what `:` becomes; the series (empty: from the files); the catalogue; series folders (default `{series} ({series year})`); series from the folder; write `ComicInfo.xml` into CBZs; convert CBR, CB7 and CBT to CBZ (the original kept beside or deleted); show the missing issues. See 2.5 |
 
 Positions count **visible characters** (Unicode graphemes), starting at 1.
 
@@ -273,8 +273,9 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   `fanart.jpg`, `logo.png` inside the movie's own folder, else
   `<new name>-poster.jpg` and so on. Existing files are never replaced
   (true of every file written beside others: `.nfo`, images, covers,
-  `metadata.opf`, playlists; tags inside songs, unlike them, are
-  rewritten when they differ, see 2.3).
+  `metadata.opf`, playlists; tags inside songs and details inside CBZ
+  and EPUB files, unlike them, are rewritten when they differ, see 2.3,
+  2.4 and 2.5).
   They are recorded in the rename's history entry and deleted by its undo.
 - Movies whose names are already right (unchanged rows with a movie) get
   the metadata too when renaming: the Rename button counts them and the
@@ -838,20 +839,42 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   numbers from 1 to the highest one held that no book has become faded
   rows (`3`); fractional numbers (`2.5`) neither fill nor open a gap.
   The bottom bar counts them; clicking saves a CSV (series, volume).
+- "Write the details inside the EPUB" (off by default): for looked-up
+  EPUB/KEPUB files (zips by content) the package document named by
+  `META-INF/container.xml` is edited in place, by byte ranges, leaving
+  everything else as written: the main `dc:title`, the authors
+  (`dc:creator` with no role or `aut`; extra ones removed with their
+  `refines` metas, a renamed one loses its `file-as`), the first
+  non-modification `dc:date` (kept when it starts with the year), the
+  first `dc:publisher` and `dc:language` (kept when the main subtag is the
+  same), an ISBN (kept when any identifier is it; else a non-unique ISBN
+  identifier is rewritten, else `urn:isbn:` is added; the package's
+  unique identifier is never touched), and the series (`calibre:series`
+  metas and/or EPUB 3 `belongs-to-collection` + `group-position`,
+  updated where present, else added: the first form always, both in EPUB
+  3). New elements use the document's prefix for Dublin Core (declaring
+  it when absent), go before `</metadata>` with the children's
+  indentation. Nothing changes → the file is not written. EPUBs with
+  `META-INF/rights.xml` or content encrypted by anything but font
+  obfuscation (DRM) are refused (`epubDrm`). Writing works like the
+  comics' (see 2.5), with the same history, recovery and undo.
 - Only the searched title, author and ISBN are sent to Open Library, and
-  only the ISBN to BrasilAPI. The book files are never changed.
+  only the ISBN to BrasilAPI. Without the option above the book files are
+  never changed.
 
 ### 2.5 Comics (ComicInfo.xml, Comic Vine)
 
 - Applies to CBZ, CBR, CB7, CBT, PDF and EPUB files. The `ComicInfo.xml`
   (else `MetronInfo.xml`, else ComicBookInfo; see "What is already
   there")
-  inside a CBZ/EPUB (zip), CB7 (7z; solid archives over 300 MB skipped)
-  or CBT (tar) is read: series, number, count, volume (a number, or the
+  inside a CBZ/EPUB (zip), CBR (RAR 4 and 5, read with the copy of
+  libarchive built into the program, `crates/renome-archive`; solid
+  archives over 300 MB skipped, RAR 5 taken as solid), CB7 (7z; solid
+  archives over 300 MB skipped) or CBT (tar) is read: series, number, count, volume (a number, or the
   series' first year when it is one), title, year, publisher, writer,
   penciller, web (a Comic Vine issue link gives its id). The archive type
   is told by the first bytes, not the extension (a `.cbz` that is a 7z is
-  read). CBR (RAR) is never opened: no RAR reader has a free licence.
+  read).
 - The file name is read for what that lacks: release notes in brackets
   are dropped (a year among them is the issue's, `(of N)` the count),
   dots and underscores stand for spaces (not in `12.1`), then a chapter
@@ -958,6 +981,61 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   catalogues; the GCD sign-in only to comics.org.
   Files are never changed.
 
+- "Write the details into the file (ComicInfo.xml)" (off by default):
+  after renaming, each CBZ (a zip by content; other comic formats and
+  broken zips are refused, `comicUnsupported` / `archiveBroken`) matched
+  to a catalogue issue (or series, on MangaDex) gets a `ComicInfo.xml`:
+  Title, Series, Number (else the chapter), Count, Volume, Year, Month,
+  Day, Writer, Penciller, Publisher, Web (the issue's page: GCD
+  `comics.org/issue/<id>/` or `/series/<id>/`, Comic Vine `4000-<id>` /
+  `4050-<id>`, MangaDex `title/<id>`), Manga `Yes` (MangaDex) and the
+  match's extra fields (story arc, imprint, format, genre, inker,
+  colorist, letterer, cover artist, editor, translator, age rating,
+  language, alternate series/number, GTIN); empty values are not
+  written. An existing `ComicInfo.xml` (the root one first, else one in a
+  folder, any case) keeps every other element as it was (summary, page
+  list); the changed and added ones join them, all in the schema's
+  order. The same values already there → nothing is written. Unchanged
+  rows count (in the Rename button) when their `ComicInfo.xml` (or other
+  details read, see "What is already there") says something else
+  (`retag`). A `MetronInfo.xml` is never updated.
+- "Convert CBR, CB7 and CBT to CBZ" (off by default), with "The original
+  file": keep beside (default) or delete. In the preview, a comic file
+  (`.cbz`/`.cbr`/`.cb7`/`.cbt`) whose content is a RAR, 7z or tar gets the
+  extension `cbz` (`convert` on the row; a `.cbz` that is a RAR keeps its
+  name and counts in the Rename button as unchanged). After renaming,
+  each is converted (`convert::convert`): every file entry, in the
+  archive's order, is written into `.<name>.renome-tags` beside it
+  (pictures stored, other files deflated, dates kept; folders and links
+  left out; names with `\` turned into `/`, leading `/`, `.` and `..`
+  parts dropped; a name repeated keeps the first), with the
+  `ComicInfo.xml` updated by the values above when "Write the details"
+  is on and the issue matched (added last when there is none), else
+  copied as it is. Synced and read back (as many entries as written);
+  then the original is renamed beside to the comic's name with its own
+  extension (`Name.cbr`, `Name.cb7`, `Name.cbt`) and the zip renamed to
+  the comic's name. Delete then sends the original to the system's trash
+  (`trash` crate); in a Flatpak (`FLATPAK_ID`) or when the trash fails,
+  it stays beside (`trashFlatpak`, `trashFailed: …` in the error list).
+  Errors, the comic as it was: `archiveLocked` (a password),
+  `archiveBroken: …` (damaged, or a RAR libarchive cannot decode),
+  `convertTaken` (the original's name beside exists), `comicUnsupported`
+  (not named `.cbz`, or a zip). A RAR split in parts is read as a broken
+  one. Recorded like written details (a backup with `converted`): undo
+  renames a kept original back over the CBZ (`originalGone` when it is not
+  there), before the renames take it back to its old name; with the
+  original in the trash, the CBZ stays and the rename that made it gets
+  `.cbz` as its old extension, so undo gives back the old name as a CBZ.
+- Writing (comics and EPUBs): the archive is written again as
+  `.<name>.renome-tags` beside it, every other entry raw-copied (no
+  recompression; order, compression and the zip comment kept), the
+  changed entry deflated in its place (new ones last), synced, given the
+  original's permissions, then renamed over the file. The old entry's
+  text is kept in the history entry's folder; undo writes it back the same
+  way (or removes an added entry). Each file is noted in the entry's
+  `.tagging` note like songs (see 2.3): a stop halfway removes the copy
+  and keeps what was written for undo.
+
 ### 2.6 Order of operations
 
 - Preview: each file's name goes through the rules from top to bottom
@@ -972,8 +1050,9 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   then the cue sheets and playlists that cite them, then the folders left
   empty, then the history entry; after it, each recorded in that entry,
   the movies' `.nfo` and images, the albums' covers, the playlists, the
-  songs' tags, the books' cover and `metadata.opf`, the shows' `.nfo` and
-  images.
+  songs' tags, the books' cover and `metadata.opf`, the comics converted
+  to CBZ and the details inside comics and books (one pass), the shows'
+  `.nfo` and images.
 
 ## 3. Preview
 

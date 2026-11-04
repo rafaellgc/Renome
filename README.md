@@ -72,8 +72,8 @@ A built-in manual (F1) explains every rule with examples.
   BrasilAPI (Brazilian editions). Picks the book automatically when sure
   and lets you choose when not; optionally organizes them into
   `Author/Title` folders and saves `cover.jpg` and a `metadata.opf`
-  (read by Audiobookshelf and e-book managers). The book files are never
-  changed.
+  (read by Audiobookshelf and e-book managers), and can write the details
+  inside EPUBs (undone like any rename).
 - Comics: names CBZ, CBR, CB7, CBT, PDF and EPUB files by series and
   number (`Series #012 (2019)`, `Series v03` for manga volumes), from the
   `ComicInfo.xml` inside the file or from its name (issue numbers,
@@ -83,7 +83,10 @@ A built-in manual (F1) explains every rule with examples.
   MangaDex (manga, no account) or Comic Vine (your own key), and organizes
   series folders (with ready-made templates for Komga and Kavita). Issues
   missing from your series show up as faded rows, and can be exported to
-  a CSV file.
+  a CSV file. Optionally writes the details into each CBZ's
+  `ComicInfo.xml`, pages untouched, and converts CBR (RAR), CB7 and CBT
+  files to CBZ, keeping or deleting the original (undone like any
+  rename). RAR files are read with libarchive, built into the app.
 - Movie, TV show, book and comic lookups read the name as the rules above
   them leave it, so a "Replace text" can fix an abbreviation first.
 - Edit any new name by hand right in the preview (double-click or F2).

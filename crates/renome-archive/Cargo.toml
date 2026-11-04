@@ -1,0 +1,12 @@
+[package]
+name = "renome-archive"
+version = "0.23.0"
+edition = "2024"
+license = "MIT AND BSD-2-Clause"
+description = "Reads RAR archives with a built-in copy of libarchive (BSD), for Renome"
+publish = false
+links = "archive"
+build = "build.rs"
+
+[build-dependencies]
+cmake = "0.1"

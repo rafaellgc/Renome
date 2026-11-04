@@ -56,7 +56,7 @@ enum Carried {
     Cbi(String),
 }
 
-/// Reads what a CBZ, CB7, CBT or EPUB says about itself: its
+/// Reads what a CBZ, CBR, CB7, CBT or EPUB says about itself: its
 /// `ComicInfo.xml`, else its `MetronInfo.xml`, else (a zip) the
 /// ComicBookInfo in its comment; `None` for other files, files without
 /// any and unreadable files. The archive type is told by the content, not
@@ -68,6 +68,8 @@ pub fn read(path: &Path) -> Option<ComicInfo> {
     let xml = std::panic::catch_unwind(|| {
         if head.starts_with(b"PK\x03\x04") || head.starts_with(b"PK\x05\x06") {
             from_zip(path)
+        } else if renome_archive::is_rar(head) {
+            from_rar(path, head)
         } else if head.starts_with(&[0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]) {
             from_7z(path)
         } else if head.len() >= 262 && &head[257..262] == b"ustar" {
@@ -153,6 +155,42 @@ fn from_7z(path: &Path) -> Option<Carried> {
     }
     let bytes = reader.read_file(&name).ok()?;
     Some(carried(&name, String::from_utf8(bytes).ok()?))
+}
+
+fn from_rar(path: &Path, head: &[u8]) -> Option<Carried> {
+    // A solid archive decodes everything before the file asked for (as a
+    // 7z): big ones are not worth it. RAR 4 tells it in its first header;
+    // a RAR 5 is taken as one.
+    let solid = head.get(6) != Some(&0) || head.get(10).is_some_and(|f| f & 0x08 != 0);
+    if solid && std::fs::metadata(path).ok()?.len() > 300 << 20 {
+        return None;
+    }
+    let mut metron = None;
+    let mut info = None;
+    renome_archive::read(path, |e, data| {
+        if e.dir || e.other || e.encrypted || !is_info(&e.name) {
+            return Ok(true);
+        }
+        if e.size.is_some_and(|s| s > MAX_INFO) {
+            return Ok(true);
+        }
+        let mut text = String::new();
+        if data.take(MAX_INFO).read_to_string(&mut text).is_err() {
+            return Ok(true);
+        }
+        match carried(&e.name, text) {
+            c @ Carried::Info(_) => {
+                info = Some(c);
+                Ok(false)
+            }
+            c => {
+                metron = Some(c);
+                Ok(true)
+            }
+        }
+    })
+    .ok()?;
+    info.or(metron)
 }
 
 fn from_tar(path: &Path) -> Option<Carried> {

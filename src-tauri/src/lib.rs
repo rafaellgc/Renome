@@ -872,6 +872,158 @@ async fn write_tags(
     Ok(report)
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InsideJob {
+    /// Where the file is now (after renaming).
+    path: PathBuf,
+    #[serde(default)]
+    comic: Option<renome_core::comics::ComicMatch>,
+    /// The issue's page in the catalogue.
+    #[serde(default)]
+    web: String,
+    #[serde(default)]
+    manga: bool,
+    #[serde(default)]
+    book: Option<renome_core::books::BookMatch>,
+    /// The book's language as Open Library gives it.
+    #[serde(default)]
+    language: String,
+    /// Converts the comic to CBZ first (with `comic`'s details in it, when
+    /// given), its original kept beside or sent to the trash.
+    #[serde(default)]
+    convert: Option<renome_core::convert::Original>,
+}
+
+/// Writes each comic's details into its `ComicInfo.xml` (CBZ) and each
+/// book's into its OPF (EPUB), keeping what they held in the rename's
+/// history entry (or one of its own) for undo, like `write_tags`. Comics
+/// to convert (CBR, CB7, CBT renamed `.cbz`) are converted, the details
+/// written in the same pass.
+#[tauri::command]
+async fn write_inside(
+    app: AppHandle,
+    history_id: Option<String>,
+    items: Vec<InsideJob>,
+) -> Result<TagReport, String> {
+    use renome_core::{convert, inside};
+    let state = app.state::<AppState>();
+    let mut report = TagReport::default();
+    let items: Vec<InsideJob> = items
+        .into_iter()
+        .map(|mut j| {
+            // Already a zip (or not an archive): only its details.
+            if j.convert.is_some() && !convert::convertible(&j.path) {
+                j.convert = None;
+            }
+            j
+        })
+        .filter(|j| {
+            let ok = match (&j.convert, &j.comic, &j.book) {
+                (Some(_), _, _) => true,
+                (_, Some(_), _) => inside::comic_writable(&j.path),
+                (_, _, Some(_)) => inside::book_writable(&j.path),
+                _ => false,
+            };
+            if !ok && (j.comic.is_some() || j.book.is_some()) {
+                let why = if j.comic.is_some() {
+                    "comicUnsupported"
+                } else {
+                    "bookUnsupported"
+                };
+                report
+                    .errors
+                    .push((j.path.display().to_string(), why.into()));
+            }
+            ok
+        })
+        .collect();
+    if items.is_empty() {
+        return Ok(report);
+    }
+    let own_entry = history_id.is_none();
+    let id = match history_id {
+        Some(id) => id,
+        None => state.history.record_files(&[])?,
+    };
+    let store = state.history.files_dir(&id)?;
+    let mut note = state.history.tagging(&id)?;
+    let total = items.len();
+    let _ = app.emit(
+        "inside-progress",
+        serde_json::json!({ "done": 0, "total": total }),
+    );
+    let mut backups = Vec::new();
+    let mut written = Vec::new();
+    for (done, job) in items.into_iter().enumerate() {
+        let (path, store) = (job.path.clone(), store.clone());
+        let job_path = job.path.clone();
+        note.start(&path);
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            let values = || {
+                job.comic
+                    .as_ref()
+                    .map(|c| inside::comic_values(c, &job.web, job.manga))
+                    .unwrap_or_default()
+            };
+            match (job.convert, &job.comic, &job.book) {
+                (Some(original), _, _) => convert::convert(&path, &values(), original)
+                    .map(|d| (Some(d.backup), d.not_trashed)),
+                (_, Some(_), _) => inside::write_comic(&path, &values(), &store).map(|b| (b, None)),
+                (_, _, Some(b)) => {
+                    inside::write_book(&path, &inside::book_values(b, &job.language), &store)
+                        .map(|b| (b, None))
+                }
+                _ => Ok((None, None)),
+            }
+        })
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|r| r);
+        let result = result.map(|(b, not_trashed)| {
+            if let Some(why) = not_trashed {
+                report.errors.push((job_path.display().to_string(), why));
+            }
+            b
+        });
+        match result {
+            Ok(Some(b)) => {
+                note.done(&b);
+                written.push(b.path.clone());
+                backups.push(b);
+            }
+            Ok(None) => {}
+            Err(e) => report.errors.push((job_path.display().to_string(), e)),
+        }
+        let _ = app.emit(
+            "inside-progress",
+            serde_json::json!({ "done": done + 1, "total": total }),
+        );
+    }
+    report.written = backups.len();
+    let saved = if backups.is_empty() {
+        if own_entry {
+            let _ = state.history.delete(&id);
+        }
+        Ok(())
+    } else {
+        state.history.add_tags(&id, backups)
+    };
+    match saved {
+        Ok(()) => note.finish(),
+        Err(e) => report
+            .errors
+            .push((String::new(), format!("err.history: {e}"))),
+    }
+    let written: HashSet<PathBuf> = written.into_iter().collect();
+    for f in state.session.lock().unwrap().files.iter_mut() {
+        if written.contains(&f.path) {
+            f.forget_tags();
+        }
+    }
+    Ok(report)
+}
+
 /// An album folder's own cover image (`cover`, `folder` or `front`).
 fn folder_cover(dir: &Path) -> Option<Vec<u8>> {
     let rd = std::fs::read_dir(dir).ok()?;
@@ -1432,6 +1584,7 @@ pub fn run() {
             tmdb_images,
             recover,
             write_book_sidecars,
+            write_inside,
             apply,
             history,
             undo,

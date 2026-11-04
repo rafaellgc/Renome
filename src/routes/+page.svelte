@@ -121,11 +121,14 @@
   /** Files in the book review window; null when closed. */
   let bookReview = $state<string[] | null>(null);
   let bookProgress = $state<{ done: number; total: number; kind: "search" | "save" } | null>(null);
+  /** Details being written inside comics and books. */
+  let insideProgress = $state<{ done: number; total: number } | null>(null);
   /** A long operation under way: the list waits for it, with what it is
    *  doing and how far it got (no count: still finding out). Searches can
    *  be stopped (`stop`). */
   const working = $derived.by((): { label: string; done?: number; total?: number; stop?: boolean } | null => {
     const counted = (label: string, p: { done: number; total: number }, stop: boolean) => ({ label, done: p.done, total: p.total, stop });
+    if (insideProgress) return counted(t("insideWriting", insideProgress), insideProgress, false);
     if (bookProgress)
       return counted(t(bookProgress.kind === "search" ? "olSearching" : "sidecarsWriting", bookProgress), bookProgress, bookProgress.kind === "search");
     if (tmdbProgress)
@@ -196,6 +199,20 @@
       ? preview.items.filter((i) => i.status === "unchanged" && books[i.path]?.choice && isBook(i.original))
       : [],
   );
+  const extOf = (p: string) => splitExt(p.split(/[\\/]/).pop() ?? p)[1].toLowerCase();
+  const isEpub = (p: string) => ["epub", "kepub"].includes(extOf(p));
+  /** EPUBs whose names are already right but whose details get written
+   *  (those that already have them are skipped when writing). */
+  const epubOnly = $derived(
+    bookRule?.rule.type === "book" && bookRule.rule.writeEpub
+      ? preview.items.filter((i) => i.status === "unchanged" && books[i.path]?.choice && isEpub(i.original))
+      : [],
+  );
+  /** What writing a book's details inside it needs. */
+  function bookInsideItem(key: string, path: string) {
+    const c = books[key].choice!;
+    return { path, book: bookMatches[key], language: c.exact ? c.language : books[key].guess.language };
+  }
   /** What the cover and metadata.opf of a book need; `key` is the path before renaming. */
   function bookSidecarItem(key: string, path: string) {
     const c = books[key].choice!;
@@ -270,6 +287,34 @@
     ),
   );
   const comicCounts = $derived(counts(comics));
+  /** Comics whose names are already right but that get converted to CBZ
+   *  (a RAR named `.cbz`), or whose ComicInfo.xml says something else. */
+  const comicInfoOnly = $derived.by(() => {
+    const r = comicRule?.rule;
+    if (r?.type !== "comic") return [];
+    return preview.items.filter(
+      (i) =>
+        i.status === "unchanged" &&
+        ((r.convert && i.convert) || (r.writeInfo && i.retag && comicMatches[i.path] && extOf(i.original) === "cbz")),
+    );
+  });
+  /** What converting a comic to CBZ and writing its ComicInfo.xml need: the
+   *  original's fate, its match and its page in the catalogue. */
+  function comicInsideItem(key: string, path: string, convert: boolean) {
+    const r = comicRule?.rule;
+    const original = r?.type === "comic" && r.convert && convert ? (r.original ?? "keep") : undefined;
+    if (!(r?.type === "comic" && r.writeInfo && comicMatches[key] && comics[key])) return { path, convert: original };
+    const c = comics[key];
+    const [source, volume] = [c.volumeKey.slice(0, c.volumeKey.indexOf(":")), c.volumeKey.slice(c.volumeKey.indexOf(":") + 1)];
+    const issue = c.choice || "";
+    const web =
+      source === "comicvine"
+        ? issue ? `https://comicvine.gamespot.com/issue/4000-${issue}/` : `https://comicvine.gamespot.com/volume/4050-${volume}/`
+        : source === "gcd"
+          ? issue ? `https://www.comics.org/issue/${issue}/` : `https://www.comics.org/series/${volume}/`
+          : source === "mangadex" ? `https://mangadex.org/title/${volume}` : "";
+    return { path, comic: comicMatches[key], web, manga: source === "mangadex", convert: original };
+  }
   /** TMDB episodes per file, for the series rule. */
   let series = $state<Record<string, EpisodeState>>({});
   /** Shows fetched, by id. */
@@ -767,7 +812,13 @@
     const listOnly = playlistOnly;
     const retagOnly = tagsOnly.map((i) => i.path);
     const bookMeta = bookMetaOnly.map((i) => bookSidecarItem(i.path, i.path));
-    if (!preview.changed && !meta.length && !tvMeta.length && !bookMeta.length && !coverOnly && !listOnly.length && !retagOnly.length) return;
+    /** Comics renamed `.cbz` to be converted. */
+    const converting = new Set(preview.items.filter((i) => i.convert).map((i) => i.path));
+    const insideOnly = [
+      ...comicInfoOnly.map((i) => comicInsideItem(i.path, i.path, i.convert)),
+      ...epubOnly.map((i) => bookInsideItem(i.path, i.path)),
+    ];
+    if (!preview.changed && !meta.length && !tvMeta.length && !bookMeta.length && !coverOnly && !listOnly.length && !retagOnly.length && !insideOnly.length) return;
     // Files left behind in a show's old folder are always told first.
     const left = preview.leftFolders.map((f) => t("confirmLeftover", { n: f.files, from: basename(f.from), to: basename(f.to) }));
     if (settings.confirmApply || left.length) {
@@ -783,6 +834,7 @@
         coverOnly ? t("confirmCovers", { n: coverOnly }) : "",
         listOnly.length ? t("confirmPlaylists", { n: listOnly.length }) : "",
         retagOnly.length ? t("confirmTags", { n: retagOnly.length }) : "",
+        insideOnly.length ? t("confirmInside", { n: insideOnly.length }) : "",
         preview.conflicts ? t("confirmConflicts", { n: preview.conflicts }) : "",
       ].filter(Boolean);
       const ok = await confirm({
@@ -886,6 +938,39 @@
           }
         }
       }
+      let inside = 0;
+      {
+        const crule = comicRule?.rule;
+        const items = [
+          ...(crule?.type === "comic" && (crule.writeInfo || crule.convert)
+            ? r.done
+                .filter((op) => extOf(op.to) === "cbz" && ((crule.convert && converting.has(op.from)) || (crule.writeInfo && comicMatches[op.from])))
+                .map((op) => comicInsideItem(op.from, op.to, converting.has(op.from)))
+            : []),
+          ...(brule?.type === "book" && brule.writeEpub
+            ? r.done.filter((op) => books[op.from]?.choice && isEpub(op.to)).map((op) => bookInsideItem(op.from, op.to))
+            : []),
+          ...insideOnly,
+        ];
+        if (recorded && items.length) {
+          insideProgress = { done: 0, total: items.length };
+          try {
+            const res = await api.writeInside(r.historyId, $state.snapshot(items));
+            inside = res.written;
+            if (res.errors.length) {
+              await notify({
+                title: t("insideTitle"),
+                text: t("insideN", { n: res.written }),
+                items: res.errors.map(([file, why]) => (file ? `${file} — ${tError(why)}` : tError(why))),
+              });
+            }
+          } catch (e) {
+            await notify({ title: t("insideTitle"), text: tError(e) });
+          } finally {
+            insideProgress = null;
+          }
+        }
+      }
       const srule = seriesRule?.rule;
       if (recorded && srule?.type === "series" && srule.sidecar) {
         const items = r.done
@@ -914,6 +999,7 @@
         saved ? t("sidecarsN", { n: saved }) : "",
         keptLists ? t("playlistsKeptN", { n: keptLists }) : "",
         tagged ? t("tagsN", { n: tagged }) : "",
+        inside ? t("insideN", { n: inside }) : "",
         r.errors.length ? t("errorsN", { n: r.errors.length }) : "",
       ].filter(Boolean).join(" · ");
       await refresh();
@@ -1809,6 +1895,9 @@
     const unlistenBooks = listen<{ done: number; total: number }>("book-progress", (e) => {
       if (bookProgress) bookProgress = { ...bookProgress, ...e.payload };
     });
+    const unlistenInside = listen<{ done: number; total: number }>("inside-progress", (e) => {
+      if (insideProgress) insideProgress = e.payload;
+    });
     const unlistenApply = listen<{ done: number; total: number }>("apply-progress", (e) => {
       if (task === "rename") applyProgress = e.payload;
     });
@@ -1850,6 +1939,7 @@
       unlistenTmdb.then((f) => f());
       unlistenMb.then((f) => f());
       unlistenBooks.then((f) => f());
+      unlistenInside.then((f) => f());
     };
   });
 </script>
@@ -1907,8 +1997,8 @@
           <button onclick={() => pickSendTo(true)}>{t("sendCopyTo")}</button>
         </div>
       {/if}
-      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !metaOnly.length && !episodeMetaOnly.length && !coverOnly && !playlistOnly.length && !tagsOnly.length) || busy || !!working} onclick={applyAll}>
-        {t(sendTo ? (sendTo.copy ? "copyAction" : "moveAction") : "rename")} {preview.changed + metaOnly.length + episodeMetaOnly.length + coverOnly + playlistOnly.length + tagsOnly.length || ""}
+      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !metaOnly.length && !episodeMetaOnly.length && !coverOnly && !playlistOnly.length && !tagsOnly.length && !comicInfoOnly.length && !epubOnly.length) || busy || !!working} onclick={applyAll}>
+        {t(sendTo ? (sendTo.copy ? "copyAction" : "moveAction") : "rename")} {preview.changed + metaOnly.length + episodeMetaOnly.length + coverOnly + playlistOnly.length + tagsOnly.length + comicInfoOnly.length + epubOnly.length || ""}
       </button>
     </div>
   </header>

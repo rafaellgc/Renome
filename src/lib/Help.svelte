@@ -15,7 +15,7 @@
 
   /** Written by scripts/licenses.js when building. */
   interface Licenses {
-    packages: { name: string; version: string; license: string; url: string; kind: "rust" | "npm"; texts: number[] }[];
+    packages: { name: string; version: string; license: string; url: string; kind: "rust" | "npm" | "c"; texts: number[] }[];
     texts: string[];
   }
   /** null: loading; false: not there (development build). */
@@ -162,7 +162,7 @@
                   <span class="muted">{p.version}</span>
                   <span class="spacer"></span>
                   <span class="lic">{p.license}</span>
-                  <span class="kind">{p.kind === "rust" ? "Rust" : "npm"}</span>
+                  <span class="kind">{p.kind === "rust" ? "Rust" : p.kind === "c" ? "C" : "npm"}</span>
                 </button>
                 {#if expanded === key}
                   <div class="detail">

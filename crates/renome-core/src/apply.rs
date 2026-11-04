@@ -729,6 +729,26 @@ pub struct HistoryEntry {
     pub tagged: usize,
 }
 
+/// Comics converted to CBZ whose original went to the trash: undo gives
+/// them their old name back, as the CBZ they now are (a CBZ named `.cbr`
+/// would be wrong).
+fn trashed_originals(j: &mut Journal, backups: &[crate::tagwrite::Backup]) {
+    for b in backups {
+        if !b.converted.as_ref().is_some_and(|c| c.original.is_none()) {
+            continue;
+        }
+        for op in j.ops.iter_mut().filter(|op| !op.copy && op.to == b.path) {
+            let cbz = op
+                .from
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("cbz"));
+            if !cbz {
+                op.from = op.from.with_extension("cbz");
+            }
+        }
+    }
+}
+
 /// Rename history, one JSON file per operation.
 pub struct History {
     dir: PathBuf,
@@ -936,6 +956,7 @@ impl History {
         done.retain(|b| !j.tags.iter().any(|t| t.path == b.path));
         let joined = done.len();
         j.tagged += joined;
+        trashed_originals(&mut j, &done);
         j.tags.extend(done);
         let empty =
             j.ops.is_empty() && j.extra_files.is_empty() && j.lists.is_empty() && j.tags.is_empty();
@@ -1117,6 +1138,7 @@ impl History {
             }
         }
         j.tagged += backups.len();
+        trashed_originals(&mut j, &backups);
         j.tags.extend(backups);
         self.write(id, &j)
     }
@@ -1422,6 +1444,48 @@ mod tests {
         assert!(h.list()[0].undone);
         // The pictures kept for undo are gone with it.
         assert!(!h.files_dir(&id).unwrap().exists());
+    }
+
+    #[test]
+    fn undo_takes_a_conversion_back() {
+        use crate::convert::{Converted, Original, convert};
+        let rar = include_bytes!("../../renome-archive/tests/data/rar4.rar");
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        fs::write(p.join("old.cbr"), rar).unwrap();
+        let h = History::new(p.join("hist"));
+        // Renamed with the CBZ's extension, then converted.
+        let id = h
+            .apply(&[op(p, "old.cbr", "Hero 001.cbz")])
+            .history_id
+            .unwrap();
+        let cbz = p.join("Hero 001.cbz");
+        let done = convert(&cbz, &[], Original::Keep).unwrap();
+        assert!(p.join("Hero 001.cbr").exists());
+        h.add_tags(&id, vec![done.backup]).unwrap();
+        let u = h.undo(&id).unwrap();
+        assert!(u.errors.is_empty(), "{:?}", u.errors);
+        assert_eq!(fs::read(p.join("old.cbr")).unwrap(), rar);
+        assert!(!cbz.exists() && !p.join("Hero 001.cbr").exists());
+        assert!(h.list()[0].undone);
+
+        // The original gone to the trash (as told here, not done): the CBZ
+        // takes the old name back, as a CBZ.
+        let id = h
+            .apply(&[op(p, "old.cbr", "Hero 001.cbz")])
+            .history_id
+            .unwrap();
+        let mut done = convert(&cbz, &[], Original::Keep).unwrap();
+        fs::remove_file(p.join("Hero 001.cbr")).unwrap();
+        done.backup.converted = Some(Converted { original: None });
+        h.add_tags(&id, vec![done.backup]).unwrap();
+        let u = h.undo(&id).unwrap();
+        assert!(u.errors.is_empty(), "{:?}", u.errors);
+        assert_eq!(
+            crate::convert::kind(&p.join("old.cbz")),
+            Some(crate::convert::Kind::Zip)
+        );
+        assert!(!p.join("old.cbr").exists() && !cbz.exists());
     }
 
     #[test]

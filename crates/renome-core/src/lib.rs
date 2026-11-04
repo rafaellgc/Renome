@@ -17,6 +17,8 @@
 //! - [`tmdb`]: movie title guessing, ranking and `.nfo` files for TMDB.
 //! - [`tv`]: season and episode numbers, and matching files to a show.
 //! - [`video`]: a video's picture size and codec, from its headers.
+//! - [`inside`]: details written inside CBZ and EPUB files.
+//! - [`convert`]: comics converted to CBZ (from RAR, 7z, tar).
 //! - [`details`]: what the optional columns of the list show.
 
 pub mod acoustid;
@@ -25,6 +27,7 @@ pub mod answers;
 pub mod apply;
 pub mod books;
 pub mod comics;
+pub mod convert;
 pub mod details;
 pub mod discogs;
 pub mod ebook;
@@ -33,6 +36,7 @@ pub mod files;
 pub mod filter;
 pub mod fingerprint;
 pub mod identical;
+pub mod inside;
 pub mod kind;
 pub mod music;
 pub mod musicbrainz;
