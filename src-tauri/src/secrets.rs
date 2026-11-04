@@ -13,10 +13,11 @@ use std::sync::Mutex;
 use serde_json::{Map, Value};
 
 /// The settings that are secrets.
-pub const FIELDS: [&str; 5] = [
+pub const FIELDS: [&str; 6] = [
     "tmdbKey",
     "comicVineKey",
     "discogsToken",
+    "metronToken",
     "gcdEmail",
     "gcdPassword",
 ];

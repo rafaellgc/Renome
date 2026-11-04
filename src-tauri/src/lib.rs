@@ -16,10 +16,13 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 mod acoustid;
+mod anilist;
 mod comicvine;
 mod discogs;
 mod gcd;
 mod mangadex;
+mod mangaupdates;
+mod metron;
 mod musicbrainz;
 mod openlibrary;
 mod secrets;
@@ -66,6 +69,12 @@ struct AppState {
     gcd: gcd::Client,
     /// MangaDex.
     md: mangadex::Client,
+    /// AniList (manga), with its answers kept.
+    al: anilist::Client,
+    /// MangaUpdates, likewise.
+    mu: mangaupdates::Client,
+    /// Metron, with the user's token, likewise.
+    mt: metron::Client,
     /// Discogs, with the user's token.
     dg: discogs::Client,
 }
@@ -540,6 +549,34 @@ async fn tv_lookup(
     typed: String,
 ) -> Result<tmdb::TvLookup, String> {
     tmdb::lookup_episodes(&tmdb::Client::new(&key, &lang), id, items, &typed).await
+}
+
+/// Like `tv_search`, on AniList (anime, no key).
+#[tauri::command]
+async fn anime_search(
+    app: AppHandle,
+    query: String,
+    items: Vec<tmdb::TvItem>,
+) -> Result<tmdb::ShowSearch, String> {
+    app.state::<AppState>()
+        .al
+        .anime_search(&query, &items)
+        .await
+}
+
+/// Like `tv_lookup`, on AniList: the show from its first season and the
+/// seasons after it.
+#[tauri::command]
+async fn anime_lookup(
+    app: AppHandle,
+    id: u64,
+    items: Vec<tmdb::TvItem>,
+    typed: String,
+) -> Result<tmdb::TvLookup, String> {
+    app.state::<AppState>()
+        .al
+        .anime_lookup(id, &items, &typed)
+        .await
 }
 
 /// Groups the files by show, to look each one up.
@@ -1152,9 +1189,10 @@ async fn gcd_check(app: AppHandle, email: String, password: String) -> Result<()
     app.state::<AppState>().gcd.check(&email, &password).await
 }
 
-/// Series with a name in a catalogue (`gcd`, `comicvine`, `mangadex`),
-/// from a year and by a publisher when given (MangaDex has no
-/// publishers), best first.
+/// Series with a name in a catalogue (`gcd`, `comicvine`, `metron`,
+/// `mangadex`, `anilist`, `mangaupdates`), from a year and by a publisher
+/// when given (the manga catalogues are not searched by publisher), best
+/// first. `key` is Comic Vine's key or Metron's token.
 #[tauri::command]
 async fn comic_search(
     app: AppHandle,
@@ -1168,12 +1206,17 @@ async fn comic_search(
     let state = app.state::<AppState>();
     match source.as_str() {
         "comicvine" => state.cv.search(&key, &query, year, &publisher, &lang).await,
+        "metron" => state.mt.search(&key, &query, year, &publisher, &lang).await,
         "mangadex" => state.md.search(&query, year, &lang).await,
+        "anilist" => state.al.search(&query, year).await,
+        "mangaupdates" => state.mu.search(&query, year).await,
         _ => state.gcd.search(&query, year, &publisher, &lang).await,
     }
 }
 
 /// A series and its issues, and the issue each comic is (by its number).
+/// A manga catalogue gives the series alone, with its details (MangaUpdates
+/// tells its authors and volumes only there).
 #[tauri::command]
 async fn comic_issues(
     app: AppHandle,
@@ -1185,6 +1228,14 @@ async fn comic_issues(
     let state = app.state::<AppState>();
     let (volume, issues) = match source.as_str() {
         "comicvine" => state.cv.issues(&key, &id).await?,
+        "metron" => state.mt.issues(&key, &id).await?,
+        "mangaupdates" => {
+            let query = comics
+                .first()
+                .map(|c| c.series.as_str())
+                .unwrap_or_default();
+            (state.mu.series(&id, query).await?, Vec::new())
+        }
         _ => state.gcd.issues(&id).await?,
     };
     let found = comics
@@ -1205,6 +1256,50 @@ struct ComicIssues {
     issues: Vec<renome_core::comics::Issue>,
     /// The issue of each comic asked about, when its number says it.
     found: Vec<Option<String>>,
+}
+
+/// The barcodes printed on comics (read in their first and last pages),
+/// a few at a time.
+#[tauri::command]
+async fn comic_barcodes(paths: Vec<PathBuf>) -> Vec<Option<String>> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let workers = std::thread::available_parallelism().map_or(2, |n| n.get().min(6));
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let out: Mutex<Vec<Option<String>>> = Mutex::new(vec![None; paths.len()]);
+        std::thread::scope(|s| {
+            for _ in 0..workers {
+                s.spawn(|| {
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(p) = paths.get(i) else { break };
+                        let code = renome_core::barcode::of_comic(p);
+                        if let Ok(mut o) = out.lock() {
+                            o[i] = code;
+                        }
+                    }
+                });
+            }
+        });
+        out.into_inner().unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// The issue a barcode belongs to, on Metron.
+#[tauri::command]
+async fn comic_by_code(
+    app: AppHandle,
+    key: String,
+    code: String,
+) -> Result<Option<metron::Coded>, String> {
+    app.state::<AppState>().mt.by_code(&key, &code).await
+}
+
+/// Checks a Metron token.
+#[tauri::command]
+async fn metron_check(app: AppHandle, token: String) -> Result<(), String> {
+    app.state::<AppState>().mt.check(&token).await
 }
 
 /// The Comic Vine series an issue belongs to.
@@ -1576,6 +1671,9 @@ pub fn run() {
             cv: comicvine::Client::default(),
             gcd: gcd::Client::default(),
             md: mangadex::Client::default(),
+            al: anilist::Client::default(),
+            mu: mangaupdates::Client::default(),
+            mt: metron::Client::default(),
             dg: discogs::Client::default(),
         })
         .invoke_handler(tauri::generate_handler![
@@ -1617,6 +1715,11 @@ pub fn run() {
             comic_search,
             comic_issues,
             comic_volume_of,
+            anime_search,
+            anime_lookup,
+            comic_barcodes,
+            comic_by_code,
+            metron_check,
             gcd_account,
             gcd_check,
             save_text,

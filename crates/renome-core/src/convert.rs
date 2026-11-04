@@ -249,6 +249,108 @@ fn natural(a: &str, b: &str) -> std::cmp::Ordering {
     pa.len().cmp(&pb.len()).then_with(|| a.cmp(b))
 }
 
+/// The largest picture read for [`end_pages`].
+const END_PAGE_MAX: u64 = 40 << 20;
+
+/// The pictures at the start and at the end of a comic, where a barcode is
+/// printed: the first `head` and the last `tail` pages, in reading order
+/// (fewer when the comic is shorter). A PDF gives none (its pages would
+/// have to be drawn); an unreadable comic gives none.
+pub fn end_pages(path: &Path, head: usize, tail: usize) -> Vec<Vec<u8>> {
+    let Some(kind) = kind(path) else {
+        return Vec::new();
+    };
+    let pick = |names: &[String]| -> Vec<usize> {
+        let mut order: Vec<usize> = (0..names.len()).filter(|&i| is_page(&names[i])).collect();
+        order.sort_by(|&a, &b| natural(&names[a], &names[b]));
+        let mut out: Vec<usize> = order.iter().take(head).copied().collect();
+        let from = order.len().saturating_sub(tail).max(out.len());
+        out.extend(&order[from..]);
+        out
+    };
+    let read = |r: &mut dyn Read| -> Option<Vec<u8>> {
+        let mut v = Vec::new();
+        r.take(END_PAGE_MAX).read_to_end(&mut v).ok()?;
+        Some(v)
+    };
+    match kind {
+        Kind::Pdf => Vec::new(),
+        Kind::Zip => {
+            let Ok(f) = File::open(path) else {
+                return Vec::new();
+            };
+            let Ok(mut zip) = zip::ZipArchive::new(std::io::BufReader::new(f)) else {
+                return Vec::new();
+            };
+            let names: Vec<String> = zip
+                .file_names()
+                .map(|n| n.map(|n| n.into_owned()).unwrap_or_default())
+                .collect();
+            pick(&names)
+                .into_iter()
+                .filter_map(|i| read(&mut zip.by_name(&names[i]).ok()?))
+                .collect()
+        }
+        Kind::Folder => {
+            let Ok(files) = folder_pages(path) else {
+                return Vec::new();
+            };
+            let names: Vec<String> = files.iter().map(|(_, n)| n.clone()).collect();
+            pick(&names)
+                .into_iter()
+                .filter_map(|i| read(&mut File::open(&files[i].0).ok()?))
+                .collect()
+        }
+        _ => {
+            // Read in one pass: the names are known only at the end, so
+            // every page that may be wanted is kept until then.
+            let mut names: Vec<String> = Vec::new();
+            let mut kept: HashMap<usize, Vec<u8>> = HashMap::new();
+            let mut first: Vec<String> = Vec::new();
+            let mut last: Vec<String> = Vec::new();
+            let mut drawn = 0;
+            let _ = each_file(
+                path,
+                kind,
+                |page, data| {
+                    if !is_page(&page.name) {
+                        return Ok(());
+                    }
+                    // Among the first or last names seen so far: may be wanted.
+                    let n = &page.name;
+                    let early = first.len() < head || first.iter().any(|f| natural(n, f).is_lt());
+                    let late = last.len() < tail || last.iter().any(|l| natural(n, l).is_gt());
+                    if early || late {
+                        if let Some(v) = read(data) {
+                            kept.insert(names.len(), v);
+                        }
+                        if early {
+                            first.push(n.clone());
+                            first.sort_by(|a, b| natural(a, b));
+                            first.truncate(head);
+                        }
+                        if late {
+                            last.push(n.clone());
+                            last.sort_by(|a, b| natural(b, a));
+                            last.truncate(tail);
+                        }
+                    }
+                    names.push(n.clone());
+                    // Pages pushed out of both ends are no longer wanted.
+                    kept.retain(|&i, _| first.contains(&names[i]) || last.contains(&names[i]));
+                    Ok(())
+                },
+                &mut drawn,
+                PdfOptions::default(),
+            );
+            pick(&names)
+                .into_iter()
+                .filter_map(|i| kept.remove(&i))
+                .collect()
+        }
+    }
+}
+
 /// What becomes of the original once converted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

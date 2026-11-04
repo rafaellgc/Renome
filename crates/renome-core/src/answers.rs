@@ -10,10 +10,12 @@ use std::time::{Duration, SystemTime};
 const DAY: u64 = 24 * 60 * 60;
 
 /// The longest a service's answers may be kept, whatever the user chose:
-/// TMDB's terms allow six months; Discogs wants its data fresh.
+/// TMDB's terms allow six months; Discogs wants its data fresh; AniList's
+/// forbid keeping its data as a store of it, so only a week is.
 fn cap(service: &str) -> Duration {
     match service {
         "tmdb" => Duration::from_secs(180 * DAY),
+        "anilist" => Duration::from_secs(7 * DAY),
         "discogs" => Duration::from_secs(6 * 60 * 60),
         _ => Duration::MAX,
     }

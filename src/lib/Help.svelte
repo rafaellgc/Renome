@@ -64,6 +64,9 @@
       items: [
         { name: "Grand Comics Database", url: "https://www.comics.org", note: "gcdLicense" },
         { name: "MangaDex", url: "https://mangadex.org" },
+        { name: "AniList", url: "https://anilist.co" },
+        { name: "MangaUpdates", url: "https://www.mangaupdates.com" },
+        { name: "Metron", url: "https://metron.cloud" },
         { name: "Comic Vine", url: "https://comicvine.gamespot.com" },
       ],
     },

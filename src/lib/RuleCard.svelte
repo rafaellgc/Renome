@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t } from "./i18n";
+  import { t, type Key } from "./i18n";
   import { comicPreset, comicPresetOf, splitExt, splitParts, type ComicPreset } from "./rules";
   import type { Step } from "./types";
 
@@ -36,6 +36,16 @@
       onreview: () => void;
     };
   } = $props();
+
+  /** What each comic catalogue is, under the choice. */
+  const SOURCE_HINT: Record<string, Key> = {
+    gcd: "gcdHint",
+    comicvine: "cvHint",
+    metron: "mtHint",
+    mangadex: "mdHint",
+    anilist: "alHint",
+    mangaupdates: "muHint",
+  };
 
   let open = $state(true);
   const r = $derived(step.rule);
@@ -261,6 +271,13 @@
         {@render actions(t("tmdbSearch"), "movieSummary")}
       {:else if r.type === "series"}
         <p class="hint top">{t("seriesHint")}</p>
+        <label>{t("seriesSource")}
+          <select bind:value={r.source}>
+            <option value="tmdb">{t("seriesSourceTmdb")}</option>
+            <option value="anilist">{t("seriesSourceAnilist")}</option>
+          </select>
+        </label>
+        {#if r.source === "anilist"}<p class="hint">{t("animeHint")}</p>{/if}
         <label>{t("seriesShow")} <input bind:value={r.show} placeholder={t("seriesShowPlaceholder")} spellcheck="false" /></label>
         <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
         <p class="hint mono">{t("seriesTemplateHint")}</p>
@@ -269,9 +286,11 @@
         {#if r.folders}
           <label class="sub">{t("seriesFolderName")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
         {/if}
-        <label class="check"><input type="checkbox" bind:checked={r.sidecar} /> <span>{t("seriesSidecarLabel")}<small>{t("seriesSidecarHint")}</small></span></label>
-        {#if r.sidecar}
-          <label class="check sub"><input type="checkbox" bind:checked={r.fanart} /> {t("fanartLabel")}</label>
+        {#if r.source !== "anilist"}
+          <label class="check"><input type="checkbox" bind:checked={r.sidecar} /> <span>{t("seriesSidecarLabel")}<small>{t("seriesSidecarHint")}</small></span></label>
+          {#if r.sidecar}
+            <label class="check sub"><input type="checkbox" bind:checked={r.fanart} /> {t("fanartLabel")}</label>
+          {/if}
         {/if}
         <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("seriesMissingLabel")}<small>{t("seriesMissingHint")}</small></span></label>
         {#if lookup?.show}<p class="hint">{t("seriesCurrent", { show: lookup.show })}</p>{/if}
@@ -374,11 +393,17 @@
         <label>{t("comicSource")}
           <select bind:value={r.source}>
             <option value="gcd">{t("comicSourceGcd")}</option>
-            <option value="mangadex">{t("comicSourceMangadex")}</option>
+            <option value="metron">{t("comicSourceMetron")}</option>
             <option value="comicvine">{t("comicSourceCv")}</option>
+            <option value="mangadex">{t("comicSourceMangadex")}</option>
+            <option value="anilist">{t("comicSourceAnilist")}</option>
+            <option value="mangaupdates">{t("comicSourceMangaupdates")}</option>
           </select>
         </label>
-        <p class="hint">{t(r.source === "comicvine" ? "cvHint" : r.source === "mangadex" ? "mdHint" : "gcdHint")}</p>
+        <p class="hint">{t(SOURCE_HINT[r.source] ?? "gcdHint")}</p>
+        {#if r.source === "metron"}
+          <label class="check"><input type="checkbox" bind:checked={r.barcode} /> <span>{t("comicBarcodeLabel")}<small>{t("comicBarcodeHint")}</small></span></label>
+        {/if}
         <label>{t("comicSeries")} <input bind:value={r.series} placeholder={t("comicSeriesPlaceholder")} spellcheck="false" /></label>
         {#if lookup?.show}<p class="hint">{t("seriesCurrent", { show: lookup.show })}</p>{/if}
         {@render actions(t("comicSearch"), "comicSummary")}

@@ -1,8 +1,8 @@
 <script lang="ts">
   import { api } from "./api";
   import { t, tError } from "./i18n";
-  import { byFit } from "./rules";
-  import { settings } from "./settings.svelte";
+  import { byFit, seriesOnly } from "./rules";
+  import { comicKey, settings } from "./settings.svelte";
   import type { ComicSource, ComicVolume } from "./types";
 
   let {
@@ -42,7 +42,7 @@
     const y = Number.parseInt(year, 10);
     try {
       const lang = settings.lang === "pt" ? "pt-br" : settings.lang;
-      const found = await api.comicSearch(source, settings.comicVineKey.trim(), query.trim(), lang, y >= 1800 && y <= 2200 ? y : null, publisher.trim());
+      const found = await api.comicSearch(source, comicKey(source), query.trim(), lang, y >= 1800 && y <= 2200 ? y : null, publisher.trim());
       candidates = byFit(found, highest);
     } catch (err) {
       searchError = tError(err);
@@ -51,7 +51,7 @@
     }
   }
 
-  const SOURCE_NAME: Record<ComicSource, string> = { gcd: "Grand Comics Database", comicvine: "Comic Vine", mangadex: "MangaDex" };
+  const SOURCE_NAME: Record<ComicSource, string> = { gcd: "Grand Comics Database", comicvine: "Comic Vine", metron: "Metron", mangadex: "MangaDex", anilist: "AniList", mangaupdates: "MangaUpdates" };
 
   function onkeydown(e: KeyboardEvent) {
     if ((e.target as HTMLElement).closest("input")) return;
@@ -76,7 +76,7 @@
     <form class="search" onsubmit={search}>
       <input bind:value={query} placeholder={t("comicSeriesPlaceholder")} spellcheck="false" />
       <input class="year" bind:value={year} oninput={() => (year = year.replace(/\D/g, ""))} inputmode="numeric" maxlength="4" placeholder={t("comicPickYear")} title={t("comicPickYearHint")} />
-      {#if source !== "mangadex"}
+      {#if !seriesOnly(source)}
         <input class="publisher" bind:value={publisher} placeholder={t("comicPickPublisher")} title={t(source === "gcd" ? "comicPickPublisherGcd" : "comicPickPublisherHint")} spellcheck="false" />
       {/if}
       <button type="submit" disabled={searching}>{t("reviewSearch")}</button>

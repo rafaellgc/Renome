@@ -55,7 +55,8 @@ A built-in manual (F1) explains every rule with examples.
   them into `Show (Year) [tmdbid-…]/Season 01` and saves `tvshow.nfo`,
   episode `.nfo` files and images for Jellyfin, Kodi and Emby. Aired
   episodes missing from the seasons you have show up as faded rows, and
-  can be exported to a CSV file.
+  can be exported to a CSV file. Anime can be looked up on AniList
+  instead, with no key, its seasons joined into one show.
 - Music: names songs from their tags (`01 - Title`, artist, album, year,
   disc…; the artist too on compilations), optionally organizing them
   into `Artist/Album (Year)` folders, with covers, lyrics and bonus
@@ -80,7 +81,9 @@ A built-in manual (F1) explains every rule with examples.
   volumes, tomes, chapters, years; release notes ignored), offline.
   Optionally looks the series up on the Grand Comics Database (editions
   from many countries; a free account, signed in for the session only),
-  MangaDex (manga, no account) or Comic Vine (your own key), and organizes
+  Metron (your own token; also finds the exact issue by the barcode
+  recorded in the file or printed on its covers), Comic Vine (your own
+  key), or MangaDex, AniList and MangaUpdates (manga, no account), and organizes
   series folders (with ready-made templates for Komga and Kavita). Issues
   missing from your series show up as faded rows, and can be exported to
   a CSV file. Optionally writes the details into each CBZ's

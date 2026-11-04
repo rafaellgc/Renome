@@ -2337,6 +2337,7 @@ mod tests {
     fn episode_keeps_subtitle_language() {
         let d = tempfile::tempdir().unwrap();
         let m = EpisodeMatch {
+            source: String::new(),
             extra: Default::default(),
             id: 1,
             show: "Show".into(),
@@ -2386,6 +2387,7 @@ mod tests {
         let old = d.path().join("Show/Season 1");
         fs::create_dir_all(&old).unwrap();
         let m = EpisodeMatch {
+            source: String::new(),
             extra: Default::default(),
             id: 7,
             show: "Show".into(),
@@ -2441,6 +2443,7 @@ mod tests {
 
     fn episode(n: u16) -> EpisodeMatch {
         EpisodeMatch {
+            source: String::new(),
             extra: Default::default(),
             id: 7,
             show: "Show".into(),

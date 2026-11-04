@@ -38,6 +38,10 @@ export const api = {
     invoke<{ query: string; candidates: Candidate[]; auto: boolean }>("tv_search", { key, lang, query, items }),
   tvLookup: (key: string, lang: string, id: number, items: TvItem[], typed: string) =>
     invoke<{ show: Show; files: EpisodeLookup[] }>("tv_lookup", { key, lang, id, items, typed }),
+  animeSearch: (query: string, items: TvItem[]) =>
+    invoke<{ query: string; candidates: Candidate[]; auto: boolean }>("anime_search", { query, items }),
+  animeLookup: (id: number, items: TvItem[], typed: string) =>
+    invoke<{ show: Show; files: EpisodeLookup[] }>("anime_lookup", { id, items, typed }),
   tvGroups: (items: TvItem[]) => invoke<{ groups: string[][]; loose: string[] }>("tv_groups", { items }),
   mbLookup: (paths: string[], fromName: boolean, listen: boolean) =>
     invoke<AlbumLookup[]>("mb_lookup", { paths, fromName, listen }),
@@ -59,6 +63,12 @@ export const api = {
   comicIssues: (source: ComicSource, key: string, id: string, comics: ComicMatch[]) =>
     invoke<{ volume: ComicVolume; issues: ComicIssue[]; found: (string | null)[] }>("comic_issues", { source, key, id, comics }),
   comicVolumeOf: (key: string, issue: string) => invoke<string>("comic_volume_of", { key, issue }),
+  /** The barcodes printed in the comics' first and last pages. */
+  comicBarcodes: (paths: string[]) => invoke<(string | null)[]>("comic_barcodes", { paths }),
+  /** The issue a barcode belongs to, on Metron. */
+  comicByCode: (key: string, code: string) =>
+    invoke<{ volume: ComicVolume; issues: ComicIssue[]; issue: string } | null>("comic_by_code", { key, code }),
+  metronCheck: (token: string) => invoke<void>("metron_check", { token }),
   gcdAccount: (email: string, password: string) => invoke<void>("gcd_account", { email, password }),
   gcdCheck: (email: string, password: string) => invoke<void>("gcd_check", { email, password }),
   bookLookup: (lang: string, items: { path: string; name: string }[]) =>

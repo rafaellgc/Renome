@@ -21,6 +21,8 @@ export interface Settings {
   comicVineKey: string;
   /** Discogs personal token (empty: not set up). */
   discogsToken: string;
+  /** Metron API token (empty: not set up). */
+  metronToken: string;
   /** Grand Comics Database account (empty: searched without one). */
   gcdEmail: string;
   gcdPassword: string;
@@ -46,6 +48,7 @@ const DEFAULTS: Settings = {
   tmdbLang: "",
   comicVineKey: "",
   discogsToken: "",
+  metronToken: "",
   gcdEmail: "",
   gcdPassword: "",
   rules: [],
@@ -74,6 +77,8 @@ function upgradeRules(steps: Step[]) {
     // books were shown.
     const r = s.rule as { type?: string; missing?: boolean } | undefined;
     if (r && ["series", "comic", "movie", "music", "book"].includes(r.type ?? "")) r.missing ??= true;
+    // Rules from before shows could be looked up on AniList.
+    if (s.rule?.type === "series") s.rule.source ??= "tmdb";
     if (s.rule?.type !== "comic") continue;
     if (OLD_COMIC_TEMPLATES[s.rule.template]) s.rule.template = OLD_COMIC_TEMPLATES[s.rule.template];
     // Rules from before there was a choice of catalogue.
@@ -97,6 +102,11 @@ export async function loadSettings() {
 }
 
 /** Language for TMDB titles and overviews. */
+/** The key a comic catalogue is asked with: Comic Vine's, Metron's token. */
+export function comicKey(source: string): string {
+  return (source === "metron" ? settings.metronToken : settings.comicVineKey).trim();
+}
+
 export function tmdbLang() {
   return settings.tmdbLang || { pt: "pt-BR", en: "en-US", es: "es-ES" }[settings.lang];
 }
@@ -106,7 +116,7 @@ export function saveSettings() {
 }
 
 /** The settings kept in the system's password store, not in the file. */
-export const SECRET_FIELDS = ["tmdbKey", "comicVineKey", "discogsToken", "gcdEmail", "gcdPassword"] as const;
+export const SECRET_FIELDS = ["tmdbKey", "comicVineKey", "discogsToken", "metronToken", "gcdEmail", "gcdPassword"] as const;
 
 /** Whether the secrets came (the store may wait to be unlocked or
  *  allowed), and where they are kept: `stored` in the password store,

@@ -21,8 +21,8 @@
   import RuleCard from "$lib/RuleCard.svelte";
   import ShowPicker from "$lib/ShowPicker.svelte";
   import { LOCALES, MOD, t, tError, type Key } from "$lib/i18n";
-  import { RULE_TYPES, LOOKUP_TYPES, isLookup, oneLookup, byFit, isAudio, isBook, isComic, isScreen, isVideo, newRule, newStep, splitExt } from "$lib/rules";
-  import { loadSecrets, loadSettings, saveSecrets, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
+  import { RULE_TYPES, LOOKUP_TYPES, isLookup, oneLookup, byFit, isAudio, isBook, isComic, isScreen, isVideo, newRule, newStep, seriesOnly, splitExt } from "$lib/rules";
+  import { comicKey, loadSecrets, loadSettings, saveSecrets, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
     AlbumState, ApplyReport, BookCandidate, BookMatch, BookState, Candidate, ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, Copies, MbCandidate, SongMatch, EpKey, EpisodeMatch, EpisodeState, MovieMatch, MovieSet, MovieState, MovieStatus, HistoryEntry,
     OpError, Preview, PreviewItem, Rule, RuleType, Show, Step, View, ViewSort,
@@ -313,8 +313,14 @@
         ? issue ? `https://comicvine.gamespot.com/issue/4000-${issue}/` : `https://comicvine.gamespot.com/volume/4050-${volume}/`
         : source === "gcd"
           ? issue ? `https://www.comics.org/issue/${issue}/` : `https://www.comics.org/series/${volume}/`
-          : source === "mangadex" ? `https://mangadex.org/title/${volume}` : "";
-    return { path, comic: comicMatches[key], web, manga: source === "mangadex", convert: original, pdf };
+          : source === "mangadex"
+            ? `https://mangadex.org/title/${volume}`
+            : source === "anilist"
+              ? `https://anilist.co/manga/${volume}`
+              : source === "mangaupdates" && /^\d+$/.test(volume)
+                ? `https://www.mangaupdates.com/series/${BigInt(volume).toString(36)}`
+                : "";
+    return { path, comic: comicMatches[key], web, manga: seriesOnly(source), convert: original, pdf };
   }
   /** TMDB episodes per file, for the series rule. */
   let series = $state<Record<string, EpisodeState>>({});
@@ -327,7 +333,7 @@
   /** Files in the episode review window; null when closed. */
   let episodeReview = $state<string[] | null>(null);
   /** The show picker, while open. */
-  let showPick = $state<{ query: string; candidates: Candidate[]; resolve: (c: Candidate | null) => void } | null>(null);
+  let showPick = $state<{ source: "tmdb" | "anilist"; query: string; candidates: Candidate[]; resolve: (c: Candidate | null) => void } | null>(null);
   let tvProgress = $state<string | null>(null);
   const seriesRule = $derived(steps.find((s) => s.enabled && s.rule.type === "series"));
   const musicRule = $derived(steps.find((s) => s.enabled && s.rule.type === "music"));
@@ -417,6 +423,7 @@
           const show = shows[e.showId];
           const keys = e.choice!;
           return [p, {
+            source: show.source ?? "",
             id: show.id,
             show: show.name,
             originalShow: show.originalName,
@@ -467,7 +474,7 @@
   });
   /** Episodes whose names are already right but that still get metadata. */
   const episodeMetaOnly = $derived(
-    seriesRule?.rule.type === "series" && seriesRule.rule.sidecar
+    seriesRule?.rule.type === "series" && seriesRule.rule.sidecar && seriesRule.rule.source !== "anilist"
       ? preview.items.filter((i) => i.status === "unchanged" && episodeMatches[i.path] && isVideo(i.original))
       : [],
   );
@@ -637,7 +644,7 @@
   // The keys and the GCD account go to the system's password store, apart.
   let secretsTimer: ReturnType<typeof setTimeout> | undefined;
   $effect(() => {
-    const deps = [settings.tmdbKey, settings.comicVineKey, settings.discogsToken, settings.gcdEmail, settings.gcdPassword];
+    const deps = [settings.tmdbKey, settings.comicVineKey, settings.discogsToken, settings.metronToken, settings.gcdEmail, settings.gcdPassword];
     if (!ready || !deps) return;
     clearTimeout(secretsTimer);
     secretsTimer = setTimeout(() => saveSecrets().catch(() => {}), 600);
@@ -975,7 +982,7 @@
         }
       }
       const srule = seriesRule?.rule;
-      if (recorded && srule?.type === "series" && srule.sidecar) {
+      if (recorded && srule?.type === "series" && srule.sidecar && srule.source !== "anilist") {
         const items = r.done
           .filter((op) => episodeMatches[op.from] && isVideo(op.to))
           .map((op) => tvSidecarItem(op.from, op.to))
@@ -1207,15 +1214,17 @@
     }
   }
 
-  /** The chosen catalogue (GCD, MangaDex, Comic Vine) for the visible
-   *  comics: one series per group of files (the series typed, else each
-   *  series the files say), picked by itself when only one has that name
-   *  (and year), else asked; then each file's issue by its number. */
+  /** The chosen catalogue (GCD, Metron, Comic Vine, a manga one) for the
+   *  visible comics: on Metron, first each file's barcode (recorded in it,
+   *  or read in its pages when asked); then one series per group of files
+   *  (the series typed, else each series the files say), picked by itself
+   *  when only one has that name (and year), else asked; then each file's
+   *  issue by its number. */
   async function searchComics(rule: Extract<Rule, { type: "comic" }>) {
     const source = rule.source ?? "gcd";
-    const key = settings.comicVineKey.trim();
-    if (source === "comicvine" && !key) {
-      const ok = await confirm({ title: t("rule.comic"), text: t("cvNeedsKey"), ok: t("options"), cancel: t("cancel") });
+    const key = comicKey(source);
+    if ((source === "comicvine" || source === "metron") && !key) {
+      const ok = await confirm({ title: t("rule.comic"), text: t(source === "metron" ? "mtNeedsKey" : "cvNeedsKey"), ok: t("options"), cancel: t("cancel") });
       if (ok) showOptions = true;
       return;
     }
@@ -1242,11 +1251,42 @@
         files.map((f) => (f.lookupName ? (f.isDir ? f.lookupName : splitExt(f.lookupName)[0]) : null)),
         !!rule.byFolder,
       );
+      const run = stopRun;
+      // On Metron, a barcode tells the issue itself.
+      const coded = new Set<string>();
+      if (source === "metron") {
+        let codes = owns.map((o) => o?.extra?.gtin?.replace(/\D/g, "") || null);
+        if (rule.barcode && codes.some((c) => !c)) {
+          comicProgress = t("comicBarcodeReading");
+          const unread = files.flatMap((f, i) => (!codes[i] && owns[i] ? [i] : []));
+          const read = await api.comicBarcodes(unread.map((i) => files[i].path));
+          if (stopRun !== run) return;
+          unread.forEach((i, n) => {
+            const code = read[n];
+            const own = owns[i];
+            if (!code || !own) return;
+            codes[i] = code;
+            // Written into the ComicInfo.xml with the rest.
+            own.extra = { ...(own.extra ?? {}), gtin: code };
+          });
+        }
+        const withCode = files.flatMap((f, i) => (codes[i] && owns[i] ? [i] : []));
+        for (const [n, i] of withCode.entries()) {
+          if (stopRun !== run) return;
+          comicProgress = t("comicBarcodeLooking", { n: `${n + 1}/${withCode.length}` });
+          const found = await api.comicByCode(key, codes[i]!);
+          if (!found) continue;
+          const vkey = `${source}:${found.volume.id}`;
+          comicVolumes[vkey] = { volume: found.volume, issues: found.issues };
+          comics[files[i].path] = { volumeKey: vkey, own: owns[i]!, choice: found.issue, status: "auto" };
+          coded.add(files[i].path);
+        }
+      }
       const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
       const groups = new Map<string, { query: string; paths: string[]; owns: ComicMatch[] }>();
       files.forEach((f, i) => {
         const own = owns[i];
-        if (!own) return;
+        if (!own || coded.has(f.path)) return;
         const query = rule.series.trim() || own.series;
         const g = groups.get(fold(query)) ?? { query, paths: [], owns: [] };
         g.paths.push(f.path);
@@ -1254,14 +1294,13 @@
         groups.set(fold(query), g);
       });
       if (!groups.size) {
-        notice = t("comicNoFiles");
+        if (!coded.size) notice = t("comicNoFiles");
         return;
       }
-      const run = stopRun;
       for (const [k, g] of groups) {
         if (stopRun !== run) break;
         // Loose chapters are no issues in the catalogues of issues.
-        if (source !== "mangadex" && g.owns.every((o) => !o.number && o.volume == null && !!o.chapter)) continue;
+        if (!seriesOnly(source) && g.owns.every((o) => !o.number && o.volume == null && !!o.chapter)) continue;
         const picked = `${source}:${k}`;
         let volume: ComicVolume | null = pickedComics[picked] ?? null;
         // A `ComicInfo.xml` link to a Comic Vine issue tells the series.
@@ -1317,10 +1356,16 @@
           if (!volume) continue;
         }
         pickedComics[picked] = volume;
-        // MangaDex has series, not a publisher's volumes: the file's
-        // numbers stay.
-        if (source === "mangadex") {
+        // The manga catalogues have series, not a publisher's volumes: the
+        // file's numbers stay. MangaUpdates tells a series' authors and
+        // volumes only when asked for it.
+        if (seriesOnly(source)) {
           const vkey = `${source}:${volume.id}`;
+          if (source === "mangaupdates") {
+            const full = await api.comicIssues(source, key, volume.id, g.owns).catch(() => null);
+            if (stopRun !== run) break;
+            if (full) volume = { ...volume, ...Object.fromEntries(Object.entries(full.volume).filter(([, x]) => x !== "" && x !== null && x !== 0)) };
+          }
           comicVolumes[vkey] = { volume, issues: [] };
           for (const [i, p] of g.paths.entries()) comics[p] = { volumeKey: vkey, own: g.owns[i], choice: "", status: "auto" };
           continue;
@@ -1351,7 +1396,7 @@
     } catch (e) {
       const err = String(e);
       // A refused account is fixed in the options.
-      if (err.startsWith("gcdBadLogin")) {
+      if (err.startsWith("gcdBadLogin") || err.startsWith("mtBadKey")) {
         if (await confirm({ title: t("rule.comic"), text: tError(e), ok: t("options"), cancel: t("close") })) showOptions = true;
       } else {
         await notify({ title: t("rule.comic"), text: tError(e) });
@@ -1474,7 +1519,12 @@
    *  doubtful files go to the review window. With no show typed, each show
    *  the file names (or folders) say is looked up in turn. */
   async function searchSeries(rule: Extract<Rule, { type: "series" }>) {
-    if (!settings.tmdbKey.trim()) {
+    // AniList: anime, with no key; its shows are kept apart from TMDB's
+    // (their ids would meet), under negative numbers.
+    const anime = rule.source === "anilist";
+    const source = anime ? "anilist" : "tmdb";
+    const showKey = (id: number) => (anime ? -id : id);
+    if (!anime && !settings.tmdbKey.trim()) {
       const ok = await confirm({ title: t("rule.series"), text: t("tmdbNeedsKey"), ok: t("options"), cancel: t("cancel") });
       if (ok) showOptions = true;
       return;
@@ -1507,38 +1557,42 @@
       for (const group of groups) {
         if (stopRun !== run) break;
         tvProgress = t("tvFinding");
-        const res = await api.tvSearch(key, lang, typed, group).catch((e) => {
+        const res = await (anime ? api.animeSearch(typed, group) : api.tvSearch(key, lang, typed, group)).catch((e) => {
           // A group whose show cannot be told is skipped, not the others.
           if (groups.length > 1 && String(e) === "tvNoShow") return null;
           throw e;
         });
         if (!res) continue;
         if (stopRun !== run) break;
-        let show: Candidate | null = pickedShows[res.query] ?? null;
+        const picked = `${source}:${res.query}`;
+        let show: Candidate | null = pickedShows[picked] ?? null;
         if (!show) {
           show = res.auto
             ? res.candidates[0]
-            : await new Promise<Candidate | null>((resolve) => (showPick = { query: res.query, candidates: res.candidates, resolve }));
+            : await new Promise<Candidate | null>((resolve) => (showPick = { source, query: res.query, candidates: res.candidates, resolve }));
           showPick = null;
           if (!show) continue;
-          pickedShows[res.query] = show;
+          pickedShows[picked] = show;
         }
+        const sid = showKey(show.id);
         if (!found.some((c) => c.id === show.id)) found.push(show);
         // Files already settled for this show keep their episode.
         const items = group.filter((i) => {
           const e = series[i.path];
-          return !(e && e.showId === show.id && (e.status === "auto" || e.status === "chosen"));
+          return !(e && e.showId === sid && (e.status === "auto" || e.status === "chosen"));
         });
         if (!items.length) continue;
         if (stopRun !== run) break;
         searched = true;
         tvProgress = t("tvLoading", { show: show.title });
-        const look = await api.tvLookup(key, lang, show.id, items, typed || res.query);
-        shows[show.id] = look.show;
+        const look = anime
+          ? await api.animeLookup(show.id, items, typed || res.query)
+          : await api.tvLookup(key, lang, show.id, items, typed || res.query);
+        shows[sid] = look.show;
         if (look.files.some((f) => !f.choice.length)) review = true;
         for (const f of look.files) {
           series[f.path] = {
-            showId: show.id,
+            showId: sid,
             guess: f.guess,
             alternatives: f.alternatives,
             conflict: f.conflict,
@@ -2296,7 +2350,7 @@
 {/if}
 
 {#if showPick}
-  <ShowPicker query={showPick.query} candidates={showPick.candidates} onpick={(c) => showPick?.resolve(c)} />
+  <ShowPicker source={showPick.source} query={showPick.query} candidates={showPick.candidates} onpick={(c) => showPick?.resolve(c)} />
 {/if}
 
 {#if help}

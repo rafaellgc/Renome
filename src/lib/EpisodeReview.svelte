@@ -145,7 +145,7 @@
               {#if still(e?.stillPath ?? null)}
                 <img src={still(e!.stillPath)} alt="" loading="lazy" />
               {:else}
-                <div class="nostill">TMDB</div>
+                <div class="nostill">{show?.source === "anilist" ? "AniList" : "TMDB"}</div>
               {/if}
               <span class="info">
                 <b><span class="code">{code(keys)}</span> {keys.map((k) => episode(k)?.name).join(" & ")}</b>

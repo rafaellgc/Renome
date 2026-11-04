@@ -31,13 +31,15 @@ export type Rule =
   | {
       type: "series"; template: string; colon: string; show: string;
       folders: boolean; folderTemplate: string; sidecar: boolean; fanart: boolean; missing: boolean;
+      /** Where shows are looked up (TMDB when not set). */
+      source?: "tmdb" | "anilist";
     }
   | {
       type: "music"; template: string; colon: string; discPrefix: boolean; fromName: boolean;
       folders: boolean; folderTemplate: string; cover: boolean; playlist: boolean; listen: boolean; writeTags: boolean; embedCover: boolean; coverSize: number; cleanTags: boolean; missing: boolean;
     }
   | { type: "book"; template: string; colon: string; folders: boolean; folderTemplate: string; cover: boolean; opf: boolean; writeEpub?: boolean; missing: boolean }
-  | { type: "comic"; template: string; colon: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; byFolder: boolean; writeInfo?: boolean; convert?: boolean; original?: "keep" | "delete"; drawPages?: boolean; pageSize?: number; missing: boolean };
+  | { type: "comic"; template: string; colon: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; byFolder: boolean; writeInfo?: boolean; convert?: boolean; original?: "keep" | "delete"; drawPages?: boolean; pageSize?: number; missing: boolean; barcode?: boolean };
 
 export type RuleType = Rule["type"];
 
@@ -329,6 +331,8 @@ export interface Episode {
 }
 
 export interface Show {
+  /** Empty for TMDB; `anilist`. */
+  source?: string;
   id: number;
   name: string;
   originalName: string;
@@ -372,6 +376,8 @@ export interface EpisodeState {
 }
 
 export interface EpisodeMatch {
+  /** Empty for TMDB; `anilist`. */
+  source?: string;
   id: number;
   show: string;
   originalShow: string;
@@ -472,7 +478,7 @@ export interface ComicMatch {
 }
 
 /** Where comics are looked up. */
-export type ComicSource = "gcd" | "comicvine" | "mangadex";
+export type ComicSource = "gcd" | "comicvine" | "metron" | "mangadex" | "anilist" | "mangaupdates";
 
 /** A series in a catalogue (a "volume" on Comic Vine). */
 export interface ComicVolume {
@@ -502,7 +508,7 @@ export interface ComicState {
   volumeKey: string;
   /** What the file says about itself. */
   own: ComicMatch;
-  /** The issue chosen; "" for the series alone (MangaDex); null for none. */
+  /** The issue chosen; "" for the series alone (the manga catalogues); null for none. */
   choice: string | null;
   status: MovieStatus;
 }

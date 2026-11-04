@@ -559,7 +559,7 @@ pub struct TvItem {
 
 impl TvItem {
     /// The name to read numbers from: no extension, no subtitle language.
-    fn stem(&self) -> &str {
+    pub(crate) fn stem(&self) -> &str {
         if self.is_dir {
             return &self.name;
         }
@@ -567,7 +567,7 @@ impl TvItem {
         &stem[..stem.len() - tmdb::subtitle_suffix(stem, ext).len()]
     }
 
-    fn folder(&self) -> PathBuf {
+    pub(crate) fn folder(&self) -> PathBuf {
         self.path
             .parent()
             .map(Path::to_path_buf)
@@ -579,9 +579,9 @@ impl TvItem {
 #[serde(rename_all = "camelCase")]
 pub struct ShowSearch {
     /// What was searched for (guessed from the files when nothing was typed).
-    query: String,
-    candidates: Vec<Candidate>,
-    auto: bool,
+    pub(crate) query: String,
+    pub(crate) candidates: Vec<Candidate>,
+    pub(crate) auto: bool,
 }
 
 /// Searches for the show typed, or for the one the files are named after.
@@ -650,7 +650,7 @@ pub struct TvFile {
 
 #[derive(Serialize)]
 pub struct TvLookup {
-    show: Show,
+    pub(crate) show: Show,
     files: Vec<TvFile>,
 }
 
@@ -663,6 +663,12 @@ pub async fn lookup_episodes(
     typed: &str,
 ) -> Result<TvLookup, String> {
     let show = client.show(id).await?;
+    Ok(files_of(show, &items, typed))
+}
+
+/// Each file's episode of a show; files named after another show are left
+/// out.
+pub(crate) fn files_of(show: Show, items: &[TvItem], typed: &str) -> TvLookup {
     let files = items
         .iter()
         .filter_map(|i| {
@@ -675,7 +681,7 @@ pub async fn lookup_episodes(
             })
         })
         .collect();
-    Ok(TvLookup { show, files })
+    TvLookup { show, files }
 }
 
 #[derive(Serialize)]
@@ -912,6 +918,7 @@ pub async fn tv_sidecars(
         let dir = item.path.parent().unwrap_or(Path::new(""));
         let in_season = tv::folder_season(&name(dir)) == Some(item.season);
         let m = EpisodeMatch {
+            source: String::new(),
             id: show.id,
             show: show.name.clone(),
             original_show: show.original_name.clone(),

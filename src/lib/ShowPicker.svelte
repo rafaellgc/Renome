@@ -6,10 +6,13 @@
   import type { Candidate } from "./types";
 
   let {
+    source = "tmdb",
     query: initial,
     candidates: found,
     onpick,
   }: {
+    /** Where the shows come from. */
+    source?: "tmdb" | "anilist";
     /** What was searched for. */
     query: string;
     candidates: Candidate[];
@@ -30,7 +33,7 @@
     searching = true;
     searchError = "";
     try {
-      candidates = (await api.tvSearch(settings.tmdbKey, tmdbLang(), query.trim(), [])).candidates;
+      candidates = (source === "anilist" ? await api.animeSearch(query.trim(), []) : await api.tvSearch(settings.tmdbKey, tmdbLang(), query.trim(), [])).candidates;
     } catch (err) {
       searchError = tError(err);
     } finally {
@@ -71,7 +74,7 @@
             {#if poster(c.posterPath)}
               <img src={poster(c.posterPath)} alt="" loading="lazy" />
             {:else}
-              <div class="noposter">TMDB</div>
+              <div class="noposter">{source === "anilist" ? "AniList" : "TMDB"}</div>
             {/if}
             <span class="info">
               <b>{c.title}{c.year ? ` (${c.year})` : ""}</b>

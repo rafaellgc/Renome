@@ -98,10 +98,10 @@ before it is read. The preview sends that name to the app
 | Character at position | position N; optionally only if the current character is X (case-insensitive unless asked); replace with Y or delete |
 | Extension | set a new one; lowercase/uppercase; remove; from the content: the extension the file's first bytes call for (pictures, camera RAW, audio, video, PDF, books, archives, Office/OpenDocument, fonts; zips told apart by what they hold: EPUB, Office, pictures only = comic), kept when it already fits (`.nef` is TIFF inside, `.m4b` is MP4), comic extensions turned into the comic one of the real archive (`.cbz` that is RAR → `.cbr`), UPPERCASE kept, split parts (`.r00`, `.001`) never touched; text (UTF-8, UTF-16 with its mark, Windows-1252 without controls) replaces only the extension of a format that is not text (`.pdf` → `.txt`, or `.html`, `.xml`, `.svg`, `.json`, `.srt`, `.vtt`, `.ass`, `.m3u8` when the start tells), never a text one or none; after a dot that starts no extension (`v1.0_x86[0]`) the new one is added; a fitting extension already in the name before the wrong one (one of the content's; for text, a free text format's — `txt`, `nfo`, `csv`, `log`… — or a structured one's only when the content was told as it: `json` valid JSON, `xml`/`opf`/`ncx` XML, `html`, `srt`/`vtt`/`ass`, `m3u`) is kept and the wrong one only taken off (`movie.nfo.pdf` → `movie.nfo`, `photo.png.jpg` → `photo.png`) |
 | Movie (TMDB) | template with `{title}`, `{original}`, `{year}`, `{id}`, `{resolution}`, `{video codec}` (default `{title} ({year}) [tmdbid-{id}]`); what `:` becomes (default ` - `); a folder for each movie; save `.nfo` and poster (optionally fanart and logo) next to renamed videos; show the collection's missing movies. See 2.1 |
-| TV show (TMDB) | the show (name, TMDB id or link; empty: from the files); template with `{show}`, `{original}`, `{year}`, `{season}`, `{episode}`, `{title}`, `{id}`, `{resolution}`, `{video codec}` (as for movies, see 2.1; not in the show folder) (default `{show} ({year}) - S{season}E{episode} - {title}`); what `:` becomes; show and season folders (show folder template, default `{show} ({year}) [tmdbid-{id}]`); save `.nfo` files and images (optionally fanart and logo); show the missing episodes. See 2.2 |
+| TV show (TMDB, AniList) | the source (TMDB, or AniList for anime); the show (name, TMDB or AniList id or link; empty: from the files); template with `{show}`, `{original}`, `{year}`, `{season}`, `{episode}`, `{title}`, `{id}`, `{resolution}`, `{video codec}` (as for movies, see 2.1; not in the show folder) (default `{show} ({year}) - S{season}E{episode} - {title}`); what `:` becomes; show and season folders (show folder template, default `{show} ({year}) [tmdbid-{id}]`); save `.nfo` files and images (optionally fanart and logo); show the missing episodes. See 2.2 |
 | Music (tags) | template with `{track}`, `{title}`, `{artist}`, `{album artist}`, `{album}`, `{year}`, `{disc}`, `{genre}`, `{composer}`, `{total tracks}`, `{total discs}`, `{original year}`, `{label}`, `{catalog}`, `{artist sort}`, `{album artist sort}`, `{initial}`, `{format}`, `{bitrate}`, `{sample rate}`, `{bits}` (default `{track} - {title}`); what `:` becomes; disc number in the track on multi-disc albums; fill in from the file name; artist and album folders (default `{album artist}/{album} ({year})`); show the missing tracks. See 2.3 |
 | Book (Open Library) | template with `{author}`, `{authors}`, `{author sort}`, `{initial}`, `{title}`, `{original}`, `{year}`, `{edition year}`, `{publisher}`, `{isbn}`, `{series}`, `{volume}`, `{id}` (default `{author} - {title} ({year})`); what `:` becomes; author and book folders (default `{author}/{title}`); save the cover and `metadata.opf`; write the details inside EPUBs; show the series' missing volumes. See 2.4 |
-| Comic (ComicInfo.xml, GCD, Comic Vine, MangaDex) | template with `{series}`, `{series year}`, `{number}`, `{volume}`, `{chapter}`, `{title}`, `{year}`, `{count}`, `{publisher}`, `{writer}`, `{artist}`, `{id}` (default `{series} v{volume} #{number} c{chapter} - {title} ({year})`); what `:` becomes; the series (empty: from the files); the catalogue; series folders (default `{series} ({series year})`); series from the folder; write `ComicInfo.xml` into CBZs; convert CBR, CB7, CBT and PDF to CBZ (the original kept beside or deleted); show the missing issues. See 2.5 |
+| Comic (ComicInfo.xml, GCD, Metron, Comic Vine, MangaDex, AniList, MangaUpdates) | template with `{series}`, `{series year}`, `{number}`, `{volume}`, `{chapter}`, `{title}`, `{year}`, `{count}`, `{publisher}`, `{writer}`, `{artist}`, `{id}` (default `{series} v{volume} #{number} c{chapter} - {title} ({year})`); what `:` becomes; the series (empty: from the files); the catalogue; series folders (default `{series} ({series year})`); series from the folder; write `ComicInfo.xml` into CBZs; convert CBR, CB7, CBT and PDF to CBZ (the original kept beside or deleted); show the missing issues. See 2.5 |
 
 Positions count **visible characters** (Unicode graphemes), starting at 1.
 
@@ -481,6 +481,30 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   as `Show (Year) - missing episodes.csv` (one show). No extra
   request is made.
 - Only the show's name (or id) is sent to TMDB.
+
+- Source (`source`, `tmdb` by default; old rules get it): `anilist`
+  looks anime up on AniList with no key (GraphQL; `type: ANIME`,
+  formats TV, TV_SHORT, ONA and OVA in the search; entries with a
+  PREQUEL relation to a season left out, unless they are all there is).
+  The typed text may be an AniList id or `anilist.co/anime/<id>` link
+  (then the show is picked by itself). The show is built from the
+  entry picked and the SEQUEL chain of seasons (TV, TV_SHORT, ONA; 12 at
+  most), one AniList request each, 2 s apart: season n is the nth
+  entry; its episodes 1 to `episodes` (while airing, the next airing
+  episode minus one); titles from `streamingEpisodes`
+  (`Episode N - Title`, by N), else none; air dates from
+  `airingSchedule` (50 per entry), the first episode's from the start
+  date. Name: the typed or guessed name (without a trailing
+  `(year)`) when it is one of the first entry's titles or synonyms,
+  else English, else romaji; original name native (else romaji);
+  aliases every title of every season; extra `genre`, `genres`,
+  `country`. The show carries `source: "anilist"`, as do its matches: a
+  template's `tmdbid-{` / `tmdbid={` becomes `anilistid-{`, a folder is
+  the show's by `anilistid-<id>`, and a `[tmdbid-…]` in a file's name
+  does not exclude it. The UI keeps AniList shows under negative keys
+  (TMDB's ids may be the same numbers) and the picked shows under
+  `source:query`; posters are AniList's whole URLs. No `.nfo` files or
+  images (the option is hidden and ignored). Answers kept 7 days at most.
 
 ### 2.3 Music (tags)
 
@@ -918,14 +942,45 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   there with Test; the first search without one in a session offers the
   options or going on without); a refused account offers the options;
   without one, anonymous access of about 30 requests an hour; requests
-  2.5 s apart), MangaDex (no account;
-  series only, titled in the reader's language when it has one, else in
-  English; fan works left out) and Comic Vine (the user's key; about 200
+  2.5 s apart), Metron (the user's token, `Authorization: Bearer`;
+  about 20 requests a minute and a few thousand a day; requests 3 s
+  apart; `/api/series/?name=` with `year_began`, a series' page and its
+  `issue_list/` pages, `/api/issue/?upc=` or `?isbn=` for barcodes; the
+  year Metron shows after a name, `Name (2016)`, is dropped when it is the
+  first year), Comic Vine (the user's key; about 200
   requests an hour; requests 1.1 s apart; a `ComicInfo.xml` link gives the
-  series directly). Answers are kept for the session, and on disk as the
-  options say (see 7).
+  series directly), and three catalogues of manga series (series only,
+  the file's volume and chapter stay): MangaDex (no account; titled in the
+  reader's language when it has one, else in English; fan works left
+  out), AniList (no account; GraphQL, `type: MANGA`, novels left out, the
+  year as `startDate_greater`/`startDate_lesser`; name, start year,
+  volumes, country, format, cover, writer from the staff roles Story,
+  Story & Art or Original Creator; requests 2 s apart, as its terms allow
+  90 a minute, 30 while degraded) and MangaUpdates (no account;
+  `POST /v1/series/search`, doujinshi, novels and artbooks left out;
+  the series picked is asked again, `/v1/series/<id>`, for its authors
+  (type Author), original publisher and the volumes in its status,
+  `15 Volumes (Hiatus)`; requests 1 s apart; credited, as its terms ask).
+  On AniList and MangaUpdates the series takes the file's name when it is
+  one of its titles (synonyms, associated names), else the English title
+  (AniList) or the main one. Answers are kept for the session, and on disk
+  as the options say (see 7).
+- On Metron, before the series: each file's barcode (`gtin` from its
+  `ComicInfo.xml` GTIN or the GTIN/ISBN/UPC of its `MetronInfo.xml`,
+  digits only), and, with "Read the barcode printed on the pages" (off;
+  only shown for Metron), the barcode read in the pictures of the first
+  page and the last two (natural order of names; a PDF gives none) with
+  `rxing` (UPC-A, EAN-13, UPC-E; with the 2- or 5-digit add-on; pictures
+  brought down to 2000 px on the long side and read in gray, the last page
+  first; codes with a wrong check digit and EAN-8 left out), a few files
+  at a time (up to 6 threads). A read code goes into the match's `gtin`
+  (written into `ComicInfo.xml` with the rest). A UPC read as an EAN-13
+  loses its leading 0; 10 digits or 13 starting 978/979 are an ISBN, 12
+  to 17 a UPC. A code with exactly one issue gives its series (and the
+  series' issues) and that issue, `auto`; the files found so are left out
+  of the search by name.
 - Files are grouped by the series typed, else by their own; loose
-  chapters are not looked up (but on MangaDex). A search that finds
+  chapters are not looked up (but on the manga catalogues). A search that finds
   nothing for `Series: Story` tries `Series`. Found series are ranked by
   name (equal, then starting alike, then similarity), the reader's
   language first; one with the name and the files' year (or the only one
@@ -935,7 +990,7 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   lists them, those that can hold the numbers first. The picker searches
   again with another name, narrowed by the year the series began and
   its publisher (part of the name, case and accents ignored; not on
-  MangaDex; one of the names typed, split at `;`, `/` or `,`, holds the
+  the manga catalogues; on Metron only when its list tells publishers; one of the names typed, split at `;`, `/` or `,`, holds the
   catalogue's whole words or is part of it: `Titan Comics` finds
   `Titan`); a progress bar shows while it searches. The GCD asks the
   name as typed and without its punctuation (`:`, `,`, `;`, `.`, `!`,
@@ -974,8 +1029,8 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   of more than one kind (episodes, issues, tracks, movies, volumes), one
   count ("N missing") and a CSV with what they share: group (show,
   series, album, collection), code, title, date.
-  MangaDex has no list of a manga's volumes (only uploaded chapters,
-  often taken down for licensed manga): for its series the rows are the
+  The manga catalogues have no list of a manga's volumes (MangaDex only
+  uploaded chapters, often taken down for licensed manga): for their series the rows are the
   numbers missing between the files, from 1 to the highest (by volume
   when every file has one, else by issue number, else by chapter;
   `v03`, `#3`, `c003`), without title or date.
@@ -986,11 +1041,13 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
 - "Write the details into the file (ComicInfo.xml)" (off by default):
   after renaming, each CBZ (a zip by content; other comic formats and
   broken zips are refused, `comicUnsupported` / `archiveBroken`) matched
-  to a catalogue issue (or series, on MangaDex) gets a `ComicInfo.xml`:
+  to a catalogue issue (or series, on a manga catalogue) gets a `ComicInfo.xml`:
   Title, Series, Number (else the chapter), Count, Volume, Year, Month,
   Day, Writer, Penciller, Publisher, Web (the issue's page: GCD
   `comics.org/issue/<id>/` or `/series/<id>/`, Comic Vine `4000-<id>` /
-  `4050-<id>`, MangaDex `title/<id>`), Manga `Yes` (MangaDex) and the
+  `4050-<id>`, MangaDex `title/<id>`, AniList `anilist.co/manga/<id>`,
+  MangaUpdates `series/<id in base 36>`; none for Metron, whose pages are
+  named, not numbered), Manga `Yes` (the manga catalogues) and the
   match's extra fields (story arc, imprint, format, genre, inker,
   colorist, letterer, cover artist, editor, translator, age rating,
   language, alternate series/number, GTIN); empty values are not
@@ -1378,7 +1435,7 @@ A "?" button (or F1) opens a window with three tabs:
 
 Saved in the user's config folder (e.g. `~/.config/renome/settings.json`).
 
-The secrets (TMDB, Comic Vine and Discogs keys, GCD email and password)
+The secrets (TMDB, Comic Vine, Discogs and Metron keys, GCD email and password)
 are not in that file: they go, as one JSON entry (service
 `io.github.rafaellgc.Renome`, account `credentials`), to the system's
 password store (Secret Service on Linux, Credential Manager on Windows,
@@ -1412,14 +1469,17 @@ may be asked about the Keychain again with each version.
 - Online searches: keep the answers for 1 day, 7 days (default), 30
   days, 6 months, or not at all (`cacheDays`), with the space they take
   and Clear. The answers (raw response bodies of TMDB, MusicBrainz,
-  AcoustID, Discogs, Open Library, the GCD, Comic Vine and MangaDex; not
+  AcoustID, Discogs, Open Library, the GCD, Comic Vine, Metron, MangaDex,
+  AniList and MangaUpdates; not
   images, not failures, never the key and account checks) are kept one
   file each in the user's cache folder (`~/.cache/renome/answers/<service>/`),
   named by a hash of the question (path, query and language, without keys
   or passwords), written whole (`.part`, then renamed), and their age is
-  the file's date. TMDB's are kept at most 6 months (its terms), Discogs'
-  at most 6 hours, whatever the choice. Expired ones are deleted when
+  the file's date. TMDB's are kept at most 6 months (its terms), AniList's
+  at most 7 days (its terms forbid using it as a store of its data),
+  Discogs' at most 6 hours, whatever the choice. Expired ones are deleted when
   read and at start, in the background.
-- Services: TMDB key and title language, Comic Vine key, GCD account
-  (email and password), Discogs token; each with a Test button. A line
+- Services: TMDB key and title language, Comic Vine key, Metron token
+  (checked against `/api/series_type/`), GCD account (email and
+  password), Discogs token; each with a Test button. A line
   says whether they are in the system's password store or in the file.

@@ -110,7 +110,7 @@ export function newRule(type: RuleType): Rule {
     case "series":
       return {
         type, template: SERIES_TEMPLATE[settings.lang], colon: " - ", show: "",
-        folders: false, folderTemplate: SHOW_FOLDER[settings.lang], sidecar: false, fanart: false, missing: true,
+        folders: false, folderTemplate: SHOW_FOLDER[settings.lang], sidecar: false, fanart: false, missing: true, source: "tmdb",
       };
     case "music": {
       const [template, folderTemplate] = MUSIC_TEMPLATE[settings.lang];
@@ -122,7 +122,7 @@ export function newRule(type: RuleType): Rule {
     }
     case "comic": {
       const [template, folderTemplate] = COMIC_TEMPLATE[settings.lang];
-      return { type, template, colon: " - ", series: "", source: "gcd", folders: false, folderTemplate, byFolder: false, writeInfo: false, convert: false, original: "keep", drawPages: true, pageSize: 2400, missing: true };
+      return { type, template, colon: " - ", series: "", source: "gcd", folders: false, folderTemplate, byFolder: false, writeInfo: false, convert: false, original: "keep", drawPages: true, pageSize: 2400, missing: true, barcode: false };
     }
   }
 }
@@ -173,4 +173,10 @@ export function newStep(rule: Rule, enabled = true): Step {
 export function byFit<T extends { count: number }>(found: T[], highest: number): T[] {
   const fits = (v: T) => !v.count || v.count >= Math.floor(highest);
   return [...found.filter(fits), ...found.filter((v) => !fits(v))];
+}
+
+/** Catalogues of manga series, not of a publisher's issues: the file's
+ *  volume and chapter stay. */
+export function seriesOnly(source: string): boolean {
+  return source === "mangadex" || source === "anilist" || source === "mangaupdates";
 }

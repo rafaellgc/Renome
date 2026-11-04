@@ -45,6 +45,23 @@
     }
   }
 
+  let showMtKey = $state(false);
+  let mtStatus = $state<{ ok: boolean; text: string } | null>(null);
+  let mtTesting = $state(false);
+
+  async function testMtKey() {
+    mtTesting = true;
+    mtStatus = null;
+    try {
+      await api.metronCheck(settings.metronToken.trim());
+      mtStatus = { ok: true, text: t("tmdbKeyOk") };
+    } catch (e) {
+      mtStatus = { ok: false, text: tError(e) };
+    } finally {
+      mtTesting = false;
+    }
+  }
+
   let showCvKey = $state(false);
   let cvStatus = $state<{ ok: boolean; text: string } | null>(null);
   let cvTesting = $state(false);
@@ -221,6 +238,32 @@
           {#if cvStatus}<b class:good={cvStatus.ok} class:bad={!cvStatus.ok}>{cvStatus.text}</b> · {/if}
           {t("cvKeyHint")}
           <button class="link" onclick={() => openUrl("https://comicvine.gamespot.com/api/")}>{t("tmdbGetKey")}</button>
+        </small>
+      </div>
+    </section>
+
+    <section>
+      <h3>{t("sectionMetron")}</h3>
+      <div class="grid">
+        <label for="opt-mt-key">{t("mtToken")}</label>
+        <div class="key">
+          <input
+            id="opt-mt-key"
+            type={showMtKey ? "text" : "password"}
+            bind:value={settings.metronToken}
+            disabled={!secrets.ready}
+            oninput={() => (mtStatus = null)}
+            spellcheck="false"
+            autocomplete="off"
+          />
+          <button onclick={() => (showMtKey = !showMtKey)}>{t(showMtKey ? "hide" : "show")}</button>
+          <button disabled={!settings.metronToken.trim() || mtTesting} onclick={testMtKey}>{t("tmdbTest")}</button>
+        </div>
+        <span></span>
+        <small>
+          {#if mtStatus}<b class:good={mtStatus.ok} class:bad={!mtStatus.ok}>{mtStatus.text}</b> · {/if}
+          {t("mtKeyHint")}
+          <button class="link" onclick={() => openUrl("https://metron.cloud")}>{t("mtGetKey")}</button>
         </small>
       </div>
     </section>

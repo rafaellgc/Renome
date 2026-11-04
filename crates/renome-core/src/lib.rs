@@ -25,6 +25,7 @@ pub mod acoustid;
 pub mod alike;
 pub mod answers;
 pub mod apply;
+pub mod barcode;
 pub mod books;
 pub mod comics;
 pub mod convert;

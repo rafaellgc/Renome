@@ -64,9 +64,11 @@ export function missingEpisodes(
   const seasons = new Map<string, { show: Show; season: number; files: { path: string; episodes: number[] }[] }>();
   for (const i of items) {
     const m = matches[i.path];
-    const show = m && shows[m.id];
+    // AniList shows are kept under negative numbers (see searchSeries).
+    const key = m && (m.source === "anilist" ? -m.id : m.id);
+    const show = m && shows[key];
     if (!show || !m.episodes.length || !isVideo(i.original)) continue;
-    const k = `${m.id}:${m.season}`;
+    const k = `${key}:${m.season}`;
     let s = seasons.get(k);
     if (!s) seasons.set(k, (s = { show, season: m.season, files: [] }));
     s.files.push({ path: i.path, episodes: m.episodes });
@@ -79,7 +81,7 @@ export function missingEpisodes(
       if (e.season !== season || have.has(e.number) || !e.airDate || e.airDate > day) continue;
       out.push({
         ghost: true,
-        key: `ghost:${show.id}:${season}:${e.number}`,
+        key: `ghost:${show.source ?? ""}${show.id}:${season}:${e.number}`,
         kind: "episode",
         group: named(show.name, show.year),
         season,

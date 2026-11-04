@@ -418,6 +418,9 @@ pub struct Episode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Show {
+    /// Where it comes from: empty for TMDB, `anilist`.
+    #[serde(default)]
+    pub source: String,
     pub id: u64,
     pub name: String,
     pub original_name: String,
@@ -493,6 +496,7 @@ pub fn build_show(d: &TvDetails, by_lang: &[Vec<ApiEpisode>], names: &[String]) 
     episodes.sort_by_key(|e| (e.season == 0, e.season, e.number));
     episodes.dedup_by_key(|e| (e.season, e.number));
     Show {
+        source: String::new(),
         id: d.id,
         name: d.name.clone(),
         original_name: d.original_name.clone(),
@@ -757,7 +761,8 @@ fn title_sim(show: &Show, title: &str, keys: &[Key]) -> f64 {
 pub fn find_in(show: &Show, g: &EpisodeGuess, dir: &Path, typed: &str) -> Option<EpisodeLookup> {
     let names = show_names(show, typed);
     match g.id {
-        Some(id) if id != show.id => return None,
+        // A TMDB id in the name says nothing of an AniList show.
+        Some(id) if show.source.is_empty() && id != show.id => return None,
         None if !g.show.is_empty() && !names.iter().any(|n| same_show(&g.show, n)) => {
             return None;
         }
@@ -772,7 +777,12 @@ pub fn find_in(show: &Show, g: &EpisodeGuess, dir: &Path, typed: &str) -> Option
             Some(dir)
         };
         let title = without_show(&g.title, show);
-        if !folder.is_some_and(|f| folder_names(f, show.id, &names))
+        let tag = if show.source == "anilist" {
+            "anilistid"
+        } else {
+            "tmdbid"
+        };
+        if !folder.is_some_and(|f| folder_names(f, tag, show.id, &names))
             && !title.is_empty()
             && title_sim(show, &title, &found.choice) < 0.5
         {
@@ -879,6 +889,10 @@ pub fn group_shows(items: &[(String, PathBuf)]) -> (Vec<Vec<usize>>, Vec<usize>)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EpisodeMatch {
+    /// Where the show comes from: empty for TMDB, `anilist` (its id then
+    /// goes into `[anilistid-…]`, not `[tmdbid-…]`).
+    #[serde(default)]
+    pub source: String,
     pub id: u64,
     pub show: String,
     #[serde(default)]
@@ -907,6 +921,8 @@ pub fn episode_name(
     video: Option<&crate::video::VideoInfo>,
 ) -> String {
     let video = crate::video::Fields::of(video);
+    // An AniList show's id is no TMDB id: tagged as what it is.
+    let template = &id_tag_of(template, m);
     let show = safe_title(&m.show, colon);
     let original = safe_title(&m.original_show, colon);
     let year = m.year.map(|y| y.to_string()).unwrap_or_default();
@@ -945,6 +961,16 @@ pub fn episode_name(
         .to_string()
 }
 
+/// The template with `tmdbid-` before the id made `anilistid-` for a show
+/// from AniList.
+fn id_tag_of(template: &str, m: &EpisodeMatch) -> String {
+    if m.source != "anilist" {
+        return template.to_string();
+    }
+    let re = Regex::new(r"(?i)tmdbid([-=]\{)").unwrap();
+    re.replace_all(template, "anilistid$1").into_owned()
+}
+
 /// The season's folder, as Jellyfin and Kodi expect it: `Season 01`.
 pub fn season_folder(season: u16) -> String {
     format!("Season {season:02}")
@@ -953,14 +979,19 @@ pub fn season_folder(season: u16) -> String {
 /// Whether a folder is named after the show: its TMDB id, or (almost) its
 /// name or original name, with or without the year.
 pub fn names_show(folder: &Path, m: &EpisodeMatch) -> bool {
-    folder_names(folder, m.id, &[&m.show, &m.original_show])
+    let tag = if m.source == "anilist" {
+        "anilistid"
+    } else {
+        "tmdbid"
+    };
+    folder_names(folder, tag, m.id, &[&m.show, &m.original_show])
 }
 
 /// Whether a folder is named after a show: its TMDB id, or (almost) one of
 /// its names, with or without the year.
-fn folder_names(folder: &Path, id: u64, names: &[&str]) -> bool {
+fn folder_names(folder: &Path, tag: &str, id: u64, names: &[&str]) -> bool {
     let name = folder.file_name().unwrap_or_default().to_string_lossy();
-    if name.contains(&format!("tmdbid-{id}")) {
+    if name.contains(&format!("{tag}-{id}")) {
         return true;
     }
     let title = tmdb::guess(&name).title;
@@ -1485,6 +1516,7 @@ mod tests {
 
     fn show() -> Show {
         Show {
+            source: String::new(),
             extra: Default::default(),
             id: 1,
             name: "Breaking Bad".into(),
@@ -1654,6 +1686,7 @@ mod tests {
     #[test]
     fn names() {
         let m = EpisodeMatch {
+            source: String::new(),
             extra: Default::default(),
             id: 1396,
             show: "Breaking Bad".into(),
@@ -1673,6 +1706,7 @@ mod tests {
             "Breaking Bad (2008) - S01E01-E02 - Piloto & O Gato - Parte 2"
         );
         let m = EpisodeMatch {
+            source: String::new(),
             titles: vec![],
             year: None,
             episodes: vec![3],
@@ -1706,6 +1740,7 @@ mod tests {
     #[test]
     fn folders() {
         let m = EpisodeMatch {
+            source: String::new(),
             extra: Default::default(),
             id: 1396,
             show: "Breaking Bad: A Química do Mal".into(),
@@ -1789,5 +1824,34 @@ mod tests {
         let items = vec![("01 - Pilot".to_string(), "/tv/Lost (2004)/Season 1".into())];
         let g = guess_show(&items);
         assert_eq!((g.title.as_str(), g.year), ("Lost", Some(2004)));
+    }
+
+    #[test]
+    fn anilist_ids_are_tagged_as_such() {
+        let m = EpisodeMatch {
+            source: "anilist".into(),
+            id: 42,
+            show: "Estrela".into(),
+            original_show: String::new(),
+            year: Some(2023),
+            season: 1,
+            episodes: vec![2],
+            titles: vec![],
+            extra: Default::default(),
+        };
+        assert_eq!(
+            episode_name("{show} ({year}) [tmdbid-{id}]", &m, " - ", None),
+            "Estrela (2023) [anilistid-42]"
+        );
+        assert!(names_show(Path::new("/x/Outro [anilistid-42]"), &m));
+        assert!(!names_show(Path::new("/x/Outro [tmdbid-42]"), &m));
+        let tmdb = EpisodeMatch {
+            source: String::new(),
+            ..m
+        };
+        assert_eq!(
+            episode_name("{show} [tmdbid-{id}]", &tmdb, " - ", None),
+            "Estrela [tmdbid-42]"
+        );
     }
 }
