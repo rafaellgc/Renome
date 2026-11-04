@@ -40,6 +40,9 @@ fn main() {
     ] {
         c.define(off, "OFF");
     }
+    // Patterns are not used; on Windows the search for a library of them
+    // ends in an error.
+    c.define("POSIX_REGEX_LIB", "NONE");
     // Debug C runtimes do not mix with Rust's on Windows.
     c.profile("Release").build_target("archive_static");
     let lib = c.build().join("build").join("libarchive");
