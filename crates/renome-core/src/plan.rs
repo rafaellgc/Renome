@@ -67,6 +67,12 @@ pub struct View {
     /// Group of each such song (filled in by the app; see [`crate::alike`]).
     #[serde(skip)]
     pub alike: HashMap<PathBuf, usize>,
+    /// Shows only pictures that look like another, grouped.
+    pub similar_only: bool,
+    /// Group of each such picture (filled in by the app; see
+    /// [`crate::similar`]).
+    #[serde(skip)]
+    pub similar: HashMap<PathBuf, usize>,
     /// The movie chosen for each file (TMDB), for the movie rule.
     pub movies: HashMap<PathBuf, MovieMatch>,
     /// The episode chosen for each file (TMDB), for the series rule.
@@ -995,6 +1001,7 @@ pub fn preview(
         .filter(|f| filter.matches(&f.file_name()))
         .filter(|f| !view.identical_only || view.identical.contains_key(&f.path))
         .filter(|f| !view.alike_only || view.alike.contains_key(&f.path))
+        .filter(|f| !view.similar_only || view.similar.contains_key(&f.path))
         .enumerate()
         .map(|(index, file)| {
             let n = per_folder.entry(&file.dir).or_default();
@@ -1381,6 +1388,9 @@ pub fn preview(
     }
     if view.alike_only {
         items.sort_by_key(|i| view.alike.get(&i.path).copied());
+    }
+    if view.similar_only {
+        items.sort_by_key(|i| view.similar.get(&i.path).copied());
     }
 
     let changed = items.iter().filter(|i| i.status == Status::Ok).count();

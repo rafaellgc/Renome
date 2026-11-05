@@ -2534,7 +2534,7 @@ pub fn convert_with(
     let mut not_trashed = None;
     let kept = match original {
         Original::Keep => Some(left),
-        Original::Delete => match to_trash(&left) {
+        Original::Delete => match crate::files::to_trash(&left) {
             Ok(()) => None,
             Err(e) => {
                 not_trashed = Some(e);
@@ -2560,15 +2560,6 @@ pub fn convert_with(
         not_trashed,
         drawn_pages,
     })
-}
-
-fn to_trash(path: &Path) -> Result<(), String> {
-    // In a Flatpak the trash found would be the sandbox's own, which the
-    // file manager does not show.
-    if std::env::var_os("FLATPAK_ID").is_some() {
-        return Err("trashFlatpak".into());
-    }
-    trash::delete(path).map_err(|e| format!("trashFailed: {e}"))
 }
 
 /// Undo: a kept original takes the CBZ's place again (the CBZ goes); one

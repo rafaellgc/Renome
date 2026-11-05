@@ -8,6 +8,7 @@
 //! - [`apply`]: renames in two phases, with a history for undo.
 //! - [`identical`]: finds files with identical content.
 //! - [`alike`]: finds songs that are the same music in different files.
+//! - [`similar`]: finds pictures that look alike.
 //! - [`music`]: tags of audio files and the names built from them.
 //! - [`musicbrainz`]: albums from MusicBrainz (ranking, matching tracks).
 //! - [`discogs`]: albums from Discogs, read as MusicBrainz's.
@@ -46,6 +47,7 @@ pub mod plan;
 pub mod playlists;
 pub mod rules;
 pub mod scan;
+pub mod similar;
 pub mod tagwrite;
 pub mod text;
 pub mod tmdb;

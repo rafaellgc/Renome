@@ -40,6 +40,8 @@ struct Session {
     identical: HashMap<PathBuf, usize>,
     /// Group of each song that is the same music as another in the list.
     alike: HashMap<PathBuf, usize>,
+    /// Group of each picture that looks like another in the list.
+    similar: HashMap<PathBuf, usize>,
 }
 
 /// How many list edits can be undone.
@@ -49,6 +51,8 @@ struct AppState {
     session: Mutex<Session>,
     history: History,
     hashes: Mutex<HashCache>,
+    /// Fingerprints of pictures, kept between sessions.
+    pictures: Mutex<renome_core::similar::PictureCache>,
     /// Bumped by each search for identical files; an older search that sees
     /// a newer number stops.
     identical_run: AtomicU64,
@@ -294,6 +298,7 @@ async fn preview(
         let s = state.session.lock().unwrap();
         view.identical = s.identical.clone();
         view.alike = s.alike.clone();
+        view.similar = s.similar.clone();
         view.protected = protected_dirs();
         renome_core::preview(&s.files, &steps, &overrides, &view)
     })
@@ -386,6 +391,159 @@ async fn find_identical(app: AppHandle) -> Result<Option<Copies>, String> {
     .map_err(|e| e.to_string())
 }
 
+/// Searches the list for pictures that look alike, in the background,
+/// after [`find_identical`] (a newer search for copies stops it). Returns
+/// the groups, or `None` if it was stopped. Emits `similar-progress`
+/// while reading pictures not seen before.
+#[tauri::command]
+async fn find_similar(app: AppHandle) -> Result<Option<Vec<Vec<PathBuf>>>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let run = state.identical_run.load(Ordering::SeqCst);
+        let stale = || state.identical_run.load(Ordering::SeqCst) != run;
+        let (files, identical) = {
+            let s = state.session.lock().unwrap();
+            (s.files.clone(), s.identical.clone())
+        };
+        let mut cache = state.pictures.lock().unwrap();
+        let mut last = Instant::now();
+        let groups = renome_core::similar::similar_pictures(
+            &files,
+            &identical,
+            &mut cache,
+            &mut |done, total| {
+                if last.elapsed() > Duration::from_millis(150) || done == total {
+                    last = Instant::now();
+                    let _ = app.emit("similar-progress", IdenticalProgress { done, total });
+                }
+            },
+            &stale,
+        );
+        cache.save();
+        drop(cache);
+        let groups = groups.filter(|_| !stale())?;
+        state.session.lock().unwrap().similar = groups
+            .iter()
+            .enumerate()
+            .flat_map(|(i, g)| g.iter().map(move |p| (p.clone(), i)))
+            .collect();
+        Some(groups)
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// A picture (or any file) as the comparison window shows it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PictureCard {
+    path: PathBuf,
+    size: u64,
+    /// Unix seconds.
+    modified: Option<i64>,
+    /// When the photo was taken (EXIF), `YYYY-MM-DDTHH:MM:SS`.
+    taken: Option<String>,
+    /// Width and height as shown.
+    width: Option<u32>,
+    height: Option<u32>,
+    /// A smaller copy, as a `data:` URL; `None` for what is not a picture
+    /// or cannot be read.
+    image: Option<String>,
+}
+
+fn base64(bytes: &[u8]) -> String {
+    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = chunk.iter().enumerate().fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(ABC[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+/// The files of a group as the comparison window shows them, pictures
+/// with a copy whose longest side is at most `max` pixels.
+#[tauri::command]
+async fn picture_cards(paths: Vec<PathBuf>, max: u32) -> Vec<PictureCard> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let card = |path: &PathBuf| {
+            let meta = std::fs::symlink_metadata(path).ok();
+            let entry = meta.as_ref().and_then(|m| FileEntry::from_path(path, m));
+            let ext = entry.as_ref().map(|e| e.ext.to_lowercase()).unwrap_or_default();
+            let shown = (renome_core::similar::is_picture(&ext) && entry.as_ref().is_some_and(|e| !e.is_dir))
+                .then(|| std::fs::read(path).ok())
+                .flatten()
+                .and_then(|b| renome_core::similar::shown_copy(&b, &ext, max.clamp(64, 4096)));
+            let dims = shown.as_ref().and_then(|(_, d)| *d);
+            PictureCard {
+                path: path.clone(),
+                size: entry.as_ref().map_or(0, |e| e.size),
+                modified: entry.as_ref().and_then(|e| e.modified),
+                taken: entry
+                    .as_ref()
+                    .filter(|_| renome_core::similar::is_picture(&ext))
+                    .and_then(|e| e.taken())
+                    .map(|t| t.format("%Y-%m-%dT%H:%M:%S").to_string()),
+                width: dims.map(|d| d.0),
+                height: dims.map(|d| d.1),
+                image: shown.map(|(jpeg, _)| format!("data:image/jpeg;base64,{}", base64(&jpeg))),
+            }
+        };
+        std::thread::scope(|scope| {
+            let jobs: Vec<_> = paths
+                .chunks(paths.len().div_ceil(4).max(1))
+                .map(|part| scope.spawn(move || part.iter().map(card).collect::<Vec<_>>()))
+                .collect();
+            jobs.into_iter().flat_map(|j| j.join().unwrap_or_default()).collect()
+        })
+    })
+    .await
+    .unwrap_or_default()
+}
+
+#[derive(Serialize)]
+struct Trashed {
+    trashed: Vec<PathBuf>,
+    /// Path and why.
+    failed: Vec<(PathBuf, String)>,
+}
+
+/// Sends files to the system's trash and takes them out of the list (and
+/// of the earlier states Ctrl+Z goes back to).
+#[tauri::command]
+async fn trash_files(app: AppHandle, paths: Vec<PathBuf>) -> Result<Trashed, String> {
+    in_background(app, move |state| {
+        let mut done = Trashed {
+            trashed: Vec::new(),
+            failed: Vec::new(),
+        };
+        for p in paths {
+            match renome_core::files::to_trash(&p) {
+                Ok(()) => done.trashed.push(p),
+                Err(e) => done.failed.push((p, e)),
+            }
+        }
+        let gone: HashSet<&PathBuf> = done.trashed.iter().collect();
+        let mut s = state.session.lock().unwrap();
+        s.files.retain(|f| !gone.contains(&f.path));
+        for (files, _) in s.undo.iter_mut() {
+            files.retain(|f| !gone.contains(&f.path));
+        }
+        s.identical.retain(|p, _| !gone.contains(p));
+        s.alike.retain(|p, _| !gone.contains(p));
+        s.similar.retain(|p, _| !gone.contains(p));
+        drop(s);
+        done
+    })
+    .await
+}
+
 /// Renames as they happened, in order: plain renames are looked up at
 /// once; a renamed folder also moves whatever was under it.
 enum Renamed<'a> {
@@ -452,6 +610,7 @@ async fn apply(
         let mut s = state.session.lock().unwrap();
         view.identical = s.identical.clone();
         view.alike = s.alike.clone();
+        view.similar = s.similar.clone();
         view.protected = protected_dirs();
         // Recompute the preview here to apply exactly what is visible and valid right now.
         let ops = renome_core::preview(&s.files, &steps, &overrides, &view).operations();
@@ -1675,6 +1834,12 @@ pub fn run() {
             session: Mutex::new(session),
             history: History::new(history_dir),
             hashes: Mutex::default(),
+            pictures: Mutex::new(renome_core::similar::PictureCache::in_file(
+                dirs::cache_dir()
+                    .unwrap_or_else(std::env::temp_dir)
+                    .join("renome")
+                    .join("pictures"),
+            )),
             identical_run: AtomicU64::new(0),
             stop_run: AtomicU64::new(0),
             mb: musicbrainz::Client::default(),
@@ -1696,6 +1861,9 @@ pub fn run() {
             add_paths,
             remove_files,
             stop_search,
+            find_similar,
+            picture_cards,
+            trash_files,
             tmdb_collections,
             clear_files,
             move_files,

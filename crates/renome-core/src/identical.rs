@@ -26,9 +26,9 @@ const CHUNK: usize = 1 << 20;
 
 /// What identifies a file's current content on disk.
 #[derive(Clone, Copy, PartialEq)]
-struct Stamp {
-    size: u64,
-    modified: Option<SystemTime>,
+pub(crate) struct Stamp {
+    pub(crate) size: u64,
+    pub(crate) modified: Option<SystemTime>,
 }
 
 #[derive(Clone, Copy)]
@@ -180,7 +180,7 @@ pub fn find_identical(
 
 /// The file's stamp and physical id (`None` where the system has no file
 /// ids). `None` for symlinks and missing files, which are left out.
-fn on_disk(path: &Path) -> Option<(Stamp, Option<(u64, u64)>)> {
+pub(crate) fn on_disk(path: &Path) -> Option<(Stamp, Option<(u64, u64)>)> {
     let meta = std::fs::symlink_metadata(path).ok()?;
     if !meta.is_file() {
         return None;

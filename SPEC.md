@@ -1203,8 +1203,9 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   then the original is renamed beside to the comic's name with its own
   extension (`Name.cbr`, `Name.cb7`, `Name.cbt`) and the zip renamed to
   the comic's name. Delete then sends the original to the system's trash
-  (`trash` crate); in a Flatpak (`FLATPAK_ID`) or when the trash fails,
-  it stays beside (`trashFlatpak`, `trashFailed: …` in the error list).
+  (`trash` crate; in a Flatpak, `FLATPAK_ID`, `gio trash`, which goes
+  through the desktop's trash portal); when the trash fails, it stays
+  beside (`trashFailed: …` in the error list).
   Errors, the comic as it was: `archiveLocked` (a password),
   `archiveBroken: …` (damaged, or a RAR libarchive cannot decode),
   `convertTaken` (the original's name beside exists), `comicUnsupported`
@@ -1307,6 +1308,46 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   number; hover: which files), selecting one highlights the others, and
   the footer shows how many songs are repeated; clicking it shows only
   those, grouped. Nothing is changed.
+- **Similar pictures**: then, pictures that look alike (the same photo
+  resized, recompressed, in another format or lightly edited; shots taken
+  a moment apart) are found by a 64-bit fingerprint of their shapes: the
+  picture shrunk to 32×32 greys (cell averages; JPEGs decoded at 1/8,
+  1/4 or 1/2 scale when that still gives 32 pixels a side), turned by its
+  EXIF orientation, a discrete cosine transform of which the 8×8 lowest
+  frequencies are kept, one bit per frequency but the average for being
+  above their median. Pictures whose fingerprints differ in 8 bits or
+  fewer are joined (transitively). JPEG, PNG, WebP, GIF (first frame),
+  BMP, TIFF; HEIC and camera RAW (DNG, CR2, NEF, NRW, ARW, SRF, SR2, ORF,
+  RW2, PEF) by the JPEG thumbnail in their EXIF data, when there is one.
+  Files over 256 MB and pictures of one flat colour are left out; a group
+  made only of identical copies of one file is left out. Read in parallel
+  (half the processors, at most 6) after the copies and songs, stopped by
+  a newer search; the footer shows the progress while new pictures are
+  read. Fingerprints are kept by path, size and modification time in the
+  cache folder (`pictures`, one line per picture; dropped when unused for
+  90 days), apart from the catalogues' answers and their cache setting.
+  Rows get an outlined tag (picture icon and group number; hover: which
+  files), selecting one highlights the others, and the footer shows how
+  many pictures look alike; clicking it shows only those, grouped.
+  Nothing is changed.
+- **Compare window**: with the similar-pictures or identical-copies filter
+  on, the footer shows "Compare"; double-clicking a row's group tag opens
+  it at that group. One group at a time, cards side by side: a smaller
+  copy (JPEG, longest side 480 px, turned by EXIF orientation; JPEGs
+  decoded at the smallest 1/8–1/2 scale that still gives that size; raw
+  and HEIC by their EXIF thumbnail), name, folder, width × height as
+  shown, size, date taken (EXIF) or else modified. Badges: "largest"
+  (most pixels, then largest file; only when the group differs) and
+  "oldest" (date taken, else modified; only when strictly oldest). A
+  card opens big (1800 px copy); arrows go through the group's cards
+  (big) or the groups; Esc goes back or closes (not while a question is
+  open). Files are ticked for the trash across groups; "Keep only the
+  largest" ticks all but the largest of the group. "Move to the Trash"
+  asks first (warning when every file of a group is ticked), sends them
+  to the system's trash (as converted originals are, Flatpak included),
+  takes them out of the list and of the Ctrl+Z states, and searches for
+  copies again; failures are listed (the file stays). Not recorded in
+  the History.
 
 - "Export list" (footer) saves the list as shown to a CSV file: folder,
   current name, new name, folder it moves into, status, problem; UTF-8

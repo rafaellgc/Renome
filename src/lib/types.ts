@@ -108,6 +108,8 @@ export interface View {
   identicalOnly: boolean;
   /** Only songs that are the same music as another, grouped. */
   alikeOnly: boolean;
+  /** Only pictures that look like another, grouped. */
+  similarOnly: boolean;
   /** The movie chosen for each file, for the movie rule. */
   movies: Record<string, MovieMatch>;
   /** The episode chosen for each file, for the series rule. */

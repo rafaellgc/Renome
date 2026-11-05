@@ -187,6 +187,28 @@ impl FileEntry {
     }
 }
 
+/// Sends a file or folder to the system's trash. In a Flatpak, GLib's
+/// `gio` asks the desktop's trash through its portal (the trash found
+/// from inside would be the sandbox's own, which no file manager shows).
+pub fn to_trash(path: &Path) -> Result<(), String> {
+    if std::env::var_os("FLATPAK_ID").is_some() {
+        let done = std::process::Command::new("gio")
+            .arg("trash")
+            .arg("--")
+            .arg(path)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        return if done {
+            Ok(())
+        } else {
+            Err("trashFailed: gio trash".into())
+        };
+    }
+    trash::delete(path).map_err(|e| format!("trashFailed: {e}"))
+}
+
 fn read_taken(path: &Path) -> Option<NaiveDateTime> {
     use exif::{In, Tag, Value};
 

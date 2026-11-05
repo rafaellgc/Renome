@@ -2,6 +2,20 @@ import { invoke } from "@tauri-apps/api/core";
 import type { AlbumLookup, AlbumQuery, ApplyReport, BookCandidate, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, EpisodeLookup, MbCandidate, SongMatch, HistoryEntry, ListedTrack, Lookup, MovieSet, Preview, ScanOptions, Show, SortKey, Step, View } from "./types";
 
 type Overrides = Record<string, string>;
+
+/** A file as the comparison window shows it. */
+export interface PictureCard {
+  path: string;
+  size: number;
+  /** Unix seconds. */
+  modified: number | null;
+  /** When the photo was taken, `YYYY-MM-DDTHH:MM:SS`. */
+  taken: string | null;
+  width: number | null;
+  height: number | null;
+  /** A smaller copy (`data:` URL), when it is a picture. */
+  image: string | null;
+}
 type TvItem = { path: string; name: string; isDir: boolean };
 
 export const api = {
@@ -20,6 +34,9 @@ export const api = {
   /** Identical files, and songs that are the same music; null when a
    *  newer search replaced this one. */
   findIdentical: () => invoke<{ identical: string[][]; songs: string[][] } | null>("find_identical"),
+  findSimilar: () => invoke<string[][] | null>("find_similar"),
+  pictureCards: (paths: string[], max: number) => invoke<PictureCard[]>("picture_cards", { paths, max }),
+  trashFiles: (paths: string[]) => invoke<{ trashed: string[]; failed: [string, string][] }>("trash_files", { paths }),
   preview: (steps: Step[], overrides: Overrides, view: View) =>
     invoke<Preview>("preview", { steps, overrides, view }),
   apply: (steps: Step[], overrides: Overrides, view: View) =>

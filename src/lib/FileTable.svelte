@@ -17,6 +17,8 @@
     onoverride,
     copies = {},
     alike = {},
+    similar = {},
+    oncompare,
     matches = {},
     onmatch,
     ghosts = [],
@@ -33,6 +35,10 @@
     copies?: Record<string, Copies>;
     /** Songs that are the same music as others in the list. */
     alike?: Record<string, Copies>;
+    /** Pictures that look like others in the list. */
+    similar?: Record<string, Copies>;
+    /** Opens the comparison window at a file's group. */
+    oncompare?: (kind: "similar" | "identical", path: string) => void;
     /** TMDB state of each file (and its tooltip), while a movie or
      *  series rule is on. */
     matches?: Record<string, { status: MovieStatus; tip: string }>;
@@ -222,7 +228,7 @@
   const byPath = $derived(new Map(items.map((i) => [i.path, i])));
   /** Copies of the selected files, highlighted so you can find them. */
   const twins = $derived(
-    new Set([...selected].flatMap((p) => [...(copies[p]?.others ?? []), ...(alike[p]?.others ?? [])]).filter((p) => !selected.has(p))),
+    new Set([...selected].flatMap((p) => [...(copies[p]?.others ?? []), ...(alike[p]?.others ?? []), ...(similar[p]?.others ?? [])]).filter((p) => !selected.has(p))),
   );
   const base = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
@@ -383,7 +389,7 @@
             {:else if item.status === "ok"}<span class="dot good">●</span>{/if}
           </span>
           <span class="c-orig" title={item.path}>
-            {#if copies[item.path]}{@const c = copies[item.path]}{@const same = t("identicalTo", { names: c.others.map(base).join(", ") })}<span class="copy g{c.group % 6}" title={same} role="img" aria-label={same}><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M5 1.5h7A1.5 1.5 0 0 1 13.5 3v8.5H12V3H5zM2.5 4.5A1.5 1.5 0 0 1 4 3h6a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 10 15H4a1.5 1.5 0 0 1-1.5-1.5zM4 4.5v9h6v-9z" /></svg>{c.group + 1}</span>{/if}{#if alike[item.path]}{@const s = alike[item.path]}{@const same = t("sameSongAs", { names: s.others.map(base).join(", ") })}<span class="copy song g{s.group % 6}" title={same} role="img" aria-label={same}>♪{s.group + 1}</span>{/if}{#if outside[item.path]}<span class="outside" title={outside[item.path]}>{t("outsideRow")}</span>{/if}{#if item.drawn}<span class="outside" title={t("drawnRowTip", { n: item.drawn })}>{t("drawnRow", { n: item.drawn })}</span>{/if}{#if item.isDir}<svg class="folder" viewBox="0 0 16 16" aria-label={t("isFolder")}><path fill="currentColor" d="M1.5 3.5A1 1 0 0 1 2.5 2.5h3.6l1.5 1.5h5.9a1 1 0 0 1 1 1v7.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" /></svg>{/if}{#if d}{@render segs(d[0], "del")}{:else}{item.original}{/if}
+            {#if copies[item.path]}{@const c = copies[item.path]}{@const same = t("identicalTo", { names: c.others.map(base).join(", ") })}<!-- svelte-ignore a11y_no_static_element_interactions --><span class="copy g{c.group % 6}" title={`${same}\n${t("compareDbl")}`} role="img" aria-label={same} ondblclick={() => oncompare?.("identical", item.path)}><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M5 1.5h7A1.5 1.5 0 0 1 13.5 3v8.5H12V3H5zM2.5 4.5A1.5 1.5 0 0 1 4 3h6a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 10 15H4a1.5 1.5 0 0 1-1.5-1.5zM4 4.5v9h6v-9z" /></svg>{c.group + 1}</span>{/if}{#if alike[item.path]}{@const s = alike[item.path]}{@const same = t("sameSongAs", { names: s.others.map(base).join(", ") })}<span class="copy song g{s.group % 6}" title={same} role="img" aria-label={same}>♪{s.group + 1}</span>{/if}{#if similar[item.path]}{@const s = similar[item.path]}{@const same = t("looksLike", { names: s.others.map(base).join(", ") })}<!-- svelte-ignore a11y_no_static_element_interactions --><span class="copy song g{s.group % 6}" title={`${same}\n${t("compareDbl")}`} role="img" aria-label={same} ondblclick={() => oncompare?.("similar", item.path)}><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M2.5 2h11A1.5 1.5 0 0 1 15 3.5v9a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 12.5v-9A1.5 1.5 0 0 1 2.5 2zm0 1.5v7.3l3.2-3.2 2.6 2.6 1.9-1.9 3.3 3.3V3.5zM10.8 4.6a1.4 1.4 0 1 1 0 2.8 1.4 1.4 0 0 1 0-2.8z" /></svg>{s.group + 1}</span>{/if}{#if outside[item.path]}<span class="outside" title={outside[item.path]}>{t("outsideRow")}</span>{/if}{#if item.drawn}<span class="outside" title={t("drawnRowTip", { n: item.drawn })}>{t("drawnRow", { n: item.drawn })}</span>{/if}{#if item.isDir}<svg class="folder" viewBox="0 0 16 16" aria-label={t("isFolder")}><path fill="currentColor" d="M1.5 3.5A1 1 0 0 1 2.5 2.5h3.6l1.5 1.5h5.9a1 1 0 0 1 1 1v7.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" /></svg>{/if}{#if d}{@render segs(d[0], "del")}{:else}{item.original}{/if}
           </span>
           <span class="c-new" role="gridcell" tabindex="-1" ondblclick={() => startEdit(item)} title={note(item) || t("editHint")}>
             {#if editing === item.path}

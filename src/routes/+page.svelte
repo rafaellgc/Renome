@@ -13,6 +13,7 @@
   import AlbumReview from "$lib/AlbumReview.svelte";
   import BookReview from "$lib/BookReview.svelte";
   import ComicPicker from "$lib/ComicPicker.svelte";
+  import PictureCompare from "$lib/PictureCompare.svelte";
   import ComicReview from "$lib/ComicReview.svelte";
   import EpisodeReview from "$lib/EpisodeReview.svelte";
   import { missingBooks, missingEpisodes, missingFolder, missingIssues, missingMovies, missingTracks, today, type Ghost } from "$lib/missing";
@@ -61,6 +62,17 @@
   let alike = $state<Record<string, Copies>>({});
   let alikeOnly = $state(false);
   const alikeCount = $derived(Object.keys(alike).length);
+  /** Pictures that look like another in the list. */
+  let similar = $state<Record<string, Copies>>({});
+  let similarOnly = $state(false);
+  const similarCount = $derived(Object.keys(similar).length);
+  /** The groups, in order, for the comparison window. */
+  let copyGroups = $state<string[][]>([]);
+  let similarGroups = $state<string[][]>([]);
+  /** The comparison window, when open. */
+  let compare = $state<{ kind: "similar" | "identical"; start: number } | null>(null);
+  /** Share of the new pictures read while comparing them (null: not). */
+  let similarProgress = $state<number | null>(null);
   /** Search progress (0–1) while reading whole files; null when idle. */
   let identicalProgress = $state<number | null>(null);
   const identicalCount = $derived(Object.keys(copies).length);
@@ -555,7 +567,7 @@
     return out;
   });
 
-  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, alikeOnly, movies: movieMatches, episodes: episodeMatches, songs: songMatches, books: bookMatches, comics: comicMatches, leftoverSuffix: t("leftoverSuffix"), sendTo });
+  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, alikeOnly, similarOnly, movies: movieMatches, episodes: episodeMatches, songs: songMatches, books: bookMatches, comics: comicMatches, leftoverSuffix: t("leftoverSuffix"), sendTo });
   /** Example name for rule cards: the first file in natural name order, so
    *  it does not jump around while the preview re-sorts. */
   const collator = new Intl.Collator(undefined, { numeric: true });
@@ -1079,13 +1091,50 @@
         return map;
       };
       copies = byGroup(found.identical);
+      copyGroups = found.identical;
       alike = byGroup(found.songs);
       if (!found.identical.length) identicalOnly = false;
       if (!found.songs.length) alikeOnly = false;
       identicalProgress = null;
       await refresh();
+      checkSimilar(byGroup);
     } catch (e) {
       identicalProgress = null;
+      notice = `${t("error")}: ${tError(e)}`;
+    }
+  }
+
+  /** Opens the comparison window at the group of `path`. */
+  function openCompare(kind: "similar" | "identical", path: string) {
+    const groups = kind === "similar" ? similarGroups : copyGroups;
+    const start = groups.findIndex((g) => g.includes(path));
+    if (start >= 0) compare = { kind, start };
+  }
+
+  async function closeCompare(trashed: string[]) {
+    compare = null;
+    if (!trashed.length) return;
+    const gone = new Set(trashed);
+    selected = new Set([...selected].filter((p) => !gone.has(p)));
+    notice = t("compareTrashedN", { n: trashed.length });
+    await refresh();
+    checkIdentical();
+  }
+
+  /** Then looks for pictures that look alike; a newer search for copies
+   *  stops it (it then returns null). */
+  async function checkSimilar(byGroup: (groups: string[][]) => Record<string, Copies>) {
+    try {
+      const found = await api.findSimilar();
+      if (!found) return;
+      const before = JSON.stringify(Object.keys(similar));
+      similar = byGroup(found);
+      similarGroups = found;
+      if (!found.length) similarOnly = false;
+      similarProgress = null;
+      if (JSON.stringify(Object.keys(similar)) !== before) await refresh();
+    } catch (e) {
+      similarProgress = null;
       notice = `${t("error")}: ${tError(e)}`;
     }
   }
@@ -1905,7 +1954,7 @@
       help ??= "manual";
       return;
     }
-    if (history || showOptions || help || review || episodeReview || albumReview || bookReview || comicReview || comicPick || showPick || busy || working) return;
+    if (history || showOptions || help || review || episodeReview || albumReview || bookReview || comicReview || comicPick || showPick || compare || busy || working) return;
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
     // These work even while typing in a rule.
@@ -1971,6 +2020,9 @@
     const unlistenProgress = listen<{ done: number; total: number }>("identical-progress", (e) => {
       identicalProgress = e.payload.done < e.payload.total ? e.payload.done / e.payload.total : null;
     });
+    const unlistenSimilar = listen<{ done: number; total: number }>("similar-progress", (e) => {
+      similarProgress = e.payload.done < e.payload.total ? e.payload.done / e.payload.total : null;
+    });
     (async () => {
       await loadSettings();
       // The password store may wait to be unlocked: the program does not.
@@ -2002,6 +2054,7 @@
     return () => {
       unlisten.then((f) => f());
       unlistenProgress.then((f) => f());
+      unlistenSimilar.then((f) => f());
       unlistenApply.then((f) => f());
       unlistenTmdb.then((f) => f());
       unlistenMb.then((f) => f());
@@ -2179,6 +2232,8 @@
           onoverride={setOverride}
           {copies}
           {alike}
+          {similar}
+          oncompare={openCompare}
           {matches}
           ghosts={settings.showMissing ? ghosts : []}
           {outside}
@@ -2244,6 +2299,23 @@
         title={t("alikeFilterHint")}
         onclick={() => (alikeOnly = !alikeOnly)}
       >♪ {t("alikeCount", { n: alikeCount })}</button>
+    {/if}
+    {#if similarProgress !== null && identicalProgress === null}
+      <span>{t("similarScanning", { p: Math.floor(similarProgress * 100) })}</span>
+    {:else if similarCount && identicalProgress === null}
+      <button
+        class="link"
+        class:on={similarOnly}
+        aria-pressed={similarOnly}
+        title={t("similarFilterHint")}
+        onclick={() => (similarOnly = !similarOnly)}
+      >
+        <svg class="copy-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M2.5 2h11A1.5 1.5 0 0 1 15 3.5v9a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 12.5v-9A1.5 1.5 0 0 1 2.5 2zm0 1.5v7.3l3.2-3.2 2.6 2.6 1.9-1.9 3.3 3.3V3.5zM10.8 4.6a1.4 1.4 0 1 1 0 2.8 1.4 1.4 0 0 1 0-2.8z" /></svg>
+        {t("similarCount", { n: similarCount })}
+      </button>
+    {/if}
+    {#if (similarOnly && similarGroups.length) || (identicalOnly && copyGroups.length)}
+      <button class="link" title={t("compareHint")} onclick={() => (compare = { kind: similarOnly ? "similar" : "identical", start: 0 })}>{t("compare")}</button>
     {/if}
     {#if preview.items.length}
       <button class="link" title={t("exportCsvHint")} onclick={exportCsv}>{t("exportCsv")}</button>
@@ -2355,6 +2427,10 @@
 
 {#if albumReview}
   <AlbumReview queue={albumReview} {albums} onchoose={chooseAlbum} onclose={() => (albumReview = null)} />
+{/if}
+
+{#if compare}
+  <PictureCompare kind={compare.kind} groups={compare.kind === "similar" ? similarGroups : copyGroups} start={compare.start} onclose={closeCompare} />
 {/if}
 
 {#if showPick}

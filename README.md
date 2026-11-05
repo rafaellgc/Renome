@@ -43,6 +43,9 @@ A built-in manual (F1) explains every rule with examples.
 - The preview highlights what is removed and added in each name.
 - Finds files with identical content in the list (even with different
   names) and shows them grouped, without deleting anything.
+- Finds pictures that look alike (the same photo resized, recompressed or
+  lightly edited, and shots taken one after another) and shows them
+  grouped, also without deleting anything.
 - Movies: names files from TMDB (`Title (Year) [tmdbid-12345]`, the format
   Jellyfin recognizes), picking the movie automatically when sure and
   letting you choose when not; optionally saves `.nfo` and poster next
