@@ -240,7 +240,7 @@
   /** Files in the comic review window; null when closed. */
   let comicReview = $state<string[] | null>(null);
   /** The series picker, while open. */
-  let comicPick = $state<{ source: ComicSource; query: string; files: number; highest: number; candidates: ComicVolume[]; resolve: (v: ComicVolume | null) => void } | null>(null);
+  let comicPick = $state<{ source: ComicSource; query: string; files: number; highest: number; candidates: ComicVolume[]; path?: string; comic?: ComicMatch; resolve: (v: ComicVolume | null) => void } | null>(null);
   /** Whether this session was told that the GCD works better with an account. */
   let gcdWarned = false;
   let comicProgress = $state<string | null>(null);
@@ -1408,7 +1408,11 @@
           volume =
             same.length === 1 && !foreign && sure
               ? same[0]
-              : await new Promise<ComicVolume | null>((resolve) => (comicPick = { source, query: g.query, files: g.paths.length, highest, candidates: sorted, resolve }));
+              : await new Promise<ComicVolume | null>((resolve) => {
+                  // The file whose cover is compared: the first with a number.
+                  const at = Math.max(0, g.owns.findIndex((o) => o.number || o.volume != null));
+                  comicPick = { source, query: g.query, files: g.paths.length, highest, candidates: sorted, path: g.paths[at], comic: g.owns[at], resolve };
+                });
           comicPick = null;
           if (!volume) continue;
         }
@@ -2422,7 +2426,7 @@
 {/if}
 
 {#if comicPick}
-  <ComicPicker source={comicPick.source} query={comicPick.query} files={comicPick.files} highest={comicPick.highest} candidates={comicPick.candidates} onpick={(v) => comicPick?.resolve(v)} />
+  <ComicPicker source={comicPick.source} query={comicPick.query} files={comicPick.files} highest={comicPick.highest} candidates={comicPick.candidates} path={comicPick.path} comic={comicPick.comic} onpick={(v) => comicPick?.resolve(v)} />
 {/if}
 
 {#if albumReview}

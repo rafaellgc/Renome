@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api } from "./api";
+  import { api, SAME_COVER, type OwnCover } from "./api";
   import { t, tError } from "./i18n";
   import { tmdbLang } from "./settings.svelte";
   import type { BookCandidate, BookState } from "./types";
@@ -40,6 +40,36 @@
     typed = null;
     searchError = "";
   });
+
+  /** The file's own cover, and how far each candidate's is from it. */
+  let own = $state<OwnCover | null>(null);
+  let far = $state<Record<string, number | null>>({});
+  $effect(() => {
+    const p = path;
+    own = null;
+    if (p) api.ownCover(p).then((c) => { if (path === p) own = c; });
+  });
+  $effect(() => {
+    const hash = own?.hash;
+    const urls = candidates.slice(0, 12).map(cover).filter((u): u is string => !!u && !(u in far));
+    if (!hash || !urls.length) return;
+    api.coverDistances(hash, urls).then((d) => {
+      if (own?.hash !== hash) return;
+      const next = { ...far };
+      urls.forEach((u, i) => (next[u] = d[i]));
+      far = next;
+    });
+  });
+  // Distances are to one file's cover: a new file starts over.
+  $effect(() => {
+    path;
+    far = {};
+  });
+  const sameCover = (c: BookCandidate) => {
+    const u = cover(c);
+    const d = u ? far[u] : null;
+    return d != null && d <= SAME_COVER;
+  };
 
   function go(delta: number) {
     const next = index + delta;
@@ -89,6 +119,7 @@
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <div class="modal review" onclick={(e) => e.stopPropagation()}>
     <header>
+      {#if own}<img class="own" src={own.image} alt={t("ownCover")} title={t("ownCover")} />{/if}
       <div>
         <h2>{t("bookReviewTitle")}</h2>
         <p class="file" title={path}>{names[path] ?? path}</p>
@@ -130,6 +161,7 @@
                 <span class="exact">{t("bookExact")}{c.publisher ? ` · ${c.publisher}` : ""}{c.editionYear ? `, ${c.editionYear}` : ""}</span>
               {/if}
               <span class="muted small">{t("bookEditions", { n: c.editions })}</span>
+              {#if sameCover(c)}<span class="same" title={t("sameCoverHint")}>{t("sameCover")}</span>{/if}
             </span>
             {#if i < 9}<kbd>{i + 1}</kbd>{/if}
           </button>
@@ -185,6 +217,8 @@
   .info { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; }
   .info i { color: var(--muted); font-size: 12px; }
   .exact { color: var(--accent); font-size: 12px; }
+  .own { flex: none; width: 48px; height: 72px; object-fit: cover; border-radius: 3px; background: var(--surface-2); }
+  .same { align-self: flex-start; font-size: 11px; padding: 1px 6px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
   .small { font-size: 12px; }
   kbd {
     position: absolute;

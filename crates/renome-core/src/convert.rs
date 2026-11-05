@@ -252,6 +252,24 @@ fn natural(a: &str, b: &str) -> std::cmp::Ordering {
 /// The largest picture read for [`end_pages`].
 const END_PAGE_MAX: u64 = 40 << 20;
 
+/// The cover of a comic or book, as picture bytes: an EPUB's cover item,
+/// a PDF's first page drawn, else the first page of the archive, folder
+/// or picture-only Kindle book. `None` when there is none to read.
+pub fn cover(path: &Path) -> Option<Vec<u8>> {
+    match kind(path)? {
+        Kind::Epub => crate::ebook::epub_cover(path).or_else(|| end_pages(path, 1, 0).pop()),
+        Kind::Pdf => {
+            let data = Arc::new(fs::read(path).ok()?);
+            let pdf = hayro_pdf(&data).ok()?;
+            let (pw, ph) = pdf.pages().first()?.render_dimensions();
+            drawn(&pdf, 0, 1000.0 / pw.max(ph).max(1.0))
+                .ok()
+                .map(|(b, _)| b)
+        }
+        _ => end_pages(path, 1, 0).pop(),
+    }
+}
+
 /// The pictures at the start and at the end of a comic, where a barcode is
 /// printed: the first `head` and the last `tail` pages, in reading order
 /// (fewer when the comic is shorter). A PDF gives none (its pages would

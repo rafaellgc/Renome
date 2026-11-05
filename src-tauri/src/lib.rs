@@ -51,6 +51,9 @@ struct AppState {
     session: Mutex<Session>,
     history: History,
     hashes: Mutex<HashCache>,
+    /// Fingerprints of the catalogues' covers, by address (`None`: could
+    /// not be read).
+    covers: tokio::sync::Mutex<HashMap<String, Option<u64>>>,
     /// Fingerprints of pictures, kept between sessions.
     pictures: Mutex<renome_core::similar::PictureCache>,
     /// Bumped by each search for identical files; an older search that sees
@@ -455,7 +458,10 @@ fn base64(bytes: &[u8]) -> String {
     const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
-        let n = chunk.iter().enumerate().fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
         for i in 0..4 {
             if i <= chunk.len() {
                 out.push(ABC[(n >> (18 - 6 * i) & 63) as usize] as char);
@@ -475,11 +481,15 @@ async fn picture_cards(paths: Vec<PathBuf>, max: u32) -> Vec<PictureCard> {
         let card = |path: &PathBuf| {
             let meta = std::fs::symlink_metadata(path).ok();
             let entry = meta.as_ref().and_then(|m| FileEntry::from_path(path, m));
-            let ext = entry.as_ref().map(|e| e.ext.to_lowercase()).unwrap_or_default();
-            let shown = (renome_core::similar::is_picture(&ext) && entry.as_ref().is_some_and(|e| !e.is_dir))
-                .then(|| std::fs::read(path).ok())
-                .flatten()
-                .and_then(|b| renome_core::similar::shown_copy(&b, &ext, max.clamp(64, 4096)));
+            let ext = entry
+                .as_ref()
+                .map(|e| e.ext.to_lowercase())
+                .unwrap_or_default();
+            let shown = (renome_core::similar::is_picture(&ext)
+                && entry.as_ref().is_some_and(|e| !e.is_dir))
+            .then(|| std::fs::read(path).ok())
+            .flatten()
+            .and_then(|b| renome_core::similar::shown_copy(&b, &ext, max.clamp(64, 4096)));
             let dims = shown.as_ref().and_then(|(_, d)| *d);
             PictureCard {
                 path: path.clone(),
@@ -500,11 +510,130 @@ async fn picture_cards(paths: Vec<PathBuf>, max: u32) -> Vec<PictureCard> {
                 .chunks(paths.len().div_ceil(4).max(1))
                 .map(|part| scope.spawn(move || part.iter().map(card).collect::<Vec<_>>()))
                 .collect();
-            jobs.into_iter().flat_map(|j| j.join().unwrap_or_default()).collect()
+            jobs.into_iter()
+                .flat_map(|j| j.join().unwrap_or_default())
+                .collect()
         })
     })
     .await
     .unwrap_or_default()
+}
+
+/// A comic's or book's own cover: a smaller copy to show and its
+/// fingerprint (hex, to compare with the catalogues' covers).
+#[derive(Serialize)]
+struct OwnCover {
+    image: String,
+    hash: String,
+}
+
+/// The cover of a comic or book file (see [`renome_core::convert::cover`]).
+#[tauri::command]
+async fn own_cover(path: PathBuf) -> Option<OwnCover> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let bytes = renome_core::convert::cover(&path)?;
+        let hash = renome_core::similar::fingerprint(&bytes, "img")?;
+        let (jpeg, _) = renome_core::similar::shown_copy(&bytes, "img", 600)?;
+        Some(OwnCover {
+            image: format!("data:image/jpeg;base64,{}", base64(&jpeg)),
+            hash: format!("{hash:016x}"),
+        })
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// For catalogue covers, fetched by the program (some catalogues refuse
+/// their pictures to a page that is not theirs).
+static HTTP: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
+    reqwest::Client::builder()
+        .user_agent(concat!(
+            "Renome/",
+            env!("CARGO_PKG_VERSION"),
+            " ( https://github.com/rafaellgc/Renome )"
+        ))
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
+        .build()
+        .unwrap_or_default()
+});
+
+/// A catalogue's cover that the page could not show by its address, as
+/// a data address; `None` when it cannot be read either.
+#[tauri::command]
+async fn remote_image(url: String) -> Option<String> {
+    if !url.starts_with("https://") {
+        return None;
+    }
+    let res = HTTP.get(&url).send().await.ok()?;
+    if !res.status().is_success() {
+        return None;
+    }
+    let kind = res
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .filter(|v| v.starts_with("image/"))?
+        .to_string();
+    let bytes = res.bytes().await.ok()?;
+    (bytes.len() <= 4 << 20).then(|| format!("data:{kind};base64,{}", base64(&bytes)))
+}
+
+/// How far each cover (by address) is from the fingerprint `hash`, in
+/// bits; `None` for one that could not be read. Covers are fetched four at
+/// a time and remembered for the session.
+#[tauri::command]
+async fn cover_distances(
+    state: State<'_, AppState>,
+    hash: String,
+    urls: Vec<String>,
+) -> Result<Vec<Option<u32>>, String> {
+    use futures_util::StreamExt;
+    let own = u64::from_str_radix(&hash, 16).map_err(|e| e.to_string())?;
+    let missing: Vec<String> = {
+        let known = state.covers.lock().await;
+        let mut m: Vec<String> = urls
+            .iter()
+            .filter(|u| u.starts_with("http") && !known.contains_key(*u))
+            .cloned()
+            .collect();
+        m.sort();
+        m.dedup();
+        m
+    };
+    let found: Vec<(String, Option<u64>)> = futures_util::stream::iter(missing)
+        .map(|url| async move {
+            let bytes = match HTTP.get(&url).send().await {
+                Ok(r) if r.status().is_success() => r.bytes().await.ok(),
+                _ => None,
+            };
+            let hash = match bytes {
+                Some(b) => tauri::async_runtime::spawn_blocking(move || {
+                    renome_core::similar::fingerprint(&b, "img")
+                })
+                .await
+                .ok()
+                .flatten(),
+                None => None,
+            };
+            (url, hash)
+        })
+        .buffer_unordered(4)
+        .collect()
+        .await;
+    let mut known = state.covers.lock().await;
+    known.extend(found);
+    Ok(urls
+        .iter()
+        .map(|u| {
+            known
+                .get(u)
+                .copied()
+                .flatten()
+                .map(|h| renome_core::similar::distance(own, h))
+        })
+        .collect())
 }
 
 #[derive(Serialize)]
@@ -1421,6 +1550,36 @@ async fn comic_issues(
     })
 }
 
+/// The covers, by address, of the comic's issue (or volume) in a series,
+/// to tell which series is the file's. None from the Grand Comics
+/// Database (its pictures are not for programs) nor from catalogues of
+/// whole series (AniList, MangaUpdates: their one cover is the series').
+#[tauri::command]
+async fn series_covers(
+    state: State<'_, AppState>,
+    source: String,
+    key: String,
+    id: String,
+    comic: renome_core::comics::ComicMatch,
+) -> Result<Vec<String>, String> {
+    let (_, issues) = match source.as_str() {
+        "mangadex" => {
+            return match comic.volume {
+                Some(v) => state.md.volume_covers(&id, v).await,
+                None => Ok(Vec::new()),
+            };
+        }
+        "comicvine" => state.cv.issues(&key, &id).await?,
+        "metron" => state.mt.issues(&key, &id).await?,
+        _ => return Ok(Vec::new()),
+    };
+    Ok(renome_core::comics::find_issue(&comic, &issues)
+        .map(|i| i.cover.clone())
+        .filter(|c| !c.is_empty())
+        .into_iter()
+        .collect())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ComicIssues {
@@ -1834,6 +1993,7 @@ pub fn run() {
             session: Mutex::new(session),
             history: History::new(history_dir),
             hashes: Mutex::default(),
+            covers: tokio::sync::Mutex::new(HashMap::new()),
             pictures: Mutex::new(renome_core::similar::PictureCache::in_file(
                 dirs::cache_dir()
                     .unwrap_or_else(std::env::temp_dir)
@@ -1863,6 +2023,10 @@ pub fn run() {
             stop_search,
             find_similar,
             picture_cards,
+            own_cover,
+            cover_distances,
+            series_covers,
+            remote_image,
             trash_files,
             tmdb_collections,
             clear_files,

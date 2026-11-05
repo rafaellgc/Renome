@@ -3,6 +3,16 @@ import type { AlbumLookup, AlbumQuery, ApplyReport, BookCandidate, BookLookup, B
 
 type Overrides = Record<string, string>;
 
+/** Covers this many bits apart, or fewer, are the same cover (another
+ *  scan or edition of the same art); see `cover_distances`. */
+export const SAME_COVER = 12;
+
+/** A comic's or book's own cover: a copy to show, and its fingerprint. */
+export interface OwnCover {
+  image: string;
+  hash: string;
+}
+
 /** A file as the comparison window shows it. */
 export interface PictureCard {
   path: string;
@@ -35,6 +45,13 @@ export const api = {
    *  newer search replaced this one. */
   findIdentical: () => invoke<{ identical: string[][]; songs: string[][] } | null>("find_identical"),
   findSimilar: () => invoke<string[][] | null>("find_similar"),
+  ownCover: (path: string) => invoke<OwnCover | null>("own_cover", { path }),
+  coverDistances: (hash: string, urls: string[]) => invoke<(number | null)[]>("cover_distances", { hash, urls }),
+  /** A catalogue's picture the page could not show by its address. */
+  remoteImage: (url: string) => invoke<string | null>("remote_image", { url }),
+  /** The covers of the comic's issue (or volume) in a series; none from
+   *  catalogues that give no covers to programs. */
+  seriesCovers: (source: ComicSource, key: string, id: string, comic: ComicMatch) => invoke<string[]>("series_covers", { source, key, id, comic }),
   pictureCards: (paths: string[], max: number) => invoke<PictureCard[]>("picture_cards", { paths, max }),
   trashFiles: (paths: string[]) => invoke<{ trashed: string[]; failed: [string, string][] }>("trash_files", { paths }),
   preview: (steps: Step[], overrides: Overrides, view: View) =>

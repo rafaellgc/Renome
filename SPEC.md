@@ -973,7 +973,7 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   options or going on without); a refused account offers the options;
   without one, anonymous access of about 30 requests an hour; requests
   2.5 s apart), Metron (the user's token, `Authorization: Bearer`;
-  about 20 requests a minute and a few thousand a day; requests 3 s
+  about 20 requests a minute and 5,000 a day; requests 3 s
   apart; `/api/series/?name=` with `year_began`, a series' page and its
   `issue_list/` pages, `/api/issue/?upc=` or `?isbn=` for barcodes; the
   year Metron shows after a name, `Name (2016)`, is dropped when it is the
@@ -1040,6 +1040,40 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   or none, open the review. The issue's title, when there is one, and its
   year replace the file's; otherwise the file's title stays, or what its
   series had after the catalogue's (`Series: Story`).
+- **Covers in the reviews** (comic issues and books): the file's own
+  cover is shown (`convert::cover`: an EPUB's cover item — manifest
+  `cover-image`, else the `cover` meta's item, else an image item named
+  cover —, a PDF's first page drawn at about 1000 px, else the first page
+  of the archive, folder or picture-only Kindle book) and fingerprinted
+  like similar pictures. Each catalogue cover is downloaded (four at a
+  time, kept by address for the session) and fingerprinted; 12 bits or
+  fewer apart is the "same cover" (measured: one volume's file vs its
+  catalogue covers in several languages 0–14 bits, other volumes 22 and
+  up). Book candidates (the first 12) are compared at once; comic issues
+  at once when up to 60 have a cover, otherwise with "Compare covers"
+  (the first 300). Issues with the same cover go first, nearest first,
+  with a badge; books get the badge in place. Nothing is picked by the
+  cover alone.
+- **Covers in "Choose the series"**: the cover of the group's first file
+  with a number or volume is shown and compared, one series after the
+  other, with the first 9 candidates (`series_covers`): Metron and Comic
+  Vine give the cover of the issue `find_issue` matches in the series'
+  issue list (series of over 200 issues are skipped); MangaDex gives the
+  covers of the file's volume, every language (`/cover?manga[]=`, once a
+  session per manga), the nearest counting; AniList and MangaUpdates
+  compare the series' own cover, only when the file is volume/number 1.
+  Once all are compared, the matching series move first (keys 1–9 do not
+  move while comparing), with the badge. The Grand Comics Database gives
+  no covers: its series list has none and its picture server answers
+  programs with a browser check (403), so it is not asked; the picker and
+  the issue review say so. A catalogue picture the page cannot load by
+  its address (MangaDex refuses other sites') is read by the program
+  (`remote_image`, https only, images up to 4 MB) and shown as a data
+  address. A series without a cover of its own (Metron's and Comic Vine's
+  series lists have none) shows the issue cover it was compared with.
+  Clicking a cover — the file's, a series', an issue's in the review —
+  shows it large beside the file's (`CoverZoom`, MangaDex's 512 px copy);
+  Esc or a click closes it without choosing.
 - Template keys (also in Portuguese and Spanish): `{series}`,
   `{series year}`, `{number}` (three digits), `{volume}` (two),
   `{chapter}` (three), `{title}`, `{year}`, `{count}`, `{publisher}`,

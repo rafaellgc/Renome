@@ -85,7 +85,11 @@ impl PictureCache {
             return;
         }
         self.loaded = true;
-        let Some(text) = self.file.as_ref().and_then(|f| std::fs::read_to_string(f).ok()) else {
+        let Some(text) = self
+            .file
+            .as_ref()
+            .and_then(|f| std::fs::read_to_string(f).ok())
+        else {
             return;
         };
         let oldest = today().saturating_sub(FORGET_DAYS);
@@ -101,9 +105,12 @@ impl PictureCache {
             ) else {
                 continue;
             };
-            let (Ok(size), Ok(secs), Ok(nanos), Ok(used)) =
-                (size.parse(), secs.parse(), nanos.parse(), used.parse::<u32>())
-            else {
+            let (Ok(size), Ok(secs), Ok(nanos), Ok(used)) = (
+                size.parse(),
+                secs.parse(),
+                nanos.parse(),
+                used.parse::<u32>(),
+            ) else {
                 continue;
             };
             let hash = match hash {
@@ -119,13 +126,16 @@ impl PictureCache {
             }
             let modified = UNIX_EPOCH.checked_add(Duration::new(secs, nanos));
             let stamp = Stamp { size, modified };
-            self.entries.insert(PathBuf::from(path), Known { stamp, hash, used });
+            self.entries
+                .insert(PathBuf::from(path), Known { stamp, hash, used });
         }
     }
 
     /// Writes the cache to its file, when it changed.
     pub fn save(&mut self) {
-        let Some(file) = self.file.clone() else { return };
+        let Some(file) = self.file.clone() else {
+            return;
+        };
         if !self.changed {
             return;
         }
@@ -133,7 +143,9 @@ impl PictureCache {
         for (path, k) in &self.entries {
             let (Some(path), Some(t)) = (
                 path.to_str(),
-                k.stamp.modified.and_then(|m| m.duration_since(UNIX_EPOCH).ok()),
+                k.stamp
+                    .modified
+                    .and_then(|m| m.duration_since(UNIX_EPOCH).ok()),
             ) else {
                 continue;
             };
@@ -344,11 +356,9 @@ fn jpeg_greys(bytes: &[u8]) -> Option<Vec<f32>> {
         let mut d = turbojpeg::Decompressor::new().ok()?;
         let head = d.read_header(bytes).ok()?;
         let side = head.width.min(head.height);
-        let scale = [8, 4, 2]
-            .into_iter()
-            .find(|&k| side / k >= N)
-            .unwrap_or(1);
-        d.set_scaling_factor(turbojpeg::ScalingFactor::new(1, scale)).ok()?;
+        let scale = [8, 4, 2].into_iter().find(|&k| side / k >= N).unwrap_or(1);
+        d.set_scaling_factor(turbojpeg::ScalingFactor::new(1, scale))
+            .ok()?;
         let head = head.scaled(turbojpeg::ScalingFactor::new(1, scale));
         let (w, h) = (head.width, head.height);
         let mut pixels = vec![0u8; w * h];
@@ -498,7 +508,10 @@ pub fn shown_copy(bytes: &[u8], ext: &str, max: u32) -> Option<(Vec<u8>, Option<
         let small = thumbnail(bytes)?;
         let dims = exif_of(bytes).and_then(|e| {
             let get = |tag| e.get_field(tag, exif::In::PRIMARY)?.value.get_uint(0);
-            Some((get(exif::Tag::PixelXDimension)?, get(exif::Tag::PixelYDimension)?))
+            Some((
+                get(exif::Tag::PixelXDimension)?,
+                get(exif::Tag::PixelYDimension)?,
+            ))
         });
         (image::load_from_memory(&small).ok()?.to_rgb8(), dims)
     } else if bytes.starts_with(&[0xFF, 0xD8])
@@ -513,7 +526,10 @@ pub fn shown_copy(bytes: &[u8], ext: &str, max: u32) -> Option<(Vec<u8>, Option<
     let (w, h) = img.dimensions();
     let scale = (max as f32 / w.max(h) as f32).min(1.0);
     let small = if scale < 1.0 {
-        let (nw, nh) = (((w as f32 * scale).round() as u32).max(1), ((h as f32 * scale).round() as u32).max(1));
+        let (nw, nh) = (
+            ((w as f32 * scale).round() as u32).max(1),
+            ((h as f32 * scale).round() as u32).max(1),
+        );
         image::imageops::thumbnail(&img, nw, nh)
     } else {
         img
@@ -529,7 +545,13 @@ pub fn shown_copy(bytes: &[u8], ext: &str, max: u32) -> Option<(Vec<u8>, Option<
         8 => rotate270(&small),
         _ => small,
     };
-    let dims = dims.map(|(w, h)| if (5..=8).contains(&turn) { (h, w) } else { (w, h) });
+    let dims = dims.map(|(w, h)| {
+        if (5..=8).contains(&turn) {
+            (h, w)
+        } else {
+            (w, h)
+        }
+    });
     let mut out = Vec::new();
     image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 82)
         .encode_image(&shown)
@@ -586,7 +608,11 @@ mod tests {
             let (fx, fy) = (x as f32 / w as f32, y as f32 / h as f32);
             let s = seed as f32;
             let a = ((fx * (3.0 + s) + s).sin() * (fy * (2.0 + s * 0.7)).cos() + 1.0) * 110.0;
-            let b = if (fx - 0.3 - s * 0.05).powi(2) + (fy - 0.6).powi(2) < 0.04 { 60.0 } else { 0.0 };
+            let b = if (fx - 0.3 - s * 0.05).powi(2) + (fy - 0.6).powi(2) < 0.04 {
+                60.0
+            } else {
+                0.0
+            };
             let v = (a + b).min(255.0) as u8;
             Rgb([v, v / 2 + 40, 255 - v])
         })
@@ -672,16 +698,31 @@ mod tests {
             write("d.jpg", jpeg(&big, 90)),
         ];
         let mut cache = PictureCache::default();
-        let groups = similar_pictures(&files, &HashMap::new(), &mut cache, &mut |_, _| {}, &|| false)
-            .unwrap();
+        let groups = similar_pictures(&files, &HashMap::new(), &mut cache, &mut |_, _| {}, &|| {
+            false
+        })
+        .unwrap();
         assert_eq!(groups.len(), 1);
-        let names: Vec<_> = groups[0].iter().map(|p| p.file_name().unwrap().to_owned()).collect();
+        let names: Vec<_> = groups[0]
+            .iter()
+            .map(|p| p.file_name().unwrap().to_owned())
+            .collect();
         assert_eq!(names, ["a.jpg", "b.png", "d.jpg"]);
         // Only identical copies (a, d): left out.
         let identical: HashMap<PathBuf, usize> =
             [(files[0].path.clone(), 0), (files[3].path.clone(), 0)].into();
-        let only = similar_pictures(&files[..1].iter().chain(&files[3..]).cloned().collect::<Vec<_>>(), &identical, &mut cache, &mut |_, _| {}, &|| false)
-            .unwrap();
+        let only = similar_pictures(
+            &files[..1]
+                .iter()
+                .chain(&files[3..])
+                .cloned()
+                .collect::<Vec<_>>(),
+            &identical,
+            &mut cache,
+            &mut |_, _| {},
+            &|| false,
+        )
+        .unwrap();
         assert!(only.is_empty());
     }
 
@@ -692,7 +733,8 @@ mod tests {
         assert_eq!(dims, Some((1600, 1200)));
         let shown = image::load_from_memory(&copy).unwrap();
         assert_eq!((shown.width(), shown.height()), (400, 300));
-        let (copy, dims) = shown_copy(&encode(&scene(300, 200, 5), ImageFormat::Png), "png", 400).unwrap();
+        let (copy, dims) =
+            shown_copy(&encode(&scene(300, 200, 5), ImageFormat::Png), "png", 400).unwrap();
         assert_eq!(dims, Some((300, 200)));
         assert_eq!(image::load_from_memory(&copy).unwrap().width(), 300);
     }
@@ -705,11 +747,15 @@ mod tests {
         let flat = dir.path().join("flat.png");
         let grey: RgbImage = ImageBuffer::from_pixel(50, 50, Rgb([9, 9, 9]));
         std::fs::write(&flat, encode(&grey, ImageFormat::Png)).unwrap();
-        let entry = |p: &Path| FileEntry::from_path(p, &std::fs::symlink_metadata(p).unwrap()).unwrap();
+        let entry =
+            |p: &Path| FileEntry::from_path(p, &std::fs::symlink_metadata(p).unwrap()).unwrap();
         let files = [entry(&pic), entry(&flat)];
         let file = dir.path().join("cache").join("pictures");
         let mut cache = PictureCache::in_file(file.clone());
-        similar_pictures(&files, &HashMap::new(), &mut cache, &mut |_, _| {}, &|| false).unwrap();
+        similar_pictures(&files, &HashMap::new(), &mut cache, &mut |_, _| {}, &|| {
+            false
+        })
+        .unwrap();
         cache.save();
         let mut again = PictureCache::in_file(file.clone());
         again.load();

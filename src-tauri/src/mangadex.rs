@@ -20,6 +20,8 @@ pub struct Client {
     http: reqwest::Client,
     last: tokio::sync::Mutex<Option<Instant>>,
     cache: tokio::sync::Mutex<HashMap<String, Vec<Volume>>>,
+    /// Each manga's covers: (volume, address).
+    covers: tokio::sync::Mutex<HashMap<String, Vec<(String, String)>>>,
 }
 
 impl Default for Client {
@@ -37,6 +39,7 @@ impl Default for Client {
                 .unwrap_or_default(),
             last: tokio::sync::Mutex::new(None),
             cache: tokio::sync::Mutex::new(HashMap::new()),
+            covers: tokio::sync::Mutex::new(HashMap::new()),
         }
     }
 }
@@ -166,6 +169,54 @@ impl Client {
         let ranked = renome_core::comics::rank_volumes(query, found, "");
         self.cache.lock().await.insert(key, ranked.clone());
         Ok(ranked)
+    }
+
+    /// The covers of a manga's volume `volume` (one a language, often),
+    /// by address. Every cover of the manga is asked once a session.
+    pub async fn volume_covers(&self, id: &str, volume: u32) -> Result<Vec<String>, String> {
+        if !self.covers.lock().await.contains_key(id) {
+            let mut last = self.last.lock().await;
+            if let Some(t) = *last {
+                tokio::time::sleep(Duration::from_millis(500).saturating_sub(t.elapsed())).await;
+            }
+            let res = self
+                .http
+                .get(format!("{}/cover", api_base()))
+                .query(&[("manga[]", id), ("limit", "100"), ("order[volume]", "asc")])
+                .send()
+                .await;
+            *last = Some(Instant::now());
+            drop(last);
+            let res = res.map_err(net_error)?;
+            match res.status().as_u16() {
+                200 => {}
+                429 => return Err("mdBusy".into()),
+                code => return Err(format!("mdNetwork: HTTP {code}")),
+            }
+            let v: Value = res.json().await.map_err(net_error)?;
+            let found = v["data"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|c| {
+                    let a = &c["attributes"];
+                    let file = a["fileName"].as_str()?;
+                    Some((
+                        a["volume"].as_str().unwrap_or_default().trim().to_string(),
+                        format!("{COVERS}/{id}/{file}.256.jpg"),
+                    ))
+                })
+                .collect();
+            self.covers.lock().await.insert(id.to_string(), found);
+        }
+        let covers = self.covers.lock().await;
+        Ok(covers
+            .get(id)
+            .into_iter()
+            .flatten()
+            .filter(|(v, _)| v.parse::<f64>().ok() == Some(f64::from(volume)))
+            .map(|(_, url)| url.clone())
+            .collect())
     }
 
     /// Asks MangaDex for manga with a title (and year), keeping the answer.

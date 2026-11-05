@@ -348,6 +348,65 @@ fn strip_tags(html: &str) -> String {
         .replace("&amp;", "&")
 }
 
+/// The cover picture of an EPUB: the manifest's `cover-image` item
+/// (EPUB 3), else the one the `cover` meta names (EPUB 2), else an image
+/// item whose id or name says cover.
+pub(crate) fn epub_cover(path: &Path) -> Option<Vec<u8>> {
+    let mut zip = zip::ZipArchive::new(BufReader::new(File::open(path).ok()?)).ok()?;
+    let container = entry(&mut zip, "META-INF/container.xml", 1 << 20)?;
+    let opf_path = {
+        let doc = xml(&container)?;
+        doc.descendants()
+            .find(|n| n.has_tag_name("rootfile") && n.attribute("full-path").is_some())?
+            .attribute("full-path")?
+            .to_string()
+    };
+    let opf = entry(&mut zip, &opf_path, 8 << 20)?;
+    let doc = xml(&opf)?;
+    let items: Vec<roxmltree::Node> = doc
+        .descendants()
+        .filter(|n| n.has_tag_name("item") && n.attribute("href").is_some())
+        .collect();
+    let image = |n: &roxmltree::Node| {
+        n.attribute("media-type")
+            .is_some_and(|m| m.starts_with("image/"))
+    };
+    let named = doc
+        .descendants()
+        .find(|n| n.has_tag_name("meta") && n.attribute("name") == Some("cover"))
+        .and_then(|m| m.attribute("content"));
+    let found = items
+        .iter()
+        .find(|n| {
+            n.attribute("properties")
+                .is_some_and(|p| p.split_whitespace().any(|w| w == "cover-image"))
+        })
+        .or_else(|| {
+            items
+                .iter()
+                .find(|n| named.is_some() && n.attribute("id") == named && image(n))
+        })
+        .or_else(|| {
+            items.iter().find(|n| {
+                image(n)
+                    && (n
+                        .attribute("id")
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains("cover")
+                        || n.attribute("href")
+                            .unwrap_or("")
+                            .to_lowercase()
+                            .contains("cover"))
+            })
+        })?;
+    let name = join_zip(&opf_path, found.attribute("href")?);
+    let f = zip.by_name(&name).ok()?;
+    let mut bytes = Vec::new();
+    f.take(40 << 20).read_to_end(&mut bytes).ok()?;
+    Some(bytes)
+}
+
 pub(crate) fn epub(path: &Path) -> Option<BookMeta> {
     let mut zip = zip::ZipArchive::new(BufReader::new(File::open(path).ok()?)).ok()?;
     let container = entry(&mut zip, "META-INF/container.xml", 1 << 20)?;
