@@ -167,6 +167,14 @@ pub struct PreviewItem {
     /// [`Operation::within`]).
     #[serde(skip)]
     pub within: Option<PathBuf>,
+    /// With a photo rule, a photo's or video's date came from (`none`:
+    /// it has none and stays as it is).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub photo_date: Option<crate::photos::DateFrom>,
+    /// The change date (Unix seconds) the file gets once renamed: when the
+    /// photo was taken, with the photo rule's "set the file date".
+    #[serde(skip)]
+    pub touch: Option<i64>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -946,6 +954,144 @@ fn follow_songs(items: &mut [PreviewItem], folders: bool, identical: &HashMap<Pa
     }
 }
 
+/// Photos taken in the same second (bursts), or whose date gives a name
+/// another file has: `-1`, `-2`… after the name, in the order of their
+/// names; a photo's files (raw, edits) take the same number. Identical
+/// copies take their original's number and are left to the duplicate
+/// check. A name already used by a file that is not in the list counts
+/// as taken.
+fn number_shots(
+    items: &mut [PreviewItem],
+    names: &HashMap<&Path, crate::photos::Named>,
+    groups: &HashMap<&Path, (usize, String)>,
+    identical: &HashMap<PathBuf, usize>,
+) {
+    let mut keys = PathKeys::default();
+    let in_batch: HashSet<PathBuf> = items.iter().map(|i| keys.key(&i.path)).collect();
+    // The name before its kept part (`.CR2`) and extension, where it goes.
+    let base_of = |i: &PreviewItem, kept: &str| -> Option<(PathBuf, String, String)> {
+        let (stem, ext) = split_name(&i.new_name);
+        let base = stem.strip_suffix(kept)?;
+        Some((
+            i.dest.clone().unwrap_or_else(|| i.dir.clone()),
+            base.to_string(),
+            ext.to_string(),
+        ))
+    };
+    // Each place and name: the groups going there, and their files.
+    let mut places: HashMap<PathBuf, Vec<(usize, Vec<usize>)>> = HashMap::new();
+    for (n, i) in items.iter().enumerate() {
+        if i.manual || i.status == Status::Conflict {
+            continue;
+        }
+        let (Some(_), Some((group, kept))) =
+            (names.get(i.path.as_path()), groups.get(i.path.as_path()))
+        else {
+            continue;
+        };
+        let Some((dir, base, _)) = base_of(i, kept) else {
+            continue;
+        };
+        let units = places.entry(keys.key(&dir.join(&base))).or_default();
+        match units.iter_mut().find(|(g, _)| g == group) {
+            Some((_, files)) => files.push(n),
+            None => units.push((*group, vec![n])),
+        }
+    }
+    let mut taken: HashSet<PathBuf> = HashSet::new();
+    let mut changes: Vec<(usize, PathBuf)> = Vec::new();
+    for units in places.values_mut() {
+        let target = |i: &PreviewItem, number: Option<usize>| -> Option<PathBuf> {
+            let kept = &groups.get(i.path.as_path())?.1;
+            let (dir, base, ext) = base_of(i, kept)?;
+            let stem = match number {
+                Some(k) => format!("{base}-{k}{kept}"),
+                None => format!("{base}{kept}"),
+            };
+            Some(dir.join(join_name(&stem, &ext)))
+        };
+        // On disk already, by a file that is not in the list.
+        let foreign = |keys: &mut PathKeys, p: &Path| {
+            p.symlink_metadata().is_ok() && !in_batch.contains(&keys.key(p))
+        };
+        // Identical copies are one photo here: the duplicate check tells them.
+        let mut kinds: Vec<Option<usize>> = Vec::new();
+        let mut distinct = 0;
+        for (_, files) in units.iter() {
+            let copy = files
+                .iter()
+                .find_map(|&n| identical.get(&items[n].path).copied());
+            if copy.is_none() || !kinds.contains(&copy) {
+                distinct += 1;
+                kinds.push(copy);
+            }
+        }
+        let crowded = distinct > 1
+            || units[0].1.iter().any(|&n| {
+                target(&items[n], None)
+                    .is_some_and(|t| foreign(&mut keys, &t) && t != items[n].path)
+            });
+        if !crowded {
+            continue;
+        }
+        let first_name = |files: &Vec<usize>| {
+            files
+                .iter()
+                .map(|&n| items[n].original.clone())
+                .min_by(|a, b| natural_cmp(a, b))
+                .unwrap_or_default()
+        };
+        units.sort_by(|a, b| natural_cmp(&first_name(&a.1), &first_name(&b.1)));
+        let copy_of = |files: &Vec<usize>| {
+            files
+                .iter()
+                .find_map(|&n| identical.get(&items[n].path).copied())
+        };
+        let mut given: Vec<(Option<usize>, usize)> = Vec::new();
+        let mut next = 1;
+        for (_, files) in units.iter() {
+            let copy = copy_of(files);
+            let number = match given.iter().find(|(c, _)| c.is_some() && *c == copy) {
+                Some(&(_, k)) => k,
+                None => loop {
+                    let k = next;
+                    next += 1;
+                    let free = files.iter().all(|&n| {
+                        target(&items[n], Some(k)).is_some_and(|t| {
+                            let key = keys.key(&t);
+                            !taken.contains(&key) && (!foreign(&mut keys, &t) || t == items[n].path)
+                        })
+                    });
+                    if free {
+                        break k;
+                    }
+                },
+            };
+            given.push((copy, number));
+            for &n in files {
+                if let Some(t) = target(&items[n], Some(number)) {
+                    taken.insert(keys.key(&t));
+                    changes.push((n, t));
+                }
+            }
+        }
+    }
+    for (n, t) in changes {
+        let i = &mut items[n];
+        i.new_name = t
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        i.windows_unsafe = windows_bad(&i.new_name);
+        i.status = if i.target() == i.path {
+            Status::Unchanged
+        } else {
+            Status::Ok
+        };
+    }
+}
+
 /// Computes the preview. `overrides` maps path → hand-edited name.
 /// Files hidden by the filter are left out (and will not be renamed);
 /// numbering only counts the visible ones.
@@ -1009,6 +1155,59 @@ pub fn preview(
             (index, *n - 1, file)
         })
         .collect();
+    // The photo rule names a photo's files (raw, edits, a Live Photo's
+    // video) by the date of the one that has it (see `photos::lead_rank`).
+    let photo_rule = pipeline.photos();
+    let photo_groups: HashMap<&Path, (usize, String)> = match photo_rule {
+        None => HashMap::new(),
+        Some(_) => {
+            let list: Vec<&FileEntry> = shown.iter().map(|&(_, _, f)| f).collect();
+            crate::photos::groups(&list)
+        }
+    };
+    let photos: HashMap<&Path, crate::photos::Named> = match photo_rule {
+        None => HashMap::new(),
+        Some((opts, _)) => {
+            let todo: Vec<&FileEntry> = shown
+                .iter()
+                .map(|&(_, _, f)| f)
+                .filter(|f| photo_groups.contains_key(f.path.as_path()))
+                .collect();
+            crate::photos::read_all(&todo, &|_, _| {});
+            let mut lead: HashMap<usize, (&FileEntry, crate::photos::Shot)> = HashMap::new();
+            for &(_, _, f) in &shown {
+                let Some(&(group, _)) = photo_groups.get(f.path.as_path()) else {
+                    continue;
+                };
+                let Some(s) = crate::photos::shot(f, &opts) else {
+                    continue;
+                };
+                let better = match lead.get(&group) {
+                    None => true,
+                    Some((g, gs)) => {
+                        (crate::photos::lead_rank(f, &s), f.file_name())
+                            < (crate::photos::lead_rank(g, gs), g.file_name())
+                    }
+                };
+                if better {
+                    lead.insert(group, (f, s));
+                }
+            }
+            photo_groups
+                .iter()
+                .filter_map(|(path, (group, kept))| {
+                    let (_, s) = lead.get(group)?;
+                    Some((
+                        *path,
+                        crate::photos::Named {
+                            shot: s.clone(),
+                            kept: kept.clone(),
+                        },
+                    ))
+                })
+                .collect()
+        }
+    };
     // The video each subtitle goes with, whose picture names it too: the
     // one with the same movie or episode in its folder, the one with its
     // name first.
@@ -1067,6 +1266,7 @@ pub fn preview(
             subtitle_video.get(file.path.as_path()).copied()
         },
         as_folder: false,
+        photo: photos.get(file.path.as_path()),
     };
     // What each lookup reads (see `Pipeline::lookup_name`).
     let lookup: HashMap<&Path, (String, String)> = shown
@@ -1235,6 +1435,22 @@ pub fn preview(
                 drawn,
                 lookup_name,
                 within: view.send_to.as_ref().map(|_| file.base.clone()),
+                photo_date: photo_groups.get(file.path.as_path()).map(|_| {
+                    photos
+                        .get(file.path.as_path())
+                        .map_or(crate::photos::DateFrom::None, |n| n.shot.from)
+                }),
+                touch: photo_rule
+                    .filter(|(_, set)| *set)
+                    .and_then(|_| photos.get(file.path.as_path()))
+                    .filter(|n| n.shot.from != crate::photos::DateFrom::Modified)
+                    .and_then(|n| {
+                        use chrono::TimeZone;
+                        Local
+                            .from_local_datetime(&n.shot.taken)
+                            .earliest()
+                            .map(|t| t.timestamp())
+                    }),
             }
         })
         .collect();
@@ -1297,6 +1513,9 @@ pub fn preview(
     follow_works(&mut items, files, view);
     if let Some(s) = &view.send_to {
         send_rest(&mut items, files, s);
+    }
+    if photo_rule.is_some() {
+        number_shots(&mut items, &photos, &photo_groups, &view.identical);
     }
 
     // Repeated targets within the batch. A file that keeps its name is not
@@ -1701,6 +1920,142 @@ mod tests {
                 target: Target::Name,
             },
         }]
+    }
+
+    #[test]
+    fn photos_by_date() {
+        let d = tempfile::tempdir().unwrap();
+        let fotos = d.path().join("Fotos");
+        fs::create_dir_all(fotos.join("2019/2019-05")).unwrap();
+        // Already there, not in the list: its name is taken.
+        fs::write(fotos.join("2019/2019-05/2019-05-12 14.30.22.jpg"), "x").unwrap();
+        let files = entries(
+            &fotos,
+            &[
+                "IMG_20190512_143022.jpg",
+                "IMG_20190512_143022.dng",
+                "IMG_20190512_143022.xmp",
+                "PXL_20190512_150000002.jpg",
+                "PXL_20190512_150000001.jpg",
+                "IMG-20190513-WA0001.jpg",
+                "IMG-20190513-WA0002.jpg",
+                "foto.jpg",
+                "notes.txt",
+            ],
+        );
+        let steps = vec![Step {
+            enabled: true,
+            rule: Rule::Photo {
+                template: "{ano}-{mês}-{dia} {hora}.{minuto}.{segundo}".into(),
+                from_name: true,
+                modified: false,
+                shift_hours: 0,
+                folders: true,
+                folder_template: "{ano}/{ano}-{mês}".into(),
+                set_modified: false,
+            },
+        }];
+        let p = preview(&files, &steps, &HashMap::new(), &View::default());
+        let got = |name: &str| {
+            let i = p.items.iter().find(|i| i.original == name).unwrap();
+            (
+                i.folder.clone().unwrap_or_default(),
+                i.new_name.clone(),
+                i.photo_date,
+            )
+        };
+        use crate::photos::DateFrom;
+        let named = |name: &str| (got(name).0, got(name).1);
+        let may = |s: &str| ("2019/2019-05".to_string(), s.to_string());
+        assert_eq!(
+            named("IMG_20190512_143022.jpg"),
+            may("2019-05-12 14.30.22-1.jpg")
+        );
+        assert_eq!(
+            named("IMG_20190512_143022.dng"),
+            may("2019-05-12 14.30.22-1.dng")
+        );
+        assert_eq!(
+            named("IMG_20190512_143022.xmp"),
+            may("2019-05-12 14.30.22-1.xmp")
+        );
+        assert_eq!(
+            named("PXL_20190512_150000001.jpg"),
+            may("2019-05-12 15.00.00-1.jpg")
+        );
+        assert_eq!(
+            named("PXL_20190512_150000002.jpg"),
+            may("2019-05-12 15.00.00-2.jpg")
+        );
+        assert_eq!(named("IMG-20190513-WA0001.jpg"), may("2019-05-13-1.jpg"));
+        assert_eq!(named("IMG-20190513-WA0002.jpg"), may("2019-05-13-2.jpg"));
+        assert_eq!(got("IMG-20190513-WA0001.jpg").2, Some(DateFrom::Name));
+        assert_eq!(
+            got("foto.jpg"),
+            (String::new(), "foto.jpg".into(), Some(DateFrom::None))
+        );
+        assert_eq!(got("notes.txt"), (String::new(), "notes.txt".into(), None));
+        assert!(p.items.iter().all(|i| i.status != Status::Conflict));
+
+        // An identical copy alone is not numbered: the duplicate check
+        // tells it.
+        let copies = entries(
+            &fotos,
+            &["IMG_20190601_101010.jpg", "copia IMG_20190601_101010.jpg"],
+        );
+        let mut view = View::default();
+        for f in &copies {
+            view.identical.insert(f.path.clone(), 7);
+        }
+        let p = preview(&copies, &steps, &HashMap::new(), &view);
+        let names: Vec<&str> = p.items.iter().map(|i| i.new_name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["2019-06-01 10.10.10.jpg", "2019-06-01 10.10.10.jpg"]
+        );
+        assert_eq!(
+            p.items
+                .iter()
+                .filter(|i| i.problem == Some(Problem::Copy))
+                .count(),
+            1
+        );
+
+        // An identical copy alone is not numbered: the duplicate check
+        // tells it.
+        let copies = entries(
+            &fotos,
+            &["IMG_20190601_101010.jpg", "copia IMG_20190601_101010.jpg"],
+        );
+        let mut view = View::default();
+        for f in &copies {
+            view.identical.insert(f.path.clone(), 7);
+        }
+        let p = preview(&copies, &steps, &HashMap::new(), &view);
+        let names: Vec<&str> = p.items.iter().map(|i| i.new_name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["2019-06-01 10.10.10.jpg", "2019-06-01 10.10.10.jpg"]
+        );
+        assert_eq!(
+            p.items
+                .iter()
+                .filter(|i| i.problem == Some(Problem::Copy))
+                .count(),
+            1
+        );
+
+        // Named so, they stay so.
+        let again = entries(
+            &fotos.join("2019/2019-05"),
+            &["2019-05-12 15.00.00-1.jpg", "2019-05-12 15.00.00-2.jpg"],
+        );
+        let p = preview(&again, &steps, &HashMap::new(), &View::default());
+        assert!(
+            p.items.iter().all(|i| i.status == Status::Unchanged),
+            "{:?}",
+            p.items
+        );
     }
 
     #[test]

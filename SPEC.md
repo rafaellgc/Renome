@@ -1262,6 +1262,72 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   `.tagging` note like songs (see 2.3): a stop halfway removes the copy
   and keeps what was written for undo.
 
+### 2.5b Photos (dates, offline)
+
+- Rule `photo` (`photos.rs`): names photos, raw files, phone/camera videos
+  and edits (`is_shot`: JPEG, HEIC/HEIF, AVIF, PNG, WebP, TIFF, GIF; DNG,
+  CR2, CR3, NEF, ARW, RAF, ORF, RW2, PEF, SRW and other RAW; MP4, MOV, M4V,
+  3GP, MTS, M2TS, AVI; XMP, AAE) by when they were taken. No network.
+- Date, in order: inside the file (`photos::Inside`, cached on the
+  `FileEntry`: EXIF `DateTimeOriginal`/`DateTimeDigitized`/`DateTime`, make
+  and model, pixel size, else the picture header's size; videos:
+  `video::recorded`, Apple's `com.apple.quicktime.creationdate` — local time
+  — or the `mvhd` creation time, UTC, shown in this computer's zone, years
+  before 1990 ignored); then the name (`date_in_name`, on by default:
+  `YYYY[-_.]MM[-_.]DD` after a non-digit, optionally a time `HH MM SS`
+  with `-_.:h m` and up to 3 more digits; years from 1970; a day alone
+  leaves the time keys empty); then, when asked, the change date (not for
+  edits). For videos, a name with date and time wins over the header
+  (phones name the start of recording; the header often holds when the
+  file was finished — measured 23 s and 58 s later — in UTC).
+  `shift_hours` is added to the inside and name dates (not to a name's day
+  without a time). Files with
+  none stay; they are marked (`photo_date: none`) and counted on the card.
+- Reading (`photos::read_all`, up to 8 threads; the app runs it before
+  the preview and emits `photos-progress`): only headers are read. JPEG
+  and PNG EXIF come from `files::read_exif`, which walks segments/chunks
+  up to the image data (the EXIF library reads a whole JPEG without EXIF
+  looking for it); the pixel size from the JPEG frame header or PNG IHDR
+  (`files::picture_size`; the image library reads a whole JPEG); MP4/MOV
+  index read once for date and size (`video::clip`). Measured on an
+  external HDD, 13,122 files: 201 s and ~6.5 GB read before, 62 s after.
+- Concurrency (app): the preview reads on a copy of the list, outside the
+  list's lock, and copies what it read back (`FileEntry::keep_read`, the
+  photo cache included); `busy_disk` is held by each preview and by
+  apply, and the searches for identical and similar files wait on it
+  before each file. Commands that take the list's lock all run off the
+  window's thread.
+- Template keys (pt/en/es): `{year}`, `{month}`, `{day}`, `{hour}`,
+  `{minute}`, `{second}`, `{date}`, `{month name}` (+ pt/es), `{camera}`
+  (make before model unless the model starts with the make's first word),
+  `{width}`, `{height}`, `{name}` (the current stem). Empty parts go with
+  their brackets; runs of two or more separators left by empty keys become
+  one space (or the first mark); ends are trimmed of separators.
+- Groups (`photos::groups`): files in one folder with one stem (case
+  ignored; an edit `X.CR2.xmp` counts as `X` and keeps `.CR2`) are one
+  photo; all take the date of the lead (`lead_rank`: date inside, then
+  name, then change date; a photo before a raw file before a video).
+- Bursts (`plan::number_shots`): files whose new name (without the kept
+  part and extension) in its destination is shared by more than one group,
+  or is taken on disk by a file outside the list, get `-1`, `-2`… per
+  group, in natural order of their current names, skipping numbers taken
+  on disk; identical copies (`view.identical`) count as one group (alone
+  they are not numbered) and take their original's number, so the
+  duplicate check flags them. A file numbered back to its own name
+  is unchanged (stable on a second run).
+- Folders (`folders`, default `{year}/{year}-{month}`): made in
+  `library_root(base, levels)`, the folder the file was added with, climbed
+  above up to `levels` date-named folders (digits, separators, month names).
+- "Set the file date" (`set_modified`): `PreviewItem::touch` (the shot's
+  local time as Unix seconds; not for change-date shots); after apply the
+  app calls `History::set_times` for each done operation's destination,
+  which records the old date (seconds, nanoseconds) in the entry; undo
+  sets it back before reversing the renames (copies' stamps are updated so
+  undo still removes them).
+- The list marks: date from the name (auto, tip), from the change date
+  (choose, tip), none (none, tip). Identical copies and similar pictures
+  work as for any files.
+
 ### 2.6 Order of operations
 
 - Preview: each file's name goes through the rules from top to bottom

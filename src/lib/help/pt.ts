@@ -581,7 +581,7 @@ ${ex("Nome_da_Serie_012_(2019)_(Digital)_(grupo).cbz", "Nome da Série #012 (201
   <li>Na janela de escolha dá para buscar de novo com outro nome e estreitar a lista com o <b>Ano</b> em que a série começou e a <b>Editora</b> (parte do nome basta; os catálogos de mangá não são buscados por editora). As séries com menos edições que o número dos arquivos vão para o fim. O GCD compara o nome letra por letra: maiúsculas e acentos não contam, mas a pontuação sim, por isso o programa busca o nome como foi digitado e também sem a pontuação (<i>Série: Nome</i> acha também <i>Série Nome</i>). Com o ano, o GCD é consultado pela palavra mais longa do nome, e aí a pontuação não atrapalha: <i>Série Nome</i> acha também <i>Série: Nome</i>. Na editora, vale o nome curto que o catálogo usa (<i>Titan</i> é achada com <i>Titan Comics</i>), e dá para pôr mais de uma, separadas por <code>;</code>. No GCD, a editora custa uma consulta a mais para cada editora diferente encontrada (até 12, as mais frequentes primeiro): junte o ano para serem poucas, principalmente sem conta.</li>
   <li>Cada arquivo é casado com a edição pelo número (ou pelo volume, num mangá numerado por volumes; um volume único, com a única edição da série). Os que não casam ficam com o nome da série e o número deles mesmos, na mesma pasta dos outros, e abrem a revisão, com a lista de edições da série, para escolher a edição exata. <b>Nenhuma destas</b> devolve o nome que o arquivo diz.</li>
   <li>A revisão mostra a <b>capa do arquivo</b> (a primeira página; num PDF, a primeira página desenhada) e compara com a capa de cada edição: as de capa igual sobem para o topo com o selo <b>mesma capa</b>, que vale também para a mesma arte em outra língua. Com até 60 edições com capa, a comparação é feita sozinha; com mais, aperte <b>Comparar capas</b> (as 300 primeiras; cada capa é baixada uma vez por sessão). Uma capa variante ou uma página de abertura antes da capa não batem.</li>
-  <li>Na tela <b>Escolher a série</b>, a capa do arquivo aparece no canto e é comparada com a da mesma edição (ou volume) em cada uma das 9 primeiras séries: as que batem sobem com o selo <b>mesma capa</b>, depois que todas forem comparadas. Assim dá para separar a publicação certa de outra com o mesmo nome. Funciona com o Metron, o Comic Vine e o MangaDex (uma ou duas consultas a mais por série; séries com mais de 200 edições ficam de fora); no AniList e no MangaUpdates, que têm só a capa da série, só para o volume 1. <b>O Grand Comics Database não entrega as capas para programas</b> (nem na lista de séries, nem nas edições): com ele não há comparação de capas. Clique numa capa (a do arquivo, a de uma série ou a de uma edição) para vê-la grande, ao lado da capa do arquivo; Esc ou um clique fecha.</li>
+  <li>Na tela <b>Escolher a série</b>, a capa do arquivo aparece no canto e é comparada com a da mesma edição (ou volume) em cada uma das 9 primeiras séries: as que batem sobem com o selo <b>mesma capa</b>, depois que todas forem comparadas. Assim dá para separar a publicação certa de outra com o mesmo nome. Funciona com o Metron, o Comic Vine e o MangaDex (uma ou duas consultas a mais por série; séries com mais de 200 edições ficam de fora); no AniList e no MangaUpdates, que têm só a capa da série, só para o volume 1. <b>O Grand Comics Database não entrega as capas para programas</b> (nem na lista de séries, nem nas edições): com ele não há comparação de capas. Clique numa capa (a do arquivo, a de uma série ou a de uma edição) para vê-la grande, ao lado da capa do arquivo; Esc ou um clique fecha. As capas aparecem aos poucos: cada série pede ao catálogo a lista das edições dela e depois baixa a capa, então o tempo depende de quão rápido o site responde e do intervalo que ele exige entre as consultas (o programa espera 3 segundos entre as do Metron, cerca de 1 segundo no Comic Vine e meio segundo no MangaDex). Com o Metron, comparar as 9 séries pode levar meio minuto; enquanto isso, já dá para escolher.</li>
 </ol>
 <ul>
   <li><b>Modelo pronto</b>: <b>Padrão do Renome</b> (que serve também para o Komga, que trata cada pasta como uma série) ou <b>Kavita</b> (sem o título depois de " - ", que o Kavita não lê). Os dois preenchem o modelo e as pastas e ligam as pastas de série, porque os dois servidores querem cada série na sua pasta. Depois dá para mudar à vontade.</li>
@@ -625,6 +625,45 @@ ${ex("Nome_da_Serie_012_(2019)_(Digital)_(grupo).cbz", "Nome da Série #012 (201
   <li>Só se grava o que o catálogo (ou o próprio arquivo) informa: no GCD, os números das edições vêm sem título, e nos catálogos de mangá só há a série. Um <code>MetronInfo.xml</code> que o arquivo tenha não é atualizado.</li>
 </ul>
 <p class="tip">Aos catálogos vão só o nome da série procurada e os números das séries e edições, nunca o nome completo do arquivo, as pastas ou o conteúdo. O login do GCD vai só ao comics.org.</p>`,
+  },
+  {
+    id: "r-photo",
+    title: "Foto",
+    sub: true,
+    html: `
+<p>Dá nome a <b>fotos e vídeos</b> de celular ou câmera pela <b>data em que foram tirados</b> e, se você quiser, organiza em pastas por data. Funciona sem internet: tudo é lido dos próprios arquivos.</p>
+${ex("IMG_4821.JPG", "2019-05-12 14.30.22.JPG")}
+${ex("IMG-20190513-WA0001.jpg", "2019-05-13.jpg")}
+<h4>De onde vem a data</h4>
+<ol>
+  <li><b>De dentro do arquivo</b>: nas fotos, a data do EXIF (JPEG, HEIC, PNG, WebP, TIFF e os RAW baseados em TIFF, como DNG, CR2, NEF, ARW, PEF e SRW); nos vídeos MP4, MOV, M4V e 3GP, a data de gravação.</li>
+  <li><b>Do nome do arquivo</b> (opção ligada por padrão): <code>IMG_20190512_143022</code>, <code>PXL_20190512_143022123</code>, <code>VID_20190512_143022</code>, <code>IMG-20190512-WA0001</code> (WhatsApp), <code>Screenshot_2019-05-12-14-30-22</code>, <code>WhatsApp Image 2019-05-12 at 14.30.22</code>, <code>2019-05-12 14.30.22</code>. Um nome só com o dia deixa a hora vazia. Nos <b>vídeos</b>, um nome com data e hora (<code>20260913_185946</code>, <code>VID_…</code>) vale mais que a data de dentro: o celular põe no nome o início da gravação, e dentro do vídeo costuma ficar a hora em que o arquivo foi fechado, segundos ou minutos depois.</li>
+  <li><b>Da data de modificação</b>, só se você ligar a opção. Numa foto copiada, baixada ou recebida, ela costuma ser a data da cópia.</li>
+</ol>
+<p>Sem nenhuma delas, o arquivo <b>fica como está</b> e ganha uma marca na lista; o card diz quantos ficaram assim. Uma data tirada do nome ou da modificação também ganha marca (passe o mouse para ver de onde veio).</p>
+<h4>Modelo</h4>
+<p>Use <code>{ano}</code>, <code>{mês}</code>, <code>{dia}</code>, <code>{hora}</code>, <code>{minuto}</code>, <code>{segundo}</code>, <code>{data}</code> (2019-05-12), <code>{nome do mês}</code>, <code>{câmera}</code> (marca e modelo, como <code>Apple iPhone 12</code>), <code>{largura}</code>, <code>{altura}</code> e <code>{nome}</code> (o nome atual). Os modelos prontos dão <code>2019-05-12 14.30.22</code>, <code>20190512_143022</code>, com a câmera entre parênteses, ou a data antes do nome atual. O que fica vazio (uma hora que não se sabe, uma câmera que a foto não diz) some junto com os separadores e parênteses em volta.</p>
+<h4>Arquivos que andam juntos</h4>
+<p>Na mesma pasta, os arquivos com o <b>mesmo nome antes da extensão</b> são uma foto só e recebem o mesmo nome novo: o JPEG e o RAW (<code>IMG_0001.JPG</code> e <code>IMG_0001.CR2</code>), as edições (<code>IMG_0001.xmp</code>, <code>IMG_0001.CR2.xmp</code>, o <code>.AAE</code> do iPhone) e a foto e o vídeo de uma Live Photo (<code>IMG_0001.HEIC</code> e <code>IMG_0001.MOV</code>). A data é a do arquivo que a tem dentro (a foto antes do RAW e do vídeo).</p>
+<h4>Fotos do mesmo segundo</h4>
+<p>Fotos em sequência (rajada) e fotos cujo nome novo já existe na pasta ganham <code>-1</code>, <code>-2</code>… em vez de dar conflito, na ordem dos nomes atuais; os arquivos que andam juntos ganham o mesmo número. Renomeadas assim, ficam como estão numa próxima vez. Cópias idênticas não ganham número: o conflito avisa que são iguais.</p>
+<h4>Opções</h4>
+<ul>
+  <li><b>Acertar o relógio</b>: horas somadas à data da câmera e à do nome (não à de modificação, nem a um nome só com o dia), para uma câmera com o relógio errado ou fotos de viagem em outro fuso. Vale para todos os arquivos da lista: para corrigir só os de uma câmera, filtre a lista antes.</li>
+  <li><b>Organizar em pastas por data</b>: modelo de pasta com <code>/</code> entre os níveis (<code>{ano}/{ano}-{mês}</code>, <code>{ano}/{mês} - {nome do mês}</code>…). As pastas são criadas na pasta que você adicionou; se ela mesma já for uma pasta de data (<code>Fotos/2019/2019-05</code>), na pasta acima delas. Pastas que ficarem vazias são apagadas.</li>
+  <li><b>Acertar a data do arquivo</b>: a data de modificação dos arquivos renomeados ou movidos passa a ser a da foto, o que ajuda galerias e celulares que ordenam por ela. O conteúdo do arquivo não é alterado, e desfazer devolve a data antiga.</li>
+</ul>
+<p>As <b>cópias idênticas</b> e as <b>fotos parecidas</b> continuam funcionando junto com a regra: aparecem no rodapé, e dois cliques na marca de uma abrem a comparação lado a lado, de onde as que sobram vão para a Lixeira (veja <b>Cópias idênticas</b>).</p>
+<p><b>Limitações:</b></p>
+<ul>
+  <li>Na primeira vez, o começo de cada foto e vídeo é lido para achar a data: num HD externo, cerca de um minuto para 13 mil arquivos, com o andamento no rodapé (<b>Lendo as datas das fotos…</b>). A lista aparece quando a leitura termina; depois, a prévia é instantânea. A janela continua respondendo, e a busca de cópias e de imagens parecidas espera essa leitura. Copiar uma coleção grande para outra pasta leva o tempo de copiar todos os dados.</li>
+  <li>Alguns RAW podem não ter a data lida (como CR3, RAF, ORF, RW2, X3F, CRW e MRW): ficam com a data do JPEG de mesmo nome, ou com a do nome. Vídeos MTS, M2TS e AVI só têm a data do nome ou da modificação.</li>
+  <li>A data de gravação de um vídeo vem, pela regra do formato, no horário universal (UTC), e é mostrada no fuso deste computador; um vídeo gravado em outro fuso fica com a hora daqui. Os vídeos do iPhone dizem o fuso e ficam certos. Algumas câmeras gravam a hora local como se fosse UTC: corrija com <b>Acertar o relógio</b>.</li>
+  <li>Dois arquivos diferentes com o mesmo nome e extensões diferentes na mesma pasta (<code>foto.jpg</code> e <code>foto.png</code>) são tratados como uma foto só.</li>
+  <li>Com pastas por data, uma foto que estava numa subpasta (<code>Fotos/Viagem</code>) sai dela para a pasta da data.</li>
+  <li><b>Acertar a data do arquivo</b> vale só para os arquivos renomeados ou movidos; um que já tem o nome certo não é tocado. A data de criação não é alterada.</li>
+  <li>Nada é gravado dentro das fotos, e o lugar onde foram tiradas (GPS) não é usado.</li>
+</ul>`,
   },
   {
     id: "preview",

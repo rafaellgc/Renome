@@ -59,6 +59,10 @@ struct AppState {
     /// Bumped by each search for identical files; an older search that sees
     /// a newer number stops.
     identical_run: AtomicU64,
+    /// Held while a preview reads the files or a renaming writes them: the
+    /// searches for copies wait meanwhile (on a hard disk, two readers
+    /// each go slower than one after the other).
+    busy_disk: Mutex<()>,
     /// Bumped by Stop; a search that sees a newer number than it started
     /// with stops, keeping what it found.
     stop_run: AtomicU64,
@@ -151,28 +155,37 @@ struct AddResult {
 
 /// Saves the current state before the UI changes the list.
 #[tauri::command]
-fn checkpoint(state: State<AppState>, overrides: Overrides) {
-    let s = &mut *state.session.lock().unwrap();
-    if s.undo.len() == UNDO_LIMIT {
-        s.undo.remove(0);
-    }
-    s.undo.push((s.files.clone(), overrides));
+async fn checkpoint(app: AppHandle, overrides: Overrides) -> Result<(), String> {
+    in_background(app, move |state| {
+        let s = &mut *state.session.lock().unwrap();
+        if s.undo.len() == UNDO_LIMIT {
+            s.undo.remove(0);
+        }
+        s.undo.push((s.files.clone(), overrides));
+    })
+    .await
 }
 
 /// Drops the last checkpoint (the edit changed nothing).
 #[tauri::command]
-fn drop_checkpoint(state: State<AppState>) {
-    state.session.lock().unwrap().undo.pop();
+async fn drop_checkpoint(app: AppHandle) -> Result<(), String> {
+    in_background(app, |state| {
+        state.session.lock().unwrap().undo.pop();
+    })
+    .await
 }
 
 /// Restores the list to the last checkpoint and returns its hand-edited
 /// names; `None` when there is nothing to undo.
 #[tauri::command]
-fn undo_list(state: State<AppState>) -> Option<Overrides> {
-    let s = &mut *state.session.lock().unwrap();
-    let (files, overrides) = s.undo.pop()?;
-    s.files = files;
-    Some(overrides)
+async fn undo_list(app: AppHandle) -> Result<Option<Overrides>, String> {
+    in_background(app, |state| {
+        let s = &mut *state.session.lock().unwrap();
+        let (files, overrides) = s.undo.pop()?;
+        s.files = files;
+        Some(overrides)
+    })
+    .await
 }
 
 /// The user's own folders (home, Downloads, Videos…), never taken for a
@@ -228,26 +241,35 @@ async fn add_paths(
 }
 
 #[tauri::command]
-fn remove_files(state: State<AppState>, paths: Vec<PathBuf>) {
-    let remove: HashSet<PathBuf> = paths.into_iter().collect();
-    state
-        .session
-        .lock()
-        .unwrap()
-        .files
-        .retain(|f| !remove.contains(&f.path));
+async fn remove_files(app: AppHandle, paths: Vec<PathBuf>) -> Result<(), String> {
+    in_background(app, move |state| {
+        let remove: HashSet<PathBuf> = paths.into_iter().collect();
+        state
+            .session
+            .lock()
+            .unwrap()
+            .files
+            .retain(|f| !remove.contains(&f.path));
+    })
+    .await
 }
 
 #[tauri::command]
-fn clear_files(state: State<AppState>) {
-    state.session.lock().unwrap().files.clear();
+async fn clear_files(app: AppHandle) -> Result<(), String> {
+    in_background(app, |state| state.session.lock().unwrap().files.clear()).await
 }
 
 /// Moves the selected files one position up (`-1`) or down (`1`).
 #[tauri::command]
-fn move_files(state: State<AppState>, paths: Vec<PathBuf>, delta: i32) {
-    let selected: HashSet<PathBuf> = paths.into_iter().collect();
-    let files = &mut state.session.lock().unwrap().files;
+async fn move_files(app: AppHandle, paths: Vec<PathBuf>, delta: i32) -> Result<(), String> {
+    in_background(app, move |state| {
+        move_in(&mut state.session.lock().unwrap().files, &paths, delta)
+    })
+    .await
+}
+
+fn move_in(files: &mut [FileEntry], paths: &[PathBuf], delta: i32) {
+    let selected: HashSet<&PathBuf> = paths.iter().collect();
     let n = files.len();
     let order: Vec<usize> = if delta < 0 {
         (1..n).collect()
@@ -297,13 +319,48 @@ async fn preview(
     overrides: Overrides,
     mut view: View,
 ) -> Result<Preview, String> {
+    let emitter = app.clone();
     in_background(app, move |state| {
-        let s = state.session.lock().unwrap();
-        view.identical = s.identical.clone();
-        view.alike = s.alike.clone();
-        view.similar = s.similar.clone();
+        let _disk = state.busy_disk.lock().unwrap();
+        // Read on a copy of the list: the list stays free for the window
+        // (the first reading of thousands of photos takes a minute).
+        let files = {
+            let s = state.session.lock().unwrap();
+            view.identical = s.identical.clone();
+            view.alike = s.alike.clone();
+            view.similar = s.similar.clone();
+            s.files.clone()
+        };
         view.protected = protected_dirs();
-        renome_core::preview(&s.files, &steps, &overrides, &view)
+        if steps
+            .iter()
+            .any(|s| s.enabled && matches!(s.rule, renome_core::rules::Rule::Photo { .. }))
+        {
+            let list: Vec<&FileEntry> = files.iter().collect();
+            let last = Mutex::new(Instant::now());
+            renome_core::photos::read_all(&list, &|done, total| {
+                let mut last = last.lock().unwrap();
+                if last.elapsed() > Duration::from_millis(150) || done == total {
+                    *last = Instant::now();
+                    let _ = emitter.emit(
+                        "photos-progress",
+                        IdenticalProgress {
+                            done: done as u64,
+                            total: total as u64,
+                        },
+                    );
+                }
+            });
+        }
+        let preview = renome_core::preview(&files, &steps, &overrides, &view);
+        // What was read stays known.
+        let read: HashMap<&PathBuf, &FileEntry> = files.iter().map(|f| (&f.path, f)).collect();
+        for f in state.session.lock().unwrap().files.iter_mut() {
+            if let Some(other) = read.get(&f.path) {
+                f.keep_read(other);
+            }
+        }
+        preview
     })
     .await
 }
@@ -345,7 +402,10 @@ async fn find_identical(app: AppHandle) -> Result<Option<Copies>, String> {
         let state = app.state::<AppState>();
         let run = state.identical_run.fetch_add(1, Ordering::SeqCst) + 1;
         let files = state.session.lock().unwrap().files.clone();
-        let stale = || state.identical_run.load(Ordering::SeqCst) != run;
+        let stale = || {
+            drop(state.busy_disk.lock());
+            state.identical_run.load(Ordering::SeqCst) != run
+        };
         let mut hashes = state.hashes.lock().unwrap();
         let mut last = Instant::now();
         let groups = renome_core::find_identical(
@@ -403,7 +463,11 @@ async fn find_similar(app: AppHandle) -> Result<Option<Vec<Vec<PathBuf>>>, Strin
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let run = state.identical_run.load(Ordering::SeqCst);
-        let stale = || state.identical_run.load(Ordering::SeqCst) != run;
+        // Asked before each picture: waits while a preview reads.
+        let stale = || {
+            drop(state.busy_disk.lock());
+            state.identical_run.load(Ordering::SeqCst) != run
+        };
         let (files, identical) = {
             let s = state.session.lock().unwrap();
             (s.files.clone(), s.identical.clone())
@@ -736,13 +800,21 @@ async fn apply(
     let stop = stop_signal(&app);
     let emitter = app.clone();
     in_background(app, move |state| {
+        let _disk = state.busy_disk.lock().unwrap();
         let mut s = state.session.lock().unwrap();
         view.identical = s.identical.clone();
         view.alike = s.alike.clone();
         view.similar = s.similar.clone();
         view.protected = protected_dirs();
         // Recompute the preview here to apply exactly what is visible and valid right now.
-        let ops = renome_core::preview(&s.files, &steps, &overrides, &view).operations();
+        let plan = renome_core::preview(&s.files, &steps, &overrides, &view);
+        let ops = plan.operations();
+        // The photo rule's "set the file date": each photo's date, by path.
+        let touch: HashMap<PathBuf, i64> = plan
+            .items
+            .iter()
+            .filter_map(|i| Some((i.path.clone(), i.touch?)))
+            .collect();
         // Copies (and moves to other disks) tell how far they are.
         let last = std::cell::Cell::new(std::time::Instant::now());
         let progress = |done: u64, total: u64| {
@@ -759,6 +831,16 @@ async fn apply(
             stop: &stop,
         };
         let report = state.history.apply_with(&ops, &hooks);
+        if let Some(id) = &report.history_id {
+            let times: Vec<(PathBuf, i64)> = report
+                .done
+                .iter()
+                .filter_map(|op| Some((op.to.clone(), *touch.get(&op.from)?)))
+                .collect();
+            if !times.is_empty() {
+                let _ = state.history.set_times(id, &times);
+            }
+        }
         refresh_renamed(&mut s.files, &report);
         // Earlier states point to the old names.
         s.undo.clear();
@@ -2001,6 +2083,7 @@ pub fn run() {
                     .join("pictures"),
             )),
             identical_run: AtomicU64::new(0),
+            busy_disk: Mutex::new(()),
             stop_run: AtomicU64::new(0),
             mb: musicbrainz::Client::default(),
             acoustid: acoustid::Client::default(),

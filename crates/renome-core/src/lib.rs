@@ -43,6 +43,7 @@ pub mod kind;
 pub mod music;
 pub mod musicbrainz;
 pub(crate) mod pages;
+pub mod photos;
 pub mod plan;
 pub mod playlists;
 pub mod rules;

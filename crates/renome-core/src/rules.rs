@@ -395,6 +395,36 @@ pub enum Rule {
         #[serde(default = "page_size")]
         page_size: u32,
     },
+    /// Names photos and videos by when they were taken (see
+    /// [`crate::photos`]); files without a date are left alone.
+    Photo {
+        /// `{year}`, `{month}`, `{day}`, `{hour}`, `{minute}`, `{second}`,
+        /// `{camera}`, `{width}`, `{height}`, `{name}`…
+        template: String,
+        /// The date in the name, for files without one inside.
+        #[serde(default = "yes")]
+        from_name: bool,
+        /// Then the file's change date.
+        #[serde(default)]
+        modified: bool,
+        /// Hours added to the camera's time.
+        #[serde(default)]
+        shift_hours: i32,
+        /// Moves each file into folders made from `folder_template`.
+        #[serde(default)]
+        folders: bool,
+        /// Folder levels separated by `/`.
+        #[serde(default = "photo_folder")]
+        folder_template: String,
+        /// Sets the renamed files' change date to when they were taken
+        /// (used by the app).
+        #[serde(default)]
+        set_modified: bool,
+    },
+}
+
+fn photo_folder() -> String {
+    "{year}/{year}-{month}".into()
 }
 
 fn cover_size() -> u32 {
@@ -502,6 +532,8 @@ pub struct Ctx<'a> {
     /// Names the movie's folder: as the video, without a subtitle's
     /// language or the picture's size.
     pub as_folder: bool,
+    /// What the photo rule names this file by (its photo's date).
+    pub photo: Option<&'a crate::photos::Named>,
 }
 
 enum Compiled {
@@ -571,6 +603,28 @@ impl Pipeline {
     pub fn run(&self, ctx: &Ctx) -> (String, String) {
         let (stem, ext, _) = self.run_full(ctx);
         (stem, ext)
+    }
+
+    /// The photo rule's way of reading dates, and whether it sets the
+    /// files' change dates, when one is on.
+    pub fn photos(&self) -> Option<(crate::photos::Options, bool)> {
+        self.steps.iter().find_map(|s| match s {
+            Compiled::Plain(Rule::Photo {
+                from_name,
+                modified,
+                shift_hours,
+                set_modified,
+                ..
+            }) => Some((
+                crate::photos::Options {
+                    from_name: *from_name,
+                    modified: *modified,
+                    shift_hours: *shift_hours,
+                },
+                *set_modified,
+            )),
+            _ => None,
+        })
     }
 
     /// The music rule's `(from_name, folders)`, when one is on.
@@ -681,6 +735,22 @@ impl Pipeline {
                         if !levels.is_empty() && !comics::in_place(&ctx.file.dir, &m) {
                             moved = Some(Move::Into {
                                 root: comics::library_root(&ctx.file.dir, &m, &levels),
+                                folders: levels,
+                            });
+                        }
+                    }
+                    if !ctx.file.is_dir
+                        && let Rule::Photo {
+                            folders: true,
+                            folder_template,
+                            ..
+                        } = rule
+                        && let Some(p) = ctx.photo
+                    {
+                        let levels = crate::photos::folders(folder_template, &p.shot);
+                        if !levels.is_empty() {
+                            moved = Some(Move::Into {
+                                root: crate::photos::library_root(&ctx.file.base, levels.len()),
                                 folders: levels,
                             });
                         }
@@ -1091,6 +1161,15 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             }
         }
 
+        Rule::Photo { template, .. } => {
+            if let Some(p) = ctx.photo {
+                let name = crate::photos::expand(template, &p.shot, &ctx.file.stem, false);
+                if !name.is_empty() {
+                    *stem = name + &p.kept;
+                }
+            }
+        }
+
         Rule::Replace { .. } | Rule::Regex { .. } => unreachable!("compiled separately"),
     }
 }
@@ -1447,6 +1526,7 @@ mod tests {
             video: Default::default(),
             kind: Default::default(),
             convert_pages: Default::default(),
+            photo: Default::default(),
         }
     }
 
@@ -1477,6 +1557,7 @@ mod tests {
             comic_folder: None,
             video: None,
             as_folder: false,
+            photo: None,
         });
         join_name(&s, &e)
     }
@@ -2059,6 +2140,7 @@ mod tests {
             comic_folder: None,
             video: None,
             as_folder: false,
+            photo: None,
         });
         assert_eq!(s, "a");
     }

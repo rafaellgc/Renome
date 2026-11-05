@@ -637,6 +637,20 @@ struct Journal {
     /// Each copy made as it was left (after its lists and tags), for undo.
     #[serde(default)]
     stamps: Vec<(PathBuf, Stamp)>,
+    /// Files whose change date was set (photos, to when they were taken),
+    /// with the one they had (seconds and nanoseconds); undo puts it back.
+    #[serde(default)]
+    times: Vec<(PathBuf, i64, u32)>,
+}
+
+/// Sets a file's change date.
+fn set_time(path: &Path, t: std::time::SystemTime) -> std::io::Result<()> {
+    // Read-only files take it through a handle opened for reading (Unix).
+    File::options()
+        .write(true)
+        .open(path)
+        .or_else(|_| File::open(path))?
+        .set_modified(t)
 }
 
 /// A rename in progress: written before it starts and removed when the
@@ -928,6 +942,7 @@ impl History {
                                 tags: Vec::new(),
                                 tagged: 0,
                                 stamps,
+                                times: Vec::new(),
                             },
                         )
                         .is_ok()
@@ -1054,6 +1069,7 @@ impl History {
                 tags: Vec::new(),
                 tagged: 0,
                 stamps: copy_stamps(&report.done),
+                times: Vec::new(),
             };
             match self.write(&id, &j) {
                 Ok(()) => report.history_id = Some(id),
@@ -1115,6 +1131,7 @@ impl History {
             tags: Vec::new(),
             tagged: 0,
             stamps: Vec::new(),
+            times: Vec::new(),
         };
         self.write(&id, &j)?;
         Ok(id)
@@ -1149,6 +1166,39 @@ impl History {
         trashed_originals(&mut j, &backups);
         j.tags.extend(backups);
         self.write(id, &j)
+    }
+
+    /// Sets the change date (Unix seconds) of files entry `id` renamed,
+    /// keeping the dates they had for undo. How many were set.
+    pub fn set_times(&self, id: &str, times: &[(PathBuf, i64)]) -> Result<usize, String> {
+        use std::time::{Duration, UNIX_EPOCH};
+        let mut j = self.read(id)?;
+        let mut set = 0;
+        for (path, secs) in times {
+            let (Ok(old), Ok(new)) = (
+                fs::metadata(path).and_then(|m| m.modified()),
+                u64::try_from(*secs).map(|s| UNIX_EPOCH + Duration::from_secs(s)),
+            ) else {
+                continue;
+            };
+            let Ok(since) = old.duration_since(UNIX_EPOCH) else {
+                continue;
+            };
+            if old == new || set_time(path, new).is_err() {
+                continue;
+            }
+            j.times
+                .push((path.clone(), since.as_secs() as i64, since.subsec_nanos()));
+            set += 1;
+            // A copy changed so is still the one made.
+            if let Some((_, st)) = j.stamps.iter_mut().find(|(p, _)| p == path)
+                && let Some(now) = stamp(path)
+            {
+                *st = now;
+            }
+        }
+        self.write(id, &j)?;
+        Ok(set)
     }
 
     /// A file entry `id` renamed to `at` moves on to `to` (a comic named
@@ -1298,6 +1348,15 @@ impl History {
         });
         if j.lists.is_empty() && j.tags.is_empty() {
             let _ = fs::remove_dir_all(&backups);
+        }
+        // Change dates go back before the files do (copies are gone).
+        for (path, secs, nanos) in std::mem::take(&mut j.times) {
+            if j.ops.iter().any(|op| op.to == path)
+                && let Ok(s) = u64::try_from(secs)
+            {
+                let t = std::time::UNIX_EPOCH + std::time::Duration::new(s, nanos);
+                let _ = set_time(&path, t);
+            }
         }
         let reverse: Vec<Operation> = j
             .ops
@@ -1719,6 +1778,29 @@ mod tests {
         h.undo(&r.history_id.unwrap()).unwrap();
         assert_eq!(read(p.join("old/list.m3u")), "missing.flac\n");
         assert_eq!(read(p.join("old/a.flac")), "a");
+    }
+
+    #[test]
+    fn undo_puts_change_dates_back() {
+        use std::time::{Duration, UNIX_EPOCH};
+        let d = tempfile::tempdir().unwrap();
+        let h = History::new(d.path().join("h"));
+        fs::write(d.path().join("a.jpg"), "a").unwrap();
+        let before = fs::metadata(d.path().join("a.jpg"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        let r = h.apply(&[op(d.path(), "a.jpg", "b.jpg")]);
+        let id = r.history_id.unwrap();
+        let b = d.path().join("b.jpg");
+        assert_eq!(h.set_times(&id, &[(b.clone(), 1_557_671_422)]).unwrap(), 1);
+        assert_eq!(
+            fs::metadata(&b).unwrap().modified().unwrap(),
+            UNIX_EPOCH + Duration::from_secs(1_557_671_422)
+        );
+        h.undo(&id).unwrap();
+        let a = d.path().join("a.jpg");
+        assert_eq!(fs::metadata(&a).unwrap().modified().unwrap(), before);
     }
 
     #[test]

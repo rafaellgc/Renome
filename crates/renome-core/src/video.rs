@@ -291,40 +291,11 @@ fn child<'a>(data: &'a [u8], kind: &[u8]) -> Option<&'a [u8]> {
 /// size from the sample description (`stsd`), else the track header
 /// (`tkhd`), and the largest is taken.
 fn mp4_video<R: Read + Seek>(f: &mut R) -> Option<VideoInfo> {
-    // A moov bigger than this is no sane file's.
-    const MOOV_MAX: u64 = 256 << 20;
-    let size = f.seek(SeekFrom::End(0)).ok()?;
-    let mut pos = 0u64;
-    let moov = loop {
-        if pos + 8 > size {
-            return None;
-        }
-        f.seek(SeekFrom::Start(pos)).ok()?;
-        let mut head = [0u8; 16];
-        f.read_exact(&mut head[..8]).ok()?;
-        let (mut len, mut start) = (u64::from(u32::from_be_bytes(head[..4].try_into().ok()?)), 8);
-        if len == 1 {
-            f.read_exact(&mut head[8..]).ok()?;
-            len = u64::from_be_bytes(head[8..].try_into().ok()?);
-            start = 16;
-        } else if len == 0 {
-            len = size - pos;
-        }
-        if len < start {
-            return None;
-        }
-        if &head[4..8] == b"moov" {
-            let len = len.min(size - pos);
-            if len > MOOV_MAX {
-                return None;
-            }
-            let mut body = vec![0u8; (len - start) as usize];
-            f.read_exact(&mut body).ok()?;
-            break body;
-        }
-        pos += len;
-    };
-    children(&moov)
+    mp4_info(&moov(f)?)
+}
+
+fn mp4_info(moov: &[u8]) -> Option<VideoInfo> {
+    children(moov)
         .filter(|(k, _)| *k == b"trak")
         .filter_map(|(_, trak)| {
             let mdia = child(trak, b"mdia")?;
@@ -357,6 +328,159 @@ fn mp4_video<R: Read + Seek>(f: &mut R) -> Option<VideoInfo> {
             })
         })
         .max_by_key(|v| u64::from(v.width) * u64::from(v.height))
+}
+
+/// When a phone's or camera's MP4 or QuickTime video was recorded, in the
+/// local time where it was (Apple's `creationdate`, which says it), else
+/// in this computer's time zone (the movie header's time, in UTC as the
+/// format wants); and the device (Apple's `make` and `model`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Recorded {
+    pub at: Option<chrono::NaiveDateTime>,
+    pub make: String,
+    pub model: String,
+}
+
+/// See [`Recorded`]; `None` for other formats.
+pub fn recorded(path: &Path) -> Option<Recorded> {
+    recorded_in(&mp4_moov(path)?)
+}
+
+/// When it was recorded and its picture, from one read of the index
+/// (it is a megabyte or so on a phone's video); `None` for other formats.
+pub fn clip(path: &Path) -> Option<(Recorded, Option<VideoInfo>)> {
+    let moov = mp4_moov(path)?;
+    let info = mp4_info(&moov).filter(|v| v.width > 0 && v.height > 0);
+    Some((recorded_in(&moov).unwrap_or_default(), info))
+}
+
+/// An MP4's or QuickTime's index; `None` for other formats.
+fn mp4_moov(path: &Path) -> Option<Vec<u8>> {
+    let mut f = BufReader::new(File::open(path).ok()?);
+    let mut head = [0u8; 12];
+    f.read_exact(&mut head).ok()?;
+    f.seek(SeekFrom::Start(0)).ok()?;
+    if !matches!(
+        &head[4..8],
+        b"ftyp" | b"moov" | b"mdat" | b"free" | b"wide" | b"skip"
+    ) {
+        return None;
+    }
+    moov(&mut f)
+}
+
+fn recorded_in(moov: &[u8]) -> Option<Recorded> {
+    let mut out = Recorded::default();
+    // Apple's keys (`com.apple.quicktime.…`), in moov/meta or moov/udta/meta.
+    let metas = child(moov, b"meta")
+        .into_iter()
+        .chain(child(moov, b"udta").and_then(|u| child(u, b"meta")));
+    for meta in metas {
+        // QuickTime's meta holds its boxes; MP4's starts with version and flags.
+        let meta = if child(meta, b"hdlr").is_some() {
+            meta
+        } else {
+            meta.get(4..).unwrap_or_default()
+        };
+        let (Some(keys), Some(ilst)) = (child(meta, b"keys"), child(meta, b"ilst")) else {
+            continue;
+        };
+        // keys: version and flags, count, then (size, namespace, name).
+        let mut names = Vec::new();
+        let mut at = 8usize;
+        while let Some(head) = keys.get(at..at + 8) {
+            let len = u32::from_be_bytes(head[..4].try_into().ok()?) as usize;
+            if len < 8 {
+                break;
+            }
+            names.push(String::from_utf8_lossy(keys.get(at + 8..at + len)?).into_owned());
+            at += len;
+        }
+        // ilst: one box per key, its type the key's index (from 1), holding
+        // a `data` box (type, locale, then the value).
+        for (kind, item) in children(ilst) {
+            let index = u32::from_be_bytes(kind.try_into().ok()?) as usize;
+            let Some(name) = index.checked_sub(1).and_then(|i| names.get(i)) else {
+                continue;
+            };
+            let Some(value) = child(item, b"data").and_then(|d| d.get(8..)) else {
+                continue;
+            };
+            let value = String::from_utf8_lossy(value).trim().to_string();
+            match name.as_str() {
+                "com.apple.quicktime.creationdate" => {
+                    // `2019-05-12T14:30:22-0300`: the time where it was.
+                    out.at = out.at.or_else(|| {
+                        chrono::NaiveDateTime::parse_from_str(value.get(..19)?, "%Y-%m-%dT%H:%M:%S")
+                            .ok()
+                    });
+                }
+                "com.apple.quicktime.make" => out.make = value,
+                "com.apple.quicktime.model" => out.model = value,
+                _ => {}
+            }
+        }
+    }
+    if out.at.is_none()
+        && let Some(mvhd) = child(moov, b"mvhd")
+    {
+        // Seconds since 1904 in UTC: 4 bytes (version 0) or 8 (version 1)
+        // after version and flags. Zero: not set.
+        let secs = match mvhd.first()? {
+            1 => u64::from_be_bytes(mvhd.get(4..12)?.try_into().ok()?),
+            _ => u64::from(u32::from_be_bytes(mvhd.get(4..8)?.try_into().ok()?)),
+        };
+        const FROM_1904: i64 = 2_082_844_800;
+        if secs > 0 {
+            let unix = i64::try_from(secs).ok()? - FROM_1904;
+            use chrono::TimeZone;
+            out.at = chrono::Local
+                .timestamp_opt(unix, 0)
+                .single()
+                .map(|t| t.naive_local())
+                // Before 1990: a camera without its clock set.
+                .filter(|t| chrono::Datelike::year(t) >= 1990);
+        }
+    }
+    Some(out)
+}
+
+/// The `moov` box's content, found by the top-level headers: the media
+/// data is skipped (a film's index is a few megabytes, its data gigabytes).
+fn moov<R: Read + Seek>(f: &mut R) -> Option<Vec<u8>> {
+    // A moov bigger than this is no sane file's.
+    const MOOV_MAX: u64 = 256 << 20;
+    let size = f.seek(SeekFrom::End(0)).ok()?;
+    let mut pos = 0u64;
+    loop {
+        if pos + 8 > size {
+            return None;
+        }
+        f.seek(SeekFrom::Start(pos)).ok()?;
+        let mut head = [0u8; 16];
+        f.read_exact(&mut head[..8]).ok()?;
+        let (mut len, mut start) = (u64::from(u32::from_be_bytes(head[..4].try_into().ok()?)), 8);
+        if len == 1 {
+            f.read_exact(&mut head[8..]).ok()?;
+            len = u64::from_be_bytes(head[8..].try_into().ok()?);
+            start = 16;
+        } else if len == 0 {
+            len = size - pos;
+        }
+        if len < start {
+            return None;
+        }
+        if &head[4..8] == b"moov" {
+            let len = len.min(size - pos);
+            if len > MOOV_MAX {
+                return None;
+            }
+            let mut body = vec![0u8; (len - start) as usize];
+            f.read_exact(&mut body).ok()?;
+            return Some(body);
+        }
+        pos += len;
+    }
 }
 
 /// AVI: the first video stream's format (`strf`, a bitmap header) gives
@@ -473,6 +597,76 @@ fn mpeg_video<R: Read>(f: &mut R) -> Option<VideoInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn mp4_box(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        let mut out = ((body.len() + 8) as u32).to_be_bytes().to_vec();
+        out.extend_from_slice(kind);
+        out.extend_from_slice(body);
+        out
+    }
+
+    #[test]
+    fn when_recorded() {
+        let d = tempfile::tempdir().unwrap();
+        // The movie header alone: UTC, shown in this computer's time zone.
+        let secs: u32 = 1_557_671_422 + 2_082_844_800; // 2019-05-12 14:30:22 UTC
+        let mut mvhd = vec![0u8; 4];
+        mvhd.extend_from_slice(&secs.to_be_bytes());
+        mvhd.extend_from_slice(&[0u8; 92]);
+        let plain = [
+            mp4_box(b"ftyp", b"isom\0\0\0\0"),
+            mp4_box(b"moov", &mp4_box(b"mvhd", &mvhd)),
+        ]
+        .concat();
+        let p = d.path().join("a.mp4");
+        std::fs::write(&p, &plain).unwrap();
+        use chrono::TimeZone;
+        let utc = chrono::Local
+            .timestamp_opt(1_557_671_422, 0)
+            .unwrap()
+            .naive_local();
+        assert_eq!(recorded(&p).unwrap().at, Some(utc));
+        // Apple's keys: the local time where it was, and the phone.
+        let key = |name: &str| mp4_box(b"mdta", name.as_bytes());
+        let mut keys = vec![0, 0, 0, 0, 0, 0, 0, 3];
+        for k in [
+            "com.apple.quicktime.make",
+            "com.apple.quicktime.model",
+            "com.apple.quicktime.creationdate",
+        ] {
+            keys.extend(key(k));
+        }
+        let item = |i: u32, v: &str| {
+            let mut data = vec![0, 0, 0, 1, 0, 0, 0, 0];
+            data.extend_from_slice(v.as_bytes());
+            mp4_box(&i.to_be_bytes(), &mp4_box(b"data", &data))
+        };
+        let ilst = [
+            item(1, "Apple"),
+            item(2, "iPhone 12"),
+            item(3, "2019-05-12T11:30:22-0300"),
+        ]
+        .concat();
+        let meta = [
+            mp4_box(b"hdlr", &[0u8; 24]),
+            mp4_box(b"keys", &keys),
+            mp4_box(b"ilst", &ilst),
+        ]
+        .concat();
+        let apple = [
+            mp4_box(b"ftyp", b"qt  \0\0\0\0"),
+            mp4_box(
+                b"moov",
+                &[mp4_box(b"mvhd", &mvhd), mp4_box(b"meta", &meta)].concat(),
+            ),
+        ]
+        .concat();
+        let p = d.path().join("b.mov");
+        std::fs::write(&p, &apple).unwrap();
+        let r = recorded(&p).unwrap();
+        assert_eq!(r.at.unwrap().to_string(), "2019-05-12 11:30:22");
+        assert_eq!((r.make.as_str(), r.model.as_str()), ("Apple", "iPhone 12"));
+    }
 
     #[test]
     fn resolutions() {

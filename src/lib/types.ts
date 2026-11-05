@@ -39,7 +39,11 @@ export type Rule =
       folders: boolean; folderTemplate: string; cover: boolean; playlist: boolean; listen: boolean; writeTags: boolean; embedCover: boolean; coverSize: number; cleanTags: boolean; missing: boolean;
     }
   | { type: "book"; template: string; colon: string; folders: boolean; folderTemplate: string; cover: boolean; opf: boolean; writeEpub?: boolean; missing: boolean }
-  | { type: "comic"; template: string; colon: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; byFolder: boolean; writeInfo?: boolean; convert?: boolean; original?: "keep" | "delete"; drawPages?: boolean; pageSize?: number; missing: boolean; barcode?: boolean };
+  | { type: "comic"; template: string; colon: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; byFolder: boolean; writeInfo?: boolean; convert?: boolean; original?: "keep" | "delete"; drawPages?: boolean; pageSize?: number; missing: boolean; barcode?: boolean }
+  | {
+      type: "photo"; template: string; fromName: boolean; modified: boolean; shiftHours: number;
+      folders: boolean; folderTemplate: string; setModified: boolean;
+    };
 
 export type RuleType = Rule["type"];
 
@@ -78,6 +82,8 @@ export interface PreviewItem {
   convert: boolean;
   /** A PDF converted: how many of its pages would be drawn. */
   drawn?: number;
+  /** With a photo rule, where a photo's date came from ("none": it has none). */
+  photoDate?: "inside" | "name" | "modified" | "none";
   /** The name the lookups read, when the rules above the first lookup rule
    *  change it (else the original). */
   lookupName?: string;

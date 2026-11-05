@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::fs::Metadata;
+use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -48,6 +49,10 @@ pub struct FileEntry {
     /// be drawn (see [`crate::convert::check`]); checked on first use.
     #[serde(skip)]
     pub(crate) convert_pages: OnceLock<Option<usize>>,
+    /// A photo's or video's date, camera and size (see
+    /// [`crate::photos::Inside`]), read on first use.
+    #[serde(skip)]
+    pub(crate) photo: OnceLock<Option<crate::photos::Inside>>,
 }
 
 impl FileEntry {
@@ -77,6 +82,7 @@ impl FileEntry {
             video: OnceLock::new(),
             kind: OnceLock::new(),
             convert_pages: OnceLock::new(),
+            photo: OnceLock::new(),
         })
     }
 
@@ -87,6 +93,13 @@ impl FileEntry {
             return None;
         }
         *self.taken.get_or_init(|| read_taken(&self.path))
+    }
+
+    /// A photo's or video's date, camera and size. Read once and cached.
+    pub fn photo_inside(&self) -> Option<&crate::photos::Inside> {
+        self.photo
+            .get_or_init(|| crate::photos::read_inside(self))
+            .as_ref()
     }
 
     /// Tags of an audio file (ID3, Vorbis comments, MP4…). Read once and
@@ -177,6 +190,9 @@ impl FileEntry {
         if let (None, Some(d)) = (self.taken.get(), other.taken.get()) {
             let _ = self.taken.set(*d);
         }
+        if let (None, Some(p)) = (self.photo.get(), other.photo.get()) {
+            let _ = self.photo.set(p.clone());
+        }
         if let (None, Some(k)) = (self.kind.get(), other.kind.get()) {
             let _ = self.kind.set(k.clone());
         }
@@ -210,12 +226,150 @@ pub fn to_trash(path: &Path) -> Result<(), String> {
 }
 
 fn read_taken(path: &Path) -> Option<NaiveDateTime> {
-    use exif::{In, Tag, Value};
+    taken_in(&read_exif(path)?)
+}
 
-    let file = std::fs::File::open(path).ok()?;
-    let data = exif::Reader::new()
-        .read_from_container(&mut std::io::BufReader::new(file))
-        .ok()?;
+/// A picture's EXIF data. JPEG and PNG are read up to their image data
+/// only: the reader of the library goes through a whole JPEG without EXIF
+/// looking for it, which on thousands of photos reads gigabytes.
+pub(crate) fn read_exif(path: &Path) -> Option<exif::Exif> {
+    let mut f = std::io::BufReader::new(std::fs::File::open(path).ok()?);
+    let mut head = [0u8; 8];
+    let n = f.read(&mut head).ok()?;
+    f.rewind().ok()?;
+    let raw = match &head[..n] {
+        [0xff, 0xd8, ..] => jpeg_exif(&mut f),
+        [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a] => png_exif(&mut f),
+        _ => return exif::Reader::new().read_from_container(&mut f).ok(),
+    }?;
+    exif::Reader::new().read_raw(raw).ok()
+}
+
+type Picture = std::io::BufReader<std::fs::File>;
+
+/// A picture's width and height, from its header (the image library
+/// reads a whole JPEG for them).
+pub(crate) fn picture_size(path: &Path) -> Option<(u32, u32)> {
+    let mut f = std::io::BufReader::new(std::fs::File::open(path).ok()?);
+    let mut head = [0u8; 24];
+    let n = f.read(&mut head).ok()?;
+    let be = |i: usize| u32::from_be_bytes(head[i..i + 4].try_into().unwrap());
+    match &head[..n] {
+        [0xff, 0xd8, ..] => {
+            // A frame's start: precision, height, width.
+            let sof = |c: u8| matches!(c, 0xc0..=0xcf) && !matches!(c, 0xc4 | 0xc8 | 0xcc);
+            jpeg_segment(&mut f, sof, |_, seg| {
+                let at = |i: usize| {
+                    Some(u32::from(u16::from_be_bytes([
+                        *seg.get(i)?,
+                        *seg.get(i + 1)?,
+                    ])))
+                };
+                Some((at(3)?, at(1)?))
+            })
+        }
+        [
+            0x89,
+            b'P',
+            b'N',
+            b'G',
+            0x0d,
+            0x0a,
+            0x1a,
+            0x0a,
+            _,
+            _,
+            _,
+            _,
+            b'I',
+            b'H',
+            b'D',
+            b'R',
+            ..,
+        ] if n == 24 => Some((be(16), be(20))),
+        _ => image::ImageReader::new(f)
+            .with_guessed_format()
+            .ok()?
+            .into_dimensions()
+            .ok(),
+    }
+    .filter(|&(w, h)| w > 0 && h > 0)
+}
+
+/// The EXIF segment of a JPEG, looked for before the image data starts.
+fn jpeg_exif(f: &mut Picture) -> Option<Vec<u8>> {
+    jpeg_segment(
+        f,
+        |c| c == 0xe1,
+        |_, seg| Some(seg.strip_prefix(b"Exif\0\0")?.to_vec()),
+    )
+}
+
+/// Walks a JPEG's segments up to its image data, reading those `read`
+/// accepts by their code, until `found` takes one.
+fn jpeg_segment<T>(
+    f: &mut Picture,
+    read: impl Fn(u8) -> bool,
+    mut found: impl FnMut(u8, &[u8]) -> Option<T>,
+) -> Option<T> {
+    let mut byte = [0u8; 1];
+    let mut next = |f: &mut Picture| f.read_exact(&mut byte).ok().map(|()| byte[0]);
+    f.seek(std::io::SeekFrom::Start(2)).ok()?;
+    // Each segment: FF, its code, its length (with the two length bytes).
+    for _ in 0..256 {
+        if next(f)? != 0xff {
+            return None;
+        }
+        let mut code = 0xff;
+        while code == 0xff {
+            code = next(f)?;
+        }
+        match code {
+            0x01 | 0xd0..=0xd7 => continue,
+            // The image data, or the end.
+            0xd9 | 0xda => return None,
+            _ => {}
+        }
+        let mut len = [0u8; 2];
+        f.read_exact(&mut len).ok()?;
+        let len = usize::from(u16::from_be_bytes(len)).checked_sub(2)?;
+        if read(code) {
+            let mut seg = vec![0; len];
+            f.read_exact(&mut seg).ok()?;
+            if let Some(t) = found(code, &seg) {
+                return Some(t);
+            }
+        } else {
+            f.seek_relative(len as i64).ok()?;
+        }
+    }
+    None
+}
+
+/// The `eXIf` chunk of a PNG, looked for before the image data.
+fn png_exif(f: &mut Picture) -> Option<Vec<u8>> {
+    f.seek(std::io::SeekFrom::Start(8)).ok()?;
+    for _ in 0..1024 {
+        let mut head = [0u8; 8];
+        f.read_exact(&mut head).ok()?;
+        let len = u32::from_be_bytes(head[..4].try_into().ok()?);
+        match &head[4..] {
+            b"eXIf" => {
+                let mut data = vec![0; len as usize];
+                f.read_exact(&mut data).ok()?;
+                return Some(data);
+            }
+            b"IDAT" | b"IEND" => return None,
+            // The data and its check sum.
+            _ => f.seek_relative(i64::from(len) + 4).ok()?,
+        };
+    }
+    None
+}
+
+/// The date a photo was taken, from its EXIF data.
+pub(crate) fn taken_in(data: &exif::Exif) -> Option<NaiveDateTime> {
+    use exif::{In, Tag, Value};
     [Tag::DateTimeOriginal, Tag::DateTimeDigitized, Tag::DateTime]
         .iter()
         .find_map(|&tag| match &data.get_field(tag, In::PRIMARY)?.value {
@@ -330,6 +484,39 @@ fn take_digits(it: &mut std::iter::Peekable<std::str::Chars>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn picture_headers() {
+        let d = tempfile::tempdir().unwrap();
+        let img = image::RgbImage::new(40, 30);
+        let mut jpg = Vec::new();
+        img.write_to(
+            &mut std::io::Cursor::new(&mut jpg),
+            image::ImageFormat::Jpeg,
+        )
+        .unwrap();
+        let mut png = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        // EXIF after another segment, as cameras put a profile first.
+        let mut tiff = b"II*\0\x08\0\0\0\x01\0\x32\x01\x02\0\x14\0\0\0\x1a\0\0\0\0\0\0\0".to_vec();
+        tiff.extend_from_slice(b"2019:05:12 14:30:22\0");
+        let mut with = vec![0xff, 0xd8, 0xff, 0xe2, 0, 6, 1, 2, 3, 4, 0xff, 0xe1];
+        with.extend(((tiff.len() + 8) as u16).to_be_bytes());
+        with.extend(b"Exif\0\0");
+        with.extend(tiff);
+        with.extend(&jpg[2..]);
+        for (name, bytes) in [("a.jpg", &jpg), ("b.png", &png), ("c.jpg", &with)] {
+            std::fs::write(d.path().join(name), bytes).unwrap();
+        }
+        let taken = |n: &str| read_exif(&d.path().join(n)).as_ref().and_then(taken_in);
+        assert_eq!(taken("a.jpg"), None);
+        assert_eq!(taken("b.png"), None);
+        assert_eq!(taken("c.jpg").unwrap().to_string(), "2019-05-12 14:30:22");
+        for n in ["a.jpg", "b.png", "c.jpg"] {
+            assert_eq!(picture_size(&d.path().join(n)), Some((40, 30)), "{n}");
+        }
+    }
 
     #[test]
     fn split() {

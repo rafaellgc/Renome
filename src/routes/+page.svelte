@@ -75,6 +75,8 @@
   let similarProgress = $state<number | null>(null);
   /** Search progress (0–1) while reading whole files; null when idle. */
   let identicalProgress = $state<number | null>(null);
+  /** How far the photo rule's first reading of the files is. */
+  let photosProgress = $state<number | null>(null);
   const identicalCount = $derived(Object.keys(copies).length);
 
   /** TMDB results and choices per file, for the movie rule. */
@@ -349,6 +351,9 @@
   let tvProgress = $state<string | null>(null);
   const seriesRule = $derived(steps.find((s) => s.enabled && s.rule.type === "series"));
   const musicRule = $derived(steps.find((s) => s.enabled && s.rule.type === "music"));
+  const photoRule = $derived(steps.find((s) => s.enabled && s.rule.type === "photo"));
+  /** Photos and videos the photo rule leaves as they are (no date). */
+  const undatedCount = $derived(photoRule ? preview.items.filter((i) => i.photoDate === "none").length : 0);
   const untaggedCount = $derived(musicRule ? preview.items.filter((i) => i.untagged).length : 0);
 
   /** Albums looked up on MusicBrainz, for the music rule. */
@@ -522,6 +527,13 @@
       }
       for (const i of preview.items) if (i.untagged) out[i.path] = { status: "none", tip: t("musicUntaggedTip") };
     }
+    if (photoRule) {
+      for (const i of preview.items) {
+        if (i.photoDate === "none") out[i.path] = { status: "none", tip: t("photoUndatedTip") };
+        else if (i.photoDate === "name") out[i.path] = { status: "auto", tip: t("photoFromNameTip") };
+        else if (i.photoDate === "modified") out[i.path] = { status: "choose", tip: t("photoFromModifiedTip") };
+      }
+    }
     return out;
   });
 
@@ -610,6 +622,7 @@
       const rule: Record<string, unknown> = { ...s.rule };
       for (const [k, v] of Object.entries(rule)) {
         if (v === null || (typeof v === "number" && !Number.isFinite(v))) rule[k] = 0;
+        else if (typeof v === "number" && k === "shiftHours") rule[k] = Math.max(-48, Math.min(48, Math.trunc(v)));
         else if (typeof v === "number" && k !== "start" && k !== "step") rule[k] = Math.max(0, Math.trunc(v));
       }
       return { ...s, rule } as Step;
@@ -624,7 +637,9 @@
     try {
       const p = await api.preview(payload(), $state.snapshot(overrides), $state.snapshot(view));
       if (run === previewRun) preview = p;
+      photosProgress = null;
     } catch (e) {
+      photosProgress = null;
       notice = `${t("error")}: ${tError(e)}`;
     }
   }
@@ -2024,6 +2039,9 @@
     const unlistenProgress = listen<{ done: number; total: number }>("identical-progress", (e) => {
       identicalProgress = e.payload.done < e.payload.total ? e.payload.done / e.payload.total : null;
     });
+    const unlistenPhotos = listen<{ done: number; total: number }>("photos-progress", (e) => {
+      photosProgress = e.payload.done < e.payload.total ? e.payload.done / e.payload.total : null;
+    });
     const unlistenSimilar = listen<{ done: number; total: number }>("similar-progress", (e) => {
       similarProgress = e.payload.done < e.payload.total ? e.payload.done / e.payload.total : null;
     });
@@ -2059,6 +2077,7 @@
       unlisten.then((f) => f());
       unlistenProgress.then((f) => f());
       unlistenSimilar.then((f) => f());
+      unlistenPhotos.then((f) => f());
       unlistenApply.then((f) => f());
       unlistenTmdb.then((f) => f());
       unlistenMb.then((f) => f());
@@ -2200,7 +2219,9 @@
                     : undefined}
             summary={step.rule.type === "music" && step.enabled && untaggedCount
               ? t(step.rule.listen ? "musicUntaggedListenN" : "musicUntaggedN", { n: untaggedCount })
-              : null}
+              : step.rule.type === "photo" && step.enabled && undatedCount
+                ? t("photoUndatedN", { n: undatedCount })
+                : null}
           />
         {:else}
           <p class="empty">{t("emptyRules")}</p>
@@ -2281,6 +2302,7 @@
         <button class="link faint" title={t("exportMissingHint")} onclick={exportMissing}>{missingCount}</button>
       </span>
     {/if}
+    {#if photosProgress !== null}<span>{t("photosReading", { p: Math.floor(photosProgress * 100) })}</span>{/if}
     {#if identicalProgress !== null}
       <span>{t("identicalScanning", { p: Math.floor(identicalProgress * 100) })}</span>
     {:else if identicalCount}

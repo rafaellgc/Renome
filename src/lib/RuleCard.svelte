@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t, type Key } from "./i18n";
-  import { comicPreset, comicPresetOf, splitExt, splitParts, type ComicPreset } from "./rules";
+  import { comicPreset, comicPresetOf, PHOTO_TEMPLATES, splitExt, splitParts, type ComicPreset } from "./rules";
+  import { settings } from "./settings.svelte";
   import type { Step } from "./types";
 
   let {
@@ -295,6 +296,35 @@
         <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("seriesMissingLabel")}<small>{t("seriesMissingHint")}</small></span></label>
         {#if lookup?.show}<p class="hint">{t("seriesCurrent", { show: lookup.show })}</p>{/if}
         {@render actions(t("tvSearch"), "seriesSummary")}
+      {:else if r.type === "photo"}
+        {@const ready = PHOTO_TEMPLATES[settings.lang]}
+        <p class="hint top">{t("photoHint")}</p>
+        <label>{t("photoReady")}
+          <select value={ready.names.includes(r.template as never) ? r.template : ""} onchange={(e) => { const v = (e.currentTarget as HTMLSelectElement).value; if (v) r.template = v; }}>
+            <option value="" disabled>{t("comicPresetCustom")}</option>
+            {#each ready.names as n, i (n)}<option value={n}>{t(`photoReady${i}` as Key)}</option>{/each}
+          </select>
+        </label>
+        <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
+        <p class="hint mono">{t("photoTemplateHint")}</p>
+        <label class="check"><input type="checkbox" bind:checked={r.fromName} /> <span>{t("photoFromName")}<small>{t("photoFromNameHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.modified} /> <span>{t("photoModified")}<small>{t("photoModifiedHint")}</small></span></label>
+        <label class="shift">{t("photoShift")}
+          <input type="number" min="-48" max="48" step="1" bind:value={r.shiftHours} />
+        </label>
+        <p class="hint">{t("photoShiftHint")}</p>
+        <label class="check"><input type="checkbox" bind:checked={r.folders} /> <span>{t("photoFolders")}<small>{t("photoFoldersHint")}</small></span></label>
+        {#if r.folders}
+          <label class="sub">{t("photoFolderReady")}
+            <select value={ready.folders.includes(r.folderTemplate as never) ? r.folderTemplate : ""} onchange={(e) => { const v = (e.currentTarget as HTMLSelectElement).value; if (v) r.folderTemplate = v; }}>
+              <option value="" disabled>{t("comicPresetCustom")}</option>
+              {#each ready.folders as f (f)}<option value={f}>{f}</option>{/each}
+            </select>
+          </label>
+          <label class="sub">{t("musicFolderName")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
+        {/if}
+        <label class="check"><input type="checkbox" bind:checked={r.setModified} /> <span>{t("photoSetModified")}<small>{t("photoSetModifiedHint")}</small></span></label>
+        <p class="hint">{t("photoCopiesHint")}</p>
       {:else if r.type === "music"}
         <p class="hint top">{t("musicHint")}</p>
         <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
@@ -513,6 +543,8 @@
   label.check span { display: flex; flex-direction: column; }
   label.check small { color: var(--muted); font-size: 11px; }
   label.sub { margin-left: 22px; }
+  label.shift { flex-direction: row; align-items: center; gap: 8px; }
+  label.shift input { width: 70px; }
   .movie-actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .parts { display: flex; flex-direction: column; gap: 3px; }
   .parts .hint { margin: 0 0 2px; }

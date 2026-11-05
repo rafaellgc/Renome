@@ -2,7 +2,7 @@ import { settings } from "./settings.svelte";
 import type { Rule, RuleType, Step } from "./types";
 
 export const RULE_TYPES: RuleType[] = [
-  "replace", "regex", "rearrange", "case", "insert", "number", "remove", "convert", "removeRange", "charAt", "extension", "movie", "series", "music", "book", "comic",
+  "replace", "regex", "rearrange", "case", "insert", "number", "remove", "convert", "removeRange", "charAt", "extension", "movie", "series", "music", "book", "comic", "photo",
 ];
 
 const NAME_VAR = { pt: "{nome}", en: "{name}", es: "{nombre}" } as const;
@@ -81,6 +81,30 @@ export const isBook = (name: string) => BOOK.has(splitExt(name)[1].toLowerCase()
 const COMIC = new Set(["cbz", "cbr", "cb7", "cbt", "pdf", "epub", "mobi", "azw3", "azw"]);
 export const isComic = (name: string) => COMIC.has(splitExt(name)[1].toLowerCase());
 
+/** The photo rule's ready templates: names and folders, in each language. */
+export const PHOTO_TEMPLATES = {
+  pt: {
+    names: ["{ano}-{mês}-{dia} {hora}.{minuto}.{segundo}", "{ano}{mês}{dia}_{hora}{minuto}{segundo}", "{ano}-{mês}-{dia} {hora}.{minuto}.{segundo} ({câmera})", "{ano}-{mês}-{dia} - {nome}"],
+    folders: ["{ano}/{ano}-{mês}", "{ano}/{mês} - {nome do mês}", "{ano}/{ano}-{mês}-{dia}", "{ano}"],
+  },
+  en: {
+    names: ["{year}-{month}-{day} {hour}.{minute}.{second}", "{year}{month}{day}_{hour}{minute}{second}", "{year}-{month}-{day} {hour}.{minute}.{second} ({camera})", "{year}-{month}-{day} - {name}"],
+    folders: ["{year}/{year}-{month}", "{year}/{month} - {month name}", "{year}/{year}-{month}-{day}", "{year}"],
+  },
+  es: {
+    names: ["{año}-{mes}-{día} {hora}.{minuto}.{segundo}", "{año}{mes}{día}_{hora}{minuto}{segundo}", "{año}-{mes}-{día} {hora}.{minuto}.{segundo} ({cámara})", "{año}-{mes}-{día} - {nombre}"],
+    folders: ["{año}/{año}-{mes}", "{año}/{mes} - {nombre del mes}", "{año}/{año}-{mes}-{día}", "{año}"],
+  },
+} as const;
+
+/** What the photo rule names: photos, raw files, phone videos and edits (as the Rust core). */
+const SHOT = new Set([
+  "jpg", "jpeg", "jpe", "heic", "heif", "avif", "png", "webp", "tif", "tiff", "gif",
+  "dng", "cr2", "cr3", "crw", "nef", "nrw", "arw", "srf", "sr2", "raf", "orf", "rw2", "pef", "srw", "x3f", "3fr", "erf", "kdc", "mrw", "rwl", "iiq", "raw",
+  "mp4", "mov", "m4v", "3gp", "mts", "m2ts", "avi", "xmp", "aae",
+]);
+export const isShot = (name: string) => SHOT.has(splitExt(name)[1].toLowerCase());
+
 export function newRule(type: RuleType): Rule {
   switch (type) {
     case "replace":
@@ -119,6 +143,10 @@ export function newRule(type: RuleType): Rule {
     case "book": {
       const [template, folderTemplate] = BOOK_TEMPLATE[settings.lang];
       return { type, template, colon: " - ", folders: false, folderTemplate, cover: false, opf: false, writeEpub: false, missing: true };
+    }
+    case "photo": {
+      const p = PHOTO_TEMPLATES[settings.lang];
+      return { type, template: p.names[0], fromName: true, modified: false, shiftHours: 0, folders: false, folderTemplate: p.folders[0], setModified: false };
     }
     case "comic": {
       const [template, folderTemplate] = COMIC_TEMPLATE[settings.lang];

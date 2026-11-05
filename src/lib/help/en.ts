@@ -581,7 +581,7 @@ ${ex("Series_Name_012_(2019)_(Digital)_(group).cbz", "Series Name #012 (2019).cb
   <li>In the picker you can search again with another name and narrow the list by the <b>Year</b> the series began and the <b>Publisher</b> (part of the name will do; the manga catalogues are not searched by publisher). Series with fewer issues than the files' numbers go last. The GCD compares names letter by letter: case and accents do not count, but punctuation does, so the program searches the name as typed and also without its punctuation (<i>Series: Name</i> also finds <i>Series Name</i>). With the year, the GCD is asked for the name's longest word, and punctuation no longer gets in the way: <i>Series Name</i> also finds <i>Series: Name</i>. For the publisher, the short name the catalogue uses will do (<i>Titan</i> is found with <i>Titan Comics</i>), and several can be given, separated by <code>;</code>. On the GCD, the publisher costs one more request for each different publisher found (up to 12, the most frequent first): add the year to keep them few, above all without an account.</li>
   <li>Each file is matched to its issue by number (or by volume, for manga numbered by volumes; a one-shot, with the series' only issue). Those that do not match get the series' name with their own number, in the same folder as the others, and open the review, with the series' list of issues, to choose the exact issue. <b>None of these</b> brings back the name the file says.</li>
   <li>The review shows the <b>file's cover</b> (its first page; in a PDF, the first page drawn) and compares it with each issue's cover: those with the same cover move to the top with the <b>same cover</b> badge, which also counts the same art in another language. With up to 60 issues with a cover, they are compared at once; with more, press <b>Compare covers</b> (the first 300; each cover is downloaded once a session). A variant cover, or an opening page before the cover, does not match.</li>
-  <li>In <b>Choose the series</b>, the file's cover shows in the corner and is compared with the same issue's (or volume's) cover in each of the first 9 series: those that match move up with the <b>same cover</b> badge, once all are compared. This tells the right publication from another of the same name. It works with Metron, Comic Vine and MangaDex (one or two more requests a series; series with over 200 issues are left out); with AniList and MangaUpdates, which only have the series' cover, only for volume 1. <b>The Grand Comics Database does not give its covers to programs</b> (neither in the series list nor in the issues): with it there is no cover comparison. Click a cover (the file's, a series' or an issue's) to see it large, beside the file's cover; Esc or a click closes it.</li>
+  <li>In <b>Choose the series</b>, the file's cover shows in the corner and is compared with the same issue's (or volume's) cover in each of the first 9 series: those that match move up with the <b>same cover</b> badge, once all are compared. This tells the right publication from another of the same name. It works with Metron, Comic Vine and MangaDex (one or two more requests a series; series with over 200 issues are left out); with AniList and MangaUpdates, which only have the series' cover, only for volume 1. <b>The Grand Comics Database does not give its covers to programs</b> (neither in the series list nor in the issues): with it there is no cover comparison. Click a cover (the file's, a series' or an issue's) to see it large, beside the file's cover; Esc or a click closes it. Covers show up gradually: each series asks the catalogue for its issue list and then downloads the cover, so the time depends on how fast the site answers and on the gap it requires between requests (the program waits 3 seconds between Metron's, about 1 second on Comic Vine and half a second on MangaDex). With Metron, comparing the 9 series can take half a minute; you can choose meanwhile.</li>
 </ol>
 <ul>
   <li><b>Ready-made template</b>: <b>Renome default</b> (which also works for Komga, which takes each folder as a series) or <b>Kavita</b> (without the title after " - ", which Kavita does not read). Both fill in the template and folders and turn series folders on, since both servers want each series in its own folder. You can change them freely afterwards.</li>
@@ -625,6 +625,45 @@ ${ex("Series_Name_012_(2019)_(Digital)_(group).cbz", "Series Name #012 (2019).cb
   <li>Only what the catalogue (or the file itself) tells is written: on the GCD, issues come without titles, and the manga catalogues only give the series. A <code>MetronInfo.xml</code> the file has is not updated.</li>
 </ul>
 <p class="tip">Only the searched series name and the series' and issues' numbers are sent to the catalogs, never the full file name, the folders or the content. The GCD sign-in goes only to comics.org.</p>`,
+  },
+  {
+    id: "r-photo",
+    title: "Photo",
+    sub: true,
+    html: `
+<p>Names phone and camera <b>photos and videos</b> by <b>when they were taken</b> and, if you want, organizes them in folders by date. Works offline: everything is read from the files themselves.</p>
+${ex("IMG_4821.JPG", "2019-05-12 14.30.22.JPG")}
+${ex("IMG-20190513-WA0001.jpg", "2019-05-13.jpg")}
+<h4>Where the date comes from</h4>
+<ol>
+  <li><b>From inside the file</b>: in photos, the EXIF date (JPEG, HEIC, PNG, WebP, TIFF and TIFF-based RAW files such as DNG, CR2, NEF, ARW, PEF and SRW); in MP4, MOV, M4V and 3GP videos, the recording date.</li>
+  <li><b>From the file name</b> (on by default): <code>IMG_20190512_143022</code>, <code>PXL_20190512_143022123</code>, <code>VID_20190512_143022</code>, <code>IMG-20190512-WA0001</code> (WhatsApp), <code>Screenshot_2019-05-12-14-30-22</code>, <code>WhatsApp Image 2019-05-12 at 14.30.22</code>, <code>2019-05-12 14.30.22</code>. A name with the day alone leaves the time empty. For <b>videos</b>, a name with date and time (<code>20260913_185946</code>, <code>VID_…</code>) wins over the date inside: the phone puts the start of the recording in the name, while the video usually holds when the file was closed, seconds or minutes later.</li>
+  <li><b>From the change date</b>, only if you turn the option on. On a copied, downloaded or received photo it is usually when it was copied.</li>
+</ol>
+<p>With none of them, the file <b>stays as it is</b> and gets a mark in the list; the card says how many did. A date taken from the name or the change date gets a mark too (hover to see where it came from).</p>
+<h4>Template</h4>
+<p>Use <code>{year}</code>, <code>{month}</code>, <code>{day}</code>, <code>{hour}</code>, <code>{minute}</code>, <code>{second}</code>, <code>{date}</code> (2019-05-12), <code>{month name}</code>, <code>{camera}</code> (make and model, like <code>Apple iPhone 12</code>), <code>{width}</code>, <code>{height}</code> and <code>{name}</code> (the current name). The ready templates give <code>2019-05-12 14.30.22</code>, <code>20190512_143022</code>, with the camera in brackets, or the date before the current name. What is left empty (a time not known, a camera the photo does not tell) goes, with the separators and brackets around it.</p>
+<h4>Files that go together</h4>
+<p>In one folder, files with the <b>same name before the extension</b> are one photo and get the same new name: the JPEG and the RAW (<code>IMG_0001.JPG</code> and <code>IMG_0001.CR2</code>), the edits (<code>IMG_0001.xmp</code>, <code>IMG_0001.CR2.xmp</code>, the iPhone's <code>.AAE</code>) and a Live Photo's photo and video (<code>IMG_0001.HEIC</code> and <code>IMG_0001.MOV</code>). The date is that of the file that has it inside (the photo before the RAW and the video).</p>
+<h4>Photos of the same second</h4>
+<p>Photos in a burst, and photos whose new name the folder already has, get <code>-1</code>, <code>-2</code>… instead of a conflict, in the order of their current names; files that go together get the same number. Named so, they stay so the next time. Identical copies get no number: the conflict says they are the same.</p>
+<h4>Options</h4>
+<ul>
+  <li><b>Fix the clock</b>: hours added to the camera's date and the name's (not the change date, nor a name with the day alone), for a camera with its clock wrong or travel photos in another time zone. It applies to every file in the list: to fix one camera's only, filter the list first.</li>
+  <li><b>Organize in folders by date</b>: a folder template with <code>/</code> between levels (<code>{year}/{year}-{month}</code>, <code>{year}/{month} - {month name}</code>…). The folders are made in the folder you added; if it is a date folder already (<code>Photos/2019/2019-05</code>), in the folder above them. Folders left empty are deleted.</li>
+  <li><b>Set the file date</b>: the change date of the files renamed or moved becomes the photo's, which helps galleries and phones that sort by it. The file's content is not changed, and undo puts the old date back.</li>
+</ul>
+<p><b>Identical copies</b> and <b>similar photos</b> keep working with the rule: they show in the footer, and double-clicking one's mark opens the side-by-side comparison, from where the extra ones go to the Trash (see <b>Identical copies</b>).</p>
+<p><b>Limitations:</b></p>
+<ul>
+  <li>The first time, the start of each photo and video is read to find its date: on an external hard disk, about a minute for 13,000 files, with the progress at the bottom (<b>Reading the photos' dates…</b>). The list appears when the reading ends; after that, the preview is instant. The window keeps responding, and the searches for copies and similar pictures wait for this reading. Copying a large collection to another folder takes the time of copying all the data.</li>
+  <li>Some RAW files may have no date read (such as CR3, RAF, ORF, RW2, X3F, CRW and MRW): they take the date of the JPEG with the same name, or the name's. MTS, M2TS and AVI videos only have the name's date or the change date.</li>
+  <li>A video's recording date is, by the format's rule, in universal time (UTC), and is shown in this computer's time zone; a video recorded in another zone gets the time here. iPhone videos tell their zone and come out right. Some cameras write local time as if it were UTC: fix it with <b>Fix the clock</b>.</li>
+  <li>Two different files with one name and different extensions in one folder (<code>photo.jpg</code> and <code>photo.png</code>) are taken as one photo.</li>
+  <li>With folders by date, a photo in a subfolder (<code>Photos/Trip</code>) leaves it for the date's folder.</li>
+  <li><b>Set the file date</b> applies only to files renamed or moved; one already named right is not touched. The creation date is not changed.</li>
+  <li>Nothing is written inside the photos, and where they were taken (GPS) is not used.</li>
+</ul>`,
   },
   {
     id: "preview",

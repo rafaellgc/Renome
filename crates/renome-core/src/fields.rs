@@ -93,7 +93,7 @@ pub fn wanted(template: &str) -> bool {
     false
 }
 
-const MONTHS: [[&str; 12]; 3] = [
+pub(crate) const MONTHS: [[&str; 12]; 3] = [
     [
         "January",
         "February",
