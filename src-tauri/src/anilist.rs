@@ -322,16 +322,19 @@ fn anime_show(seasons: &[Value], typed: &str) -> renome_core::tv::Show {
         let season = u16::try_from(i + 1).unwrap_or(u16::MAX);
         let names = episode_titles(s);
         let dates = air_dates(s);
+        // An episode the schedule leaves out (several shown on the
+        // premiere day) aired with the one before it.
+        let mut aired = date_of(&s["startDate"]);
         for n in 1..=episode_count(s) {
+            if let Some(d) = dates.get(&n) {
+                aired = Some(d.clone());
+            }
             episodes.push(renome_core::tv::Episode {
                 season,
                 number: n,
                 name: names.get(&n).cloned().unwrap_or_default(),
                 names: Vec::new(),
-                air_date: dates
-                    .get(&n)
-                    .cloned()
-                    .or_else(|| (n == 1).then(|| date_of(&s["startDate"])).flatten()),
+                air_date: aired.clone(),
                 overview: String::new(),
                 still_path: None,
             });
@@ -664,6 +667,8 @@ mod tests {
         );
         assert_eq!(show.episodes[0].air_date.as_deref(), Some("2023-09-29"));
         assert_eq!(show.episodes[1].air_date.as_deref(), Some("2023-10-06"));
+        // Left out of the schedule: the date of the one before it.
+        assert_eq!(show.episodes[2].air_date.as_deref(), Some("2023-10-06"));
         assert!(
             show.aliases
                 .contains(&"Hoshi no Tabi 2nd Season".to_string())

@@ -278,7 +278,7 @@
           </select>
         </label>
         {#if r.source === "anilist"}<p class="hint">{t("animeHint")}</p>{/if}
-        <label>{t("seriesShow")} <input bind:value={r.show} placeholder={t("seriesShowPlaceholder")} spellcheck="false" /></label>
+        <label>{t("seriesShow")} <input bind:value={r.show} placeholder={t(r.source === "anilist" ? "seriesShowPlaceholderAnilist" : "seriesShowPlaceholder")} spellcheck="false" /></label>
         <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
         <p class="hint mono">{t("seriesTemplateHint")}</p>
         <label class="colon">{t("colonLabel")} <input class="mono sep" bind:value={r.colon} spellcheck="false" /></label>

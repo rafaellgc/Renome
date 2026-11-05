@@ -78,7 +78,9 @@
     if (n >= 1 && n <= candidates.length) choose(candidates[n - 1]);
   }
 
-  const cover = (id: number | null) => (id && id > 0 ? `https://covers.openlibrary.org/b/id/${id}-M.jpg` : null);
+  /** Open Library's cover, else Google Books'. */
+  const cover = (c: BookCandidate) => (c.cover && c.cover > 0 ? `https://covers.openlibrary.org/b/id/${c.cover}-M.jpg` : c.coverUrl || null);
+  const SOURCE_NAME: Record<string, string> = { google: "Google Books", brasilapi: "BrasilAPI" };
 </script>
 
 <svelte:window {onkeydown} />
@@ -113,12 +115,12 @@
     {#if candidates.length}
       <p class="muted hint">{t("bookPick")}</p>
       <div class="grid">
-        {#each candidates.slice(0, 12) as c, i (c.work + c.edition + c.isbn)}
+        {#each candidates.slice(0, 12) as c, i (`${i}:${c.work}${c.edition}${c.isbn}`)}
           <button class="cand" class:current={b?.choice?.work === c.work && b?.choice?.isbn === c.isbn} onclick={() => choose(c)}>
-            {#if cover(c.cover)}
-              <img src={cover(c.cover)} alt="" loading="lazy" />
+            {#if cover(c)}
+              <img src={cover(c)} alt="" loading="lazy" />
             {:else}
-              <div class="nocover">{c.work ? "Open Library" : "BrasilAPI"}</div>
+              <div class="nocover">{c.work ? "Open Library" : (SOURCE_NAME[c.source ?? ""] ?? "BrasilAPI")}</div>
             {/if}
             <span class="info">
               <b>{c.title}{c.year ? ` (${c.year})` : ""}</b>

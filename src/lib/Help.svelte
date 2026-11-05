@@ -57,6 +57,7 @@
       items: [
         { name: "Open Library", url: "https://openlibrary.org" },
         { name: "BrasilAPI", url: "https://brasilapi.com.br" },
+        { name: "Google Books", url: "https://books.google.com" },
       ],
     },
     {

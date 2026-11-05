@@ -216,7 +216,7 @@
   /** What the cover and metadata.opf of a book need; `key` is the path before renaming. */
   function bookSidecarItem(key: string, path: string) {
     const c = books[key].choice!;
-    return { path, book: bookMatches[key], cover: c.cover, language: c.exact ? c.language : books[key].guess.language };
+    return { path, book: bookMatches[key], cover: c.cover, coverUrl: c.coverUrl ?? "", description: c.description ?? "", language: c.exact ? c.language : books[key].guess.language };
   }
 
   /** Comic Vine issues per file, for the comic rule. */
@@ -644,7 +644,7 @@
   // The keys and the GCD account go to the system's password store, apart.
   let secretsTimer: ReturnType<typeof setTimeout> | undefined;
   $effect(() => {
-    const deps = [settings.tmdbKey, settings.comicVineKey, settings.discogsToken, settings.metronToken, settings.gcdEmail, settings.gcdPassword];
+    const deps = [settings.tmdbKey, settings.comicVineKey, settings.discogsToken, settings.metronToken, settings.googleBooksKey, settings.gcdEmail, settings.gcdPassword];
     if (!ready || !deps) return;
     clearTimeout(secretsTimer);
     secretsTimer = setTimeout(() => saveSecrets().catch(() => {}), 600);
@@ -657,6 +657,10 @@
   // Discogs is asked when MusicBrainz finds nothing, with the user's token.
   $effect(() => {
     api.discogsToken(settings.discogsToken).catch(() => {});
+  });
+  // Google Books is asked for books Open Library does not settle.
+  $effect(() => {
+    api.googleBooksKey(settings.googleBooksKey).catch(() => {});
   });
   $effect(() => {
     api.gcdAccount(settings.gcdEmail, settings.gcdPassword).catch(() => {});
@@ -1278,7 +1282,11 @@
           if (!found) continue;
           const vkey = `${source}:${found.volume.id}`;
           comicVolumes[vkey] = { volume: found.volume, issues: found.issues };
-          comics[files[i].path] = { volumeKey: vkey, own: owns[i]!, choice: found.issue, status: "auto" };
+          // The code tells the issue: its number too, when the name has none.
+          const own = owns[i]!;
+          const number = found.issues.find((x) => x.id === found.issue)?.number ?? "";
+          const exact = own.number || !number ? own : { ...own, number };
+          comics[files[i].path] = { volumeKey: vkey, own: exact, choice: found.issue, status: "auto" };
           coded.add(files[i].path);
         }
       }
@@ -2056,8 +2064,8 @@
           <button onclick={() => pickSendTo(true)}>{t("sendCopyTo")}</button>
         </div>
       {/if}
-      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !metaOnly.length && !episodeMetaOnly.length && !coverOnly && !playlistOnly.length && !tagsOnly.length && !comicInfoOnly.length && !epubOnly.length) || busy || !!working} onclick={applyAll}>
-        {t(sendTo ? (sendTo.copy ? "copyAction" : "moveAction") : "rename")} {preview.changed + metaOnly.length + episodeMetaOnly.length + coverOnly + playlistOnly.length + tagsOnly.length + comicInfoOnly.length + epubOnly.length || ""}
+      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !metaOnly.length && !episodeMetaOnly.length && !bookMetaOnly.length && !coverOnly && !playlistOnly.length && !tagsOnly.length && !comicInfoOnly.length && !epubOnly.length) || busy || !!working} onclick={applyAll}>
+        {t(sendTo ? (sendTo.copy ? "copyAction" : "moveAction") : "rename")} {preview.changed + metaOnly.length + episodeMetaOnly.length + bookMetaOnly.length + coverOnly + playlistOnly.length + tagsOnly.length + comicInfoOnly.length + epubOnly.length || ""}
       </button>
     </div>
   </header>

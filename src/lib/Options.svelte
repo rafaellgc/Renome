@@ -45,6 +45,23 @@
     }
   }
 
+  let showGbKey = $state(false);
+  let gbStatus = $state<{ ok: boolean; text: string } | null>(null);
+  let gbTesting = $state(false);
+
+  async function testGbKey() {
+    gbTesting = true;
+    gbStatus = null;
+    try {
+      await api.googleBooksCheck(settings.googleBooksKey.trim());
+      gbStatus = { ok: true, text: t("tmdbKeyOk") };
+    } catch (e) {
+      gbStatus = { ok: false, text: tError(e) };
+    } finally {
+      gbTesting = false;
+    }
+  }
+
   let showMtKey = $state(false);
   let mtStatus = $state<{ ok: boolean; text: string } | null>(null);
   let mtTesting = $state(false);
@@ -213,6 +230,32 @@
           <option value="">{t("tmdbLangAuto")}</option>
           {#each TMDB_LANGS as code (code)}<option value={code}>{code}</option>{/each}
         </select>
+      </div>
+    </section>
+
+    <section>
+      <h3>{t("sectionGoogleBooks")}</h3>
+      <div class="grid">
+        <label for="opt-gb-key">{t("tmdbKey")}</label>
+        <div class="key">
+          <input
+            id="opt-gb-key"
+            type={showGbKey ? "text" : "password"}
+            bind:value={settings.googleBooksKey}
+            disabled={!secrets.ready}
+            oninput={() => (gbStatus = null)}
+            spellcheck="false"
+            autocomplete="off"
+          />
+          <button onclick={() => (showGbKey = !showGbKey)}>{t(showGbKey ? "hide" : "show")}</button>
+          <button disabled={!settings.googleBooksKey.trim() || gbTesting} onclick={testGbKey}>{t("tmdbTest")}</button>
+        </div>
+        <span></span>
+        <small>
+          {#if gbStatus}<b class:good={gbStatus.ok} class:bad={!gbStatus.ok}>{gbStatus.text}</b> · {/if}
+          {t("gbKeyHint")}
+          <button class="link" onclick={() => openUrl("https://developers.google.com/books/docs/v1/using#APIKey")}>{t("tmdbGetKey")}</button>
+        </small>
       </div>
     </section>
 

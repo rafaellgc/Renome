@@ -70,7 +70,8 @@ A built-in manual (F1) explains every rule with examples.
 - Books: names EPUB, MOBI, AZW3, PDF, FB2 and DjVu files from Open Library
   (`Author - Title (Year)`), using the ISBN, title and author stored in
   the file or its name; ISBNs Open Library does not know are looked up on
-  BrasilAPI (Brazilian editions). Picks the book automatically when sure
+  Google Books (with your own free key) and BrasilAPI (Brazilian
+  editions), and Google Books also fills in and widens the title search. Picks the book automatically when sure
   and lets you choose when not; optionally organizes them into
   `Author/Title` folders and saves `cover.jpg` and a `metadata.opf`
   (read by Audiobookshelf and e-book managers), and can write the details

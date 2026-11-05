@@ -279,6 +279,12 @@ export interface BookCandidate {
   language: string;
   pages: number | null;
   cover: number | null;
+  /** Where it was found besides Open Library: `google`, `brasilapi`. */
+  source?: string;
+  /** A cover elsewhere (Google Books). */
+  coverUrl?: string;
+  /** A description elsewhere (Google Books). */
+  description?: string;
   editions: number;
   /** Found by the file's ISBN: edition, publisher and ISBN are its own. */
   exact: boolean;

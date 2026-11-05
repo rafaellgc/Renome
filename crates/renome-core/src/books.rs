@@ -432,6 +432,15 @@ pub struct Candidate {
     pub pages: Option<u32>,
     /// Open Library cover id.
     pub cover: Option<i64>,
+    /// Where it was found besides Open Library: `google` (Google Books),
+    /// `brasilapi`; empty for Open Library.
+    pub source: String,
+    /// A cover's address elsewhere (Google Books), for a book with no Open
+    /// Library cover.
+    pub cover_url: String,
+    /// The book's description elsewhere (Google Books), for its
+    /// `metadata.opf` when Open Library has none.
+    pub description: String,
     /// How many editions the work has: how well known it is.
     pub editions: u32,
     /// Found by the book's ISBN: edition, publisher and ISBN are this
@@ -807,6 +816,9 @@ pub fn rank(g: &Guess, docs: Vec<Doc>, isbn: Option<&str>, lang: &str) -> (Vec<C
             }
             .filter(|&p| p > 0),
             cover: ed.cover_i.or(doc.cover_i),
+            source: String::new(),
+            cover_url: String::new(),
+            description: String::new(),
             editions: doc.edition_count,
             exact: by_isbn,
             score,
@@ -1007,12 +1019,190 @@ pub fn brasil_candidate(isbn: &str, b: &BrasilBook, g: &Guess) -> Option<(Candid
         publisher,
         isbn: isbn.to_string(),
         language: "por".into(),
+        source: "brasilapi".into(),
         editions: 1,
         exact: true,
         score: 2.0,
         ..Default::default()
     };
     Some((c, ok))
+}
+
+/// A book as Google Books returns it (its `volumeInfo`).
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct GoogleBook {
+    pub title: String,
+    pub authors: Vec<String>,
+    pub publisher: String,
+    /// `2008`, `2008-05`, `2008-05-01`.
+    pub published_date: String,
+    pub description: String,
+    pub industry_identifiers: Vec<GoogleId>,
+    pub page_count: Option<u32>,
+    /// `pt-BR`, `en`.
+    pub language: String,
+    pub image_links: GoogleImages,
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(default)]
+pub struct GoogleId {
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub identifier: String,
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct GoogleImages {
+    pub thumbnail: String,
+}
+
+/// A Google Books cover at a size: `zoom=1` is a thumbnail, `zoom=0` the
+/// largest (about 800 px wide); always over HTTPS, without the page curl
+/// drawn on it.
+pub fn google_cover(url: &str, zoom: u8) -> String {
+    if url.is_empty() {
+        return String::new();
+    }
+    // Google gives its own addresses over plain HTTP.
+    let url = url
+        .replacen("http://books.google.", "https://books.google.", 1)
+        .replace("&edge=curl", "");
+    static ZOOM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"zoom=\d").unwrap());
+    ZOOM.replace(&url, format!("zoom={zoom}").as_str())
+        .into_owned()
+}
+
+/// A book found on Google Books as a candidate: `isbn` is the ISBN it was
+/// found by (then it is that very edition), with whether it is the book
+/// the file says it is; by title and author, how well it fits the guess.
+/// `None` without a title.
+pub fn google_candidate(
+    b: &GoogleBook,
+    g: &Guess,
+    isbn: Option<&str>,
+) -> Option<(Candidate, bool)> {
+    let raw = text::nfc(b.title.trim());
+    if raw.is_empty() {
+        return None;
+    }
+    let names = authors(&b.authors);
+    let ok = plausible(g, &raw, &names);
+    let mut pairs = vec![(g.title.clone(), g.author.clone())];
+    pairs.extend(g.alts.iter().cloned());
+    let (fit, tfit, afit) = pairs
+        .iter()
+        .map(|(t, a)| {
+            let tfit = title_fit(t, &raw);
+            let afit = author_fit(a, &names);
+            let term = match afit {
+                None => 0.0,
+                Some(x) if x >= 0.5 => 0.1 * x,
+                Some(_) => -0.4,
+            };
+            (tfit + term, tfit, afit)
+        })
+        .max_by(|a, b| a.0.total_cmp(&b.0))
+        .unwrap_or((0.0, 0.0, None));
+    // As on Open Library: the title fits, and the author does (or, with
+    // none to compare, the title fits exactly).
+    let fits = tfit >= 0.95
+        && match afit {
+            Some(a) => a >= 0.5,
+            None => tfit >= 0.99,
+        };
+    let names = own_authors(g, names);
+    let title = choose_title(g, &raw, &names, isbn.is_some() && ok);
+    let own_isbn = isbn.map(str::to_string).or_else(|| {
+        b.industry_identifiers
+            .iter()
+            .filter(|i| i.kind.starts_with("ISBN"))
+            .find_map(|i| crate::ebook::isbn13(&i.identifier))
+    });
+    let c = Candidate {
+        original_title: title.clone(),
+        title: text::collapse_spaces(title.trim()),
+        authors: names,
+        edition_year: b.published_date.get(..4).and_then(|y| y.parse().ok()),
+        publisher: b.publisher.trim().to_string(),
+        isbn: own_isbn.unwrap_or_default(),
+        language: b.language.split('-').next().unwrap_or("").to_lowercase(),
+        pages: b.page_count.filter(|&p| p > 0),
+        source: "google".into(),
+        cover_url: google_cover(&b.image_links.thumbnail, 1),
+        description: b.description.trim().to_string(),
+        editions: 1,
+        exact: isbn.is_some(),
+        score: if isbn.is_some() { 2.0 } else { fit },
+        ..Default::default()
+    };
+    Some((c, if isbn.is_some() { ok } else { fits }))
+}
+
+/// The books found on Google Books by title and author joined to those
+/// found on Open Library: one that is the same book as a found one fills
+/// what that one lacks (publisher, pages, ISBN, cover, description); the
+/// others come after them. With nothing found on Open Library, Google's
+/// best one is a safe pick when its title and author fit and no other is
+/// close.
+pub fn with_google(
+    g: &Guess,
+    (found, auto): (Vec<Candidate>, bool),
+    extra: Vec<(Candidate, bool)>,
+) -> (Vec<Candidate>, bool) {
+    let was_empty = found.is_empty();
+    let mut out = found;
+    let mut added: Vec<(Candidate, bool)> = Vec::new();
+    for (e, fits) in extra {
+        let same = out.iter_mut().find(|c| {
+            title_fit(&e.title, &c.title).max(title_fit(&e.title, &c.original_title)) >= 0.9
+                && author_fit(c.authors.first().map_or("", |a| a), &e.authors)
+                    .is_none_or(|f| f >= 0.5)
+        });
+        match same {
+            Some(c) => {
+                if c.cover.is_none() && c.cover_url.is_empty() {
+                    c.cover_url = e.cover_url.clone();
+                }
+                if c.description.is_empty() {
+                    c.description = e.description.clone();
+                }
+                if c.publisher.is_empty() {
+                    c.publisher = e.publisher.clone();
+                }
+                if c.pages.is_none() {
+                    c.pages = e.pages;
+                }
+                if c.isbn.is_empty() {
+                    c.isbn = e.isbn.clone();
+                }
+            }
+            None if !added.iter().any(|(a, _)| same_book(a, &e)) => {
+                // Books by someone else, found by a word of the title, are
+                // left out, as on Open Library.
+                let author_ok = author_fit(&g.author, &e.authors).is_none_or(|f| f >= 0.5);
+                if fits || (author_ok && e.score >= 0.6) {
+                    added.push((e, fits));
+                }
+            }
+            None => {}
+        }
+    }
+    added.sort_by(|a, b| b.0.score.total_cmp(&a.0.score));
+    let auto = match (was_empty, added.as_slice()) {
+        (true, [(best, fits), rest @ ..]) => {
+            *fits
+                && !best.authors.is_empty()
+                && rest.first().is_none_or(|(second, _)| {
+                    second.score < best.score - 0.1 || same_book(best, second)
+                })
+        }
+        _ => auto,
+    };
+    out.extend(added.into_iter().map(|(c, _)| c));
+    (out, auto)
 }
 
 /// The edition found on BrasilAPI with what Open Library knows of its work,
@@ -1936,5 +2126,63 @@ mod tests {
         assert!(o.contains("<dc:description>Lúcio e Dora.</dc:description>"));
         assert!(o.contains("opf:scheme=\"ISBN\">9780000000026<"));
         assert!(o.contains("href=\"cover.jpg\""));
+    }
+
+    #[test]
+    fn google_books_join_open_library() {
+        let g = Guess {
+            title: "A regra do êxito".into(),
+            author: "Otto Lindqvist".into(),
+            from_file: true,
+            ..Default::default()
+        };
+        let b: GoogleBook = serde_json::from_str(
+            r#"{"title":"A Regra do Êxito","authors":["Otto Lindqvist"],"publisher":"Editora Um",
+            "publishedDate":"2002-05-01","description":"Um livro.","pageCount":212,"language":"pt-BR",
+            "industryIdentifiers":[{"type":"ISBN_10","identifier":"0306406152"}],
+            "imageLinks":{"thumbnail":"http://books.google.com/books/content?id=X&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api"}}"#,
+        )
+        .unwrap();
+        // By ISBN: that very edition, a safe pick.
+        let (e, ok) = google_candidate(&b, &g, Some("9780000000033")).unwrap();
+        assert!(ok && e.exact);
+        assert_eq!(
+            (e.source.as_str(), e.language.as_str(), e.pages),
+            ("google", "pt", Some(212))
+        );
+        assert_eq!(e.edition_year, Some(2002));
+        assert_eq!(
+            e.cover_url,
+            "https://books.google.com/books/content?id=X&printsec=frontcover&img=1&zoom=1&source=gbs_api"
+        );
+        assert!(google_cover(&e.cover_url, 0).contains("zoom=0"));
+        // By title: its own ISBN; it fills what Open Library's same book lacks.
+        let (t, fits) = google_candidate(&b, &g, None).unwrap();
+        assert!(fits && !t.exact);
+        assert_eq!(t.isbn, "9780306406157");
+        let ol = Candidate {
+            work: "OL1W".into(),
+            title: "A Regra do Êxito".into(),
+            authors: vec!["Otto Lindqvist".into()],
+            ..Default::default()
+        };
+        let (c, auto) = with_google(&g, (vec![ol], false), vec![(t.clone(), fits)]);
+        assert_eq!(c.len(), 1);
+        assert!(!auto);
+        assert_eq!(
+            (c[0].work.as_str(), c[0].publisher.as_str()),
+            ("OL1W", "Editora Um")
+        );
+        assert_eq!(c[0].description, "Um livro.");
+        assert!(!c[0].cover_url.is_empty());
+        // Nothing on Open Library: Google's book alone is a safe pick.
+        let (c, auto) = with_google(&g, (Vec::new(), false), vec![(t.clone(), fits)]);
+        assert!(auto && c[0].source == "google");
+        // A book by someone else, by a word of the title, is left out.
+        let other: GoogleBook =
+            serde_json::from_str(r#"{"title":"O êxito dos outros","authors":["Rui Sá"]}"#).unwrap();
+        let o = google_candidate(&other, &g, None).unwrap();
+        let (c, auto) = with_google(&g, (Vec::new(), false), vec![o]);
+        assert!(c.is_empty() && !auto);
     }
 }

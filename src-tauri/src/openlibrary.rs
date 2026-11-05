@@ -32,10 +32,12 @@ fn covers_base() -> String {
     std::env::var("RENOME_OL_COVERS").unwrap_or_else(|_| COVERS.into())
 }
 
-/// Shared by all lookups, so the pace holds across them.
+/// Shared by all lookups, so the pace holds across them. Google Books,
+/// with the user's key, is asked too.
 pub struct Client {
     http: reqwest::Client,
     last: tokio::sync::Mutex<Option<Instant>>,
+    pub gb: crate::googlebooks::Client,
 }
 
 fn net_error(e: reqwest::Error) -> String {
@@ -62,6 +64,7 @@ impl Default for Client {
                 .build()
                 .unwrap_or_default(),
             last: tokio::sync::Mutex::new(None),
+            gb: crate::googlebooks::Client::default(),
         }
     }
 }
@@ -159,20 +162,40 @@ impl Client {
     /// a safe pick and two searches have not found anything yet; then by
     /// the author.
     ///
-    /// An ISBN Open Library does not know is asked of BrasilAPI, which has
-    /// most books published in Brazil: that edition comes first, with its
-    /// work on Open Library when the search finds it.
+    /// An ISBN Open Library does not know is asked of Google Books (with
+    /// the user's key), then of BrasilAPI, which has most books published
+    /// in Brazil: that edition comes first, with its work on Open Library
+    /// when the search finds it. Without an ISBN, a book Open Library does
+    /// not settle is searched on Google Books too, and the books found
+    /// there join those (see [`books::with_google`]).
     pub async fn find(&self, g: &Guess, lang: &str) -> Result<(Vec<Candidate>, bool), String> {
-        let found = self.find_ol(g, lang).await?;
+        let found = match self.find_ol(g, lang).await {
+            Ok(f) => f,
+            // Google Books may still find it.
+            Err(e) if self.gb.enabled() => {
+                return self
+                    .find_google(g, lang, (Vec::new(), false))
+                    .await
+                    .map_err(|_| e);
+            }
+            Err(e) => return Err(e),
+        };
         if found.0.first().is_some_and(|c| c.exact) {
             return Ok(found);
         }
         for isbn in g.isbns.iter().take(3) {
-            let Some((edition, ok)) = self
-                .brasil(isbn)
-                .await
-                .and_then(|b| books::brasil_candidate(isbn, &b, g))
-            else {
+            let google = match self.gb.by_isbn(isbn).await {
+                Ok(b) => b.and_then(|b| books::google_candidate(&b, g, Some(isbn))),
+                Err(_) => None,
+            };
+            let edition = match google {
+                Some(e) => Some(e),
+                None => self
+                    .brasil(isbn)
+                    .await
+                    .and_then(|b| books::brasil_candidate(isbn, &b, g)),
+            };
+            let Some((edition, ok)) = edition else {
                 continue;
             };
             let merged = books::with_edition(edition.clone(), ok, found.clone());
@@ -192,7 +215,36 @@ impl Client {
                 Err(_) => merged,
             });
         }
-        Ok(found)
+        if found.1 || !self.gb.enabled() {
+            return Ok(found);
+        }
+        // Google's failures leave what Open Library found.
+        let fallback = found.clone();
+        Ok(self.find_google(g, lang, found).await.unwrap_or(fallback))
+    }
+
+    /// The books Google Books finds by title and author (the guess's
+    /// readings, two at most) joined to `found`.
+    async fn find_google(
+        &self,
+        g: &Guess,
+        lang: &str,
+        found: (Vec<Candidate>, bool),
+    ) -> Result<(Vec<Candidate>, bool), String> {
+        let mut pairs = vec![(g.title.clone(), g.author.clone())];
+        pairs.extend(g.alts.iter().cloned());
+        let mut extra = Vec::new();
+        for (t, a) in pairs.iter().filter(|(t, _)| !t.trim().is_empty()).take(2) {
+            let list = self.gb.search(t, a, lang).await?;
+            extra.extend(
+                list.iter()
+                    .filter_map(|b| books::google_candidate(b, g, None)),
+            );
+            if extra.iter().any(|(_, fits)| *fits) {
+                break;
+            }
+        }
+        Ok(books::with_google(g, found, extra))
     }
 
     /// The edition of an ISBN on BrasilAPI; `None` when it is not there or
@@ -357,6 +409,12 @@ pub struct SidecarItem {
     path: PathBuf,
     book: BookMatch,
     cover: Option<i64>,
+    /// A cover elsewhere (Google Books), when there is no `cover`.
+    #[serde(default)]
+    cover_url: String,
+    /// A description from elsewhere, when Open Library has none.
+    #[serde(default)]
+    description: String,
     #[serde(default)]
     language: String,
 }
@@ -394,15 +452,22 @@ pub async fn sidecars(
         };
         let cover_path = file("cover.jpg", "jpg");
         let mut cover_name = None;
-        if cover && let Some(id) = item.cover {
+        let has_cover = item.cover.is_some() || !item.cover_url.is_empty();
+        if cover && has_cover {
             if std::fs::symlink_metadata(&cover_path).is_ok() {
                 cover_name = Some(name(&cover_path));
             } else {
-                match client
-                    .cover(id)
-                    .await
-                    .and_then(|b| write_new(&cover_path, &b))
-                {
+                let picture = match item.cover {
+                    Some(id) => client.cover(id).await,
+                    // The largest Google has.
+                    None => {
+                        client
+                            .gb
+                            .cover(&books::google_cover(&item.cover_url, 0))
+                            .await
+                    }
+                };
+                match picture.and_then(|b| write_new(&cover_path, &b)) {
                     Ok(()) => {
                         cover_name = Some(name(&cover_path));
                         report.created.push(cover_path.clone());
@@ -414,10 +479,13 @@ pub async fn sidecars(
         let opf_path = file("metadata.opf", "opf");
         if opf && std::fs::symlink_metadata(&opf_path).is_err() {
             // Without the work's description the file is still worth having.
-            let work = match item.book.work.is_empty() {
+            let mut work = match item.book.work.is_empty() {
                 true => Work::default(),
                 false => client.work(&item.book.work).await.unwrap_or_default(),
             };
+            if work.description.is_none() && !item.description.trim().is_empty() {
+                work.description = Some(books::Text::Plain(item.description.clone()));
+            }
             let c = Candidate {
                 language: item.language.clone(),
                 ..Default::default()

@@ -23,6 +23,8 @@ export interface Settings {
   discogsToken: string;
   /** Metron API token (empty: not set up). */
   metronToken: string;
+  /** Google Books API key (empty: not used). */
+  googleBooksKey: string;
   /** Grand Comics Database account (empty: searched without one). */
   gcdEmail: string;
   gcdPassword: string;
@@ -49,6 +51,7 @@ const DEFAULTS: Settings = {
   comicVineKey: "",
   discogsToken: "",
   metronToken: "",
+  googleBooksKey: "",
   gcdEmail: "",
   gcdPassword: "",
   rules: [],
@@ -116,7 +119,7 @@ export function saveSettings() {
 }
 
 /** The settings kept in the system's password store, not in the file. */
-export const SECRET_FIELDS = ["tmdbKey", "comicVineKey", "discogsToken", "metronToken", "gcdEmail", "gcdPassword"] as const;
+export const SECRET_FIELDS = ["tmdbKey", "comicVineKey", "discogsToken", "metronToken", "googleBooksKey", "gcdEmail", "gcdPassword"] as const;
 
 /** Whether the secrets came (the store may wait to be unlocked or
  *  allowed), and where they are kept: `stored` in the password store,

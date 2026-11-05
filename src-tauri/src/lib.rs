@@ -20,6 +20,7 @@ mod anilist;
 mod comicvine;
 mod discogs;
 mod gcd;
+mod googlebooks;
 mod mangadex;
 mod mangaupdates;
 mod metron;
@@ -725,6 +726,18 @@ async fn mb_search(
 #[tauri::command]
 fn discogs_token(state: State<AppState>, token: String) {
     state.dg.set_token(&token);
+}
+
+/// The Google Books key from the options (empty: Google Books is not used).
+#[tauri::command]
+fn google_books_key(state: State<AppState>, key: String) {
+    state.ol.gb.set_key(&key);
+}
+
+/// Checks a Google Books key.
+#[tauri::command]
+async fn google_books_check(app: AppHandle, key: String) -> Result<(), String> {
+    app.state::<AppState>().ol.gb.check(&key).await
 }
 
 /// Checks a Discogs token.
@@ -1689,6 +1702,8 @@ pub fn run() {
             sort_files,
             file_details,
             discogs_token,
+            google_books_key,
+            google_books_check,
             discogs_check,
             preview,
             find_identical,

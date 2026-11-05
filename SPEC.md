@@ -493,8 +493,8 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   entry; its episodes 1 to `episodes` (while airing, the next airing
   episode minus one); titles from `streamingEpisodes`
   (`Episode N - Title`, by N), else none; air dates from
-  `airingSchedule` (50 per entry), the first episode's from the start
-  date. Name: the typed or guessed name (without a trailing
+  `airingSchedule` (50 per entry); an episode it lacks takes the date
+  of the one before it, the first one the start date. Name: the typed or guessed name (without a trailing
   `(year)`) when it is one of the first entry's titles or synonyms,
   else English, else romaji; original name native (else romaji);
   aliases every title of every season; extra `genre`, `genres`,
@@ -807,7 +807,7 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   tags" is on (cue sheets and playlists that list them are updated,
   see 4).
 
-### 2.4 Books (Open Library, BrasilAPI)
+### 2.4 Books (Open Library, Google Books, BrasilAPI)
 
 - Applies to EPUB, KEPUB, MOBI, AZW, AZW3, PRC, PDF, FB2 and DjVu files.
   Each file's details are read: EPUB package document (EPUB 2/3, series
@@ -827,9 +827,39 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   then the author's best-known books (the author found with Open
   Library's author search: all name words, the same name before longer
   ones, then most works; the surname alone as a fallback). An ISBN Open
-  Library does not know is looked up on BrasilAPI; that edition is joined
+  Library does not know is looked up on Google Books (with the user's
+  key; `q=isbn:…`), else on BrasilAPI; that edition is joined
   with the work Open Library has when the search finds it (first year,
   original title, cover).
+- Google Books (optional; the user's API key, set with
+  `google_books_key`, checked with `isbn:9780306406157`; `gbBadKey` for
+  `keyInvalid`/400/401/403, `gbBusy` for a used-up daily quota or 429):
+  `GET /books/v1/volumes` with `maxResults=10`, `printType=books`,
+  requests 0.5 s apart, answers kept only for the session (Google's
+  terms bind keeping to its cache headers, which allow none; nothing on
+  disk). Without an ISBN, a book Open Library does not pick by itself
+  (or one Open Library fails on) is searched as `intitle:<words>
+  inauthor:<surname>` with `langRestrict` (the titles' language), then
+  without it, for the first two readings, until one fits. A volume
+  becomes a candidate (`source: google`): title (NFC), authors, publisher,
+  edition year from `publishedDate`, ISBN (the one searched, else its
+  ISBN-13, or its ISBN-10 made 13), language (`pt-BR` → `pt`), pages,
+  cover (`imageLinks.thumbnail`, HTTPS, no `edge=curl`, `zoom=1`; saved
+  at `zoom=0`, about 800 px wide), description. By ISBN it is the edition
+  (`exact`, safe when plausible). By title it fits when the title fits
+  (≥ 0.95) and the author does (≥ 0.5; with no author to compare, an
+  exact title); one that is the same book as an Open Library candidate
+  (title fit ≥ 0.9, author ≥ 0.5 or unknown) only fills that one's empty
+  publisher, pages, ISBN, cover and description; the others, if they fit
+  or are by the author with a title fit of 0.6 or more, follow Open
+  Library's, best first, one per book. With nothing from Open Library,
+  the best one is a safe pick when it fits, has an author and no other
+  is within 0.1 (but the same book). The cover saved is Open Library's,
+  else Google's; Google's description goes into `metadata.opf` when the
+  work has none. A Google candidate found by title has no `year` (first
+  publication), and, not being `exact`, its edition year, publisher and
+  ISBN are not used in the name or `metadata.opf`. BrasilAPI candidates
+  carry `source: brasilapi`.
 - Ranking: title fit (also without subtitles), author fit (the surname
   and the first name must match, initials too: `C. S. X` is not
   `X Carroll`), popularity, Open Library's order. Results by someone else
@@ -882,8 +912,8 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   `META-INF/rights.xml` or content encrypted by anything but font
   obfuscation (DRM) are refused (`epubDrm`). Writing works like the
   comics' (see 2.5), with the same history, recovery and undo.
-- Only the searched title, author and ISBN are sent to Open Library, and
-  only the ISBN to BrasilAPI. Without the option above the book files are
+- Only the searched title, author and ISBN are sent to Open Library and
+  Google Books, and only the ISBN to BrasilAPI. Without the option above the book files are
   never changed.
 
 ### 2.5 Comics (ComicInfo.xml, Comic Vine)
@@ -1435,7 +1465,7 @@ A "?" button (or F1) opens a window with three tabs:
 
 Saved in the user's config folder (e.g. `~/.config/renome/settings.json`).
 
-The secrets (TMDB, Comic Vine, Discogs and Metron keys, GCD email and password)
+The secrets (TMDB, Google Books, Comic Vine, Discogs and Metron keys, GCD email and password)
 are not in that file: they go, as one JSON entry (service
 `io.github.rafaellgc.Renome`, account `credentials`), to the system's
 password store (Secret Service on Linux, Credential Manager on Windows,
@@ -1479,7 +1509,7 @@ may be asked about the Keychain again with each version.
   at most 7 days (its terms forbid using it as a store of its data),
   Discogs' at most 6 hours, whatever the choice. Expired ones are deleted when
   read and at start, in the background.
-- Services: TMDB key and title language, Comic Vine key, Metron token
+- Services: TMDB key and title language, Google Books key, Comic Vine key, Metron token
   (checked against `/api/series_type/`), GCD account (email and
   password), Discogs token; each with a Test button. A line
   says whether they are in the system's password store or in the file.

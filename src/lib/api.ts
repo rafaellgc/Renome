@@ -49,6 +49,8 @@ export const api = {
   /** The Discogs token from the options (empty: Discogs is not used). */
   discogsToken: (token: string) => invoke<void>("discogs_token", { token }),
   discogsCheck: (token: string) => invoke<void>("discogs_check", { token }),
+  googleBooksKey: (key: string) => invoke<void>("google_books_key", { key }),
+  googleBooksCheck: (key: string) => invoke<void>("google_books_check", { key }),
   mbChoose: (id: string, paths: string[], fromName: boolean) =>
     invoke<{ matches: [string, SongMatch][]; tracks: ListedTrack[]; agree: number }>("mb_choose", { id, paths, fromName }),
   /** `names`: the name each file is read by (null: its own). */
