@@ -739,7 +739,7 @@ ${ex("IMG-20190513-WA0001.jpg", "2019-05-13.jpg")}
   <li>Tick <b>Send to the Trash</b> on the files you don't want, in as many groups as you like. <b>Keep only the largest</b> ticks every file of the group but the largest.</li>
   <li>Nothing moves until you click <b>Move to the Trash</b> and confirm. If every file of some group is ticked, the confirmation says so. The files go to the <b>system's Trash</b> (where they can be recovered until it is emptied) and leave the list; the groups are made again.</li>
 </ul>
-<p><b>Limitations:</b> sending to the Trash is not in the History: to bring a file back, use the system's Trash. Files that are not pictures (identical copies of videos, songs) show without a picture, only their details. On a disk without a Trash (some USB sticks and network disks), the file stays where it is and the program says so.</p>`,
+<p><b>Limitations:</b> sending to the Trash is not in the History: to bring a file back, use the system's Trash (on macOS, drag it from the Trash to a folder: the Finder's <b>Put Back</b> does not show for it). Files that are not pictures (identical copies of videos, songs) show without a picture, only their details. On a disk without a Trash (some USB sticks and network disks), the file stays where it is and the program says so.</p>`,
   },
   {
     id: "apply",

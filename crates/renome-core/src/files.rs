@@ -222,7 +222,18 @@ pub fn to_trash(path: &Path) -> Result<(), String> {
             Err("trashFailed: gio trash".into())
         };
     }
-    trash::delete(path).map_err(|e| format!("trashFailed: {e}"))
+    // macOS: through the file system, not by asking the Finder, which
+    // makes the system ask the user to let the program control it.
+    #[cfg(target_os = "macos")]
+    let done = {
+        use trash::macos::{DeleteMethod, TrashContextExtMacos};
+        let mut ctx = trash::TrashContext::default();
+        ctx.set_delete_method(DeleteMethod::NsFileManager);
+        ctx.delete(path)
+    };
+    #[cfg(not(target_os = "macos"))]
+    let done = trash::delete(path);
+    done.map_err(|e| format!("trashFailed: {e}"))
 }
 
 fn read_taken(path: &Path) -> Option<NaiveDateTime> {

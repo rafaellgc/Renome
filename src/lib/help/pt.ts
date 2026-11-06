@@ -739,7 +739,7 @@ ${ex("IMG-20190513-WA0001.jpg", "2019-05-13.jpg")}
   <li>Marque <b>Mandar para a Lixeira</b> nos arquivos que não quer, em quantos grupos quiser. <b>Manter só a maior</b> marca todos do grupo menos o maior.</li>
   <li>Nada sai do lugar até você clicar em <b>Mover para a Lixeira</b> e confirmar. Se em algum grupo todos estiverem marcados, a confirmação avisa. Os arquivos vão para a <b>Lixeira do sistema</b> (de onde podem ser recuperados até ela ser esvaziada) e saem da lista; os grupos são refeitos.</li>
 </ul>
-<p><b>Limitações:</b> mandar para a Lixeira não entra no Histórico: para trazer um arquivo de volta, use a Lixeira do sistema. Arquivos que não são imagens (cópias idênticas de vídeos, músicas) aparecem sem imagem, só com os dados. Num disco sem Lixeira (alguns pendrives e discos de rede), o arquivo fica onde está e o programa avisa.</p>`,
+<p><b>Limitações:</b> mandar para a Lixeira não entra no Histórico: para trazer um arquivo de volta, use a Lixeira do sistema (no macOS, arraste-o da Lixeira para uma pasta: o <b>Colocar de Volta</b> do Finder não aparece para ele). Arquivos que não são imagens (cópias idênticas de vídeos, músicas) aparecem sem imagem, só com os dados. Num disco sem Lixeira (alguns pendrives e discos de rede), o arquivo fica onde está e o programa avisa.</p>`,
   },
   {
     id: "apply",

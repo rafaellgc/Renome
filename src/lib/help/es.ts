@@ -739,7 +739,7 @@ ${ex("IMG-20190513-WA0001.jpg", "2019-05-13.jpg")}
   <li>Marca <b>Mandar a la Papelera</b> en los archivos que no quieras, en tantos grupos como quieras. <b>Conservar solo la mayor</b> marca todos los del grupo menos el mayor.</li>
   <li>Nada se mueve hasta que hagas clic en <b>Mover a la Papelera</b> y confirmes. Si en algún grupo están todos marcados, la confirmación lo avisa. Los archivos van a la <b>Papelera del sistema</b> (de donde se pueden recuperar hasta que se vacíe) y salen de la lista; los grupos se rehacen.</li>
 </ul>
-<p><b>Limitaciones:</b> mandar a la Papelera no queda en el Historial: para recuperar un archivo, usa la Papelera del sistema. Los archivos que no son imágenes (copias idénticas de vídeos, canciones) aparecen sin imagen, solo con sus datos. En un disco sin Papelera (algunos pendrives y discos de red), el archivo se queda donde está y el programa avisa.</p>`,
+<p><b>Limitaciones:</b> mandar a la Papelera no queda en el Historial: para recuperar un archivo, usa la Papelera del sistema (en macOS, arrástralo de la Papelera a una carpeta: el <b>Devolver</b> del Finder no aparece para él). Los archivos que no son imágenes (copias idénticas de vídeos, canciones) aparecen sin imagen, solo con sus datos. En un disco sin Papelera (algunos pendrives y discos de red), el archivo se queda donde está y el programa avisa.</p>`,
   },
   {
     id: "apply",

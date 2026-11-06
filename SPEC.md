@@ -1238,7 +1238,9 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   extension (`Name.cbr`, `Name.cb7`, `Name.cbt`) and the zip renamed to
   the comic's name. Delete then sends the original to the system's trash
   (`trash` crate; in a Flatpak, `FLATPAK_ID`, `gio trash`, which goes
-  through the desktop's trash portal); when the trash fails, it stays
+  through the desktop's trash portal; on macOS through `NSFileManager`,
+  not the Finder, which would make the system ask to let the program
+  control it — so the Finder's Put Back does not show for those files); when the trash fails, it stays
   beside (`trashFailed: …` in the error list).
   Errors, the comic as it was: `archiveLocked` (a password),
   `archiveBroken: …` (damaged, or a RAR libarchive cannot decode),
@@ -1505,7 +1507,11 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   total size and latest date), updated when its tags are written; undo
   deletes the copies still so and keeps the others (out of the entry,
   listed), with their lists and tags untouched. Copies and moves to
-  other disks report their progress (bytes, every 200 ms at most) and
+  other disks report their progress (bytes, every 200 ms at most; the
+  moves that cross disks are seen before starting — Unix: the device of
+  the file's folder against that of the target's nearest existing
+  folder; Windows: the drive — so the total holds them all from the
+  start, and one missed joins it when its rename fails) and
   can be stopped between files: the files not reached keep their names.
   The next start after a stop halfway deletes passing copies, records
   whole copies in an entry, and, for a move to another disk whose

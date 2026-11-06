@@ -346,6 +346,42 @@ fn temp_path(from: &Path, i: usize) -> PathBuf {
     from.with_file_name(format!(".renome-{}-{i}.tmp", std::process::id()))
 }
 
+/// Whether moving `from` to `to` crosses disks, so that it is a copy
+/// and then a delete. Unix: the device of `from`'s folder against that of
+/// the nearest folder of `to` that exists; Windows: the drive.
+fn other_disk(from: &Path, to: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let dev = |p: &Path| {
+            p.ancestors()
+                .skip(1)
+                .find_map(|a| fs::metadata(a).ok())
+                .map(|m| m.dev())
+        };
+        matches!((dev(from), dev(to)), (Some(a), Some(b)) if a != b)
+    }
+    #[cfg(windows)]
+    {
+        use std::path::{Component, Prefix};
+        let drive = |p: &Path| match p.components().next() {
+            Some(Component::Prefix(x)) => match x.kind() {
+                Prefix::Disk(c) | Prefix::VerbatimDisk(c) => Some(std::ffi::OsString::from(
+                    (c.to_ascii_uppercase() as char).to_string(),
+                )),
+                _ => Some(x.as_os_str().to_ascii_uppercase()),
+            },
+            _ => None,
+        };
+        matches!((drive(from), drive(to)), (Some(a), Some(b)) if a != b)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (from, to);
+        false
+    }
+}
+
 /// Order in which depth levels run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Depth {
@@ -361,13 +397,16 @@ pub fn execute(ops: &[Operation], order: Depth) -> ApplyReport {
 }
 
 pub fn execute_with(ops: &[Operation], order: Depth, hooks: &Hooks) -> ApplyReport {
-    // What is copied: the copies, and moves that may cross disks (only
-    // known when they fail to rename; counted when they do).
-    let total: u64 = ops
+    // What is copied: the copies, and moves to another disk (seen ahead,
+    // so the bar counts them from the start; one missed is counted when
+    // its rename fails).
+    let counted: HashSet<usize> = ops
         .iter()
-        .filter(|op| op.copy)
-        .map(|op| size_of(&op.from))
-        .sum();
+        .enumerate()
+        .filter(|(_, op)| op.copy || other_disk(&op.from, &op.to))
+        .map(|(i, _)| i)
+        .collect();
+    let total: u64 = counted.iter().map(|&i| size_of(&ops[i].from)).sum();
     let bytes = std::cell::Cell::new(0u64);
     let total = std::cell::Cell::new(total);
     let progress = |n: u64| {
@@ -376,7 +415,11 @@ pub fn execute_with(ops: &[Operation], order: Depth, hooks: &Hooks) -> ApplyRepo
     };
     let ctx = Copying {
         progress: &progress,
-        grow: &|n| total.set(total.get() + n),
+        grow: &|i, n| {
+            if !counted.contains(&i) {
+                total.set(total.get() + n)
+            }
+        },
         stop: hooks.stop,
     };
     let depth = |op: &Operation| op.from.components().count();
@@ -405,8 +448,9 @@ pub fn execute_with(ops: &[Operation], order: Depth, hooks: &Hooks) -> ApplyRepo
 /// Progress and stop, while running.
 struct Copying<'a> {
     progress: &'a dyn Fn(u64),
-    /// A move found to cross disks: its bytes join the total.
-    grow: &'a dyn Fn(u64),
+    /// A move found to cross disks (by its index): its bytes join the
+    /// total unless they were counted ahead.
+    grow: &'a dyn Fn(usize, u64),
     stop: &'a dyn Fn() -> bool,
 }
 
@@ -464,7 +508,7 @@ fn execute_level(ops: &[(usize, &Operation)], report: &mut ApplyReport, ctx: &Co
             match rename_new(&tmp, &op.to) {
                 // Another disk: copied, then the original goes.
                 Err((ErrorKind::OtherDisk, _)) => {
-                    (ctx.grow)(size_of(&tmp));
+                    (ctx.grow)(i, size_of(&tmp));
                     let copied = copy_new(&tmp, &op.to, &part_path(&op.to, i), &mut add);
                     match copied.map(|()| (tmp.is_dir(), remove_any(&tmp))) {
                         Ok((_, Ok(()))) => Ok(()),
@@ -2201,5 +2245,42 @@ mod tests {
     fn rejects_path_traversal_ids() {
         let d = tempfile::tempdir().unwrap();
         assert!(History::new(d.path()).undo("../x").is_err());
+    }
+
+    /// Moves to another disk count in the bar from the start, so it does
+    /// not stay at 100% while they go (`/dev/shm` is another disk here;
+    /// skipped where it is not).
+    #[test]
+    fn other_disk_moves_counted_ahead() {
+        let a = tempfile::tempdir().unwrap();
+        let Ok(b) = tempfile::tempdir_in("/dev/shm") else {
+            return;
+        };
+        if !other_disk(&a.path().join("x"), &b.path().join("x")) {
+            return;
+        }
+        assert!(!other_disk(&a.path().join("x"), &a.path().join("new/y")));
+        for n in ["1", "2", "3"] {
+            fs::write(a.path().join(n), "0123456789").unwrap();
+        }
+        let ops: Vec<Operation> = ["1", "2", "3"]
+            .iter()
+            .map(|n| Operation {
+                from: a.path().join(n),
+                to: b.path().join("sub").join(n),
+                copy: false,
+                within: None,
+            })
+            .collect();
+        let seen = std::cell::RefCell::new(Vec::new());
+        let progress = |d, t| seen.borrow_mut().push((d, t));
+        let hooks = Hooks {
+            progress: &progress,
+            stop: &|| false,
+        };
+        let r = execute_with(&ops, Depth::DeepestFirst, &hooks);
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        assert_eq!(*seen.borrow(), vec![(10, 30), (20, 30), (30, 30)]);
+        assert!(b.path().join("sub/3").exists() && !a.path().join("3").exists());
     }
 }

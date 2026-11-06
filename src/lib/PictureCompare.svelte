@@ -148,6 +148,19 @@
   const base = (p: string) => p.split(/[\\/]/).pop() ?? p;
   const folder = (p: string) => p.replace(/[\\/][^\\/]*$/, "");
   const home = /^\/(var\/)?home\/[^/]+/;
+  // Where each picture is: in a group spread over folders, only what tells
+  // them apart ("…/Phone", "…/WhatsApp"); the whole folder otherwise.
+  function where(p: string) {
+    const dirs = group.map((g) => folder(g).split(/[\\/]/));
+    const own = folder(p).split(/[\\/]/);
+    let k = 0;
+    while (k < own.length && dirs.every((d) => d.length > k && d[k] === own[k])) k++;
+    if (dirs.every((d) => d.length === k) || k === 0) return folder(p).replace(home, "~");
+    const sep = p.includes("\\") && !p.includes("/") ? "\\" : "/";
+    // A folder holding the others: all start from its name.
+    const from = dirs.some((d) => d.length === k) ? k - 1 : k;
+    return `…${sep}${own.slice(from).join(sep)}`;
+  }
   const ext = (p: string) => (base(p).includes(".") ? base(p).split(".").pop()!.toUpperCase() : "");
   function size(n: number) {
     if (n < 1024) return `${n} B`;
@@ -182,6 +195,7 @@
         </button>
         <div class="zoom-bar">
           <span class="name" title={zoom}>{base(zoom)}</span>
+          <span class="muted path" title={folder(zoom)}><bdi>{where(zoom)}</bdi></span>
           {#if c?.width}<span class="muted">{c.width}×{c.height}</span>{/if}
           <span class="spacer"></span>
           <label class="mark"><input type="checkbox" checked={marked.has(zoom)} onchange={() => zoom && toggle(zoom)} /> {t("compareMark")}</label>
@@ -199,7 +213,7 @@
             </button>
             <div class="info">
               <b class="name" title={p}>{base(p)}</b>
-              <span class="muted path" title={folder(p)}>{folder(p).replace(home, "~")}</span>
+              <span class="muted path" title={folder(p)}><bdi>{where(p)}</bdi></span>
               {#if c}
                 <span>{[c.width ? `${c.width}×${c.height}` : "", size(c.size)].filter(Boolean).join(" · ")}</span>
                 <span class="muted">{takenAt(c) ? t("compareTaken", { d: takenAt(c) ?? "" }) : t("compareChanged", { d: changedAt(c) })}</span>
@@ -266,6 +280,10 @@
   .noimg { font-size: 22px; font-weight: 600; color: var(--muted); }
   .info { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; min-width: 0; }
   .name, .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Cut at the start: the end tells two folders apart. */
+  .path { direction: rtl; text-align: left; }
+  .zoom-bar .name { flex-shrink: 0; max-width: 40%; }
+  .zoom-bar .path { min-width: 0; flex: 0 1 auto; }
   .badges { display: flex; gap: 6px; min-height: 18px; margin-top: 2px; }
   .badge { font-size: 11px; padding: 1px 6px; border-radius: 8px; background: var(--accent-soft, rgb(37 99 235 / 0.12)); color: var(--accent); }
   .mark { display: flex; align-items: center; gap: 6px; margin-top: 4px; cursor: pointer; }
