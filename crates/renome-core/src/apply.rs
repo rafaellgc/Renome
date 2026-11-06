@@ -149,9 +149,9 @@ fn size_of(path: &Path) -> u64 {
     stamp(path).map(|s| s.size).unwrap_or_default()
 }
 
-/// Copies a file with its date, waits until it is on the disk and checks
-/// its size; a folder with everything in it (links as links where they
-/// can be).
+/// Copies a file with its date and checks its size; a folder with
+/// everything in it (links as links where they can be). Putting it on the
+/// disk is left to [`flush`], once for a whole batch.
 fn copy_any(from: &Path, to: &Path, done: &mut dyn FnMut(u64)) -> std::io::Result<()> {
     let meta = fs::symlink_metadata(from)?;
     if meta.is_symlink() {
@@ -164,7 +164,6 @@ fn copy_any(from: &Path, to: &Path, done: &mut dyn FnMut(u64)) -> std::io::Resul
         if let Ok(t) = meta.modified() {
             f.set_modified(t)?;
         }
-        f.sync_all()?;
         if n != meta.len() || f.metadata()?.len() != meta.len() {
             return Err(std::io::Error::other("copy incomplete"));
         }
@@ -196,9 +195,10 @@ fn part_path(to: &Path, i: usize) -> PathBuf {
     to.with_file_name(format!(".renome-{}-{i}.part", std::process::id()))
 }
 
-/// Copies `from` to `to` (which must not exist) through `part`, and gives
-/// it its name only when whole; nothing is left behind on failure.
-fn copy_new(
+/// Copies `from` to `part`, the passing name of `to` (which must not
+/// exist); nothing is left behind on failure. It gets its name in
+/// [`Batch::finish`], once on the disk.
+fn copy_part(
     from: &Path,
     to: &Path,
     part: &Path,
@@ -212,13 +212,53 @@ fn copy_new(
         let _ = remove_any(part);
         return Err(io_kind(&e));
     }
-    sync_dir(part);
-    if let Err(e) = rename_new(part, to) {
-        let _ = remove_any(part);
-        return Err(e);
-    }
-    sync_dir(to);
     Ok(())
+}
+
+/// Puts on the disk what was written to `paths` (files, or folders with
+/// everything in them) and their folders' lists of names. Linux: once per
+/// file system (`syncfs`); elsewhere file by file and then each folder.
+fn flush(paths: &[&Path]) -> std::io::Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::MetadataExt;
+        use std::os::unix::io::AsRawFd;
+        let mut seen = HashSet::new();
+        for p in paths {
+            let Some(dir) = p.parent() else { continue };
+            let d = File::open(dir)?;
+            if seen.insert(d.metadata()?.dev()) {
+                // SAFETY: the descriptor is open for the call's duration.
+                if unsafe { libc::syncfs(d.as_raw_fd()) } != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+            }
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let mut dirs: Vec<&Path> = Vec::new();
+        for p in paths {
+            for e in walkdir::WalkDir::new(p) {
+                let e = e.map_err(std::io::Error::other)?;
+                if e.file_type().is_file() {
+                    File::options()
+                        .write(true)
+                        .open(e.path())
+                        .or_else(|_| File::open(e.path()))?
+                        .sync_all()?;
+                }
+            }
+            if let Some(d) = p.parent()
+                && !dirs.contains(&d)
+            {
+                dirs.push(d);
+                sync_dir(p);
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Renames `from` to `to` only if `to` does not exist. The check and the
@@ -481,9 +521,12 @@ fn execute_level(ops: &[(usize, &Operation)], report: &mut ApplyReport, ctx: &Co
         }
     }
 
+    let mut batch = Batch::default();
     for (i, op, tmp) in staged {
-        // Stopped: those not reached get their names back.
+        // Stopped: those not reached get their names back (the copies
+        // made are finished first).
         if report.stopped || (ctx.stop)() {
+            batch.finish(report);
             report.stopped = true;
             if !op.copy {
                 let _ = fs::rename(&tmp, &op.from);
@@ -502,59 +545,158 @@ fn execute_level(ops: &[(usize, &Operation)], report: &mut ApplyReport, ctx: &Co
             }
         };
         let mut add = |n| (ctx.progress)(n);
-        let result = if op.copy {
-            copy_new(&op.from, &op.to, &part_path(&op.to, i), &mut add)
+        let copy_from = if op.copy {
+            Ok(&op.from)
         } else {
             match rename_new(&tmp, &op.to) {
-                // Another disk: copied, then the original goes.
+                Ok(()) => {
+                    report.done.push(op.clone());
+                    continue;
+                }
+                // Another disk: copied, then (once the copy is on the
+                // disk) the original goes.
                 Err((ErrorKind::OtherDisk, _)) => {
                     (ctx.grow)(i, size_of(&tmp));
-                    let copied = copy_new(&tmp, &op.to, &part_path(&op.to, i), &mut add);
-                    match copied.map(|()| (tmp.is_dir(), remove_any(&tmp))) {
-                        Ok((_, Ok(()))) => Ok(()),
-                        // A file is whole when it cannot go: its copy goes.
-                        Ok((false, Err(e))) => {
-                            let _ = remove_any(&op.to);
-                            Err(io_kind(&e))
-                        }
-                        // A folder may be partly gone: its copy is the
-                        // whole one, so it stays and the move counts; what
-                        // is left of the original is told, under its name.
-                        Ok((true, Err(e))) => {
-                            let _ = fs::rename(&tmp, &op.from);
-                            report
-                                .errors
-                                .push(err(op, ErrorKind::PartlyLeft, io_kind(&e).1));
-                            Ok(())
-                        }
-                        Err(e) => Err(e),
-                    }
+                    Ok(&tmp)
                 }
-                r => r,
+                Err(e) => Err(e),
             }
         };
-        match result {
-            Ok(()) => report.done.push(op.clone()),
-            Err((kind, detail)) => {
-                // A folder made just for this file goes away again.
-                for dir in made.iter().rev() {
-                    if fs::remove_dir(dir).is_ok() {
-                        report.created_dirs.retain(|d| d != dir);
-                    }
+        let part = part_path(&op.to, i);
+        match copy_from.and_then(|from| copy_part(from, &op.to, &part, &mut add)) {
+            Ok(()) => {
+                batch.bytes += size_of(&part);
+                batch.items.push(Copied {
+                    op,
+                    tmp,
+                    part,
+                    made,
+                });
+                if batch.items.len() >= BATCH_FILES || batch.bytes >= BATCH_BYTES {
+                    batch.finish(report);
                 }
-                // Restore the original name.
-                let (kind, detail) = if op.copy {
-                    (kind, detail)
-                } else {
-                    match fs::rename(&tmp, &op.from) {
-                        Ok(()) => (kind, detail),
-                        Err(_) => (ErrorKind::RestoreFailed, tmp.display().to_string()),
-                    }
-                };
-                report.errors.push(err(op, kind, detail));
+            }
+            Err((kind, detail)) => failed(op, &tmp, &made, kind, detail, report),
+        }
+    }
+    batch.finish(report);
+}
+
+/// Copies (and moves to another disk) are put on the disk together, every
+/// so many files or bytes: waiting for the disk after each file made a
+/// move between two hard disks about twice as slow.
+const BATCH_FILES: usize = 100;
+const BATCH_BYTES: u64 = 512 << 20;
+
+/// A copy made under its passing name, waiting for its batch.
+struct Copied<'a> {
+    op: &'a Operation,
+    /// The original under its temporary name (a move), or `op.from`.
+    tmp: PathBuf,
+    part: PathBuf,
+    /// The folders made for it, removed again if it fails.
+    made: Vec<PathBuf>,
+}
+
+#[derive(Default)]
+struct Batch<'a> {
+    items: Vec<Copied<'a>>,
+    bytes: u64,
+}
+
+impl Batch<'_> {
+    /// Puts the copies on the disk, gives them their names, puts those on
+    /// the disk and only then deletes the originals of the moves. Cut
+    /// short anywhere, nothing is lost: a copy under its passing name is
+    /// removed on the next start, one with its name and its original
+    /// still there is too (same size and date), and the original gets its
+    /// name back.
+    fn finish(&mut self, report: &mut ApplyReport) {
+        let items = std::mem::take(&mut self.items);
+        self.bytes = 0;
+        if items.is_empty() {
+            return;
+        }
+        let parts: Vec<&Path> = items.iter().map(|c| c.part.as_path()).collect();
+        if let Err(e) = flush(&parts) {
+            let (kind, detail) = io_kind(&e);
+            for c in items {
+                let _ = remove_any(&c.part);
+                failed(c.op, &c.tmp, &c.made, kind, detail.clone(), report);
+            }
+            return;
+        }
+        let mut named = Vec::with_capacity(items.len());
+        for c in items {
+            match rename_new(&c.part, &c.op.to) {
+                Ok(()) => named.push(c),
+                Err((kind, detail)) => {
+                    let _ = remove_any(&c.part);
+                    failed(c.op, &c.tmp, &c.made, kind, detail, report);
+                }
+            }
+        }
+        let names: Vec<&Path> = named.iter().map(|c| c.op.to.as_path()).collect();
+        // The names, on the disk before any original goes.
+        #[cfg(target_os = "linux")]
+        let _ = flush(&names);
+        #[cfg(not(target_os = "linux"))]
+        for n in &names {
+            sync_dir(n);
+        }
+        for c in named {
+            let op = c.op;
+            if op.copy {
+                report.done.push(op.clone());
+                continue;
+            }
+            match remove_any(&c.tmp) {
+                Ok(()) => report.done.push(op.clone()),
+                // A file is whole when it cannot go: its copy goes.
+                Err(e) if !c.tmp.is_dir() => {
+                    let _ = remove_any(&op.to);
+                    let (kind, detail) = io_kind(&e);
+                    failed(op, &c.tmp, &c.made, kind, detail, report);
+                }
+                // A folder may be partly gone: its copy is the whole one,
+                // so it stays and the move counts; what is left of the
+                // original is told, under its name.
+                Err(e) => {
+                    let _ = fs::rename(&c.tmp, &op.from);
+                    report
+                        .errors
+                        .push(err(op, ErrorKind::PartlyLeft, io_kind(&e).1));
+                    report.done.push(op.clone());
+                }
             }
         }
     }
+}
+
+/// An operation that did not happen: the folders made just for it go
+/// away again and the original gets its name back.
+fn failed(
+    op: &Operation,
+    tmp: &Path,
+    made: &[PathBuf],
+    kind: ErrorKind,
+    detail: String,
+    report: &mut ApplyReport,
+) {
+    for dir in made.iter().rev() {
+        if fs::remove_dir(dir).is_ok() {
+            report.created_dirs.retain(|d| d != dir);
+        }
+    }
+    let (kind, detail) = if op.copy {
+        (kind, detail)
+    } else {
+        match fs::rename(tmp, &op.from) {
+            Ok(()) => (kind, detail),
+            Err(_) => (ErrorKind::RestoreFailed, tmp.display().to_string()),
+        }
+    };
+    report.errors.push(err(op, kind, detail));
 }
 
 /// Creates the target's missing parent folders (moving into a new folder)
@@ -2282,5 +2424,42 @@ mod tests {
         assert!(r.errors.is_empty(), "{:?}", r.errors);
         assert_eq!(*seen.borrow(), vec![(10, 30), (20, 30), (30, 30)]);
         assert!(b.path().join("sub/3").exists() && !a.path().join("3").exists());
+    }
+
+    /// Moves to another disk go in batches: past one batch, with one
+    /// target taken meanwhile, every other file moves, that one keeps its
+    /// name, and no passing copy is left.
+    #[test]
+    fn other_disk_moves_in_batches() {
+        let a = tempfile::tempdir().unwrap();
+        let Ok(b) = tempfile::tempdir_in("/dev/shm") else {
+            return;
+        };
+        if !other_disk(&a.path().join("x"), &b.path().join("x")) {
+            return;
+        }
+        let n = BATCH_FILES + 30;
+        for i in 0..n {
+            fs::write(a.path().join(format!("{i}")), format!("{i}")).unwrap();
+        }
+        fs::create_dir(b.path().join("sub")).unwrap();
+        fs::write(b.path().join("sub/7"), "taken").unwrap();
+        let ops: Vec<Operation> = (0..n)
+            .map(|i| Operation {
+                from: a.path().join(format!("{i}")),
+                to: b.path().join("sub").join(format!("{i}")),
+                copy: false,
+                within: None,
+            })
+            .collect();
+        let r = execute(&ops, Depth::DeepestFirst);
+        assert_eq!(r.done.len(), n - 1);
+        assert_eq!(r.errors.len(), 1);
+        assert_eq!(r.errors[0].kind, ErrorKind::TargetExists);
+        assert_eq!(read(a.path().join("7")), "7");
+        assert_eq!(read(b.path().join("sub/7")), "taken");
+        assert_eq!(read(b.path().join("sub/129")), "129");
+        assert_eq!(fs::read_dir(a.path()).unwrap().count(), 1);
+        assert_eq!(fs::read_dir(b.path().join("sub")).unwrap().count(), n);
     }
 }

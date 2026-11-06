@@ -1483,10 +1483,14 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
 - A move to another disk (the rename says so) is a copy: the file (a
   folder with everything in it, links as links on Linux and macOS) is
   copied to a passing name beside its target (`.renome-<pid>-<n>.part`,
-  also noted before starting), with its modification date, synced to the
-  disk and checked for size, renamed to its target only if that is free
-  (as above), and only then is the original deleted; a file whose
-  original cannot be deleted loses its copy again, a folder keeps it
+  also noted before starting), with its modification date, and checked
+  for size. Copies go to the disk in batches (100 files or 512 MB; Linux:
+  `syncfs` once per file system, elsewhere each file and folder synced):
+  the batch is synced, each copy renamed to its target only if that is
+  free (as above), the names synced, and only then are the originals
+  deleted — waiting for the disk after each file made a move between two
+  hard disks about 1.75 times slower; a stop finishes the batch first. A
+  file whose original cannot be deleted loses its copy again, a folder keeps it
   (the move counts) and what is left of the original gets its old name
   back and is reported ("partly left").
 - **Send to another folder** (toolbar, next to Rename; "In the same
