@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t, type Key } from "./i18n";
-  import { comicPreset, comicPresetOf, PHOTO_TEMPLATES, splitExt, splitParts, type ComicPreset } from "./rules";
+  import { comicPreset, comicPresetOf, defaultSubLangs, PHOTO_TEMPLATES, splitExt, splitParts, type ComicPreset } from "./rules";
   import { settings } from "./settings.svelte";
   import type { Step } from "./types";
 
@@ -13,6 +13,7 @@
     onmove,
     onremove,
     lookup,
+    subs,
     summary = null,
   }: {
     step: Step;
@@ -33,6 +34,15 @@
       found: number;
       choose: number;
       none: number;
+      onsearch: () => void;
+      onreview: () => void;
+    };
+    /** Movie and series rules: the subtitles' search state and actions. */
+    subs?: {
+      progress: string | null;
+      summary: string | null;
+      /** Videos with subtitles found (the review opens on them). */
+      found: number;
       onsearch: () => void;
       onreview: () => void;
     };
@@ -270,6 +280,7 @@
         {/if}
         <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("movieMissingLabel")}<small>{t("movieMissingHint")}</small></span></label>
         {@render actions(t("tmdbSearch"), "movieSummary")}
+        {@render subtitles()}
       {:else if r.type === "series"}
         <p class="hint top">{t("seriesHint")}</p>
         <label>{t("seriesSource")}
@@ -294,8 +305,10 @@
           {/if}
         {/if}
         <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("seriesMissingLabel")}<small>{t("seriesMissingHint")}</small></span></label>
+
         {#if lookup?.show}<p class="hint">{t("seriesCurrent", { show: lookup.show })}</p>{/if}
         {@render actions(t("tvSearch"), "seriesSummary")}
+        {#if r.source !== "anilist"}{@render subtitles()}{/if}
       {:else if r.type === "photo"}
         {@const ready = PHOTO_TEMPLATES[settings.lang]}
         <p class="hint top">{t("photoHint")}</p>
@@ -444,6 +457,24 @@
     </fieldset>
   {/if}
 </article>
+
+{#snippet subtitles()}
+  {#if r.type === "movie" || r.type === "series"}
+    <label class="check"><input type="checkbox" bind:checked={r.subtitles} /> <span>{t("subsLabel")}<small>{t("subsHint")}</small></span></label>
+    {#if r.subtitles}
+      <label class="sub">{t("subsLangs")} <input value={r.subLangs ?? defaultSubLangs()} oninput={(e) => {
+        if (r.type === "movie" || r.type === "series") r.subLangs = e.currentTarget.value;
+      }} placeholder="pt-BR, en" spellcheck="false" /></label>
+      {#if subs}
+        <div class="movie-actions sub">
+          <button disabled={!!subs.progress} onclick={subs.onsearch}>{t("subsSearch")}</button>
+          {#if subs.found}<button onclick={subs.onreview}>{t("subsReview")}</button>{/if}
+        </div>
+        {#if subs.progress || subs.summary}<p class="hint">{subs.progress ?? subs.summary}</p>{/if}
+      {/if}
+    {/if}
+  {/if}
+{/snippet}
 
 {#snippet actions(label: string, summary: "movieSummary" | "seriesSummary" | "albumSummary" | "bookSummary" | "comicSummary")}
   {#if lookup}

@@ -64,6 +64,9 @@ const SERIES_TEMPLATE = {
 
 /** Extensions that get .nfo and images (subtitles share the movie's name but not those). */
 const VIDEO = new Set(["mkv", "mp4", "m4v", "avi", "mov", "wmv", "ts", "m2ts", "mts", "webm", "mpg", "mpeg", "flv", "ogv", "iso", "vob", "divx", "rmvb"]);
+/** The subtitle languages a new rule asks for: the interface's. */
+export const defaultSubLangs = () => ({ pt: "pt-BR", en: "en", es: "es" })[settings.lang] ?? "en";
+
 export const isVideo = (name: string) => VIDEO.has(splitExt(name)[1].toLowerCase());
 const SUBTITLE = new Set(["srt", "ass", "ssa", "sub", "idx", "vtt", "sup", "smi"]);
 /** What the movie and TV show rules name: videos and their subtitles (as the Rust core). */

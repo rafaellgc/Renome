@@ -254,6 +254,13 @@ pub enum Rule {
         /// files are in (used by the app, not here).
         #[serde(default = "yes")]
         missing: bool,
+        /// Downloads subtitles in `sub_langs` along with the rename (used
+        /// by the app, not here).
+        #[serde(default)]
+        subtitles: bool,
+        /// Their languages, in order: `pt-BR, en`.
+        #[serde(default)]
+        sub_langs: String,
     },
     /// Names each file after the episode chosen for it on TMDB (files
     /// without one are left alone). The search happens outside the rules.
@@ -281,6 +288,13 @@ pub enum Rule {
         /// cover (used by the app, not here).
         #[serde(default = "yes")]
         missing: bool,
+        /// Downloads subtitles in `sub_langs` along with the rename (used
+        /// by the app, not here).
+        #[serde(default)]
+        subtitles: bool,
+        /// Their languages, in order: `pt-BR, en`.
+        #[serde(default)]
+        sub_langs: String,
     },
     /// Names songs after their tags; files without them are left alone.
     Music {

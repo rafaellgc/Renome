@@ -21,12 +21,13 @@
   import Options from "$lib/Options.svelte";
   import RuleCard from "$lib/RuleCard.svelte";
   import ShowPicker from "$lib/ShowPicker.svelte";
+  import SubtitleReview from "$lib/SubtitleReview.svelte";
   import { LOCALES, MOD, t, tError, type Key } from "$lib/i18n";
-  import { RULE_TYPES, LOOKUP_TYPES, isLookup, oneLookup, byFit, isAudio, isBook, isComic, isScreen, isVideo, newRule, newStep, seriesOnly, splitExt } from "$lib/rules";
+  import { RULE_TYPES, LOOKUP_TYPES, isLookup, oneLookup, byFit, isAudio, isBook, isComic, isScreen, isVideo, newRule, newStep, seriesOnly, splitExt, defaultSubLangs } from "$lib/rules";
   import { comicKey, loadSecrets, loadSettings, saveSecrets, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
     AlbumState, ApplyReport, BookCandidate, BookMatch, BookState, Candidate, ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, Copies, MbCandidate, SongMatch, EpKey, EpisodeMatch, EpisodeState, MovieMatch, MovieSet, MovieState, MovieStatus, HistoryEntry,
-    OpError, Preview, PreviewItem, Rule, RuleType, Show, Step, View, ViewSort,
+    OpError, Preview, PreviewItem, Rule, RuleType, Show, Step, SubCandidate, SubsAuth, View, ViewSort,
   } from "$lib/types";
   import { DETAIL_COLUMNS, type DetailColumn } from "$lib/types";
   import { COL_LABEL, detailText } from "$lib/details";
@@ -143,6 +144,8 @@
   const working = $derived.by((): { label: string; done?: number; total?: number; stop?: boolean } | null => {
     const counted = (label: string, p: { done: number; total: number }, stop: boolean) => ({ label, done: p.done, total: p.total, stop });
     if (insideProgress) return counted(t("insideWriting", insideProgress), insideProgress, false);
+    if (subsProgress)
+      return counted(t(subsProgress.kind === "search" ? "subsSearching" : "subsWriting", subsProgress), subsProgress, true);
     if (bookProgress)
       return counted(t(bookProgress.kind === "search" ? "olSearching" : "sidecarsWriting", bookProgress), bookProgress, bookProgress.kind === "search");
     if (tmdbProgress)
@@ -454,6 +457,120 @@
     ),
   );
   const seriesCounts = $derived(counts(series));
+
+  /** Subtitles found per video (by its path): the languages asked for it
+   *  has already, the candidates best first, and the one chosen per
+   *  language (an index in `candidates`; -1: none). `key` tells what was
+   *  searched (movie or episode, languages), to search again on a change. */
+  type SubsState = { key: string; have: string[]; candidates: SubCandidate[]; pick: Record<string, number> };
+  let subsFound = $state<Record<string, SubsState>>({});
+  /** The languages of the last search, as understood (`pt-BR`, `en`). */
+  let subsLangs = $state<string[]>([]);
+  let subsProgress = $state<{ done: number; total: number; kind: "search" | "save" } | null>(null);
+  let subsReview = $state(false);
+  /** OpenSubtitles downloads left today, when known. */
+  let subsRemaining = $state<number | null>(null);
+  /** The languages asked for by the movie or TV show rule, when it
+   *  downloads subtitles. */
+  const subsWanted = $derived.by(() => {
+    const r = movieRule?.rule.type === "movie" ? movieRule.rule : seriesRule?.rule.type === "series" && seriesRule.rule.source !== "anilist" ? seriesRule.rule : null;
+    return r?.subtitles ? (r.subLangs ?? defaultSubLangs()) : null;
+  });
+  const subsAuth = (): SubsAuth => ({
+    osKey: settings.osKey.trim(),
+    osUser: settings.osUser.trim(),
+    osPassword: settings.osPassword,
+    subdlKey: settings.subdlKey.trim(),
+  });
+  /** The visible videos identified, with what to look their subtitles up by. */
+  function subsItems() {
+    const out: { path: string; tmdb: number; season?: number; episode?: number }[] = [];
+    for (const i of preview.items) {
+      if (i.isDir || !isVideo(i.original)) continue;
+      const m = movieRule ? movies[i.path]?.choice : null;
+      const e = seriesRule ? episodeMatches[i.path] : null;
+      if (m) out.push({ path: i.path, tmdb: m.id });
+      else if (e && !e.source && e.episodes.length === 1) out.push({ path: i.path, tmdb: e.id, season: e.season, episode: e.episodes[0] });
+    }
+    return out;
+  }
+  const subsKey = (it: { tmdb: number; season?: number; episode?: number }, langs: string) =>
+    `${it.tmdb}:${it.season ?? ""}:${it.episode ?? ""}:${langs}`;
+  /** Subtitles chosen per video, not there yet. */
+  const subsChosen = (s: SubsState | undefined) => (s ? Object.entries(s.pick).filter(([l, i]) => i >= 0 && !s.have.includes(l)).length : 0);
+  const subsCounts = $derived.by(() => {
+    const visible = new Set(preview.items.map((i) => i.path));
+    let subs = 0;
+    let videos = 0;
+    let missing = 0;
+    for (const [p, s] of Object.entries(subsFound)) {
+      if (!visible.has(p)) continue;
+      const n = subsChosen(s);
+      subs += n;
+      if (n) videos++;
+      if (subsLangs.some((l) => !s.have.includes(l) && !(s.pick[l] >= 0))) missing++;
+    }
+    return { subs, videos, missing };
+  });
+
+  /** Searches subtitles for the visible videos identified (those searched
+   *  already for the same languages are kept, unless `again`). */
+  async function searchSubs(again = false) {
+    const langs = subsWanted;
+    if (langs === null) return;
+    const auth = subsAuth();
+    if (!auth.osKey && !auth.subdlKey) {
+      const ok = await confirm({ title: t("subsTitle"), text: t("subsNeedKey"), ok: t("options"), cancel: t("cancel") });
+      if (ok) showOptions = true;
+      return;
+    }
+    const items = subsItems().filter((it) => again || subsFound[it.path]?.key !== subsKey(it, langs));
+    if (!items.length) {
+      if (!subsItems().length) notice = t("subsNoVideos");
+      else if (subsCounts.videos) subsReview = true;
+      return;
+    }
+    subsProgress = { done: 0, total: items.length, kind: "search" };
+    try {
+      const r = await api.subsSearch(auth, langs, items);
+      subsLangs = r.langs;
+      if (r.remaining !== null) subsRemaining = r.remaining;
+      const asked = new Map(items.map((it) => [it.path, it]));
+      for (const f of r.found) {
+        const pick: Record<string, number> = {};
+        f.candidates.forEach((c, i) => {
+          if (!(c.lang in pick)) pick[c.lang] = i;
+        });
+        subsFound[f.path] = { key: subsKey(asked.get(f.path)!, langs), have: f.have, candidates: f.candidates, pick };
+      }
+      if (r.errors.length) await notify({ title: t("subsTitle"), text: r.errors.map(tError).join("\n") });
+      else if (r.found.some((f) => f.candidates.length)) subsReview = true;
+    } catch (e) {
+      await notify({ title: t("subsTitle"), text: tError(e) });
+    } finally {
+      subsProgress = null;
+    }
+  }
+
+  /** Videos whose names are already right but that still get subtitles. */
+  const subsOnly = $derived(
+    subsWanted === null ? [] : preview.items.filter((i) => i.status === "unchanged" && subsChosen(subsFound[i.path]) > 0),
+  );
+
+  /** What to download for renamed videos (`from` → `to`): per language, the
+   *  one chosen first and the others of that language after it. */
+  function subsWrites(pairs: [string, string][]) {
+    return pairs.flatMap(([from, to]) => {
+      const s = subsFound[from];
+      if (!s) return [];
+      const langs = Object.entries(s.pick)
+        .filter(([l, i]) => i >= 0 && !s.have.includes(l))
+        .map(([l, i]) => [s.candidates[i], ...s.candidates.filter((c, j) => j !== i && c.lang === l)]);
+      if (!langs.length) return [];
+      const e = episodeMatches[from];
+      return [{ path: to, season: e?.season, episode: e?.episodes[0], langs }];
+    });
+  }
   /** Aired episodes missing from the seasons the listed videos cover,
    *  issues from the series the listed comics are from, tracks from the
    *  albums, released movies from the collections and volumes between a
@@ -850,6 +967,8 @@
     const tvMeta = episodeMetaOnly.map((i) => tvSidecarItem(i.path, i.path));
     const listOnly = playlistOnly;
     const retagOnly = tagsOnly.map((i) => i.path);
+    const subsUnchanged = subsOnly.map((i) => i.path);
+    const subsPlanned = subsWanted === null ? 0 : preview.items.reduce((n, i) => n + (i.status !== "conflict" ? subsChosen(subsFound[i.path]) : 0), 0);
     const bookMeta = bookMetaOnly.map((i) => bookSidecarItem(i.path, i.path));
     /** Comics renamed `.cbz` to be converted. */
     const converting = new Set(preview.items.filter((i) => i.convert).map((i) => i.path));
@@ -857,7 +976,7 @@
       ...comicInfoOnly.map((i) => comicInsideItem(i.path, i.path, i.convert)),
       ...epubOnly.map((i) => bookInsideItem(i.path, i.path)),
     ];
-    if (!preview.changed && !meta.length && !tvMeta.length && !bookMeta.length && !coverOnly && !listOnly.length && !retagOnly.length && !insideOnly.length) return;
+    if (!preview.changed && !meta.length && !tvMeta.length && !bookMeta.length && !coverOnly && !listOnly.length && !retagOnly.length && !insideOnly.length && !subsUnchanged.length) return;
     // Files left behind in a show's old folder are always told first.
     const left = preview.leftFolders.map((f) => t("confirmLeftover", { n: f.files, from: basename(f.from), to: basename(f.to) }));
     if (settings.confirmApply || left.length) {
@@ -874,6 +993,7 @@
         listOnly.length ? t("confirmPlaylists", { n: listOnly.length }) : "",
         retagOnly.length ? t("confirmTags", { n: retagOnly.length }) : "",
         insideOnly.length ? t("confirmInside", { n: insideOnly.length }) : "",
+        subsPlanned ? t("confirmSubs", { n: subsPlanned }) : "",
         preview.conflicts ? t("confirmConflicts", { n: preview.conflicts }) : "",
       ].filter(Boolean);
       const ok = await confirm({
@@ -1025,6 +1145,35 @@
           );
         }
       }
+      let subsSaved = 0;
+      if (recorded && subsWanted !== null) {
+        const pairs: [string, string][] = [
+          ...r.done.filter((op) => isVideo(op.to) && subsFound[op.from]).map((op): [string, string] => [op.from, op.to]),
+          ...subsUnchanged.map((p): [string, string] => [p, p]),
+        ];
+        const items = subsWrites(pairs);
+        if (items.length) {
+          subsProgress = { done: 0, total: items.reduce((n, i) => n + i.langs.length, 0), kind: "save" };
+          try {
+            const res = await api.writeSubtitles(subsAuth(), r.historyId, $state.snapshot(items));
+            subsSaved = res.created.length;
+            if (res.remaining !== null) subsRemaining = res.remaining;
+            // Downloaded (or tried): searched again if wanted.
+            for (const [from] of pairs) delete subsFound[from];
+            if (res.errors.length) {
+              await notify({
+                title: t("subsTitle"),
+                text: t("subsSavedN", { n: subsSaved }),
+                items: res.errors.map(([file, why]) => (file ? `${file} — ${tError(why)}` : tError(why))),
+              });
+            }
+          } catch (e) {
+            await notify({ title: t("subsTitle"), text: tError(e) });
+          } finally {
+            subsProgress = null;
+          }
+        }
+      }
       followMatches(r);
       if (settings.disableRulesAfterApply) for (const s of steps) s.enabled = false;
       // The list now holds what was sent: sending it again would send it
@@ -1038,6 +1187,7 @@
         r.lists ? t("listsN", { n: r.lists }) : "",
         r.listsRemoved ? t("listsRemovedN", { n: r.listsRemoved }) : "",
         saved ? t("sidecarsN", { n: saved }) : "",
+        subsSaved ? t("subsSavedN", { n: subsSaved }) : "",
         keptLists ? t("playlistsKeptN", { n: keptLists }) : "",
         tagged ? t("tagsN", { n: tagged }) : "",
         inside ? t("insideN", { n: inside }) : "",
@@ -1276,6 +1426,7 @@
     comics = moved(comics);
     movies = moved(movies);
     series = moved(series);
+    subsFound = moved(subsFound);
     for (const a of albums) {
       a.files = a.files.map(follow);
       a.matches = moved(a.matches);
@@ -1781,6 +1932,7 @@
    *  file added again starts fresh. */
   function forget(paths: Set<string> | null) {
     if (!paths) {
+      subsFound = {};
       movies = {};
       books = {};
       comics = {};
@@ -1793,6 +1945,7 @@
     }
     const keep = <T,>(m: Record<string, T>) => Object.fromEntries(Object.entries(m).filter(([p]) => !paths.has(p)));
     movies = keep(movies);
+    subsFound = keep(subsFound);
     books = keep(books);
     comics = keep(comics);
     series = keep(series);
@@ -2027,6 +2180,9 @@
       if (mbProgress)
         mbProgress = { ...e.payload, kind: e.payload.kind ?? (mbProgress.kind === "listen" ? "search" : mbProgress.kind) };
     });
+    const unlistenSubs = listen<{ done: number; total: number }>("subs-progress", (e) => {
+      if (subsProgress) subsProgress = { ...subsProgress, ...e.payload };
+    });
     const unlistenBooks = listen<{ done: number; total: number }>("book-progress", (e) => {
       if (bookProgress) bookProgress = { ...bookProgress, ...e.payload };
     });
@@ -2082,6 +2238,7 @@
       unlistenTmdb.then((f) => f());
       unlistenMb.then((f) => f());
       unlistenBooks.then((f) => f());
+      unlistenSubs.then((f) => f());
       unlistenInside.then((f) => f());
     };
   });
@@ -2140,8 +2297,8 @@
           <button onclick={() => pickSendTo(true)}>{t("sendCopyTo")}</button>
         </div>
       {/if}
-      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !metaOnly.length && !episodeMetaOnly.length && !bookMetaOnly.length && !coverOnly && !playlistOnly.length && !tagsOnly.length && !comicInfoOnly.length && !epubOnly.length) || busy || !!working} onclick={applyAll}>
-        {t(sendTo ? (sendTo.copy ? "copyAction" : "moveAction") : "rename")} {preview.changed + metaOnly.length + episodeMetaOnly.length + bookMetaOnly.length + coverOnly + playlistOnly.length + tagsOnly.length + comicInfoOnly.length + epubOnly.length || ""}
+      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !metaOnly.length && !episodeMetaOnly.length && !bookMetaOnly.length && !coverOnly && !playlistOnly.length && !tagsOnly.length && !comicInfoOnly.length && !epubOnly.length && !subsOnly.length) || busy || !!working} onclick={applyAll}>
+        {t(sendTo ? (sendTo.copy ? "copyAction" : "moveAction") : "rename")} {preview.changed + metaOnly.length + episodeMetaOnly.length + bookMetaOnly.length + coverOnly + playlistOnly.length + tagsOnly.length + comicInfoOnly.length + epubOnly.length + subsOnly.length || ""}
       </button>
     </div>
   </header>
@@ -2175,6 +2332,17 @@
             last={i === steps.length - 1}
             onmove={(d) => moveStep(i, d)}
             onremove={() => steps.splice(i, 1)}
+            subs={step.rule.type === "movie" || step.rule.type === "series"
+              ? {
+                  progress: subsProgress ? t(subsProgress.kind === "search" ? "subsSearching" : "subsWriting", subsProgress) : null,
+                  summary: subsCounts.subs || subsCounts.missing
+                    ? [subsCounts.subs ? t("subsSummary", { subs: subsCounts.subs, videos: subsCounts.videos }) : "", subsCounts.missing ? t("subsMissingN", { n: subsCounts.missing }) : ""].filter(Boolean).join(" · ")
+                    : null,
+                  found: subsCounts.videos + subsCounts.missing,
+                  onsearch: () => searchSubs(),
+                  onreview: () => (subsReview = true),
+                }
+              : undefined}
             lookup={step.rule.type === "movie"
               ? {
                   ...movieCounts,
@@ -2403,6 +2571,20 @@
       </div>
     </div>
   </div>
+{/if}
+
+{#if subsReview}
+  <SubtitleReview
+    rows={preview.items
+      .filter((i) => subsFound[i.path])
+      .map((i) => {
+        const s = subsFound[i.path];
+        return { path: i.path, name: i.original, candidates: s.candidates, langs: subsLangs.map((l) => ({ lang: l, have: s.have.includes(l), pick: s.pick[l] ?? -1 })) };
+      })}
+    remaining={subsRemaining}
+    onpick={(path, lang, index) => (subsFound[path].pick[lang] = index)}
+    onclose={() => (subsReview = false)}
+  />
 {/if}
 
 {#if review}

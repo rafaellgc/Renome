@@ -160,16 +160,58 @@ fn ebml_uint(data: &[u8]) -> u64 {
     data.iter().fold(0, |n, &b| (n << 8) | u64::from(b))
 }
 
+/// The languages of the subtitle tracks inside a Matroska video (`por`,
+/// `pt-BR`; `eng` when a track does not say), forced ones (only the parts
+/// in another language) left out. Other formats: none.
+pub fn subtitle_tracks(path: &Path) -> Vec<String> {
+    let Ok(file) = File::open(path) else {
+        return Vec::new();
+    };
+    let mut f = BufReader::new(file);
+    let mut head = [0u8; 4];
+    if f.read_exact(&mut head).is_err() || head != [0x1a, 0x45, 0xdf, 0xa3] {
+        return Vec::new();
+    }
+    let Some(tracks) = matroska_tracks(&mut f) else {
+        return Vec::new();
+    };
+    ebml(&tracks)
+        .filter(|(id, _)| *id == 0xae)
+        .filter_map(|(_, entry)| {
+            let (mut kind, mut forced) = (0, false);
+            let (mut lang, mut bcp47) = (None, None);
+            for (id, data) in ebml(entry) {
+                let text = || {
+                    Some(
+                        std::str::from_utf8(data)
+                            .ok()?
+                            .trim_end_matches('\0')
+                            .to_string(),
+                    )
+                };
+                match id {
+                    0x83 => kind = ebml_uint(data),
+                    0x55aa => forced = ebml_uint(data) == 1,
+                    0x22_b59c => lang = text(),
+                    0x22_b59d => bcp47 = text(),
+                    _ => {}
+                }
+            }
+            (kind == 0x11 && !forced).then(|| bcp47.or(lang).unwrap_or_else(|| "eng".into()))
+        })
+        .collect()
+}
+
 /// Matroska and WebM: the segment's elements are walked by their headers
-/// until its track list, which is read; the clusters before it, if any,
-/// are skipped.
-fn matroska_video<R: Read + Seek>(f: &mut R) -> Option<VideoInfo> {
+/// until its track list, which is returned; the clusters before it, if
+/// any, are skipped.
+fn matroska_tracks<R: Read + Seek>(f: &mut R) -> Option<Vec<u8>> {
     const SEGMENT: u64 = 0x1853_8067;
     const TRACKS: u64 = 0x1654_ae6b;
     let size = f.seek(SeekFrom::End(0)).ok()?;
     let mut pos = 0u64;
     let mut head = [0u8; 16];
-    let tracks = loop {
+    loop {
         if pos >= size {
             return None;
         }
@@ -186,13 +228,18 @@ fn matroska_video<R: Read + Seek>(f: &mut R) -> Option<VideoInfo> {
             let mut body = vec![0u8; len as usize];
             f.seek(SeekFrom::Start(start)).ok()?;
             f.read_exact(&mut body).ok()?;
-            break body;
+            return Some(body);
         } else if len == u64::MAX {
             return None;
         } else {
             pos = start.checked_add(len)?;
         }
-    };
+    }
+}
+
+/// Matroska and WebM: the largest video track.
+fn matroska_video<R: Read + Seek>(f: &mut R) -> Option<VideoInfo> {
+    let tracks = matroska_tracks(f)?;
     ebml(&tracks)
         .filter(|(id, _)| *id == 0xae)
         .filter_map(|(_, entry)| {
@@ -724,6 +771,15 @@ mod tests {
         let cut = d.path().join("cut.mkv");
         std::fs::write(&cut, &mkv[..mkv.len() / 2]).unwrap();
         assert_eq!(read(&cut).map(|v| v.height), Some(136));
+    }
+
+    #[test]
+    fn subtitle_tracks_inside() {
+        let dir = Path::new("tests/fixtures");
+        // por, eng (forced: left out), spa.
+        assert_eq!(subtitle_tracks(&dir.join("video-subs.mkv")), ["por", "spa"]);
+        assert!(subtitle_tracks(&dir.join("video.mkv")).is_empty());
+        assert!(subtitle_tracks(&dir.join("video.mp4")).is_empty());
     }
 
     /// The boxes of an MP4 file: (kind, bytes with the header).

@@ -58,14 +58,17 @@ A built-in manual (F1) explains every rule with examples.
 - Movies: names files from TMDB (`Title (Year) [tmdbid-12345]`, the format
   Jellyfin recognizes), picking the movie automatically when sure and
   letting you choose when not; optionally saves `.nfo` and poster next
-  to each movie for Jellyfin, Kodi and Emby.
+  to each movie for Jellyfin, Kodi and Emby, and downloads subtitles in
+  the languages you choose from OpenSubtitles.com and SubDL (your own
+  free keys), preferring those made for that very file.
 - TV shows: names episodes from TMDB (`Show (Year) - S01E02 - Title`),
   reading the number in many forms (`S01E02`, `1x02`, `T1 E2`,
   `Season 1 Episode 2`, absolute numbering) and checking it against the
   title in the name; when they disagree, you choose. A folder mixing
   several shows is looked up show by show. Optionally organizes
   them into `Show (Year) [tmdbid-…]/Season 01` and saves `tvshow.nfo`,
-  episode `.nfo` files and images for Jellyfin, Kodi and Emby. Aired
+  episode `.nfo` files and images for Jellyfin, Kodi and Emby, and
+  downloads each episode's subtitles like the movies'. Aired
   episodes missing from the seasons you have show up as faded rows, and
   can be exported to a CSV file. Anime can be looked up on AniList
   instead, with no key, its seasons joined into one show.

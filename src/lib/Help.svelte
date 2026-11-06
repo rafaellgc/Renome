@@ -42,7 +42,7 @@
   const DONATE = "https://ko-fi.com/rafaellgc";
 
   /** The services the lookups use, credited as their terms ask. */
-  const SOURCES: { key: "sourcesMusic" | "sourcesBooks" | "sourcesComics"; items: { name: string; url: string; note?: "gcdLicense" | "acoustidTerms" | "discogsNotice" }[] }[] = [
+  const SOURCES: { key: "sourcesMusic" | "sourcesBooks" | "sourcesComics" | "sourcesSubs"; items: { name: string; url: string; note?: "gcdLicense" | "acoustidTerms" | "discogsNotice" }[] }[] = [
     {
       key: "sourcesMusic",
       items: [
@@ -69,6 +69,13 @@
         { name: "MangaUpdates", url: "https://www.mangaupdates.com" },
         { name: "Metron", url: "https://metron.cloud" },
         { name: "Comic Vine", url: "https://comicvine.gamespot.com" },
+      ],
+    },
+    {
+      key: "sourcesSubs",
+      items: [
+        { name: "OpenSubtitles.com", url: "https://www.opensubtitles.com" },
+        { name: "SubDL", url: "https://subdl.com" },
       ],
     },
   ];

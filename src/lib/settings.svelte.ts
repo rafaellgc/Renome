@@ -28,6 +28,12 @@ export interface Settings {
   /** Grand Comics Database account (empty: searched without one). */
   gcdEmail: string;
   gcdPassword: string;
+  /** OpenSubtitles.com API key and account (empty: not used). */
+  osKey: string;
+  osUser: string;
+  osPassword: string;
+  /** SubDL API key (empty: not used). */
+  subdlKey: string;
   /** Rules from the last session (when `rememberRules`). */
   rules: Step[];
   /** The optional columns shown in the list, in their order. */
@@ -54,6 +60,10 @@ const DEFAULTS: Settings = {
   googleBooksKey: "",
   gcdEmail: "",
   gcdPassword: "",
+  osKey: "",
+  osUser: "",
+  osPassword: "",
+  subdlKey: "",
   rules: [],
   columns: [],
   showMissing: true,
@@ -119,7 +129,7 @@ export function saveSettings() {
 }
 
 /** The settings kept in the system's password store, not in the file. */
-export const SECRET_FIELDS = ["tmdbKey", "comicVineKey", "discogsToken", "metronToken", "googleBooksKey", "gcdEmail", "gcdPassword"] as const;
+export const SECRET_FIELDS = ["tmdbKey", "comicVineKey", "discogsToken", "metronToken", "googleBooksKey", "gcdEmail", "gcdPassword", "osKey", "osUser", "osPassword", "subdlKey"] as const;
 
 /** Whether the secrets came (the store may wait to be unlocked or
  *  allowed), and where they are kept: `stored` in the password store,

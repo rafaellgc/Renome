@@ -49,6 +49,7 @@ pub mod playlists;
 pub mod rules;
 pub mod scan;
 pub mod similar;
+pub mod subtitles;
 pub mod tagwrite;
 pub mod text;
 pub mod tmdb;

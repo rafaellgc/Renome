@@ -303,6 +303,61 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   in release order (unknown dates last). The bottom bar counts them;
   clicking saves a CSV (collection, title, release date).
 
+- "Download subtitles" (off; `subtitles`, languages in `subLangs`,
+  default the interface's: `pt-BR`, `en` or `es`), for the movie rule and
+  the TV show rule on TMDB (not AniList). Sources, each optional, with
+  the user's own keys (Options → Subtitles): OpenSubtitles.com (REST API
+  `api.opensubtitles.com/api/v1`, `Api-Key` header, `User-Agent: Renome
+  v<version>`; with a user name and password it logs in once per
+  session, `/login`, and then asks the server the answer names; about
+  4 requests a second) and SubDL (`api.subdl.com/api/v1/subtitles`,
+  `api_key`; downloads from `dl.subdl.com`, zips). Languages: typed as
+  two-letter codes with an optional region or three-letter ones (`pt-BR`,
+  `pob`, `en`, `eng`; unknown ones dropped); OpenSubtitles' codes in
+  lower case (`pt-br`), SubDL's upper case (`EN`, `BR_PT`, `PT`,
+  `ZH_BG` for Taiwan/Hong Kong).
+  - "Search subtitles" (in the rule card, after the TMDB search) looks
+    up each visible video matched to a movie (`tmdb_id`) or to one
+    episode (`parent_tmdb_id`, `season_number`, `episode_number`; SubDL
+    `type=tv`), for the languages it does not have: subtitles beside it
+    named after it with a language (`Movie.pt-BR.srt`, `Movie.por.srt`;
+    `Movie.srt` without one does not count) and, in Matroska files, the
+    subtitle tracks (`Language`/`LanguageBCP47`, `eng` when missing;
+    forced tracks left out). A language without region counts for every
+    region; `pob`/`ptb` are `pt-BR`. OpenSubtitles also gets the video's
+    hash (size plus the 64-bit little-endian sums of its first and last
+    64 KiB; files under 128 KiB have none) and excludes AI- and
+    machine-translated subtitles and foreign-parts-only ones; subtitles
+    in several files (CD1/CD2) are left out. Searching costs no quota.
+    Videos searched for the same movie or episode and languages are not
+    searched again.
+  - Ranking (per language): same hash first (★, "made for this very
+    file"); then the release group (`-GRP` at the end) +40, the same kind
+    of source (Blu-ray, WEB, HDTV, DVD families) +30 or another −10, each
+    resolution/codec/edition word in common +8, an extended, unrated,
+    remastered or IMAX cut on one side only −40, words in common (share
+    of the subtitle's) up to +20, 2·ln(1+downloads), trusted uploader +3,
+    hearing impaired −12. The best of each language is chosen; the review
+    window lists every video with a select per language (the others,
+    "Don't download"), a link to the subtitle's page, the subtitles to
+    download and, with an account, OpenSubtitles' downloads left today
+    (`/infos/user`), warning when more are chosen than that.
+  - Downloads happen after the rename (videos renamed, sent or copied,
+    and those keeping their names, which the Rename button counts), with
+    the video's new name: `<video name>.<lang>[.sdh].<ext>` (`srt` when
+    the file's extension is not a subtitle one). Per language the chosen
+    one is tried, then the next ones of that language in order (3 at
+    most): a source out of quota or with a wrong key is skipped for the
+    rest. OpenSubtitles: `POST /download` with `file_id` (token when
+    logged in) gives a link and the downloads left. SubDL: the zip's
+    subtitle (`srt`, `ass`, `ssa`, `vtt`, `sub`; `__MACOSX` copies left
+    out); with several, the episode's (`S01E02`, `1x02`), else the
+    largest. Text is saved as UTF-8 (a BOM dropped, UTF-16 with its mark
+    decoded, else Windows-1252 when not valid UTF-8). A name that exists
+    is never replaced. The files are recorded in the rename's history
+    entry (or an entry of their own), so undo deletes them. Failures are
+    listed per video and language.
+
 ### 2.2 TV shows (TMDB)
 
 - A name made only of bracketed pieces (`[Group][Show (1987)][S03E22]
@@ -1616,7 +1671,7 @@ A "?" button (or F1) opens a window with three tabs:
 
 Saved in the user's config folder (e.g. `~/.config/renome/settings.json`).
 
-The secrets (TMDB, Google Books, Comic Vine, Discogs and Metron keys, GCD email and password)
+The secrets (TMDB, Google Books, Comic Vine, Discogs, Metron, OpenSubtitles and SubDL keys, GCD and OpenSubtitles user names and passwords)
 are not in that file: they go, as one JSON entry (service
 `io.github.rafaellgc.Renome`, account `credentials`), to the system's
 password store (Secret Service on Linux, Credential Manager on Windows,
@@ -1662,5 +1717,7 @@ may be asked about the Keychain again with each version.
   read and at start, in the background.
 - Services: TMDB key and title language, Google Books key, Comic Vine key, Metron token
   (checked against `/api/series_type/`), GCD account (email and
-  password), Discogs token; each with a Test button. A line
+  password), Discogs token, OpenSubtitles key with user name and
+  password (Test: `/infos/formats`, then the login and the downloads
+  left today), SubDL key (Test: a search); each with a Test button. A line
   says whether they are in the system's password store or in the file.

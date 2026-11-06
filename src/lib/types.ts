@@ -27,10 +27,15 @@ export type Rule =
   | { type: "charAt"; position: number; fromEnd: boolean; onlyIf: string; caseSensitive: boolean; replace: string }
   | { type: "extension"; mode: "set" | "lower" | "upper" | "remove" | "content"; value: string }
   | { type: "rearrange"; separator: string; order: string; target: Target }
-  | { type: "movie"; template: string; colon: string; sidecar: boolean; fanart: boolean; folder: boolean; missing: boolean }
+  | {
+      type: "movie"; template: string; colon: string; sidecar: boolean; fanart: boolean; folder: boolean; missing: boolean;
+      /** Download subtitles in `subLangs` (`pt-BR, en`) with the rename. */
+      subtitles?: boolean; subLangs?: string;
+    }
   | {
       type: "series"; template: string; colon: string; show: string;
       folders: boolean; folderTemplate: string; sidecar: boolean; fanart: boolean; missing: boolean;
+      subtitles?: boolean; subLangs?: string;
       /** Where shows are looked up (TMDB when not set). */
       source?: "tmdb" | "anilist";
     }
@@ -388,6 +393,23 @@ export interface EpisodeState {
   choice: EpKey[] | null;
   status: MovieStatus;
 }
+
+/** A subtitle found for a video (see the core's `subtitles::Candidate`). */
+export interface SubCandidate {
+  source: "openSubtitles" | "subdl";
+  id: string;
+  lang: string;
+  release: string;
+  downloads: number;
+  /** Made for this very file. */
+  exact: boolean;
+  hearingImpaired: boolean;
+  trusted: boolean;
+  url: string;
+}
+
+/** The keys and account for the subtitle services. */
+export interface SubsAuth { osKey: string; osUser: string; osPassword: string; subdlKey: string }
 
 export interface EpisodeMatch {
   /** Empty for TMDB; `anilist`. */

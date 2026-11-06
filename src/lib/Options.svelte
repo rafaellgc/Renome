@@ -28,6 +28,40 @@
     }
   }
 
+  let showOs = $state(false);
+  let osStatus = $state<{ ok: boolean; text: string } | null>(null);
+  let osTesting = $state(false);
+
+  async function testOs() {
+    osTesting = true;
+    osStatus = null;
+    try {
+      const left = await api.osCheck({ osKey: settings.osKey.trim(), osUser: settings.osUser.trim(), osPassword: settings.osPassword, subdlKey: "" });
+      osStatus = { ok: true, text: left === null ? t("tmdbKeyOk") : t("osAccountOk", { n: left }) };
+    } catch (e) {
+      osStatus = { ok: false, text: tError(e) };
+    } finally {
+      osTesting = false;
+    }
+  }
+
+  let showSubdl = $state(false);
+  let subdlStatus = $state<{ ok: boolean; text: string } | null>(null);
+  let subdlTesting = $state(false);
+
+  async function testSubdl() {
+    subdlTesting = true;
+    subdlStatus = null;
+    try {
+      await api.subdlCheck(settings.subdlKey.trim());
+      subdlStatus = { ok: true, text: t("tmdbKeyOk") };
+    } catch (e) {
+      subdlStatus = { ok: false, text: tError(e) };
+    } finally {
+      subdlTesting = false;
+    }
+  }
+
   let showGcd = $state(false);
   let gcdStatus = $state<{ ok: boolean; text: string } | null>(null);
   let gcdTesting = $state(false);
@@ -234,6 +268,77 @@
     </section>
 
     <section>
+      <h3>{t("sectionSubs")}</h3>
+      <p class="hint-top"><small>{t("subsOptionsHint")}</small></p>
+      <h4>OpenSubtitles.com</h4>
+      <div class="grid">
+        <label for="opt-os-key">{t("tmdbKey")}</label>
+        <div class="key">
+          <input
+            id="opt-os-key"
+            type={showOs ? "text" : "password"}
+            bind:value={settings.osKey}
+            disabled={!secrets.ready}
+            oninput={() => (osStatus = null)}
+            spellcheck="false"
+            autocomplete="off"
+          />
+          <button onclick={() => (showOs = !showOs)}>{t(showOs ? "hide" : "show")}</button>
+        </div>
+        <label for="opt-os-user">{t("osUser")}</label>
+        <input
+          id="opt-os-user"
+          bind:value={settings.osUser}
+          disabled={!secrets.ready}
+          oninput={() => (osStatus = null)}
+          spellcheck="false"
+          autocomplete="off"
+        />
+        <label for="opt-os-password">{t("gcdPassword")}</label>
+        <div class="key">
+          <input
+            id="opt-os-password"
+            type={showOs ? "text" : "password"}
+            bind:value={settings.osPassword}
+            disabled={!secrets.ready}
+            oninput={() => (osStatus = null)}
+            autocomplete="off"
+          />
+          <button disabled={!settings.osKey.trim() || osTesting} onclick={testOs}>{t("tmdbTest")}</button>
+        </div>
+        <span></span>
+        <small>
+          {#if osStatus}<b class:good={osStatus.ok} class:bad={!osStatus.ok}>{osStatus.text}</b> · {/if}
+          {t("osKeyHint")}
+          <button class="link" onclick={() => openUrl("https://www.opensubtitles.com/consumers")}>{t("osGetKey")}</button>
+        </small>
+      </div>
+      <h4>SubDL</h4>
+      <div class="grid">
+        <label for="opt-subdl-key">{t("tmdbKey")}</label>
+        <div class="key">
+          <input
+            id="opt-subdl-key"
+            type={showSubdl ? "text" : "password"}
+            bind:value={settings.subdlKey}
+            disabled={!secrets.ready}
+            oninput={() => (subdlStatus = null)}
+            spellcheck="false"
+            autocomplete="off"
+          />
+          <button onclick={() => (showSubdl = !showSubdl)}>{t(showSubdl ? "hide" : "show")}</button>
+          <button disabled={!settings.subdlKey.trim() || subdlTesting} onclick={testSubdl}>{t("tmdbTest")}</button>
+        </div>
+        <span></span>
+        <small>
+          {#if subdlStatus}<b class:good={subdlStatus.ok} class:bad={!subdlStatus.ok}>{subdlStatus.text}</b> · {/if}
+          {t("subdlKeyHint")}
+          <button class="link" onclick={() => openUrl("https://subdl.com/panel/api")}>{t("subdlGetKey")}</button>
+        </small>
+      </div>
+    </section>
+
+    <section>
       <h3>{t("sectionGoogleBooks")}</h3>
       <div class="grid">
         <label for="opt-gb-key">{t("tmdbKey")}</label>
@@ -403,6 +508,8 @@
   h2 { margin: 0; font-size: 16px; }
   h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
   section { display: flex; flex-direction: column; gap: 10px; }
+  h4 { margin: 4px 0 0; font-size: 13px; }
+  .hint-top { margin: 0; }
   .grid { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 10px; }
   .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; width: fit-content; }
   .seg button { border: none; border-radius: 0; height: 28px; }

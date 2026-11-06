@@ -27,6 +27,7 @@ mod metron;
 mod musicbrainz;
 mod openlibrary;
 mod secrets;
+mod subtitles;
 mod tmdb;
 
 /// The session's file list. It lives on the Rust side so the whole list
@@ -1009,6 +1010,50 @@ async fn write_tv_sidecars(
     let mut report = tmdb::tv_sidecars(&app, &client, items, fanart, folders).await;
     record_created(&app, history_id, &mut report);
     Ok(report)
+}
+
+/// Searches subtitles for the videos, in the languages not there yet.
+#[tauri::command]
+async fn subs_search(
+    app: AppHandle,
+    auth: subtitles::Auth,
+    langs: String,
+    items: Vec<subtitles::Item>,
+) -> subtitles::Search {
+    let stop = stop_signal(&app);
+    subtitles::search(&app, auth, &langs, items, stop).await
+}
+
+/// Downloads the subtitles chosen beside the renamed videos and records
+/// them like `write_sidecars`.
+#[tauri::command]
+async fn write_subtitles(
+    app: AppHandle,
+    auth: subtitles::Auth,
+    history_id: Option<String>,
+    items: Vec<subtitles::Write>,
+) -> subtitles::Written {
+    let stop = stop_signal(&app);
+    let mut out = subtitles::write(&app, auth, items, stop).await;
+    let mut report = tmdb::SidecarReport {
+        created: std::mem::take(&mut out.created),
+        errors: std::mem::take(&mut out.errors),
+        kept: 0,
+    };
+    record_created(&app, history_id, &mut report);
+    out.created = report.created;
+    out.errors = report.errors;
+    out
+}
+
+#[tauri::command]
+async fn os_check(auth: subtitles::Auth) -> Result<Option<i64>, String> {
+    subtitles::check_os(auth).await
+}
+
+#[tauri::command]
+async fn subdl_check(key: String) -> Result<(), String> {
+    subtitles::check_subdl(key).await
 }
 
 type Songs = Vec<(PathBuf, AudioTags)>;
@@ -2130,6 +2175,10 @@ pub fn run() {
             tv_groups,
             write_sidecars,
             write_tv_sidecars,
+            subs_search,
+            write_subtitles,
+            os_check,
+            subdl_check,
             mb_lookup,
             mb_search,
             mb_choose,

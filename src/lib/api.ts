@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AlbumLookup, AlbumQuery, ApplyReport, BookCandidate, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, EpisodeLookup, MbCandidate, SongMatch, HistoryEntry, ListedTrack, Lookup, MovieSet, Preview, ScanOptions, Show, SortKey, Step, View } from "./types";
+import type { AlbumLookup, AlbumQuery, ApplyReport, BookCandidate, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, EpisodeLookup, MbCandidate, SongMatch, HistoryEntry, ListedTrack, Lookup, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
 
 type Overrides = Record<string, string>;
 
@@ -82,6 +82,12 @@ export const api = {
   mbSearch: (query: AlbumQuery, discogs = false) => invoke<MbCandidate[]>("mb_search", { query, discogs }),
   /** The Discogs token from the options (empty: Discogs is not used). */
   discogsToken: (token: string) => invoke<void>("discogs_token", { token }),
+  subsSearch: (auth: SubsAuth, langs: string, items: { path: string; tmdb: number; season?: number; episode?: number }[]) =>
+    invoke<{ langs: string[]; found: { path: string; have: string[]; candidates: SubCandidate[] }[]; errors: string[]; remaining: number | null }>("subs_search", { auth, langs, items }),
+  writeSubtitles: (auth: SubsAuth, historyId: string | null, items: { path: string; season?: number; episode?: number; langs: SubCandidate[][] }[]) =>
+    invoke<{ created: string[]; errors: [string, string][]; remaining: number | null }>("write_subtitles", { auth, historyId, items }),
+  osCheck: (auth: SubsAuth) => invoke<number | null>("os_check", { auth }),
+  subdlCheck: (key: string) => invoke<void>("subdl_check", { key }),
   discogsCheck: (token: string) => invoke<void>("discogs_check", { token }),
   googleBooksKey: (key: string) => invoke<void>("google_books_key", { key }),
   googleBooksCheck: (key: string) => invoke<void>("google_books_check", { key }),
