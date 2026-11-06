@@ -42,10 +42,19 @@ A built-in manual (F1) explains every rule with examples.
 - Renames folders too, even together with the files inside them.
 - The preview highlights what is removed and added in each name.
 - Finds files with identical content in the list (even with different
-  names) and shows them grouped, without deleting anything.
+  names) and shows them grouped.
 - Finds pictures that look alike (the same photo resized, recompressed or
   lightly edited, and shots taken one after another) and shows them
-  grouped, also without deleting anything.
+  grouped. Pictures in either kind of group can be compared side by side
+  (size, pixels, date taken; the largest is pointed out), and the ones
+  you mark go to the Trash only when you confirm.
+- Photos: names photos, raw files, edits and phone videos by when they
+  were taken (from the date inside the file, else the one in its name),
+  offline, with keys such as year, month, camera and size, and optionally
+  sorts them into `Year/Year-Month` folders. A photo's files (JPEG, raw,
+  `.xmp`, Live Photo video) stay together; shots from the same second are
+  numbered. Can also set each file's date to when it was taken (undone
+  with the rename). Nothing is written inside the files.
 - Movies: names files from TMDB (`Title (Year) [tmdbid-12345]`, the format
   Jellyfin recognizes), picking the movie automatically when sure and
   letting you choose when not; optionally saves `.nfo` and poster next
@@ -87,7 +96,8 @@ A built-in manual (F1) explains every rule with examples.
   from many countries; a free account, signed in for the session only),
   Metron (your own token; also finds the exact issue by the barcode
   recorded in the file or printed on its covers), Comic Vine (your own
-  key), or MangaDex, AniList and MangaUpdates (manga, no account), and organizes
+  key), or MangaDex, AniList and MangaUpdates (manga, no account), showing the
+  file's cover beside each catalogue's cover to choose by, and organizes
   series folders (with ready-made templates for Komga and Kavita). Issues
   missing from your series show up as faded rows, and can be exported to
   a CSV file. Optionally writes the details into each CBZ's
