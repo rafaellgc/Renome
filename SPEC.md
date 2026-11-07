@@ -338,7 +338,10 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
     remastered or IMAX cut on one side only −40, words in common (share
     of the subtitle's) up to +20, 2·ln(1+downloads), trusted uploader +3,
     hearing impaired −12. The best of each language is chosen; the review
-    window lists every video with a select per language (the others,
+    window lists every video with a select per language, labelled with
+    the language's name in the interface's language (`Intl.DisplayNames`;
+    the code as tooltip, and alone when it has no name), saying that a
+    subtitle's name is its video's release (the others,
     "Don't download"), a link to the subtitle's page, the subtitles to
     download and, with an account, OpenSubtitles' downloads left today
     (`/infos/user`), warning when more are chosen than that.
@@ -1689,7 +1692,14 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   folder, e.g. `~/.local/share/renome/history/`), allowing **undo** even
   after closing the program. If part of an undo fails (file moved or
   deleted), the entry shows the failure and can be retried once the files
-  are back in place. Entries can be deleted from the history, one by one
+  are back in place. While undoing, the list's progress bar shows the
+  songs whose tags are going back ("Putting the tags back: n of total"),
+  then the bytes moving back from another disk ("Undoing: p%"), from
+  `undo-progress` events, with Stop: tags go back before any rename, so
+  a stop among them renames nothing; a stop among the renames finishes
+  the file under way and the batch of copies, puts the files not reached
+  under their names again, and keeps them (with their dates) in the
+  entry, which stays to be undone later; the note says it stopped. Entries can be deleted from the history, one by one
   or all at once ("Clear history", confirmed); the files stay as they
   are. Entry ids come from the time (milliseconds) and the process,
   with `-2`, `-3`… if one is taken.

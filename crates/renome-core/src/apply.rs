@@ -1450,6 +1450,20 @@ impl History {
     /// if everything goes back; whatever failed (e.g. a moved file) stays
     /// in the history so it can be retried.
     pub fn undo(&self, id: &str) -> Result<ApplyReport, String> {
+        self.undo_with(id, &Hooks::none(), &|_, _| {})
+    }
+
+    /// [`undo`](Self::undo), telling how far it is (songs whose tags are
+    /// back, in `tags`; bytes moved back from another disk, in `hooks`)
+    /// and stopping when asked: what was not reached stays in the entry,
+    /// to be undone later. Tags go back before any rename, so a stop among
+    /// them renames nothing.
+    pub fn undo_with(
+        &self,
+        id: &str,
+        hooks: &Hooks,
+        tags: &dyn Fn(usize, usize),
+    ) -> Result<ApplyReport, String> {
         let mut j = self.read(id)?;
         if j.undone {
             return Err("alreadyUndone".into());
@@ -1500,10 +1514,18 @@ impl History {
         let mut note = (!j.tags.is_empty())
             .then(|| self.tagging(id).ok())
             .flatten();
+        let (tagged, mut back) = (j.tags.len(), 0);
+        let mut stopped = false;
         j.tags.retain(|b| {
+            if stopped || (hooks.stop)() {
+                stopped = true;
+                return true;
+            }
             if let Some(n) = note.as_mut() {
                 n.start(&b.path);
             }
+            back += 1;
+            tags(back, tagged);
             match crate::tagwrite::restore(b, &backups) {
                 Ok(()) => false,
                 Err(e) => {
@@ -1535,13 +1557,27 @@ impl History {
         if j.lists.is_empty() && j.tags.is_empty() {
             let _ = fs::remove_dir_all(&backups);
         }
+        // Stopped among the tags: no file is renamed back yet.
+        if stopped {
+            let report = ApplyReport {
+                errors,
+                stopped: true,
+                kept,
+                copies_removed: removed,
+                ..ApplyReport::default()
+            };
+            j.failed = report.errors.len();
+            self.write(id, &j)?;
+            return Ok(report);
+        }
         // Change dates go back before the files do (copies are gone).
-        for (path, secs, nanos) in std::mem::take(&mut j.times) {
-            if j.ops.iter().any(|op| op.to == path)
-                && let Ok(s) = u64::try_from(secs)
+        let times = std::mem::take(&mut j.times);
+        for (path, secs, nanos) in &times {
+            if j.ops.iter().any(|op| op.to == *path)
+                && let Ok(s) = u64::try_from(*secs)
             {
-                let t = std::time::UNIX_EPOCH + std::time::Duration::new(s, nanos);
-                let _ = set_time(&path, t);
+                let t = std::time::UNIX_EPOCH + std::time::Duration::new(s, *nanos);
+                let _ = set_time(path, t);
             }
         }
         let reverse: Vec<Operation> = j
@@ -1573,7 +1609,7 @@ impl History {
             };
             serde_json::to_vec(&p).is_ok_and(|t| write_synced(path, &t).is_ok())
         });
-        let mut report = execute(&reverse, Depth::ShallowestFirst);
+        let mut report = execute_with(&reverse, Depth::ShallowestFirst, hooks);
         report.kept = kept;
         report.copies_removed = removed;
         // The list goes back to the originals.
@@ -1591,6 +1627,11 @@ impl History {
             .collect();
         j.ops
             .retain(|op| !back.contains(&(op.from.as_path(), op.to.as_path())));
+        // Those not reached (a stop) get their dates back with them later.
+        j.times = times
+            .into_iter()
+            .filter(|(p, ..)| j.ops.iter().any(|op| op.to == *p))
+            .collect();
         report.errors.extend(errors);
         j.failed = report.errors.len();
         if j.ops.is_empty() {
@@ -1655,6 +1696,37 @@ mod tests {
         assert_eq!(read(p.join("a")), "A");
         assert!(h.list()[0].undone);
         assert!(h.undo(&id).is_err());
+    }
+
+    #[test]
+    fn stopped_undo_stays_pending() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        fs::write(p.join("a"), "A").unwrap();
+        fs::write(p.join("b"), "B").unwrap();
+        let h = History::new(p.join("hist"));
+        let id = h
+            .apply(&[op(p, "a", "a2"), op(p, "b", "b2")])
+            .history_id
+            .unwrap();
+
+        // Stopped before anything: nothing goes back, the entry stays.
+        let stop = Hooks {
+            progress: &|_, _| {},
+            stop: &|| true,
+        };
+        let u = h.undo_with(&id, &stop, &|_, _| {}).unwrap();
+        assert!(u.stopped);
+        assert!(u.done.is_empty());
+        assert!(p.join("a2").exists() && p.join("b2").exists());
+        assert!(!h.list()[0].undone);
+
+        // Asked again, all of it goes back.
+        let u = h.undo(&id).unwrap();
+        assert!(!u.stopped && u.errors.is_empty());
+        assert_eq!(u.done.len(), 2);
+        assert_eq!(read(p.join("a")), "A");
+        assert!(h.list()[0].undone);
     }
 
     #[test]

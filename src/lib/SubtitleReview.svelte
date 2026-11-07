@@ -1,6 +1,7 @@
 <script lang="ts">
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { t } from "./i18n";
+  import { settings } from "./settings.svelte";
   import type { SubCandidate } from "./types";
 
   type Row = {
@@ -27,6 +28,24 @@
 
   const SOURCE = { openSubtitles: "OpenSubtitles", subdl: "SubDL" } as const;
   const count = new Intl.NumberFormat();
+  /** A language's name in the window's language (`pt-BR` → "Português
+   *  (Brasil)"); the code when it has none. */
+  const names = $derived.by(() => {
+    try {
+      return new Intl.DisplayNames([settings.lang], { type: "language" });
+    } catch {
+      return null;
+    }
+  });
+  function langName(code: string) {
+    let name: string | undefined;
+    try {
+      name = names?.of(code);
+    } catch {
+      name = undefined;
+    }
+    return name && name !== code ? name.charAt(0).toLocaleUpperCase(settings.lang) + name.slice(1) : code;
+  }
 
   function label(c: SubCandidate) {
     return [
@@ -61,7 +80,7 @@
             {@const options = r.candidates.map((c, i) => ({ c, i })).filter((o) => o.c.lang === l.lang)}
             {@const c = r.candidates[l.pick]}
             <div class="lang">
-              <span class="code">{l.lang}</span>
+              <span class="code" title={l.lang}>{langName(l.lang)}</span>
               {#if l.have}
                 <span class="muted">{t("subsHave")}</span>
               {:else if !options.length}
@@ -100,7 +119,7 @@
   .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
   .lang { display: flex; align-items: center; gap: 8px; font-size: 12.5px; min-width: 0; }
   .lang select { flex: 1; min-width: 0; }
-  .code { width: 48px; flex-shrink: 0; font-family: ui-monospace, monospace; color: var(--muted); }
+  .code { width: 150px; flex-shrink: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .link { border: none; background: none; height: auto; padding: 0; color: var(--accent); font-size: 12px; }
   .bad { color: var(--danger); }
   .spacer { flex: 1; }

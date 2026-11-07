@@ -305,7 +305,7 @@ ${ex("Nome.do.Filme.2001.1080p.BluRay.x264.mkv", "Nome do Filme (2001) [tmdbid-1
 <ol>
   <li>Em <b>Opções → Legendas</b>, informe a chave da API do OpenSubtitles (e, para baixar mais, o usuário e a senha da conta) e/ou a chave do SubDL. As duas são gratuitas.</li>
   <li>Em <b>Idiomas</b>, escreva os idiomas na ordem que quiser, separados por vírgula: <code>pt-BR, en</code>. Vale o código de duas letras com ou sem país (<code>pt-BR</code>, <code>pt-PT</code>, <code>es</code>, <code>es-MX</code>) ou o de três (<code>por</code>, <code>eng</code>).</li>
-  <li>Depois de <b>Buscar no TMDB</b>, clique em <b>Procurar legendas</b>. Procurar não gasta a cota. A janela de revisão mostra, para cada vídeo e idioma, a legenda escolhida e as outras; troque se quiser, ou escolha <b>Não baixar</b>.</li>
+  <li>Depois de <b>Buscar no TMDB</b>, clique em <b>Procurar legendas</b>. Procurar não gasta a cota. A janela de revisão mostra, para cada vídeo e idioma (com o nome do idioma por extenso), a legenda escolhida e as outras. O nome de cada legenda é o do vídeo para o qual ela foi feita, por isso costuma vir em inglês, mesmo numa legenda em português; troque se quiser, ou escolha <b>Não baixar</b>.</li>
   <li>Clique em <b>Renomear</b>. Vídeos que já têm o nome certo também recebem as legendas (o botão os conta).</li>
 </ol>
 <ul>
@@ -799,7 +799,7 @@ ${ex("IMG-20190513-WA0001.jpg", "2019-05-13.jpg")}
 <h4>Histórico</h4>
 <p>Cada renomeação fica registrada no <b>Histórico</b>, mesmo depois de fechar o programa. Lá você pode:</p>
 <ul>
-  <li><b>Desfazer</b>: volta os nomes anteriores.</li>
+  <li><b>Desfazer</b>: volta os nomes anteriores. Enquanto desfaz, uma barra mostra quanto falta (as músicas cujas tags estão voltando e, depois, os arquivos que voltam de outro disco), com o botão <b>Parar</b>. Parado, o que já voltou fica como está e o resto continua no Histórico, para desfazer depois. Limitação: um arquivo grande que está voltando de outro disco termina antes de parar.</li>
   <li><b>Tentar de novo</b>: aparece quando parte do desfazer falhou (por exemplo, um arquivo foi movido depois). Devolva o arquivo ao lugar e tente de novo.</li>
   <li><b>✕</b>: exclui a entrada do histórico. Os arquivos não mudam, mas aquela renomeação não poderá mais ser desfeita.</li>
   <li><b>Limpar histórico</b>: exclui todas as entradas de uma vez, com o mesmo efeito.</li>

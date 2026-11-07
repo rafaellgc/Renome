@@ -305,7 +305,7 @@ ${ex("Nombre.de.la.Pelicula.2001.1080p.BluRay.x264.mkv", "Nombre de la Película
 <ol>
   <li>En <b>Opciones → Subtítulos</b>, indique la clave de API de OpenSubtitles (y, para descargar más, el usuario y la contraseña de la cuenta) y/o la clave de SubDL. Las dos son gratuitas.</li>
   <li>En <b>Idiomas</b>, escriba los idiomas en el orden que quiera, separados por comas: <code>es, en</code>. Vale el código de dos letras con o sin país (<code>es</code>, <code>es-MX</code>, <code>pt-BR</code>) o el de tres (<code>spa</code>, <code>eng</code>).</li>
-  <li>Después de <b>Buscar en TMDB</b>, haga clic en <b>Buscar subtítulos</b>. Buscar no gasta la cuota. La ventana de revisión muestra, para cada vídeo e idioma, el subtítulo elegido y los demás; cámbielo si quiere, o elija <b>No descargar</b>.</li>
+  <li>Después de <b>Buscar en TMDB</b>, haga clic en <b>Buscar subtítulos</b>. Buscar no gasta la cuota. La ventana de revisión muestra, para cada vídeo e idioma (con el nombre del idioma completo), el subtítulo elegido y los demás. El nombre de cada subtítulo es el del vídeo para el que se hizo, por eso suele estar en inglés, incluso en un subtítulo en español; cámbielo si quiere, o elija <b>No descargar</b>.</li>
   <li>Haga clic en <b>Renombrar</b>. Los vídeos que ya tienen el nombre correcto también reciben los subtítulos (el botón los cuenta).</li>
 </ol>
 <ul>
@@ -799,7 +799,7 @@ ${ex("IMG-20190513-WA0001.jpg", "2019-05-13.jpg")}
 <h4>Historial</h4>
 <p>Cada renombrado queda registrado en el <b>Historial</b>, incluso después de cerrar el programa. Allí puede:</p>
 <ul>
-  <li><b>Deshacer</b>: recupera los nombres anteriores.</li>
+  <li><b>Deshacer</b>: recupera los nombres anteriores. Mientras deshace, una barra muestra cuánto falta (las canciones cuyas etiquetas vuelven y, después, los archivos que vuelven de otro disco), con el botón <b>Detener</b>. Detenido, lo que ya volvió queda así y el resto sigue en el Historial, para deshacer después. Limitación: un archivo grande que vuelve de otro disco termina antes de detenerse.</li>
   <li><b>Reintentar</b>: aparece cuando parte del deshacer falló (por ejemplo, un archivo se movió después). Devuelva el archivo a su sitio e inténtelo de nuevo.</li>
   <li><b>✕</b>: borra la entrada del historial. Los archivos no cambian, pero ese renombrado ya no se podrá deshacer.</li>
   <li><b>Vaciar historial</b>: borra todas las entradas de una vez, con el mismo efecto.</li>

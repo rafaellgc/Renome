@@ -305,7 +305,7 @@ ${ex("Movie.Name.2001.1080p.BluRay.x264.mkv", "Movie Name (2001) [tmdbid-12345].
 <ol>
   <li>In <b>Options → Subtitles</b>, enter the OpenSubtitles API key (and, to download more, the account's user name and password) and/or the SubDL key. Both are free.</li>
   <li>In <b>Languages</b>, write the languages in the order you like, separated by commas: <code>en, pt-BR</code>. Two-letter codes with or without a country (<code>pt-BR</code>, <code>pt-PT</code>, <code>es</code>, <code>es-MX</code>) or three-letter ones (<code>por</code>, <code>eng</code>) work.</li>
-  <li>After <b>Search TMDB</b>, click <b>Search subtitles</b>. Searching does not use up the quota. The review window shows, for each video and language, the subtitle chosen and the others; change it if you like, or choose <b>Don't download</b>.</li>
+  <li>After <b>Search TMDB</b>, click <b>Search subtitles</b>. Searching does not use up the quota. The review window shows, for each video and language (with the language's name spelled out), the subtitle chosen and the others. Each subtitle's name is that of the video it was made for, so it is often in English even for a subtitle in another language; change it if you like, or choose <b>Don't download</b>.</li>
   <li>Click <b>Rename</b>. Videos whose names are already right get their subtitles too (the button counts them).</li>
 </ol>
 <ul>
@@ -799,7 +799,7 @@ ${ex("IMG-20190513-WA0001.jpg", "2019-05-13.jpg")}
 <h4>History</h4>
 <p>Each rename is recorded in the <b>History</b>, even after closing the program. There you can:</p>
 <ul>
-  <li><b>Undo</b>: brings back the previous names.</li>
+  <li><b>Undo</b>: brings back the previous names. While undoing, a bar shows how far it is (the songs whose tags are going back, then the files coming back from another disk), with a <b>Stop</b> button. Once stopped, what is back stays so and the rest remains in the History, to undo later. Limitation: a large file coming back from another disk finishes before it stops.</li>
   <li><b>Try again</b>: shown when part of an undo failed (for example, a file was moved afterwards). Put the file back and try again.</li>
   <li><b>✕</b>: deletes the entry from the history. The files do not change, but that rename can no longer be undone.</li>
   <li><b>Clear history</b>: deletes all entries at once, with the same effect.</li>

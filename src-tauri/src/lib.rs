@@ -1987,8 +1987,28 @@ fn history(state: State<AppState>) -> Vec<HistoryEntry> {
 
 #[tauri::command]
 async fn undo(app: AppHandle, id: String) -> Result<ApplyReport, String> {
+    let stop = stop_signal(&app);
+    let emitter = app.clone();
     in_background(app, move |state| {
-        let report = state.history.undo(&id)?;
+        // How far: songs whose tags are back, then bytes moved back from
+        // another disk (renames on the same disk take no time).
+        let last = std::cell::Cell::new(std::time::Instant::now());
+        let tell = |kind: &str, done: u64, total: u64| {
+            if last.get().elapsed().as_millis() >= 200 || done == total {
+                last.set(std::time::Instant::now());
+                let _ = emitter.emit(
+                    "undo-progress",
+                    serde_json::json!({ "done": done, "total": total, "kind": kind }),
+                );
+            }
+        };
+        let progress = |done: u64, total: u64| tell("files", done, total);
+        let hooks = renome_core::apply::Hooks {
+            progress: &progress,
+            stop: &stop,
+        };
+        let tags = |done: usize, total: usize| tell("tags", done as u64, total as u64);
+        let report = state.history.undo_with(&id, &hooks, &tags)?;
         let s = &mut *state.session.lock().unwrap();
         refresh_renamed(&mut s.files, &report);
         // Songs may have their old tags back: read again.

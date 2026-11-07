@@ -145,6 +145,15 @@
         total: applyProgress.total,
         stop: true,
       };
+    if (task === "undo")
+      return undoProgress?.total
+        ? {
+            label: undoProgress.kind === "tags" ? t("undoTags", undoProgress) : t("undoFiles", { p: Math.floor((undoProgress.done / undoProgress.total) * 100) }),
+            done: undoProgress.done,
+            total: undoProgress.total,
+            stop: true,
+          }
+        : { label: t("workingUndo"), stop: true };
     if (task) return { label: t({ add: "workingAdd", rename: "workingRename", undo: "workingUndo", sort: "workingSort" }[task] as "workingAdd") };
     return null;
   });
@@ -242,6 +251,9 @@
   let sendTo = $state<{ dir: string; copy: boolean } | null>(null);
   let sendMenu = $state(false);
   /** Bytes copied so far, while copying. */
+  /** How far an undo is: songs whose tags are back, then bytes moved
+   *  back from another disk. */
+  let undoProgress = $state<{ done: number; total: number; kind: "tags" | "files" } | null>(null);
   let applyProgress = $state<{ done: number; total: number } | null>(null);
   let ruleMenu = $state(false);
   let table = $state<FileTable>();
@@ -795,12 +807,17 @@
   async function undo(id: string) {
     busy = true;
     task = "undo";
+    undoProgress = null;
     try {
       const r = await api.undo(id);
       foundUndo = [];
       followMatches(r);
       const restored = r.done.filter((op) => !op.copy).length;
-      notice = [restored || !r.copiesRemoved ? t("restoredN", { n: restored }) : "", r.copiesRemoved ? t("copiesRemovedN", { n: r.copiesRemoved }) : ""]
+      notice = [
+        restored || !r.copiesRemoved ? t("restoredN", { n: restored }) : "",
+        r.copiesRemoved ? t("copiesRemovedN", { n: r.copiesRemoved }) : "",
+        r.stopped ? t("undoStopped") : "",
+      ]
         .filter(Boolean)
         .join(" · ");
       if (history) history = await api.history();
@@ -816,6 +833,9 @@
     } catch (e) {
       await notify({ title: t("undoFailed"), text: tError(e) });
     } finally {
+      // Its own notice says it stopped.
+      stopping = false;
+      undoProgress = null;
       busy = false;
       task = null;
     }
@@ -1185,6 +1205,9 @@
     const unlistenApply = listen<{ done: number; total: number }>("apply-progress", (e) => {
       if (task === "rename") applyProgress = e.payload;
     });
+    const unlistenUndo = listen<{ done: number; total: number; kind: "tags" | "files" }>("undo-progress", (e) => {
+      if (task === "undo") undoProgress = e.payload;
+    });
     const unlistenProgress = listen<{ done: number; total: number }>("identical-progress", (e) => {
       identicalProgress = e.payload.done < e.payload.total ? e.payload.done / e.payload.total : null;
     });
@@ -1228,6 +1251,7 @@
       unlistenSimilar.then((f) => f());
       unlistenPhotos.then((f) => f());
       unlistenApply.then((f) => f());
+      unlistenUndo.then((f) => f());
       unlistenTmdb.then((f) => f());
       unlistenMb.then((f) => f());
       unlistenBooks.then((f) => f());
