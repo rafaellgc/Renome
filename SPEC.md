@@ -1399,6 +1399,12 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   `shift_hours` is added to the inside and name dates (not to a name's day
   without a time). Files with
   none stay; they are marked (`photo_date: none`) and counted on the card.
+  Known limit, stated in the manual: messaging apps and social networks
+  (WhatsApp first) strip EXIF, so a received photo's only dates are the
+  name's (WhatsApp `IMG-YYYYMMDD-WA…` is the day it arrived) and the
+  change date (the copy); the taken date cannot be recovered, and the
+  manual points to filtering by `WA`, "Set the date", turning the name
+  source off, or asking for the photo to be sent as a document.
 - "Set the date (N selected)" (photo rule card): for the photos and
   videos the rule reads selected in the list, a window with day, month,
   year and optional hour and minute (`DetailsEdit.svelte`; empty start
