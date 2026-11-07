@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AlbumLookup, AlbumQuery, ApplyReport, BookCandidate, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, EpisodeLookup, MbCandidate, SongMatch, HistoryEntry, ListedTrack, Lookup, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
+import type { AlbumLookup, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, EpisodeLookup, MbCandidate, SongMatch, HistoryEntry, ListedTrack, Lookup, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
 
 type Overrides = Record<string, string>;
 
@@ -116,6 +116,7 @@ export const api = {
   gcdCheck: (email: string, password: string) => invoke<void>("gcd_check", { email, password }),
   bookLookup: (lang: string, items: { path: string; name: string }[]) =>
     invoke<BookLookup[]>("book_lookup", { lang, items }),
+  bookGuesses: (paths: string[], names: string[]) => invoke<BookGuess[]>("book_guesses", { paths, names }),
   bookSearch: (lang: string, title: string, author: string) =>
     invoke<BookCandidate[]>("book_search", { lang, title, author }),
   writeBookSidecars: (

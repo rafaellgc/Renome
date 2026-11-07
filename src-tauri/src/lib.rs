@@ -1657,6 +1657,21 @@ async fn book_search(
     Ok(app.state::<AppState>().ol.find(&guess, &lang).await?.0)
 }
 
+/// What each book says about itself (its details and name), as a start
+/// for typing them in; `names` are the names the rule reads (stems).
+#[tauri::command]
+async fn book_guesses(paths: Vec<PathBuf>, names: Vec<String>) -> Vec<renome_core::books::Guess> {
+    tauri::async_runtime::spawn_blocking(move || {
+        paths
+            .iter()
+            .zip(names)
+            .map(|(p, n)| renome_core::books::guess(&n, &renome_core::ebook::read(p)))
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
+}
+
 /// What each comic says about itself (its `ComicInfo.xml` and name), for
 /// grouping files by series and matching them to issues.
 #[tauri::command]
@@ -2304,6 +2319,7 @@ pub fn run() {
             book_lookup,
             book_search,
             comic_guesses,
+            book_guesses,
             song_own_tags,
             comic_check,
             comic_search,

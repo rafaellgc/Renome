@@ -27,7 +27,7 @@
   import { RULE_TYPES, LOOKUP_TYPES, isLookup, oneLookup, byFit, isAudio, isBook, isComic, isScreen, isVideo, newRule, newStep, seriesOnly, splitExt, defaultSubLangs } from "$lib/rules";
   import { comicKey, loadSecrets, loadSettings, saveSecrets, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
-    AlbumState, ApplyReport, BookCandidate, BookMatch, BookState, Candidate, ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, Copies, EditField, MbCandidate, SongMatch, EpKey, EpisodeMatch, EpisodeState, MovieMatch, MovieSet, MovieState, MovieStatus, HistoryEntry,
+    AlbumState, ApplyReport, BookCandidate, BookGuess, BookMatch, BookState, Candidate, ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, Copies, EditField, MbCandidate, SongMatch, EpKey, EpisodeMatch, EpisodeState, MovieMatch, MovieSet, MovieState, MovieStatus, HistoryEntry,
     OpError, Preview, PreviewItem, Rule, RuleType, Show, Step, SubCandidate, SubsAuth, View, ViewSort,
   } from "$lib/types";
   import { DETAIL_COLUMNS, type DetailColumn } from "$lib/types";
@@ -205,16 +205,95 @@
     const raw = Object.entries(books).filter(([, b]) => b.choice).map(([p, b]): [string, BookMatch] => [p, bookMatch(b)]);
     const spelling = authorSpellings(raw.flatMap(([, m]) => m.authors));
     const same = (a: string) => spelling.get(a.normalize("NFC")) ?? a.normalize("NFC");
-    return Object.fromEntries(
-      raw.map(([p, m]) => [p, { ...m, title: m.title.normalize("NFC"), authors: [...new Set(m.authors.map(same))] }]),
-    );
+    return {
+      ...Object.fromEntries(
+        raw.map(([p, m]) => [p, { ...m, title: m.title.normalize("NFC"), authors: [...new Set(m.authors.map(same))] }]),
+      ),
+      ...bookEdits,
+    } as Record<string, BookMatch>;
   });
+  /** Books whose details were typed in (over what the catalogue said). */
+  let bookEdits = $state<Record<string, BookMatch>>({});
+  /** The book details window, while open. */
+  let bookEdit = $state<{ paths: string[]; books: BookMatch[] } | null>(null);
+  /** A book has details to name and write it with: chosen or typed in. */
+  const hasBook = (p: string) => !!(books[p]?.choice || bookEdits[p]);
+  /** The books among the rows chosen in the list. */
+  const selectedBooks = $derived(preview.items.filter((i) => selected.has(i.path) && !i.isDir && isBook(i.original)));
+  const BOOK_FIELDS = $derived<EditField[]>([
+    { key: "title", label: t("bookEditTitle"), wide: true },
+    { key: "authors", label: t("bookEditAuthors"), wide: true },
+    { key: "year", label: t("bookEditYear"), numeric: true },
+    { key: "publisher", label: t("bookEditPublisher") },
+    { key: "language", label: t("bookEditLanguage") },
+    { key: "series", label: t("bookEditSeries"), wide: true },
+    { key: "seriesIndex", label: t("bookEditSeriesIndex") },
+    { key: "isbn", label: t("bookEditIsbn") },
+  ]);
+  /** A book's details as the window shows them. */
+  const bookText = (m: BookMatch) => ({
+    title: m.title,
+    authors: m.authors.join("; "),
+    year: m.year ? String(m.year) : "",
+    publisher: m.publisher,
+    language: m.extra?.language ?? "",
+    series: m.series,
+    seriesIndex: m.seriesIndex,
+    isbn: m.isbn,
+  });
+
+  async function openBookEdit() {
+    const rows = selectedBooks;
+    if (!rows.length) return;
+    const missing = rows.filter((i) => !bookMatches[i.path] && !books[i.path]);
+    const guessed: Record<string, BookGuess> = {};
+    if (missing.length) {
+      const got = await api.bookGuesses(missing.map((i) => i.path), missing.map((i) => splitExt(readName(i))[0]));
+      missing.forEach((i, n) => (guessed[i.path] = got[n]));
+    }
+    const fromGuess = (g: BookGuess): BookMatch => ({
+      work: "", title: g.title, originalTitle: "", authors: g.author ? g.author.split(/\s*[;&]\s*/).filter(Boolean) : [],
+      year: g.year, editionYear: null, publisher: g.publisher, isbn: g.isbns[0] ?? "", series: g.series, seriesIndex: g.seriesIndex,
+      extra: g.language ? { language: g.language } : {},
+    });
+    bookEdit = {
+      paths: rows.map((i) => i.path),
+      books: rows.map((i) => {
+        const g = books[i.path]?.guess ?? guessed[i.path];
+        return $state.snapshot(bookMatches[i.path] ?? (g ? fromGuess(g) : fromGuess({ title: "", author: "", year: null, isbns: [], fromFile: false, series: "", seriesIndex: "", publisher: "", language: "" })));
+      }),
+    };
+  }
+
+  function saveBookEdit(changed: Record<string, string>) {
+    if (!bookEdit) return;
+    const next = { ...bookEdits };
+    bookEdit.paths.forEach((p, i) => {
+      const m: BookMatch = { ...bookEdit!.books[i], extra: { ...(bookEdit!.books[i].extra ?? {}) } };
+      for (const [k, v] of Object.entries(changed)) {
+        if (k === "authors") m.authors = v.split(";").map((a) => a.trim()).filter(Boolean);
+        else if (k === "year") {
+          m.year = v ? Number.parseInt(v, 10) : null;
+          // One year typed: the edition's goes.
+          m.editionYear = null;
+        } else if (k === "language") {
+          if (v) m.extra!.language = v;
+          else delete m.extra!.language;
+        } else (m as unknown as Record<string, string>)[k] = v;
+      }
+      // Another book: the catalogue's work (and its cover) no longer tell it.
+      if (changed.title !== undefined || changed.authors !== undefined) m.work = "";
+      next[p] = m;
+    });
+    bookEdits = next;
+    bookEdit = null;
+  }
   const bookCounts = $derived(counts(books));
   /** Books whose names are already right but that still get a cover or a
    *  metadata.opf (files that already exist are skipped when writing). */
   const bookMetaOnly = $derived(
     bookRule?.rule.type === "book" && (bookRule.rule.cover || bookRule.rule.opf)
-      ? preview.items.filter((i) => i.status === "unchanged" && books[i.path]?.choice && isBook(i.original))
+      ? preview.items.filter((i) => i.status === "unchanged" && hasBook(i.path) && isBook(i.original))
       : [],
   );
   const extOf = (p: string) => splitExt(p.split(/[\\/]/).pop() ?? p)[1].toLowerCase();
@@ -223,17 +302,26 @@
    *  (those that already have them are skipped when writing). */
   const epubOnly = $derived(
     bookRule?.rule.type === "book" && bookRule.rule.writeEpub
-      ? preview.items.filter((i) => i.status === "unchanged" && books[i.path]?.choice && isEpub(i.original))
+      ? preview.items.filter((i) => i.status === "unchanged" && hasBook(i.path) && isEpub(i.original))
       : [],
   );
   /** What writing a book's details inside it needs. */
   function bookInsideItem(key: string, path: string) {
+    const typed = bookEdits[key];
+    if (typed) return { path, book: typed, language: typed.extra?.language ?? "" };
     const c = books[key].choice!;
     return { path, book: bookMatches[key], language: c.exact ? c.language : books[key].guess.language };
   }
   /** What the cover and metadata.opf of a book need; `key` is the path before renaming. */
   function bookSidecarItem(key: string, path: string) {
-    const c = books[key].choice!;
+    const typed = bookEdits[key];
+    const c = books[key]?.choice;
+    // Typed in: the catalogue's cover and description only while it is still that book.
+    if (typed) {
+      const same = !!(c && typed.work);
+      return { path, book: typed, cover: same ? c!.cover : null, coverUrl: same ? (c!.coverUrl ?? "") : "", description: same ? (c!.description ?? "") : "", language: typed.extra?.language ?? "" };
+    }
+    if (!c) throw new Error("no book");
     return { path, book: bookMatches[key], cover: c.cover, coverUrl: c.coverUrl ?? "", description: c.description ?? "", language: c.exact ? c.language : books[key].guess.language };
   }
 
@@ -1217,7 +1305,7 @@
       const brule = bookRule?.rule;
       if (recorded && brule?.type === "book" && (brule.cover || brule.opf)) {
         const items = r.done
-          .filter((op) => books[op.from]?.choice && isBook(op.to))
+          .filter((op) => hasBook(op.from) && isBook(op.to))
           .map((op) => bookSidecarItem(op.from, op.to))
           .concat(bookMeta);
         if (items.length) {
@@ -1246,7 +1334,7 @@
                 .map((op) => comicInsideItem(op.from, op.to, converting.has(op.from)))
             : []),
           ...(brule?.type === "book" && brule.writeEpub
-            ? r.done.filter((op) => books[op.from]?.choice && isEpub(op.to)).map((op) => bookInsideItem(op.from, op.to))
+            ? r.done.filter((op) => hasBook(op.from) && isEpub(op.to)).map((op) => bookInsideItem(op.from, op.to))
             : []),
           ...insideOnly,
         ];
@@ -2054,9 +2142,9 @@
   /** Saves the list and the hand-edited names before an edit, for Ctrl+Z. */
   /** What the lookups found per file, kept along each list checkpoint
    *  that takes files out (null: the edit left them as they were). */
-  type Found = { movies: typeof movies; books: typeof books; comics: typeof comics; comicEdits: typeof comicEdits; songEdits: typeof songEdits; series: typeof series; albums: AlbumState[]; pickedShows: typeof pickedShows; pickedComics: typeof pickedComics; searchedShows: Candidate[] };
+  type Found = { movies: typeof movies; books: typeof books; comics: typeof comics; comicEdits: typeof comicEdits; songEdits: typeof songEdits; bookEdits: typeof bookEdits; series: typeof series; albums: AlbumState[]; pickedShows: typeof pickedShows; pickedComics: typeof pickedComics; searchedShows: Candidate[] };
   let foundUndo: (Found | null)[] = [];
-  const found = (): Found => ({ movies, books, comics, comicEdits, songEdits, series, albums, pickedShows, pickedComics, searchedShows });
+  const found = (): Found => ({ movies, books, comics, comicEdits, songEdits, bookEdits, series, albums, pickedShows, pickedComics, searchedShows });
   const remember = (keep: Found | null = null) => {
     if (foundUndo.length === 100) foundUndo.shift();
     foundUndo.push(keep);
@@ -2077,6 +2165,7 @@
       comics = {};
       comicEdits = {};
       songEdits = {};
+      bookEdits = {};
       series = {};
       albums = [];
       pickedShows = {};
@@ -2091,6 +2180,7 @@
     comics = keep(comics);
     comicEdits = keep(comicEdits);
     songEdits = keep(songEdits);
+    bookEdits = keep(bookEdits);
     series = keep(series);
     albums = albums
       .map((a) => ({ ...a, files: a.files.filter((p) => !paths.has(p)), matches: keep(a.matches) }))
@@ -2106,7 +2196,7 @@
       return;
     }
     const was = foundUndo.pop();
-    if (was) ({ movies, books, comics, comicEdits, songEdits, series, albums, pickedShows, pickedComics, searchedShows } = was);
+    if (was) ({ movies, books, comics, comicEdits, songEdits, bookEdits, series, albums, pickedShows, pickedComics, searchedShows } = was);
     overrides = prev;
     await refresh();
     checkIdentical();
@@ -2540,6 +2630,13 @@
                         progress: bookProgress ? t(bookProgress.kind === "search" ? "olSearching" : "sidecarsWriting", bookProgress) : null,
                         onsearch: searchBooks,
                         onreview: () => openBookReview(),
+                        edit: {
+                          n: selectedBooks.length,
+                          typed: Object.keys(bookEdits).length,
+                          label: t("editButton", { n: selectedBooks.length }),
+                          hint: t("bookEditButtonHint"),
+                          onclick: openBookEdit,
+                        },
                       }
                     : undefined}
             summary={step.rule.type === "music" && step.enabled && untaggedCount
@@ -2798,6 +2895,16 @@
     rows={comicEdit.comics.map((m) => asText(m, COMIC_FIELDS))}
     onsave={saveComicEdit}
     onclose={() => (comicEdit = null)}
+  />
+{/if}
+{#if bookEdit}
+  <DetailsEdit
+    heading={t("bookEditTitleN", { n: bookEdit.books.length })}
+    hint={t("detailsEditHint")}
+    fields={BOOK_FIELDS}
+    rows={bookEdit.books.map(bookText)}
+    onsave={saveBookEdit}
+    onclose={() => (bookEdit = null)}
   />
 {/if}
 {#if songEdit}

@@ -982,6 +982,19 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   `META-INF/rights.xml` or content encrypted by anything but font
   obfuscation (DRM) are refused (`epubDrm`). Writing works like the
   comics' (see 2.5), with the same history, recovery and undo.
+- "Edit the details (N selected)" (`DetailsEdit.svelte`, shared with
+  the comic and music rules): for the books selected in the list, a window
+  with title, authors (`;`-separated), year, publisher, language, series,
+  number in the series and ISBN, prefilled from the chosen book, else the
+  file's own guess (`book_guesses`: its details and name, as a search
+  would read them). The result goes into `bookEdits` (per path, for the
+  session), which override the chosen books in `view.books` (naming) and
+  count as a match for "Save the cover", "Save the book's details" and
+  "Write the details inside the EPUB". A typed year sets `year` and clears
+  `editionYear`. Changing title or authors clears `work`: no Open Library
+  description, and the chosen book's cover and description are not used.
+  Clear and removing files forget them; Ctrl+Z after those brings them
+  back with the rest.
 - Only the searched title, author and ISBN are sent to Open Library and
   Google Books, and only the ISBN to BrasilAPI. Without the option above the book files are
   never changed.
