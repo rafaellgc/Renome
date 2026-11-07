@@ -856,7 +856,7 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   own tags as the rule reads them (`song_own_tags`, with "Fill in from the
   file name when a tag is missing" when on); with several, a field with
   different values shows empty and only the fields typed in are applied to all. The result goes
-  into `songEdits` (per path, for the session), which override the
+  into `Music.edits` (per path, for the session), which override the
   release matches in `view.songs` (naming, `retag`, tag writing). Changing
   album or album artist, or editing a song with no release, makes it
   `typed`: its release ids are cleared, writing removes the MusicBrainz
@@ -987,7 +987,7 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   with title, authors (`;`-separated), year, publisher, language, series,
   number in the series and ISBN, prefilled from the chosen book, else the
   file's own guess (`book_guesses`: its details and name, as a search
-  would read them). The result goes into `bookEdits` (per path, for the
+  would read them). The result goes into `Books.edits` (per path, for the
   session), which override the chosen books in `view.books` (naming) and
   count as a match for "Save the cover", "Save the book's details" and
   "Write the details inside the EPUB". A typed year sets `year` and clears
@@ -1218,7 +1218,7 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   current match, else the file's own reading (`comic_guesses`); with
   several, a field with different values shows empty ("(several)") and
   only the fields typed in are applied to all. The result goes into
-  `comicEdits` (per path, for the session), which override the catalogue
+  `Comics.edits` (per path, for the session), which override the catalogue
   matches in `view.comics` (naming, `retag`); changing series or number
   clears the catalogue id. With "Write the details" they are written to
   `ComicInfo.xml` with no Web address and not as manga. Clear and removing

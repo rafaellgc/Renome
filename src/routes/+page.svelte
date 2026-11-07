@@ -5,7 +5,13 @@
   import { open, save } from "@tauri-apps/plugin-dialog";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { api } from "$lib/api";
-  import { authorSpellings } from "$lib/authors";
+  import { Books } from "$lib/page/books.svelte";
+  import { Music } from "$lib/page/music.svelte";
+  import { Comics, clearsInfo } from "$lib/page/comics.svelte";
+  import { Movies } from "$lib/page/movies.svelte";
+  import { Series } from "$lib/page/series.svelte";
+  import { Subtitles } from "$lib/page/subtitles.svelte";
+  import { asText, counts, extOf, isEpub, moved, without, type PageCtx } from "$lib/page/common";
   import Dialog from "$lib/Dialog.svelte";
   import { closeDialog, confirm, dialog, notify } from "$lib/dialogs.svelte";
   import FileTable from "$lib/FileTable.svelte";
@@ -24,11 +30,10 @@
   import ShowPicker from "$lib/ShowPicker.svelte";
   import SubtitleReview from "$lib/SubtitleReview.svelte";
   import { LOCALES, MOD, t, tError, type Key } from "$lib/i18n";
-  import { RULE_TYPES, LOOKUP_TYPES, isLookup, oneLookup, byFit, isAudio, isBook, isComic, isScreen, isVideo, newRule, newStep, seriesOnly, splitExt, defaultSubLangs } from "$lib/rules";
-  import { comicKey, loadSecrets, loadSettings, saveSecrets, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
+  import { RULE_TYPES, isLookup, oneLookup, isAudio, isBook, isComic, isScreen, isVideo, newRule, newStep } from "$lib/rules";
+  import { loadSecrets, loadSettings, saveSecrets, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
-    AlbumState, ApplyReport, BookCandidate, BookGuess, BookMatch, BookState, Candidate, ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, Copies, EditField, MbCandidate, SongMatch, EpKey, EpisodeMatch, EpisodeState, MovieMatch, MovieSet, MovieState, MovieStatus, HistoryEntry,
-    OpError, Preview, PreviewItem, Rule, RuleType, Show, Step, SubCandidate, SubsAuth, View, ViewSort,
+    ApplyReport, Copies, MovieStatus, HistoryEntry, OpError, Preview, PreviewItem, Rule, RuleType, Step, View, ViewSort,
   } from "$lib/types";
   import { DETAIL_COLUMNS, type DetailColumn } from "$lib/types";
   import { COL_LABEL, detailText } from "$lib/details";
@@ -81,62 +86,36 @@
   let photosProgress = $state<number | null>(null);
   const identicalCount = $derived(Object.keys(copies).length);
 
-  /** TMDB results and choices per file, for the movie rule. */
-  let movies = $state<Record<string, MovieState>>({});
-  /** Files in the movie review window; null when closed. */
-  let review = $state<string[] | null>(null);
-  let tmdbProgress = $state<{ done: number; total: number; kind: "search" | "save" | "saveTv" } | null>(null);
-  const movieRule = $derived(steps.find((s) => s.enabled && s.rule.type === "movie"));
-  /** Each chosen movie's template fields (genre, director…), by id. */
-  let movieExtra = $state<Record<number, Record<string, string>>>({});
-  const movieMatches = $derived(
-    Object.fromEntries(
-      Object.entries(movies)
-        .filter(([, m]) => m.choice)
-        .map(([p, m]): [string, MovieMatch] => {
-          const c = m.choice!;
-          return [p, { id: c.id, title: c.title, originalTitle: c.originalTitle, year: c.year, extra: movieExtra[c.id] }];
-        }),
-    ),
-  );
-  /** Movies whose names are already right but that still get .nfo and
-   *  images (files that already exist are skipped when writing). */
-  const metaOnly = $derived(
-    movieRule?.rule.type === "movie" && movieRule.rule.sidecar
-      ? preview.items.filter((i) => i.status === "unchanged" && movies[i.path]?.choice && isVideo(i.original))
-      : [],
-  );
-  const movieCounts = $derived(counts(movies));
-  /** Each chosen movie's TMDB collection (null: none), and the collections,
-   *  for the movies missing from them. */
-  let setOf = $state<Record<number, number | null>>({});
-  let movieSets = $state<Record<number, MovieSet>>({});
-  /** Movies already asked about (an answer may not come). */
-  const setAsked = new Set<string>();
-  $effect(() => {
-    if (movieRule?.rule.type !== "movie" || !settings.tmdbKey) return;
-    const sets = movieRule.rule.missing;
-    // Read without tracking the fields: they come from this.
-    const ids = [...new Set(Object.values(movies).flatMap((m) => (m.choice ? [m.choice.id] : [])))].filter(
-      (id) => !setAsked.has(`${id}:${sets}`) && !(sets ? false : setAsked.has(`${id}:true`)),
-    );
-    if (!ids.length) return;
-    for (const id of ids) setAsked.add(`${id}:${sets}`);
-    api.tmdbCollections(settings.tmdbKey, tmdbLang(), ids, sets).then(
-      (r) => {
-        for (const [id, set] of r.of) setOf[id] = set;
-        for (const set of r.sets) movieSets[set.id] = set;
-        for (const [id, extra] of r.extras) movieExtra[id] = extra;
-      },
-      () => {},
-    );
-  });
-
-  /** Open Library results and choices per file, for the book rule. */
-  let books = $state<Record<string, BookState>>({});
-  /** Files in the book review window; null when closed. */
-  let bookReview = $state<string[] | null>(null);
-  let bookProgress = $state<{ done: number; total: number; kind: "search" | "save" } | null>(null);
+  /** What the rule modules read from the page. */
+  const ctx: PageCtx = {
+    get items() {
+      return preview.items;
+    },
+    get selected() {
+      return selected;
+    },
+    get steps() {
+      return steps;
+    },
+    readName: (i) => readName(i),
+    say: (text) => (notice = text),
+    get stopRun() {
+      return stopRun;
+    },
+    openOptions: () => (showOptions = true),
+  };
+  /** The book rule's lookups, choices and typed details. */
+  const books = new Books(ctx);
+  /** The music rule's albums, releases and typed tags. */
+  const music = new Music(ctx);
+  /** The comic rule's series, issues and typed details. */
+  const comics = new Comics(ctx);
+  /** The movie rule's TMDB results and choices. */
+  const movies = new Movies(ctx);
+  /** The TV show rule's shows and episodes. */
+  const tv = new Series(ctx);
+  /** Subtitles for the videos those two identified. */
+  const subs = new Subtitles(ctx, movies, tv);
   /** Details being written inside comics and books. */
   let insideProgress = $state<{ done: number; total: number } | null>(null);
   /** A long operation under way: the list waits for it, with what it is
@@ -145,20 +124,20 @@
   const working = $derived.by((): { label: string; done?: number; total?: number; stop?: boolean } | null => {
     const counted = (label: string, p: { done: number; total: number }, stop: boolean) => ({ label, done: p.done, total: p.total, stop });
     if (insideProgress) return counted(t("insideWriting", insideProgress), insideProgress, false);
-    if (subsProgress)
-      return counted(t(subsProgress.kind === "search" ? "subsSearching" : "subsWriting", subsProgress), subsProgress, true);
-    if (bookProgress)
-      return counted(t(bookProgress.kind === "search" ? "olSearching" : "sidecarsWriting", bookProgress), bookProgress, bookProgress.kind === "search");
-    if (tmdbProgress)
-      return counted(t(tmdbProgress.kind === "search" ? "tmdbSearching" : "sidecarsWriting", tmdbProgress), tmdbProgress, tmdbProgress.kind === "search");
-    if (mbProgress)
+    if (subs.progress)
+      return counted(t(subs.progress.kind === "search" ? "subsSearching" : "subsWriting", subs.progress), subs.progress, true);
+    if (books.progress)
+      return counted(t(books.progress.kind === "search" ? "olSearching" : "sidecarsWriting", books.progress), books.progress, books.progress.kind === "search");
+    if (movies.progress)
+      return counted(t(movies.progress.kind === "search" ? "tmdbSearching" : "sidecarsWriting", movies.progress), movies.progress, movies.progress.kind === "search");
+    if (music.progress)
       return counted(
-        t({ search: "mbSearching", listen: "mbListening", save: "coversWriting", tags: "tagsWriting" }[mbProgress.kind] as "mbSearching", mbProgress),
-        mbProgress,
-        mbProgress.kind === "search" || mbProgress.kind === "listen",
+        t({ search: "mbSearching", listen: "mbListening", save: "coversWriting", tags: "tagsWriting" }[music.progress.kind] as "mbSearching", music.progress),
+        music.progress,
+        music.progress.kind === "search" || music.progress.kind === "listen",
       );
-    if (tvProgress) return { label: tvProgress, stop: true };
-    if (comicProgress && !comicPick) return { label: comicProgress, stop: true };
+    if (tv.progress) return { label: tv.progress, stop: true };
+    if (comics.progress && !comics.pick) return { label: comics.progress, stop: true };
     if (task === "rename" && applyProgress?.total)
       return {
         label: t(sendTo?.copy ? "workingCopy" : "workingMove", { p: Math.floor((applyProgress.done / applyProgress.total) * 100) }),
@@ -184,628 +163,26 @@
       done(t("searchStopped"));
     }
   });
-  const bookRule = $derived(steps.find((s) => s.enabled && s.rule.type === "book"));
-  /** What the rule uses of each chosen book: the edition's publisher and
-   *  ISBN only when it was found by the file's ISBN (otherwise they would
-   *  be another edition's), else the file's own. */
-  function bookMatch(b: BookState): BookMatch {
-    const c = b.choice!;
-    return {
-      work: c.work, title: c.title, originalTitle: c.originalTitle, authors: c.authors, year: c.year,
-      editionYear: c.exact ? c.editionYear : null,
-      publisher: c.exact ? c.publisher : b.guess.publisher,
-      isbn: c.exact ? c.isbn : (b.guess.isbns[0] ?? ""),
-      series: b.guess.series, seriesIndex: b.guess.seriesIndex,
-      extra: Object.fromEntries(
-        [["language", c.exact ? c.language : b.guess.language || c.language], ["pages", c.pages ? String(c.pages) : ""]].filter(([, v]) => v),
-      ),
-    };
-  }
-  const bookMatches = $derived.by(() => {
-    const raw = Object.entries(books).filter(([, b]) => b.choice).map(([p, b]): [string, BookMatch] => [p, bookMatch(b)]);
-    const spelling = authorSpellings(raw.flatMap(([, m]) => m.authors));
-    const same = (a: string) => spelling.get(a.normalize("NFC")) ?? a.normalize("NFC");
-    return {
-      ...Object.fromEntries(
-        raw.map(([p, m]) => [p, { ...m, title: m.title.normalize("NFC"), authors: [...new Set(m.authors.map(same))] }]),
-      ),
-      ...bookEdits,
-    } as Record<string, BookMatch>;
-  });
-  /** Books whose details were typed in (over what the catalogue said). */
-  let bookEdits = $state<Record<string, BookMatch>>({});
-  /** The book details window, while open. */
-  let bookEdit = $state<{ paths: string[]; books: BookMatch[] } | null>(null);
-  /** A book has details to name and write it with: chosen or typed in. */
-  const hasBook = (p: string) => !!(books[p]?.choice || bookEdits[p]);
-  /** The books among the rows chosen in the list. */
-  const selectedBooks = $derived(preview.items.filter((i) => selected.has(i.path) && !i.isDir && isBook(i.original)));
-  const BOOK_FIELDS = $derived<EditField[]>([
-    { key: "title", label: t("bookEditTitle"), wide: true },
-    { key: "authors", label: t("bookEditAuthors"), wide: true },
-    { key: "year", label: t("bookEditYear"), numeric: true },
-    { key: "publisher", label: t("bookEditPublisher") },
-    { key: "language", label: t("bookEditLanguage") },
-    { key: "series", label: t("bookEditSeries"), wide: true },
-    { key: "seriesIndex", label: t("bookEditSeriesIndex") },
-    { key: "isbn", label: t("bookEditIsbn") },
-  ]);
-  /** A book's details as the window shows them. */
-  const bookText = (m: BookMatch) => ({
-    title: m.title,
-    authors: m.authors.join("; "),
-    year: m.year ? String(m.year) : "",
-    publisher: m.publisher,
-    language: m.extra?.language ?? "",
-    series: m.series,
-    seriesIndex: m.seriesIndex,
-    isbn: m.isbn,
-  });
-
-  async function openBookEdit() {
-    const rows = selectedBooks;
-    if (!rows.length) return;
-    const missing = rows.filter((i) => !bookMatches[i.path] && !books[i.path]);
-    const guessed: Record<string, BookGuess> = {};
-    if (missing.length) {
-      const got = await api.bookGuesses(missing.map((i) => i.path), missing.map((i) => splitExt(readName(i))[0]));
-      missing.forEach((i, n) => (guessed[i.path] = got[n]));
-    }
-    const fromGuess = (g: BookGuess): BookMatch => ({
-      work: "", title: g.title, originalTitle: "", authors: g.author ? g.author.split(/\s*[;&]\s*/).filter(Boolean) : [],
-      year: g.year, editionYear: null, publisher: g.publisher, isbn: g.isbns[0] ?? "", series: g.series, seriesIndex: g.seriesIndex,
-      extra: g.language ? { language: g.language } : {},
-    });
-    bookEdit = {
-      paths: rows.map((i) => i.path),
-      books: rows.map((i) => {
-        const g = books[i.path]?.guess ?? guessed[i.path];
-        return $state.snapshot(bookMatches[i.path] ?? (g ? fromGuess(g) : fromGuess({ title: "", author: "", year: null, isbns: [], fromFile: false, series: "", seriesIndex: "", publisher: "", language: "" })));
-      }),
-    };
-  }
-
-  function saveBookEdit(changed: Record<string, string>) {
-    if (!bookEdit) return;
-    const next = { ...bookEdits };
-    bookEdit.paths.forEach((p, i) => {
-      const m: BookMatch = { ...bookEdit!.books[i], extra: { ...(bookEdit!.books[i].extra ?? {}) } };
-      for (const [k, v] of Object.entries(changed)) {
-        if (k === "authors") m.authors = v.split(";").map((a) => a.trim()).filter(Boolean);
-        else if (k === "year") {
-          m.year = v ? Number.parseInt(v, 10) : null;
-          // One year typed: the edition's goes.
-          m.editionYear = null;
-        } else if (k === "language") {
-          if (v) m.extra!.language = v;
-          else delete m.extra!.language;
-        } else (m as unknown as Record<string, string>)[k] = v;
-      }
-      // Another book: the catalogue's work (and its cover) no longer tell it.
-      if (changed.title !== undefined || changed.authors !== undefined) m.work = "";
-      next[p] = m;
-    });
-    bookEdits = next;
-    bookEdit = null;
-  }
-  const bookCounts = $derived(counts(books));
-  /** Books whose names are already right but that still get a cover or a
-   *  metadata.opf (files that already exist are skipped when writing). */
-  const bookMetaOnly = $derived(
-    bookRule?.rule.type === "book" && (bookRule.rule.cover || bookRule.rule.opf)
-      ? preview.items.filter((i) => i.status === "unchanged" && hasBook(i.path) && isBook(i.original))
-      : [],
-  );
-  const extOf = (p: string) => splitExt(p.split(/[\\/]/).pop() ?? p)[1].toLowerCase();
-  const isEpub = (p: string) => ["epub", "kepub"].includes(extOf(p));
-  /** EPUBs whose names are already right but whose details get written
-   *  (those that already have them are skipped when writing). */
-  const epubOnly = $derived(
-    bookRule?.rule.type === "book" && bookRule.rule.writeEpub
-      ? preview.items.filter((i) => i.status === "unchanged" && hasBook(i.path) && isEpub(i.original))
-      : [],
-  );
-  /** What writing a book's details inside it needs. */
-  function bookInsideItem(key: string, path: string) {
-    const typed = bookEdits[key];
-    if (typed) return { path, book: typed, language: typed.extra?.language ?? "" };
-    const c = books[key].choice!;
-    return { path, book: bookMatches[key], language: c.exact ? c.language : books[key].guess.language };
-  }
-  /** What the cover and metadata.opf of a book need; `key` is the path before renaming. */
-  function bookSidecarItem(key: string, path: string) {
-    const typed = bookEdits[key];
-    const c = books[key]?.choice;
-    // Typed in: the catalogue's cover and description only while it is still that book.
-    if (typed) {
-      const same = !!(c && typed.work);
-      return { path, book: typed, cover: same ? c!.cover : null, coverUrl: same ? (c!.coverUrl ?? "") : "", description: same ? (c!.description ?? "") : "", language: typed.extra?.language ?? "" };
-    }
-    if (!c) throw new Error("no book");
-    return { path, book: bookMatches[key], cover: c.cover, coverUrl: c.coverUrl ?? "", description: c.description ?? "", language: c.exact ? c.language : books[key].guess.language };
-  }
-
-  /** Comic Vine issues per file, for the comic rule. */
-  let comics = $state<Record<string, ComicState>>({});
-  /** Series fetched with their issues, by `source:id`. */
-  let comicVolumes = $state<Record<string, { volume: ComicVolume; issues: ComicIssue[] }>>({});
-  /** The series picked for each search text (typed, or the files' series). */
-  let pickedComics = $state<Record<string, ComicVolume>>({});
-  /** Files in the comic review window; null when closed. */
-  let comicReview = $state<string[] | null>(null);
-  /** The series picker, while open. */
-  let comicPick = $state<{ source: ComicSource; skip: string; query: string; files: number; highest: number; candidates: ComicVolume[]; path?: string; comic?: ComicMatch; resolve: (v: ComicVolume | null) => void } | null>(null);
-  /** Whether this session was told that the GCD works better with an account. */
-  let gcdWarned = false;
-  let comicProgress = $state<string | null>(null);
-  const comicRule = $derived(steps.find((s) => s.enabled && s.rule.type === "comic"));
-  /** A comic named after its issue: series, number, title, year and
-   *  publisher from Comic Vine; volume and chapter from the file (as the
-   *  Rust core's `with_issue`). */
-  /** What a file's series has after the catalogue's (as the Rust core's `story`). */
-  function story(own: string, series: string): string {
-    const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
-    const name = series.trim();
-    if (!name || own.length === name.length || !fold(own).startsWith(fold(name))) return "";
-    const rest = own.slice(name.length);
-    return /^[: \-–]/.test(rest) ? rest.replace(/^[\s:\-–—,.#]+|[\s\-–—:,.#]+$/g, "") : "";
-  }
-
-  function withIssue(own: ComicMatch, volume: ComicVolume, issue: ComicIssue | undefined): ComicMatch {
-    const year = Number.parseInt((issue?.coverDate ?? "").slice(0, 4), 10);
-    return {
-      series: volume.name,
-      seriesYear: volume.startYear ?? own.seriesYear,
-      // A book found by its volume (`v03`, a manga's) stays a volume, and a
-      // one-shot gets no number.
-      number: own.number && issue?.number ? issue.number : own.number,
-      volume: own.volume,
-      chapter: own.chapter,
-      // Many issues have no title there: the file's stays, or what its
-      // series had after the catalogue's (`Series: Story`).
-      title: issue?.name.trim() ? issue.name : own.title || story(own.series, volume.name),
-      year: Number.isNaN(year) ? own.year : year,
-      count: volume.count > 0 ? volume.count : own.count,
-      publisher: volume.publisher || own.publisher,
-      writer: own.writer || volume.writer,
-      artist: own.artist,
-      id: issue ? issue.id : volume.id,
-      extra: withCoverDate(own.extra ?? {}, issue?.coverDate ?? ""),
-    };
-  }
-
-  /** The catalogue's cover date over the file's (its parts come from it). */
-  function withCoverDate(extra: Record<string, string>, date: string): Record<string, string> {
-    if (!date) return extra;
-    const out = Object.fromEntries(Object.entries(extra).filter(([k]) => !["date", "month", "day"].includes(k) && !k.startsWith("month name")));
-    out.date = date;
-    return out;
-  }
-  /** Comics whose details were typed in (over what the catalogue said). */
-  let comicEdits = $state<Record<string, ComicMatch>>({});
-  /** The comic details window, while open. */
-  let comicEdit = $state<{ paths: string[]; comics: ComicMatch[] } | null>(null);
-  const comicMatches = $derived({
-    ...Object.fromEntries(
-      Object.entries(comics).flatMap(([p, c]): [string, ComicMatch][] => {
-        const v = comicVolumes[c.volumeKey];
-        if (!v || c.choice == null) return [];
-        // "": the series alone (MangaDex).
-        const issue = c.choice === "" ? undefined : v.issues.find((i) => i.id === c.choice);
-        return c.choice === "" || issue ? [[p, withIssue(c.own, v.volume, issue)]] : [];
-      }),
-    ),
-    ...comicEdits,
-  });
-  /** The comics among the rows chosen in the list. */
-  const selectedComics = $derived(preview.items.filter((i) => selected.has(i.path) && (i.isDir ? i.convert : isComic(i.original))));
-
-  async function openComicEdit() {
-    const rows = selectedComics;
-    if (!rows.length) return;
-    const r = comicRule?.rule;
-    const missing = rows.filter((i) => !comicMatches[i.path] && !comics[i.path]);
-    const guessed: Record<string, ComicMatch | null> = {};
-    if (missing.length) {
-      const got = await api.comicGuesses(
-        missing.map((i) => i.path),
-        missing.map((i) => (i.lookupName ? (i.isDir ? i.lookupName : splitExt(i.lookupName)[0]) : null)),
-        r?.type === "comic" && !!r.byFolder,
-      );
-      missing.forEach((i, n) => (guessed[i.path] = got[n]));
-    }
-    const empty: ComicMatch = { series: "", seriesYear: null, number: "", volume: null, chapter: "", title: "", year: null, count: null, publisher: "", writer: "", artist: "", id: "" };
-    comicEdit = {
-      paths: rows.map((i) => i.path),
-      comics: rows.map((i) => $state.snapshot(comicMatches[i.path] ?? comics[i.path]?.own ?? guessed[i.path] ?? empty)),
-    };
-  }
-  /** The comic details window's fields. */
-  const COMIC_FIELDS = $derived<EditField[]>([
-    { key: "series", label: t("comicEditSeries"), wide: true },
-    { key: "seriesYear", label: t("comicEditSeriesYear"), numeric: true },
-    { key: "volume", label: t("comicEditVolume"), numeric: true },
-    { key: "number", label: t("comicEditNumber") },
-    { key: "title", label: t("comicEditTitle"), wide: true },
-    { key: "year", label: t("comicEditYear"), numeric: true },
-    { key: "publisher", label: t("comicEditPublisher") },
-    { key: "writer", label: t("comicEditWriter") },
-    { key: "artist", label: t("comicEditArtist") },
-  ]);
-  /** Values as the details window shows them (nothing: empty). */
-  const asText = (m: object, keys: EditField[]) =>
-    Object.fromEntries(keys.map((f) => {
-      const v = (m as Record<string, unknown>)[f.key];
-      return [f.key, v == null || v === 0 ? "" : String(v)];
-    }));
-
-  function saveComicEdit(changed: Record<string, string>) {
-    if (!comicEdit) return;
-    const num = (v: string) => (v ? Number.parseInt(v, 10) : null);
-    const next = { ...comicEdits };
-    comicEdit.paths.forEach((p, i) => {
-      const m: ComicMatch = { ...comicEdit!.comics[i] };
-      for (const [k, v] of Object.entries(changed)) {
-        if (k === "seriesYear" || k === "volume" || k === "year") m[k] = num(v);
-        else (m as unknown as Record<string, string>)[k] = v;
-      }
-      // The catalogue's issue no longer tells it.
-      if (changed.series !== undefined || changed.number !== undefined) m.id = "";
-      next[p] = m;
-    });
-    comicEdits = next;
-    comicEdit = null;
-  }
-  const comicCounts = $derived(counts(comics));
-  /** Comics whose names are already right but that get converted to CBZ
-   *  (a RAR named `.cbz`), or whose ComicInfo.xml says something else. */
-  const comicInfoOnly = $derived.by(() => {
-    const r = comicRule?.rule;
-    if (r?.type !== "comic") return [];
-    return preview.items.filter(
-      (i) =>
-        i.status === "unchanged" &&
-        ((r.convert && i.convert) ||
-          (extOf(i.original) === "cbz" && ((r.writeInfo && (i.retag || (r.cleanInfo && i.junk)) && comicMatches[i.path]) || clearsInfo(r, i.junk)))),
-    );
-  });
-  /** A CBZ whose ComicInfo.xml the comic rule takes out: with "clear", the
-   *  ones it does not write (without "write", every one; with it, none:
-   *  an unmatched comic's details are what name it). */
-  function clearsInfo(r: Rule, junk: boolean) {
-    return r.type === "comic" && !!r.cleanInfo && junk && !r.writeInfo;
-  }
-  /** What converting a comic to CBZ and writing its ComicInfo.xml need: the
-   *  original's fate, its match and its page in the catalogue. */
-  function comicInsideItem(key: string, path: string, convert: boolean) {
-    const r = comicRule?.rule;
-    const original = r?.type === "comic" && r.convert && convert ? (r.original ?? "keep") : undefined;
-    const pdf = r?.type === "comic" ? { draw: r.drawPages !== false, size: r.pageSize ?? 2400, info: !!r.writeInfo } : undefined;
-    const fresh = r?.type === "comic" && !!r.cleanInfo;
-    // Typed in: no page in a catalogue.
-    if (r?.type === "comic" && r.writeInfo && comicEdits[key]) return { path, comic: comicEdits[key], web: "", manga: false, convert: original, pdf, fresh };
-    if (!(r?.type === "comic" && r.writeInfo && comicMatches[key] && comics[key])) return { path, convert: original, pdf, fresh };
-    const c = comics[key];
-    const [source, volume] = [c.volumeKey.slice(0, c.volumeKey.indexOf(":")), c.volumeKey.slice(c.volumeKey.indexOf(":") + 1)];
-    const issue = c.choice || "";
-    const web =
-      source === "comicvine"
-        ? issue ? `https://comicvine.gamespot.com/issue/4000-${issue}/` : `https://comicvine.gamespot.com/volume/4050-${volume}/`
-        : source === "gcd"
-          ? issue ? `https://www.comics.org/issue/${issue}/` : `https://www.comics.org/series/${volume}/`
-          : source === "mangadex"
-            ? `https://mangadex.org/title/${volume}`
-            : source === "anilist"
-              ? `https://anilist.co/manga/${volume}`
-              : source === "mangaupdates" && /^\d+$/.test(volume)
-                ? `https://www.mangaupdates.com/series/${BigInt(volume).toString(36)}`
-                : "";
-    return { path, comic: comicMatches[key], web, manga: seriesOnly(source), convert: original, pdf, fresh };
-  }
-  /** TMDB episodes per file, for the series rule. */
-  let series = $state<Record<string, EpisodeState>>({});
-  /** Shows fetched, by id. */
-  let shows = $state<Record<number, Show>>({});
-  /** The shows picked, by the text they were found by (not asked again). */
-  let pickedShows = $state<Record<string, Candidate>>({});
-  /** The shows of the last search. */
-  let searchedShows = $state<Candidate[]>([]);
-  /** Files in the episode review window; null when closed. */
-  let episodeReview = $state<string[] | null>(null);
-  /** The show picker, while open. */
-  let showPick = $state<{ source: "tmdb" | "anilist"; query: string; candidates: Candidate[]; resolve: (c: Candidate | null) => void } | null>(null);
-  let tvProgress = $state<string | null>(null);
-  const seriesRule = $derived(steps.find((s) => s.enabled && s.rule.type === "series"));
-  const musicRule = $derived(steps.find((s) => s.enabled && s.rule.type === "music"));
   const photoRule = $derived(steps.find((s) => s.enabled && s.rule.type === "photo"));
   /** Photos and videos the photo rule leaves as they are (no date). */
   const undatedCount = $derived(photoRule ? preview.items.filter((i) => i.photoDate === "none").length : 0);
-  const untaggedCount = $derived(musicRule ? preview.items.filter((i) => i.untagged).length : 0);
 
-  /** Albums looked up on MusicBrainz, for the music rule. */
-  let albums = $state<AlbumState[]>([]);
-  /** Albums in the review window (indexes); null when closed. */
-  let albumReview = $state<number[] | null>(null);
-  let mbProgress = $state<{ done: number; total: number; kind: "search" | "listen" | "save" | "tags" } | null>(null);
-  /** Songs whose tags were typed in (over what the release said). */
-  let songEdits = $state<Record<string, SongMatch>>({});
-  /** Each song's details from its chosen release. */
-  const songMatches = $derived({
-    ...(Object.fromEntries(albums.flatMap((a) => (a.choice ? Object.entries(a.matches) : []))) as Record<string, SongMatch>),
-    ...songEdits,
-  });
-  /** The song details window, while open. */
-  let songEdit = $state<{ paths: string[]; songs: SongMatch[] } | null>(null);
-  /** The songs among the rows chosen in the list. */
-  const selectedSongs = $derived(preview.items.filter((i) => selected.has(i.path) && !i.isDir && isAudio(i.original)));
-  const SONG_FIELDS = $derived<EditField[]>([
-    { key: "title", label: t("songEditTitle"), wide: true },
-    { key: "artist", label: t("songEditArtist") },
-    { key: "albumArtist", label: t("songEditAlbumArtist") },
-    { key: "genre", label: t("songEditGenre") },
-    { key: "album", label: t("songEditAlbum"), wide: true },
-    { key: "year", label: t("songEditYear"), numeric: true },
-    { key: "track", label: t("songEditTrack"), numeric: true },
-    { key: "trackTotal", label: t("songEditTrackTotal"), numeric: true },
-    { key: "disc", label: t("songEditDisc"), numeric: true },
-    { key: "discTotal", label: t("songEditDiscTotal"), numeric: true },
-  ]);
-
-  async function openSongEdit() {
-    const rows = selectedSongs;
-    if (!rows.length) return;
-    const r = musicRule?.rule;
-    const missing = rows.filter((i) => !songMatches[i.path]);
-    const own: Record<string, SongMatch | null> = {};
-    if (missing.length) {
-      const got = await api.songTags(missing.map((i) => i.path), r?.type === "music" && r.fromName);
-      missing.forEach((i, n) => (own[i.path] = got[n]));
-    }
-    const empty: SongMatch = { release: "", title: "", artist: "", albumArtist: "", album: "", year: null, track: 0, trackTotal: 0, disc: 0, discTotal: 0, typed: true };
-    songEdit = {
-      paths: rows.map((i) => i.path),
-      songs: rows.map((i) => $state.snapshot(songMatches[i.path] ?? own[i.path] ?? empty)),
-    };
-  }
-
-  function saveSongEdit(changed: Record<string, string>) {
-    if (!songEdit) return;
-    const next = { ...songEdits };
-    songEdit.paths.forEach((p, i) => {
-      const m: SongMatch = { ...songEdit!.songs[i] };
-      for (const [k, v] of Object.entries(changed)) {
-        if (k === "year") m.year = v ? Number.parseInt(v, 10) : null;
-        else if (k === "track" || k === "trackTotal" || k === "disc" || k === "discTotal") m[k] = v ? Number.parseInt(v, 10) : 0;
-        else (m as unknown as Record<string, string>)[k] = v;
-      }
-      // Another album: the release's ids no longer tell it.
-      if (m.typed || !m.release || changed.album !== undefined || changed.albumArtist !== undefined) {
-        Object.assign(m, { typed: true, release: "", recording: "", trackId: "", releaseGroup: "", artistIds: [], albumArtistIds: [] });
-      }
-      next[p] = m;
-    });
-    songEdits = next;
-    songEdit = null;
-  }
-  /** The album each song is in. */
-  const albumOf = $derived(new Map(albums.flatMap((a, i) => a.files.map((p): [string, number] => [p, i]))));
-  /** Albums whose songs keep their names but still get a cover: those
-   *  whose folder has none yet (asked of the disk; an existing cover is
-   *  kept when writing). */
-  let coverOnly = $state(0);
-  $effect(() => {
-    const on = musicRule?.rule.type === "music" && musicRule.rule.cover;
-    const items = preview.items;
-    const status = new Map(items.map((i) => [i.path, i.status]));
-    const dirs = on
-      ? [...new Set(albums.filter((a) => a.choice && a.files.every((p) => status.get(p) === "unchanged")).map((a) => a.dir))]
-      : [];
-    if (!dirs.length) {
-      coverOnly = 0;
-      return;
-    }
-    api.coverDirs(dirs).then((d) => {
-      if (items === preview.items) coverOnly = d.length;
-    }, () => {});
-  });
-  /** Album folders whose songs keep their names but still get a playlist
-   *  (asked of the disk: those without one and with two songs or more). */
-  let playlistOnly = $state<string[]>([]);
-  /** Songs whose names are already right but whose tags get written. */
-  const tagsOnly = $derived(
-    musicRule?.rule.type === "music" && musicRule.rule.writeTags
-      ? preview.items.filter(
-          (i) => i.status === "unchanged" && (i.retag || (musicRule.rule.type === "music" && musicRule.rule.cleanTags && i.junk)) && songMatches[i.path],
-        )
-      : [],
-  );
-  $effect(() => {
-    const on = musicRule?.rule.type === "music" && musicRule.rule.playlist;
-    const items = preview.items;
-    const changed = new Set(items.filter((i) => i.status !== "unchanged").map((i) => i.dir));
-    const dirs = on
-      ? [...new Set(items.filter((i) => !i.isDir && i.status === "unchanged" && isAudio(i.original) && !changed.has(i.dir)).map((i) => i.dir))]
-      : [];
-    if (!dirs.length) {
-      playlistOnly = [];
-      return;
-    }
-    api.playlistDirs(dirs).then((d) => {
-      if (items === preview.items) playlistOnly = d;
-    }, () => {});
-  });
-  const albumCounts = $derived.by(() => {
-    let found = 0, choose = 0, none = 0;
-    for (const a of albums) {
-      if (a.status === "auto" || a.status === "chosen") found++;
-      else if (a.status === "choose") choose++;
-      else none++;
-    }
-    return { found, choose, none };
-  });
-  /** An episode's template fields: the show's, its air date and its
-   *  number counted from the first episode (specials apart). */
-  function episodeExtra(show: Show, season: number, number: number): Record<string, string> {
-    const extra: Record<string, string> = { ...(show.extra ?? {}) };
-    const ep = show.episodes.find((x) => x.season === season && x.number === number);
-    if (ep?.airDate) extra.date = ep.airDate;
-    if (season > 0 && ep) {
-      extra.absolute = String(show.episodes.filter((x) => x.season > 0 && (x.season < season || (x.season === season && x.number <= number))).length);
-    }
-    return extra;
-  }
-  const episodeMatches = $derived(
-    Object.fromEntries(
-      Object.entries(series)
-        .filter(([, e]) => e.choice && shows[e.showId])
-        .map(([p, e]): [string, EpisodeMatch] => {
-          const show = shows[e.showId];
-          const keys = e.choice!;
-          return [p, {
-            source: show.source ?? "",
-            id: show.id,
-            show: show.name,
-            originalShow: show.originalName,
-            year: show.year,
-            season: keys[0][0],
-            episodes: keys.map((k) => k[1]),
-            titles: keys.map((k) => show.episodes.find((x) => x.season === k[0] && x.number === k[1])?.name ?? ""),
-            extra: episodeExtra(show, keys[0][0], keys[0][1]),
-          }];
-        }),
-    ),
-  );
-  const seriesCounts = $derived(counts(series));
-
-  /** Subtitles found per video (by its path): the languages asked for it
-   *  has already, the candidates best first, and the one chosen per
-   *  language (an index in `candidates`; -1: none). `key` tells what was
-   *  searched (movie or episode, languages), to search again on a change. */
-  type SubsState = { key: string; have: string[]; candidates: SubCandidate[]; pick: Record<string, number> };
-  let subsFound = $state<Record<string, SubsState>>({});
-  /** The languages of the last search, as understood (`pt-BR`, `en`). */
-  let subsLangs = $state<string[]>([]);
-  let subsProgress = $state<{ done: number; total: number; kind: "search" | "save" } | null>(null);
-  let subsReview = $state(false);
-  /** OpenSubtitles downloads left today, when known. */
-  let subsRemaining = $state<number | null>(null);
-  /** The languages asked for by the movie or TV show rule, when it
-   *  downloads subtitles. */
-  const subsWanted = $derived.by(() => {
-    const r = movieRule?.rule.type === "movie" ? movieRule.rule : seriesRule?.rule.type === "series" && seriesRule.rule.source !== "anilist" ? seriesRule.rule : null;
-    return r?.subtitles ? (r.subLangs ?? defaultSubLangs()) : null;
-  });
-  const subsAuth = (): SubsAuth => ({
-    osKey: settings.osKey.trim(),
-    osUser: settings.osUser.trim(),
-    osPassword: settings.osPassword,
-    subdlKey: settings.subdlKey.trim(),
-  });
-  /** The visible videos identified, with what to look their subtitles up by. */
-  function subsItems() {
-    const out: { path: string; tmdb: number; season?: number; episode?: number }[] = [];
-    for (const i of preview.items) {
-      if (i.isDir || !isVideo(i.original)) continue;
-      const m = movieRule ? movies[i.path]?.choice : null;
-      const e = seriesRule ? episodeMatches[i.path] : null;
-      if (m) out.push({ path: i.path, tmdb: m.id });
-      else if (e && !e.source && e.episodes.length === 1) out.push({ path: i.path, tmdb: e.id, season: e.season, episode: e.episodes[0] });
-    }
-    return out;
-  }
-  const subsKey = (it: { tmdb: number; season?: number; episode?: number }, langs: string) =>
-    `${it.tmdb}:${it.season ?? ""}:${it.episode ?? ""}:${langs}`;
-  /** Subtitles chosen per video, not there yet. */
-  const subsChosen = (s: SubsState | undefined) => (s ? Object.entries(s.pick).filter(([l, i]) => i >= 0 && !s.have.includes(l)).length : 0);
-  const subsCounts = $derived.by(() => {
-    const visible = new Set(preview.items.map((i) => i.path));
-    let subs = 0;
-    let videos = 0;
-    let missing = 0;
-    for (const [p, s] of Object.entries(subsFound)) {
-      if (!visible.has(p)) continue;
-      const n = subsChosen(s);
-      subs += n;
-      if (n) videos++;
-      if (subsLangs.some((l) => !s.have.includes(l) && !(s.pick[l] >= 0))) missing++;
-    }
-    return { subs, videos, missing };
-  });
-
-  /** Searches subtitles for the visible videos identified (those searched
-   *  already for the same languages are kept, unless `again`). */
-  async function searchSubs(again = false) {
-    const langs = subsWanted;
-    if (langs === null) return;
-    const auth = subsAuth();
-    if (!auth.osKey && !auth.subdlKey) {
-      const ok = await confirm({ title: t("subsTitle"), text: t("subsNeedKey"), ok: t("options"), cancel: t("cancel") });
-      if (ok) showOptions = true;
-      return;
-    }
-    const items = subsItems().filter((it) => again || subsFound[it.path]?.key !== subsKey(it, langs));
-    if (!items.length) {
-      if (!subsItems().length) notice = t("subsNoVideos");
-      else if (subsCounts.videos) subsReview = true;
-      return;
-    }
-    subsProgress = { done: 0, total: items.length, kind: "search" };
-    try {
-      const r = await api.subsSearch(auth, langs, items);
-      subsLangs = r.langs;
-      if (r.remaining !== null) subsRemaining = r.remaining;
-      const asked = new Map(items.map((it) => [it.path, it]));
-      for (const f of r.found) {
-        const pick: Record<string, number> = {};
-        f.candidates.forEach((c, i) => {
-          if (!(c.lang in pick)) pick[c.lang] = i;
-        });
-        subsFound[f.path] = { key: subsKey(asked.get(f.path)!, langs), have: f.have, candidates: f.candidates, pick };
-      }
-      if (r.errors.length) await notify({ title: t("subsTitle"), text: r.errors.map(tError).join("\n") });
-      else if (r.found.some((f) => f.candidates.length)) subsReview = true;
-    } catch (e) {
-      await notify({ title: t("subsTitle"), text: tError(e) });
-    } finally {
-      subsProgress = null;
-    }
-  }
-
-  /** Videos whose names are already right but that still get subtitles. */
-  const subsOnly = $derived(
-    subsWanted === null ? [] : preview.items.filter((i) => i.status === "unchanged" && subsChosen(subsFound[i.path]) > 0),
-  );
-
-  /** What to download for renamed videos (`from` → `to`): per language, the
-   *  one chosen first and the others of that language after it. */
-  function subsWrites(pairs: [string, string][]) {
-    return pairs.flatMap(([from, to]) => {
-      const s = subsFound[from];
-      if (!s) return [];
-      const langs = Object.entries(s.pick)
-        .filter(([l, i]) => i >= 0 && !s.have.includes(l))
-        .map(([l, i]) => [s.candidates[i], ...s.candidates.filter((c, j) => j !== i && c.lang === l)]);
-      if (!langs.length) return [];
-      const e = episodeMatches[from];
-      return [{ path: to, season: e?.season, episode: e?.episodes[0], langs }];
-    });
-  }
   /** Aired episodes missing from the seasons the listed videos cover,
    *  issues from the series the listed comics are from, tracks from the
    *  albums, released movies from the collections and volumes between a
    *  book series' files. */
   const ghosts = $derived(unique([
-    ...(seriesRule?.rule.type === "series" && seriesRule.rule.missing
-      ? missingEpisodes(shows, episodeMatches, preview.items, sortDesc, today())
+    ...(tv.rule?.rule.type === "series" && tv.rule.rule.missing
+      ? missingEpisodes(tv.shows, tv.matches, preview.items, sortDesc, today())
       : []),
-    ...(comicRule?.rule.type === "comic" && comicRule.rule.missing
-      ? missingIssues(comicVolumes, comics, preview.items, sortDesc, today())
+    ...(comics.rule?.rule.type === "comic" && comics.rule.rule.missing
+      ? missingIssues(comics.volumes, comics.state, preview.items, sortDesc, today())
       : []),
-    ...(musicRule?.rule.type === "music" && musicRule.rule.missing ? missingTracks(albums, preview.items, sortDesc) : []),
-    ...(movieRule?.rule.type === "movie" && movieRule.rule.missing
-      ? missingMovies(movieSets, setOf, Object.fromEntries(Object.entries(movieMatches).map(([p, m]) => [p, m.id])), preview.items, sortDesc, today())
+    ...(music.rule?.rule.type === "music" && music.rule.rule.missing ? missingTracks(music.albums, preview.items, sortDesc) : []),
+    ...(movies.rule?.rule.type === "movie" && movies.rule.rule.missing
+      ? missingMovies(movies.sets, movies.setOf, Object.fromEntries(Object.entries(movies.matches).map(([p, m]) => [p, m.id])), preview.items, sortDesc, today())
       : []),
-    ...(bookRule?.rule.type === "book" && bookRule.rule.missing ? missingBooks(books, preview.items, sortDesc) : []),
+    ...(books.rule?.rule.type === "book" && books.rule.rule.missing ? missingBooks(books.state, preview.items, sortDesc) : []),
   ]));
   /** Each missing row once: the list is keyed by them, and a repeated key
    *  stops it from being drawn at all. */
@@ -825,19 +202,6 @@
     const kinds = [...new Set(ghosts.map((g) => g.kind))];
     return t(kinds.length === 1 ? MISSING[kinds[0]].count : "missingItems", { n: ghosts.length });
   });
-  /** Episodes whose names are already right but that still get metadata. */
-  const episodeMetaOnly = $derived(
-    seriesRule?.rule.type === "series" && seriesRule.rule.sidecar && seriesRule.rule.source !== "anilist"
-      ? preview.items.filter((i) => i.status === "unchanged" && episodeMatches[i.path] && isVideo(i.original))
-      : [],
-  );
-
-  /** What the metadata of an episode needs; `key` is the path before renaming. */
-  function tvSidecarItem(key: string, path: string) {
-    const m = episodeMatches[key];
-    return { path, id: m.id, season: m.season, episodes: m.episodes, titles: m.titles };
-  }
-
   /** The ✓ ? ✕ marks next to the new names. */
   const matches = $derived.by(() => {
     const out: Record<string, { status: MovieStatus; tip: string }> = {};
@@ -845,19 +209,19 @@
       movie: { auto: "movieAuto", chosen: "movieChosen", choose: "movieChoose", none: "movieNone" },
       episode: { auto: "episodeAuto", chosen: "episodeChosen", choose: "episodeChoose", none: "episodeNone" },
     } as const;
-    if (movieRule) for (const [p, m] of Object.entries(movies)) out[p] = { status: m.status, tip: t(tips.movie[m.status]) };
-    if (seriesRule) for (const [p, e] of Object.entries(series)) out[p] = { status: e.status, tip: t(tips.episode[e.status]) };
-    if (bookRule) {
+    if (movies.rule) for (const [p, m] of Object.entries(movies.state)) out[p] = { status: m.status, tip: t(tips.movie[m.status]) };
+    if (tv.rule) for (const [p, e] of Object.entries(tv.state)) out[p] = { status: e.status, tip: t(tips.episode[e.status]) };
+    if (books.rule) {
       const tip = { auto: "bookAuto", chosen: "bookChosen", choose: "bookChoose", none: "bookNone" } as const;
-      for (const [p, b] of Object.entries(books)) out[p] = { status: b.status, tip: t(tip[b.status]) };
+      for (const [p, b] of Object.entries(books.state)) out[p] = { status: b.status, tip: t(tip[b.status]) };
     }
-    if (comicRule) {
+    if (comics.rule) {
       const tip = { auto: "comicAuto", chosen: "comicChosen", choose: "comicChoose", none: "comicNoneTip" } as const;
-      for (const [p, c] of Object.entries(comics)) out[p] = { status: c.status, tip: t(tip[c.status]) };
+      for (const [p, c] of Object.entries(comics.state)) out[p] = { status: c.status, tip: t(tip[c.status]) };
     }
-    if (musicRule) {
+    if (music.rule) {
       const tip = { auto: "albumAuto", chosen: "albumChosen", choose: "albumChoose", none: "albumNone" } as const;
-      for (const a of albums) {
+      for (const a of music.albums) {
         const key = a.status === "auto" && a.choice?.id.startsWith("discogs:") ? "albumAutoDiscogs" : tip[a.status];
         for (const p of a.files) out[p] = { status: a.status, tip: t(key) };
       }
@@ -873,17 +237,6 @@
     return out;
   });
 
-  /** Found, waiting and without a match, among the visible files. */
-  function counts(state: Record<string, { status: MovieStatus }>) {
-    let found = 0, choose = 0, none = 0;
-    for (const i of preview.items) {
-      const st = state[i.path]?.status;
-      if (st === "auto" || st === "chosen") found++;
-      else if (st === "choose") choose++;
-      else if (st === "none") none++;
-    }
-    return { found, choose, none };
-  }
   let addMenu = $state(false);
   /** Another folder the files go to (moved or copied); for this session only. */
   let sendTo = $state<{ dir: string; copy: boolean } | null>(null);
@@ -897,12 +250,12 @@
    *  with why: tagged in the list, which can still name them by hand. */
   const outside = $derived.by(() => {
     const kinds: [boolean, (i: PreviewItem) => boolean, Key][] = [
-      [!!movieRule, (i) => i.isDir || isScreen(i.original), "outsideMovie"],
-      [!!seriesRule, (i) => !i.isDir && isScreen(i.original), "outsideSeries"],
+      [!!movies.rule, (i) => i.isDir || isScreen(i.original), "outsideMovie"],
+      [!!tv.rule, (i) => !i.isDir && isScreen(i.original), "outsideSeries"],
       // Songs bring their lyrics, cue sheets, playlists and covers along.
-      [!!musicRule, (i) => !i.isDir && (isAudio(i.original) || /\.(lrc|cue|m3u8?|pls|jpe?g|png|webp)$/i.test(i.original)), "outsideMusic"],
-      [!!bookRule, (i) => !i.isDir && isBook(i.original), "outsideBook"],
-      [!!comicRule, (i) => (i.isDir ? i.convert : isComic(i.original)), "outsideComic"],
+      [!!music.rule, (i) => !i.isDir && (isAudio(i.original) || /\.(lrc|cue|m3u8?|pls|jpe?g|png|webp)$/i.test(i.original)), "outsideMusic"],
+      [!!books.rule, (i) => !i.isDir && isBook(i.original), "outsideBook"],
+      [!!comics.rule, (i) => (i.isDir ? i.convert : isComic(i.original)), "outsideComic"],
     ];
     const on = kinds.filter(([enabled]) => enabled);
     if (!on.length) return {};
@@ -915,7 +268,7 @@
     return out;
   });
 
-  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, alikeOnly, similarOnly, movies: movieMatches, episodes: episodeMatches, songs: songMatches, books: bookMatches, comics: comicMatches, leftoverSuffix: t("leftoverSuffix"), sendTo });
+  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, alikeOnly, similarOnly, movies: movies.matches, episodes: tv.matches, songs: music.matches, books: books.matches, comics: comics.matches, leftoverSuffix: t("leftoverSuffix"), sendTo });
   /** Example name for rule cards: the first file in natural name order, so
    *  it does not jump around while the preview re-sorts. */
   const collator = new Intl.Collator(undefined, { numeric: true });
@@ -1182,21 +535,21 @@
     // A shortcut may come before the debounced preview update.
     clearTimeout(timer);
     await refresh();
-    const meta = metaOnly.map((i) => ({ path: i.path, id: movies[i.path].choice!.id }));
-    const tvMeta = episodeMetaOnly.map((i) => tvSidecarItem(i.path, i.path));
-    const listOnly = playlistOnly;
-    const retagOnly = tagsOnly.map((i) => i.path);
-    const subsUnchanged = subsOnly.map((i) => i.path);
-    const subsPlanned = subsWanted === null ? 0 : preview.items.reduce((n, i) => n + (i.status !== "conflict" ? subsChosen(subsFound[i.path]) : 0), 0);
-    const bookMeta = bookMetaOnly.map((i) => bookSidecarItem(i.path, i.path));
+    const meta = movies.metaOnly.map((i) => ({ path: i.path, id: movies.state[i.path].choice!.id }));
+    const tvMeta = tv.metaOnly.map((i) => tv.sidecarItem(i.path, i.path));
+    const listOnly = music.playlistOnly;
+    const retagOnly = music.tagsOnly.map((i) => i.path);
+    const subsUnchanged = subs.only.map((i) => i.path);
+    const subsPlanned = subs.wanted === null ? 0 : preview.items.reduce((n, i) => n + (i.status !== "conflict" ? subs.chosen(subs.found[i.path]) : 0), 0);
+    const bookMeta = books.metaOnly.map((i) => books.sidecarItem(i.path, i.path));
     /** Comics renamed `.cbz` to be converted. */
     const converting = new Set(preview.items.filter((i) => i.convert).map((i) => i.path));
     const cleared = new Set(preview.items.filter((i) => i.junk).map((i) => i.path));
     const insideOnly = [
-      ...comicInfoOnly.map((i) => comicInsideItem(i.path, i.path, i.convert)),
-      ...epubOnly.map((i) => bookInsideItem(i.path, i.path)),
+      ...comics.infoOnly.map((i) => comics.insideItem(i.path, i.path, i.convert)),
+      ...books.epubOnly.map((i) => books.insideItem(i.path, i.path)),
     ];
-    if (!preview.changed && !meta.length && !tvMeta.length && !bookMeta.length && !coverOnly && !listOnly.length && !retagOnly.length && !insideOnly.length && !subsUnchanged.length) return;
+    if (!preview.changed && !meta.length && !tvMeta.length && !bookMeta.length && !music.coverOnly && !listOnly.length && !retagOnly.length && !insideOnly.length && !subsUnchanged.length) return;
     // Files left behind in a show's old folder are always told first.
     const left = preview.leftFolders.map((f) => t("confirmLeftover", { n: f.files, from: basename(f.from), to: basename(f.to) }));
     if (settings.confirmApply || left.length) {
@@ -1209,7 +562,7 @@
           : "",
         meta.length + tvMeta.length ? t("confirmMeta", { n: meta.length + tvMeta.length }) : "",
         bookMeta.length ? t("confirmBookMeta", { n: bookMeta.length }) : "",
-        coverOnly ? t("confirmCovers", { n: coverOnly }) : "",
+        music.coverOnly ? t("confirmCovers", { n: music.coverOnly }) : "",
         listOnly.length ? t("confirmPlaylists", { n: listOnly.length }) : "",
         retagOnly.length ? t("confirmTags", { n: retagOnly.length }) : "",
         insideOnly.length ? t("confirmInside", { n: insideOnly.length }) : "",
@@ -1230,7 +583,7 @@
     // Where the files went, for the notice (the choice is reset below).
     const sent = sendTo;
     try {
-      const rule = movieRule?.rule;
+      const rule = movies.rule?.rule;
       // Old folders renamed for their leftovers: not files.
       const leftFrom = new Set(preview.leftFolders.map((f) => f.from));
       const r: ApplyReport = preview.changed
@@ -1246,23 +599,23 @@
       const recorded = !r.done.length || !!r.historyId;
       if (recorded && rule?.type === "movie" && rule.sidecar) {
         const items = r.done
-          .filter((op) => movies[op.from]?.choice && isVideo(op.to))
-          .map((op) => ({ path: op.to, id: movies[op.from].choice!.id }))
+          .filter((op) => movies.state[op.from]?.choice && isVideo(op.to))
+          .map((op) => ({ path: op.to, id: movies.state[op.from].choice!.id }))
           .concat(meta);
         if (items.length) {
-          tmdbProgress = { done: 0, total: items.length, kind: "save" };
+          movies.progress = { done: 0, total: items.length, kind: "save" };
           saved += await writeMeta(() => api.writeSidecars(settings.tmdbKey, tmdbLang(), r.historyId, items, rule.fanart, rule.folder));
         }
       }
-      const mrule = musicRule?.rule;
+      const mrule = music.rule?.rule;
       if (recorded && mrule?.type === "music" && mrule.cover) {
-        const items = coverItems(r);
+        const items = music.coverItems(r);
         if (items.length) {
-          mbProgress = { done: 0, total: items.length, kind: "save" };
+          music.progress = { done: 0, total: items.length, kind: "save" };
           try {
             saved += await writeMeta(() => api.writeCovers(r.historyId, items));
           } finally {
-            mbProgress = null;
+            music.progress = null;
           }
         }
       }
@@ -1280,11 +633,11 @@
       if (recorded && mrule?.type === "music" && mrule.writeTags) {
         // Every matched song that moved, and those that keep their names.
         const items = r.done
-          .filter((op) => songMatches[op.from] && isAudio(op.to))
-          .map((op) => ({ path: op.to, song: songMatches[op.from] }))
-          .concat(retagOnly.map((p) => ({ path: p, song: songMatches[p] })));
+          .filter((op) => music.matches[op.from] && isAudio(op.to))
+          .map((op) => ({ path: op.to, song: music.matches[op.from] }))
+          .concat(retagOnly.map((p) => ({ path: p, song: music.matches[p] })));
         if (items.length) {
-          mbProgress = { done: 0, total: items.length, kind: "tags" };
+          music.progress = { done: 0, total: items.length, kind: "tags" };
           try {
             const res = await api.writeTags(r.historyId, $state.snapshot(items), mrule.embedCover, mrule.cleanTags, mrule.coverSize);
             tagged = res.written;
@@ -1298,29 +651,29 @@
           } catch (e) {
             await notify({ title: t("tagsTitle"), text: tError(e) });
           } finally {
-            mbProgress = null;
+            music.progress = null;
           }
         }
       }
-      const brule = bookRule?.rule;
+      const brule = books.rule?.rule;
       if (recorded && brule?.type === "book" && (brule.cover || brule.opf)) {
         const items = r.done
-          .filter((op) => hasBook(op.from) && isBook(op.to))
-          .map((op) => bookSidecarItem(op.from, op.to))
+          .filter((op) => books.has(op.from) && isBook(op.to))
+          .map((op) => books.sidecarItem(op.from, op.to))
           .concat(bookMeta);
         if (items.length) {
-          bookProgress = { done: 0, total: items.length, kind: "save" };
+          books.progress = { done: 0, total: items.length, kind: "save" };
           try {
             saved += await writeMeta(() => api.writeBookSidecars(r.historyId, $state.snapshot(items), brule.cover, brule.opf, brule.folders));
           } finally {
-            bookProgress = null;
+            books.progress = null;
           }
         }
       }
       let inside = 0;
       let drawnPages = 0;
       {
-        const crule = comicRule?.rule;
+        const crule = comics.rule?.rule;
         const items = [
           ...(crule?.type === "comic" && (crule.writeInfo || crule.convert || crule.cleanInfo)
             ? r.done
@@ -1328,13 +681,13 @@
                   (op) =>
                     extOf(op.to) === "cbz" &&
                     ((crule.convert && converting.has(op.from)) ||
-                      (crule.writeInfo && comicMatches[op.from]) ||
+                      (crule.writeInfo && comics.matches[op.from]) ||
                       clearsInfo(crule, cleared.has(op.from))),
                 )
-                .map((op) => comicInsideItem(op.from, op.to, converting.has(op.from)))
+                .map((op) => comics.insideItem(op.from, op.to, converting.has(op.from)))
             : []),
           ...(brule?.type === "book" && brule.writeEpub
-            ? r.done.filter((op) => hasBook(op.from) && isEpub(op.to)).map((op) => bookInsideItem(op.from, op.to))
+            ? r.done.filter((op) => books.has(op.from) && isEpub(op.to)).map((op) => books.insideItem(op.from, op.to))
             : []),
           ...insideOnly,
         ];
@@ -1358,34 +711,34 @@
           }
         }
       }
-      const srule = seriesRule?.rule;
+      const srule = tv.rule?.rule;
       if (recorded && srule?.type === "series" && srule.sidecar && srule.source !== "anilist") {
         const items = r.done
-          .filter((op) => episodeMatches[op.from] && isVideo(op.to))
-          .map((op) => tvSidecarItem(op.from, op.to))
+          .filter((op) => tv.matches[op.from] && isVideo(op.to))
+          .map((op) => tv.sidecarItem(op.from, op.to))
           .concat(tvMeta);
         if (items.length) {
-          tmdbProgress = { done: 0, total: items.length, kind: "saveTv" };
+          movies.progress = { done: 0, total: items.length, kind: "saveTv" };
           saved += await writeMeta(() =>
             api.writeTvSidecars(settings.tmdbKey, tmdbLang(), r.historyId, items, srule.fanart, srule.folders),
           );
         }
       }
       let subsSaved = 0;
-      if (recorded && subsWanted !== null) {
+      if (recorded && subs.wanted !== null) {
         const pairs: [string, string][] = [
-          ...r.done.filter((op) => isVideo(op.to) && subsFound[op.from]).map((op): [string, string] => [op.from, op.to]),
+          ...r.done.filter((op) => isVideo(op.to) && subs.found[op.from]).map((op): [string, string] => [op.from, op.to]),
           ...subsUnchanged.map((p): [string, string] => [p, p]),
         ];
-        const items = subsWrites(pairs);
+        const items = subs.writes(pairs);
         if (items.length) {
-          subsProgress = { done: 0, total: items.reduce((n, i) => n + i.langs.length, 0), kind: "save" };
+          subs.progress = { done: 0, total: items.reduce((n, i) => n + i.langs.length, 0), kind: "save" };
           try {
-            const res = await api.writeSubtitles(subsAuth(), r.historyId, $state.snapshot(items));
+            const res = await api.writeSubtitles(subs.auth(), r.historyId, $state.snapshot(items));
             subsSaved = res.created.length;
-            if (res.remaining !== null) subsRemaining = res.remaining;
+            if (res.remaining !== null) subs.remaining = res.remaining;
             // Downloaded (or tried): searched again if wanted.
-            for (const [from] of pairs) delete subsFound[from];
+            for (const [from] of pairs) delete subs.found[from];
             if (res.errors.length) {
               await notify({
                 title: t("subsTitle"),
@@ -1396,7 +749,7 @@
           } catch (e) {
             await notify({ title: t("subsTitle"), text: tError(e) });
           } finally {
-            subsProgress = null;
+            subs.progress = null;
           }
         }
       }
@@ -1530,109 +883,6 @@
     }
   }
 
-  /** Looks up the visible files without a movie yet on TMDB; files picked
-   *  with confidence are done, the rest go to the review window. */
-  async function searchMovies() {
-    if (!settings.tmdbKey.trim()) {
-      const ok = await confirm({ title: t("rule.movie"), text: t("tmdbNeedsKey"), ok: t("options"), cancel: t("cancel") });
-      if (ok) showOptions = true;
-      return;
-    }
-    const items = preview.items
-      .filter((i) => (i.isDir || isScreen(i.original)) && movies[i.path]?.status !== "auto" && movies[i.path]?.status !== "chosen")
-      .map((i) => ({ path: i.path, name: i.isDir ? readName(i) : splitExt(readName(i))[0] }));
-    if (!items.length) {
-      notice = t("tmdbNoFiles");
-      return;
-    }
-    tmdbProgress = { done: 0, total: items.length, kind: "search" };
-    try {
-      const found = await api.tmdbLookup(settings.tmdbKey, tmdbLang(), items);
-      // Nothing was really searched (bad key, no connection): mark nothing.
-      const failed = found.find((f) => f.error);
-      if (failed && found.every((f) => f.error || !f.guess.title)) {
-        await notify({ title: t("rule.movie"), text: tError(failed.error) });
-        return;
-      }
-      for (const f of found) {
-        movies[f.path] = {
-          guess: f.guess,
-          candidates: f.candidates,
-          choice: f.auto ? f.candidates[0] : null,
-          status: f.auto ? "auto" : f.candidates.length ? "choose" : "none",
-          error: f.error,
-        };
-      }
-      if (found.some((f) => !f.auto && f.candidates.length)) openReview();
-    } catch (e) {
-      await notify({ title: t("rule.movie"), text: tError(e) });
-    } finally {
-      tmdbProgress = null;
-    }
-  }
-
-  /** Looks up the visible books without a choice yet on Open Library;
-   *  books picked with confidence are done, the rest go to the review. */
-  async function searchBooks() {
-    const items = preview.items
-      .filter((i) => !i.isDir && isBook(i.original) && books[i.path]?.status !== "auto" && books[i.path]?.status !== "chosen")
-      .map((i) => ({ path: i.path, name: splitExt(readName(i))[0] }));
-    if (!items.length) {
-      notice = t("bookNoFiles");
-      return;
-    }
-    bookProgress = { done: 0, total: items.length, kind: "search" };
-    try {
-      const found = await api.bookLookup(tmdbLang(), items);
-      // Nothing was really searched (no connection): mark nothing.
-      const failed = found.find((f) => f.error);
-      if (failed && found.every((f) => f.error || (!f.guess.title && !f.guess.isbns.length))) {
-        await notify({ title: t("rule.book"), text: tError(failed.error) });
-        return;
-      }
-      for (const f of found) {
-        books[f.path] = {
-          guess: f.guess,
-          candidates: f.candidates,
-          choice: f.auto ? f.candidates[0] : null,
-          status: f.auto ? "auto" : f.candidates.length ? "choose" : "none",
-          error: f.error,
-        };
-      }
-      if (found.some((f) => !f.auto && f.candidates.length)) openBookReview();
-    } catch (e) {
-      await notify({ title: t("rule.book"), text: tError(e) });
-    } finally {
-      bookProgress = null;
-    }
-  }
-
-  /** Opens the review on the books still without a choice (or on one). */
-  function openBookReview(start?: string) {
-    const paths = preview.items.map((i) => i.path);
-    const pending = [
-      ...paths.filter((p) => books[p]?.status === "choose"),
-      ...paths.filter((p) => books[p]?.status === "none"),
-    ];
-    const queue = start ? [start, ...pending.filter((p) => p !== start)] : pending;
-    bookReview = queue.length ? queue : null;
-  }
-
-  /** The user's pick for a book; undecided files with the same guess (the
-   *  same book in other formats) get it too. */
-  function chooseBook(path: string, choice: BookCandidate | null, candidates?: BookCandidate[]) {
-    const b = books[path];
-    if (!b) return;
-    const set = (p: string) => {
-      books[p] = { ...books[p], choice, status: choice ? "chosen" : "none", candidates: candidates ?? books[p].candidates };
-    };
-    set(path);
-    for (const [p, o] of Object.entries(books)) {
-      const same = o.guess.title === b.guess.title && o.guess.author === b.guess.author;
-      if (p !== path && same && (o.status === "choose" || o.status === "none")) set(p);
-    }
-  }
-
   /** Movie, episode and book choices follow their files when renamed or restored. */
   function followMatches(r: ApplyReport) {
     if (!r.done.length) return;
@@ -1645,480 +895,10 @@
       for (const op of r.done) if (inside(q, op.from)) q = op.to + q.slice(op.from.length);
       return q;
     };
-    function moved<T>(m: Record<string, T>): Record<string, T> {
-      return Object.fromEntries(Object.entries(m).map(([p, v]) => [follow(p), v]));
-    }
-    books = moved(books);
-    comics = moved(comics);
-    movies = moved(movies);
-    series = moved(series);
-    subsFound = moved(subsFound);
-    for (const a of albums) {
-      a.files = a.files.map(follow);
-      a.matches = moved(a.matches);
-    }
+    for (const m of [movies, tv, subs, books, comics, music]) m.follow(follow);
   }
 
-  /** The chosen catalogue (GCD, Metron, Comic Vine, a manga one) for the
-   *  visible comics: on Metron, first each file's barcode (recorded in it,
-   *  or read in its pages when asked); then one series per group of files
-   *  (the series typed, else each series the files say), picked by itself
-   *  when only one has that name (and year), else asked; then each file's
-   *  issue by its number. */
-  async function searchComics(rule: Extract<Rule, { type: "comic" }>) {
-    const source = rule.source ?? "gcd";
-    const skip = rule.skipPublishers?.trim() ?? "";
-    const key = comicKey(source);
-    if ((source === "comicvine" || source === "metron") && !key) {
-      const ok = await confirm({ title: t("rule.comic"), text: t(source === "metron" ? "mtNeedsKey" : "cvNeedsKey"), ok: t("options"), cancel: t("cancel") });
-      if (ok) showOptions = true;
-      return;
-    }
-    // Without an account the GCD takes few searches: said once per session.
-    if (source === "gcd" && !gcdWarned && !(settings.gcdEmail.trim() && settings.gcdPassword)) {
-      gcdWarned = true;
-      const ok = await confirm({ title: t("rule.comic"), text: t("gcdNoAccount"), ok: t("options"), cancel: t("gcdAnonymous") });
-      if (ok) {
-        showOptions = true;
-        return;
-      }
-    }
-    // A folder of pictures too, when it becomes a CBZ.
-    const files = preview.items.filter((i) => (i.isDir ? i.convert : isComic(i.original)));
-    if (!files.length) {
-      notice = t("comicNoFiles");
-      return;
-    }
-    comicProgress = t("comicReading");
-    const lang = settings.lang === "pt" ? "pt-br" : settings.lang;
-    try {
-      const owns = await api.comicGuesses(
-        files.map((f) => f.path),
-        files.map((f) => (f.lookupName ? (f.isDir ? f.lookupName : splitExt(f.lookupName)[0]) : null)),
-        !!rule.byFolder,
-      );
-      const run = stopRun;
-      // On Metron, a barcode tells the issue itself.
-      const coded = new Set<string>();
-      if (source === "metron") {
-        let codes = owns.map((o) => o?.extra?.gtin?.replace(/\D/g, "") || null);
-        if (rule.barcode && codes.some((c) => !c)) {
-          comicProgress = t("comicBarcodeReading");
-          const unread = files.flatMap((f, i) => (!codes[i] && owns[i] ? [i] : []));
-          const read = await api.comicBarcodes(unread.map((i) => files[i].path));
-          if (stopRun !== run) return;
-          unread.forEach((i, n) => {
-            const code = read[n];
-            const own = owns[i];
-            if (!code || !own) return;
-            codes[i] = code;
-            // Written into the ComicInfo.xml with the rest.
-            own.extra = { ...(own.extra ?? {}), gtin: code };
-          });
-        }
-        const withCode = files.flatMap((f, i) => (codes[i] && owns[i] ? [i] : []));
-        for (const [n, i] of withCode.entries()) {
-          if (stopRun !== run) return;
-          comicProgress = t("comicBarcodeLooking", { n: `${n + 1}/${withCode.length}` });
-          const found = await api.comicByCode(key, codes[i]!);
-          if (!found) continue;
-          const vkey = `${source}:${found.volume.id}`;
-          comicVolumes[vkey] = { volume: found.volume, issues: found.issues };
-          // The code tells the issue: its number too, when the name has none.
-          const own = owns[i]!;
-          const number = found.issues.find((x) => x.id === found.issue)?.number ?? "";
-          const exact = own.number || !number ? own : { ...own, number };
-          comics[files[i].path] = { volumeKey: vkey, own: exact, choice: found.issue, status: "auto" };
-          coded.add(files[i].path);
-        }
-      }
-      const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-      const groups = new Map<string, { query: string; paths: string[]; owns: ComicMatch[] }>();
-      files.forEach((f, i) => {
-        const own = owns[i];
-        if (!own || coded.has(f.path)) return;
-        const query = rule.series.trim() || own.series;
-        const g = groups.get(fold(query)) ?? { query, paths: [], owns: [] };
-        g.paths.push(f.path);
-        g.owns.push(own);
-        groups.set(fold(query), g);
-      });
-      if (!groups.size) {
-        if (!coded.size) notice = t("comicNoFiles");
-        return;
-      }
-      for (const [k, g] of groups) {
-        if (stopRun !== run) break;
-        // Loose chapters are no issues in the catalogues of issues.
-        if (!seriesOnly(source) && g.owns.every((o) => !o.number && o.volume == null && !!o.chapter)) continue;
-        const picked = `${source}:${k}`;
-        let volume: ComicVolume | null = pickedComics[picked] ?? null;
-        // A `ComicInfo.xml` link to a Comic Vine issue tells the series.
-        const linked = source === "comicvine" ? g.owns.find((o) => o.id) : undefined;
-        if (!volume && linked) {
-          try {
-            const id = await api.comicVolumeOf(key, linked.id);
-            volume = comicVolumes[`${source}:${id}`]?.volume ?? { id, name: g.query, startYear: null, publisher: "", count: 0, cover: "", country: "", language: "", format: "", writer: "" };
-          } catch {
-            volume = null;
-          }
-        }
-        if (!volume) {
-          comicProgress = t("comicSearching", { series: g.query });
-          let found = await api.comicSearch(source, key, g.query, lang, null, "", skip);
-          // `Series: Story` may be a story in `Series`: the series alone.
-          const head = g.query.split(/\s*[:–]\s*|\s+-\s+/)[0].trim();
-          if (!found.length && head && head !== g.query.trim()) found = await api.comicSearch(source, key, head, lang, null, "", skip);
-          if (stopRun !== run) break;
-          const year = g.owns.find((o) => o.seriesYear)?.seriesYear ?? null;
-          // A common name (`Saga`) may leave the series out of what the
-          // catalogue answers: asked again with the files' year (theirs, or
-          // their issues'), whose series come first.
-          const dated = year ?? g.owns.find((o) => o.year)?.year ?? null;
-          if (dated && !found.some((v) => fold(v.name) === k)) {
-            const more = await api.comicSearch(source, key, g.query, lang, dated, "", skip).catch(() => []);
-            if (stopRun !== run) break;
-            found = [...more, ...found.filter((v) => !more.some((m) => m.id === v.id))];
-          }
-          // The highest number among the files: a series with fewer issues
-          // is not theirs.
-          const highest = Math.max(
-            0,
-            ...g.owns.map((o) => Number.parseFloat(o.number || (o.chapter ? "" : String(o.volume ?? ""))) || 0),
-          );
-          const fits = (v: ComicVolume) => !v.count || v.count >= Math.floor(highest);
-          const sorted = byFit(found, highest);
-          const same = sorted.filter((v) => fold(v.name) === k && (year == null || v.startYear === year) && fits(v));
-          // The same name in another language (a French edition for a
-          // Brazilian reader, when there is one in Portuguese) is not
-          // picked by itself.
-          const mine = (v: ComicVolume) => !v.language || v.language.toLowerCase().startsWith(settings.lang);
-          const foreign = same.length === 1 && !mine(same[0]) && found.some(mine);
-          // Without the files' year, the name alone does not tell one
-          // run from another (a translation of a newer series under an
-          // older one's name): asked when there is anything else to pick.
-          const sure = year != null || found.length === 1;
-          volume =
-            same.length === 1 && !foreign && sure
-              ? same[0]
-              : await new Promise<ComicVolume | null>((resolve) => {
-                  // The file whose cover is compared: the first with a number.
-                  const at = Math.max(0, g.owns.findIndex((o) => o.number || o.volume != null));
-                  comicPick = { source, skip, query: g.query, files: g.paths.length, highest, candidates: sorted, path: g.paths[at], comic: g.owns[at], resolve };
-                });
-          comicPick = null;
-          if (!volume) continue;
-        }
-        pickedComics[picked] = volume;
-        // The manga catalogues have series, not a publisher's volumes: the
-        // file's numbers stay. MangaUpdates tells a series' authors and
-        // volumes only when asked for it.
-        if (seriesOnly(source)) {
-          const vkey = `${source}:${volume.id}`;
-          if (source === "mangaupdates") {
-            const full = await api.comicIssues(source, key, volume.id, g.owns).catch(() => null);
-            if (stopRun !== run) break;
-            if (full) volume = { ...volume, ...Object.fromEntries(Object.entries(full.volume).filter(([, x]) => x !== "" && x !== null && x !== 0)) };
-          }
-          comicVolumes[vkey] = { volume, issues: [] };
-          for (const [i, p] of g.paths.entries()) comics[p] = { volumeKey: vkey, own: g.owns[i], choice: "", status: "auto" };
-          continue;
-        }
-        if (stopRun !== run) break;
-        comicProgress = t("comicLoading", { series: volume.name });
-        const res = await api.comicIssues(source, key, volume.id, g.owns);
-        const vkey = `${source}:${res.volume.id}`;
-        // The search's own details where the series' lack them (a cover).
-        comicVolumes[vkey] = { volume: { ...volume, ...Object.fromEntries(Object.entries(res.volume).filter(([, x]) => x !== "" && x !== null && x !== 0)) }, issues: res.issues };
-        g.paths.forEach((p, i) => {
-          const found = res.found[i];
-          const own = g.owns[i];
-          // A loose chapter is no issue there: the series is all there is.
-          const chapterOnly = !own.number && !!own.chapter;
-          // A file without its issue still takes the series ("": the series
-          // alone, with its own numbers), so a series' files stay together;
-          // the review can still pick its issue.
-          comics[p] = {
-            volumeKey: vkey,
-            own,
-            choice: found ?? "",
-            status: found != null || chapterOnly ? "auto" : "choose",
-          };
-        });
-      }
-      if (Object.values(comics).some((c) => c.status === "choose")) openComicReview();
-    } catch (e) {
-      const err = String(e);
-      // A refused account is fixed in the options.
-      if (err.startsWith("gcdBadLogin") || err.startsWith("mtBadKey")) {
-        if (await confirm({ title: t("rule.comic"), text: tError(e), ok: t("options"), cancel: t("close") })) showOptions = true;
-      } else {
-        await notify({ title: t("rule.comic"), text: tError(e) });
-      }
-    } finally {
-      comicProgress = null;
-      comicPick = null;
-    }
-  }
-
-  /** Opens the review on the comics still without an issue (or on one). */
-  function openComicReview(start?: string) {
-    const paths = preview.items.map((i) => i.path);
-    const pending = [
-      ...paths.filter((p) => comics[p]?.status === "choose"),
-      ...paths.filter((p) => comics[p]?.status === "none"),
-    ];
-    const queue = start ? [start, ...pending.filter((p) => p !== start)] : pending;
-    comicReview = queue.length ? queue : null;
-  }
-
-  function chooseComic(path: string, issue: string | null) {
-    const c = comics[path];
-    if (c) comics[path] = { ...c, choice: issue, status: issue == null ? "none" : "chosen" };
-  }
-
-  /** Looks up the visible songs' albums on MusicBrainz; albums already
-   *  settled keep their release, doubtful ones go to the review window. */
-  async function searchAlbums(rule: Extract<Rule, { type: "music" }>) {
-    const settled = new Set(
-      albums.filter((a) => a.status === "auto" || a.status === "chosen").flatMap((a) => a.files),
-    );
-    const paths = preview.items
-      // Songs without a title can still be identified by their sound.
-      .filter((i) => !i.isDir && (!i.untagged || rule.listen) && isAudio(i.original) && !settled.has(i.path))
-      .map((i) => i.path);
-    if (!paths.length) {
-      notice = t("mbNoFiles");
-      return;
-    }
-    mbProgress = { done: 0, total: 0, kind: "search" };
-    try {
-      const found = await api.mbLookup(paths, rule.fromName, rule.listen);
-      if (!found.length) {
-        notice = t("mbNoFiles");
-        return;
-      }
-      const failed = found.find((f) => f.error);
-      if (failed && found.every((f) => f.error)) {
-        await notify({ title: t("rule.music"), text: tError(failed.error) });
-        return;
-      }
-      const looked = new Set(found.flatMap((f) => f.files));
-      albums = [
-        ...albums.filter((a) => !a.files.some((p) => looked.has(p))),
-        ...found.map((f): AlbumState => ({
-          files: f.files,
-          dir: f.dir,
-          query: f.query,
-          candidates: f.candidates,
-          choice: f.choice,
-          matches: Object.fromEntries(f.matches),
-          status: f.choice ? "auto" : f.candidates.length ? "choose" : "none",
-          error: f.error,
-          heard: f.heard,
-          tracks: f.tracks,
-        })),
-      ];
-      openAlbumReview();
-    } catch (e) {
-      await notify({ title: t("rule.music"), text: tError(e) });
-    } finally {
-      mbProgress = null;
-    }
-  }
-
-  /** Opens the review on the albums without a release (or on one). */
-  function openAlbumReview(start?: number) {
-    const pending = [
-      ...albums.flatMap((a, i) => (a.status === "choose" ? [i] : [])),
-      ...albums.flatMap((a, i) => (a.status === "none" ? [i] : [])),
-    ];
-    const queue = start === undefined ? pending : [start, ...pending.filter((i) => i !== start)];
-    albumReview = queue.length ? queue : null;
-  }
-
-  /** The release the user chose for an album: its songs are matched to
-   *  the tracks; `null` keeps the tags. */
-  async function chooseAlbum(index: number, choice: MbCandidate | null, candidates?: MbCandidate[]) {
-    const a = albums[index];
-    const rule = musicRule?.rule;
-    if (!choice || rule?.type !== "music") {
-      albums[index] = { ...a, choice: null, matches: {}, tracks: [], status: "none" };
-      return;
-    }
-    const res = await api.mbChoose(choice.id, a.files, rule.fromName);
-    albums[index] = {
-      ...a,
-      choice,
-      candidates: candidates ?? a.candidates,
-      matches: Object.fromEntries(res.matches),
-      tracks: res.tracks,
-      status: "chosen",
-    };
-  }
-
-  /** Where each album with a release ends up after renaming, for its cover. */
-  function coverItems(r: ApplyReport): { dir: string; release: string }[] {
-    const moved = new Map(r.done.map((op) => [op.from, op.to]));
-    const parent = (p: string) => p.slice(0, Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\")));
-    const items = new Map<string, string>();
-    for (const a of albums) {
-      if (!a.choice || !a.files.some((p) => preview.items.some((i) => i.path === p) || moved.has(p))) continue;
-      items.set(parent(moved.get(a.files[0]) ?? a.files[0]), a.choice.id);
-    }
-    return [...items].map(([dir, release]) => ({ dir, release }));
-  }
-
-  /** Finds the show (asking when unsure), then each visible file's episode;
-   *  doubtful files go to the review window. With no show typed, each show
-   *  the file names (or folders) say is looked up in turn. */
-  async function searchSeries(rule: Extract<Rule, { type: "series" }>) {
-    // AniList: anime, with no key; its shows are kept apart from TMDB's
-    // (their ids would meet), under negative numbers.
-    const anime = rule.source === "anilist";
-    const source = anime ? "anilist" : "tmdb";
-    const showKey = (id: number) => (anime ? -id : id);
-    if (!anime && !settings.tmdbKey.trim()) {
-      const ok = await confirm({ title: t("rule.series"), text: t("tmdbNeedsKey"), ok: t("options"), cancel: t("cancel") });
-      if (ok) showOptions = true;
-      return;
-    }
-    const all = preview.items
-      .filter((i) => !i.isDir && isScreen(i.original))
-      .map((i) => ({ path: i.path, name: readName(i), isDir: i.isDir }));
-    if (!all.length) {
-      notice = t("tvNoFiles");
-      return;
-    }
-    const key = settings.tmdbKey;
-    const lang = tmdbLang();
-    const typed = rule.show.trim();
-    tvProgress = t("tvFinding");
-    try {
-      let groups = [all];
-      let loose = 0;
-      if (!typed) {
-        const g = await api.tvGroups(all);
-        const byPath = new Map(all.map((i) => [i.path, i]));
-        groups = g.groups.map((list) => list.map((p) => byPath.get(p)!));
-        loose = g.loose.length;
-        if (!groups.length) groups = [all];
-      }
-      const found: Candidate[] = [];
-      let searched = false;
-      let review = false;
-      const run = stopRun;
-      for (const group of groups) {
-        if (stopRun !== run) break;
-        tvProgress = t("tvFinding");
-        const res = await (anime ? api.animeSearch(typed, group) : api.tvSearch(key, lang, typed, group)).catch((e) => {
-          // A group whose show cannot be told is skipped, not the others.
-          if (groups.length > 1 && String(e) === "tvNoShow") return null;
-          throw e;
-        });
-        if (!res) continue;
-        if (stopRun !== run) break;
-        const picked = `${source}:${res.query}`;
-        let show: Candidate | null = pickedShows[picked] ?? null;
-        if (!show) {
-          show = res.auto
-            ? res.candidates[0]
-            : await new Promise<Candidate | null>((resolve) => (showPick = { source, query: res.query, candidates: res.candidates, resolve }));
-          showPick = null;
-          if (!show) continue;
-          pickedShows[picked] = show;
-        }
-        const sid = showKey(show.id);
-        if (!found.some((c) => c.id === show.id)) found.push(show);
-        // Files already settled for this show keep their episode.
-        const items = group.filter((i) => {
-          const e = series[i.path];
-          return !(e && e.showId === sid && (e.status === "auto" || e.status === "chosen"));
-        });
-        if (!items.length) continue;
-        if (stopRun !== run) break;
-        searched = true;
-        tvProgress = t("tvLoading", { show: show.title });
-        const look = anime
-          ? await api.animeLookup(show.id, items, typed || res.query)
-          : await api.tvLookup(key, lang, show.id, items, typed || res.query);
-        shows[sid] = look.show;
-        if (look.files.some((f) => !f.choice.length)) review = true;
-        for (const f of look.files) {
-          series[f.path] = {
-            showId: sid,
-            guess: f.guess,
-            alternatives: f.alternatives,
-            conflict: f.conflict,
-            choice: f.choice.length ? f.choice : null,
-            status: f.choice.length ? "auto" : f.alternatives.length ? "choose" : "none",
-          };
-        }
-      }
-      if (found.length) searchedShows = found;
-      if (!searched && found.length) notice = t("tvNoFiles");
-      else if (loose) notice = t("tvLoose", { n: loose });
-      if (review) openEpisodeReview();
-    } catch (e) {
-      await notify({ title: t("rule.series"), text: tError(e) });
-    } finally {
-      tvProgress = null;
-    }
-  }
-
-  /** Opens the review on the files still without an episode (or on one). */
-  function openEpisodeReview(start?: string) {
-    const paths = preview.items.map((i) => i.path);
-    const pending = [
-      ...paths.filter((p) => series[p]?.status === "choose"),
-      ...paths.filter((p) => series[p]?.status === "none"),
-    ];
-    const queue = start ? [start, ...pending.filter((p) => p !== start)] : pending;
-    episodeReview = queue.length ? queue : null;
-  }
-
-  /** The user's pick for a file; undecided files read the same way (its
-   *  subtitles, say) get it too. */
-  function chooseEpisode(path: string, choice: EpKey[] | null) {
-    const e = series[path];
-    if (!e) return;
-    const guess = JSON.stringify(e.guess);
-    for (const [p, o] of Object.entries(series)) {
-      const undecided = o.status === "choose" || o.status === "none";
-      if (p === path || (undecided && o.showId === e.showId && JSON.stringify(o.guess) === guess)) {
-        series[p] = { ...o, choice, status: choice ? "chosen" : "none" };
-      }
-    }
-  }
-
-  /** Opens the review on the files still without a movie (or on one). */
-  function openReview(start?: string) {
-    // Files with options first; those without results after.
-    const paths = preview.items.map((i) => i.path);
-    const pending = [
-      ...paths.filter((p) => movies[p]?.status === "choose"),
-      ...paths.filter((p) => movies[p]?.status === "none"),
-    ];
-    const queue = start ? [start, ...pending.filter((p) => p !== start)] : pending;
-    review = queue.length ? queue : null;
-  }
-
-  /** The user's pick for a file; undecided files with the same guess (its
-   *  subtitles, say) get it too. */
-  function chooseMovie(path: string, choice: Candidate | null, candidates?: Candidate[]) {
-    const m = movies[path];
-    if (!m) return;
-    const set = (p: string) => {
-      movies[p] = { ...movies[p], choice, status: choice ? "chosen" : "none", candidates: candidates ?? movies[p].candidates };
-    };
-    set(path);
-    for (const [p, o] of Object.entries(movies)) {
-      const same = o.guess.title === m.guess.title && o.guess.year === m.guess.year;
-      if (p !== path && same && (o.status === "choose" || o.status === "none")) set(p);
-    }
-  }
-
-  /** Writes .nfo files and images (undone with the rename); tmdbProgress
+  /** Writes .nfo files and images (undone with the rename); movies.progress
    *  must be set. Returns how many files were created. */
   async function writeMeta(write: () => Promise<{ created: string[]; errors: [string, string][] }>): Promise<number> {
     try {
@@ -2135,16 +915,16 @@
       await notify({ title: t("sidecarsTitle"), text: tError(e) });
       return 0;
     } finally {
-      tmdbProgress = null;
+      movies.progress = null;
     }
   }
 
   /** Saves the list and the hand-edited names before an edit, for Ctrl+Z. */
   /** What the lookups found per file, kept along each list checkpoint
    *  that takes files out (null: the edit left them as they were). */
-  type Found = { movies: typeof movies; books: typeof books; comics: typeof comics; comicEdits: typeof comicEdits; songEdits: typeof songEdits; bookEdits: typeof bookEdits; series: typeof series; albums: AlbumState[]; pickedShows: typeof pickedShows; pickedComics: typeof pickedComics; searchedShows: Candidate[] };
+  type Found = { movies: ReturnType<Movies["snapshot"]>; tv: ReturnType<Series["snapshot"]>; books: ReturnType<Books["snapshot"]>; music: ReturnType<Music["snapshot"]>; comics: ReturnType<Comics["snapshot"]> };
   let foundUndo: (Found | null)[] = [];
-  const found = (): Found => ({ movies, books, comics, comicEdits, songEdits, bookEdits, series, albums, pickedShows, pickedComics, searchedShows });
+  const found = (): Found => ({ movies: movies.snapshot(), tv: tv.snapshot(), books: books.snapshot(), music: music.snapshot(), comics: comics.snapshot() });
   const remember = (keep: Found | null = null) => {
     if (foundUndo.length === 100) foundUndo.shift();
     foundUndo.push(keep);
@@ -2158,33 +938,7 @@
    *  with the shows and series picked, when the list is cleared), so a
    *  file added again starts fresh. */
   function forget(paths: Set<string> | null) {
-    if (!paths) {
-      subsFound = {};
-      movies = {};
-      books = {};
-      comics = {};
-      comicEdits = {};
-      songEdits = {};
-      bookEdits = {};
-      series = {};
-      albums = [];
-      pickedShows = {};
-      pickedComics = {};
-      searchedShows = [];
-      return;
-    }
-    const keep = <T,>(m: Record<string, T>) => Object.fromEntries(Object.entries(m).filter(([p]) => !paths.has(p)));
-    movies = keep(movies);
-    subsFound = keep(subsFound);
-    books = keep(books);
-    comics = keep(comics);
-    comicEdits = keep(comicEdits);
-    songEdits = keep(songEdits);
-    bookEdits = keep(bookEdits);
-    series = keep(series);
-    albums = albums
-      .map((a) => ({ ...a, files: a.files.filter((p) => !paths.has(p)), matches: keep(a.matches) }))
-      .filter((a) => a.files.length);
+    for (const m of [movies, tv, subs, books, comics, music]) m.forget(paths);
   }
 
   /** Undoes the last edit to the list (Ctrl+Z). Renames are undone in the History. */
@@ -2196,7 +950,13 @@
       return;
     }
     const was = foundUndo.pop();
-    if (was) ({ movies, books, comics, comicEdits, songEdits, bookEdits, series, albums, pickedShows, pickedComics, searchedShows } = was);
+    if (was) {
+      movies.restore(was.movies);
+      tv.restore(was.tv);
+      comics.restore(was.comics);
+      books.restore(was.books);
+      music.restore(was.music);
+    }
     overrides = prev;
     await refresh();
     checkIdentical();
@@ -2346,20 +1106,20 @@
       history = null;
       showOptions = false;
       help = null;
-      review = null;
-      episodeReview = null;
-      albumReview = null;
-      bookReview = null;
-      comicReview = null;
-      showPick?.resolve(null);
-      comicPick?.resolve(null);
+      movies.review = null;
+      tv.review = null;
+      music.review = null;
+      books.review = null;
+      comics.review = null;
+      tv.pick?.resolve(null);
+      comics.pick?.resolve(null);
     }
     if (e.key === "F1") {
       e.preventDefault();
       help ??= "manual";
       return;
     }
-    if (history || showOptions || help || review || episodeReview || albumReview || bookReview || comicReview || comicPick || showPick || compare || busy || working) return;
+    if (history || showOptions || help || movies.review || tv.review || music.review || books.review || comics.review || comics.pick || tv.pick || compare || busy || working) return;
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
     // These work even while typing in a rule.
@@ -2406,18 +1166,18 @@
       if (e.payload.type === "drop") addPaths(e.payload.paths);
     });
     const unlistenTmdb = listen<{ done: number; total: number }>("tmdb-progress", (e) => {
-      if (tmdbProgress) tmdbProgress = { ...tmdbProgress, ...e.payload };
+      if (movies.progress) movies.progress = { ...movies.progress, ...e.payload };
     });
     const unlistenMb = listen<{ done: number; total: number; kind?: "listen" | "tags" }>("mb-progress", (e) => {
       // After listening, the albums heard are looked up.
-      if (mbProgress)
-        mbProgress = { ...e.payload, kind: e.payload.kind ?? (mbProgress.kind === "listen" ? "search" : mbProgress.kind) };
+      if (music.progress)
+        music.progress = { ...e.payload, kind: e.payload.kind ?? (music.progress.kind === "listen" ? "search" : music.progress.kind) };
     });
     const unlistenSubs = listen<{ done: number; total: number }>("subs-progress", (e) => {
-      if (subsProgress) subsProgress = { ...subsProgress, ...e.payload };
+      if (subs.progress) subs.progress = { ...subs.progress, ...e.payload };
     });
     const unlistenBooks = listen<{ done: number; total: number }>("book-progress", (e) => {
-      if (bookProgress) bookProgress = { ...bookProgress, ...e.payload };
+      if (books.progress) books.progress = { ...books.progress, ...e.payload };
     });
     const unlistenInside = listen<{ done: number; total: number }>("inside-progress", (e) => {
       if (insideProgress) insideProgress = e.payload;
@@ -2530,8 +1290,8 @@
           <button onclick={() => pickSendTo(true)}>{t("sendCopyTo")}</button>
         </div>
       {/if}
-      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !metaOnly.length && !episodeMetaOnly.length && !bookMetaOnly.length && !coverOnly && !playlistOnly.length && !tagsOnly.length && !comicInfoOnly.length && !epubOnly.length && !subsOnly.length) || busy || !!working} onclick={applyAll}>
-        {t(sendTo ? (sendTo.copy ? "copyAction" : "moveAction") : "rename")} {preview.changed + metaOnly.length + episodeMetaOnly.length + bookMetaOnly.length + coverOnly + playlistOnly.length + tagsOnly.length + comicInfoOnly.length + epubOnly.length + subsOnly.length || ""}
+      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !movies.metaOnly.length && !tv.metaOnly.length && !books.metaOnly.length && !music.coverOnly && !music.playlistOnly.length && !music.tagsOnly.length && !comics.infoOnly.length && !books.epubOnly.length && !subs.only.length) || busy || !!working} onclick={applyAll}>
+        {t(sendTo ? (sendTo.copy ? "copyAction" : "moveAction") : "rename")} {preview.changed + movies.metaOnly.length + tv.metaOnly.length + books.metaOnly.length + music.coverOnly + music.playlistOnly.length + music.tagsOnly.length + comics.infoOnly.length + books.epubOnly.length + subs.only.length || ""}
       </button>
     </div>
   </header>
@@ -2567,80 +1327,80 @@
             onremove={() => steps.splice(i, 1)}
             subs={step.rule.type === "movie" || step.rule.type === "series"
               ? {
-                  progress: subsProgress ? t(subsProgress.kind === "search" ? "subsSearching" : "subsWriting", subsProgress) : null,
-                  summary: subsCounts.subs || subsCounts.missing
-                    ? [subsCounts.subs ? t("subsSummary", { subs: subsCounts.subs, videos: subsCounts.videos }) : "", subsCounts.missing ? t("subsMissingN", { n: subsCounts.missing }) : ""].filter(Boolean).join(" · ")
+                  progress: subs.progress ? t(subs.progress.kind === "search" ? "subsSearching" : "subsWriting", subs.progress) : null,
+                  summary: subs.counts.subs || subs.counts.missing
+                    ? [subs.counts.subs ? t("subsSummary", { subs: subs.counts.subs, videos: subs.counts.videos }) : "", subs.counts.missing ? t("subsMissingN", { n: subs.counts.missing }) : ""].filter(Boolean).join(" · ")
                     : null,
-                  found: subsCounts.videos + subsCounts.missing,
-                  onsearch: () => searchSubs(),
-                  onreview: () => (subsReview = true),
+                  found: subs.counts.videos + subs.counts.missing,
+                  onsearch: () => subs.search(),
+                  onreview: () => (subs.review = true),
                 }
               : undefined}
             lookup={step.rule.type === "movie"
               ? {
-                  ...movieCounts,
-                  progress: tmdbProgress && tmdbProgress.kind !== "saveTv"
-                    ? t(tmdbProgress.kind === "search" ? "tmdbSearching" : "sidecarsWriting", tmdbProgress)
+                  ...movies.counts,
+                  progress: movies.progress && movies.progress.kind !== "saveTv"
+                    ? t(movies.progress.kind === "search" ? "tmdbSearching" : "sidecarsWriting", movies.progress)
                     : null,
-                  onsearch: searchMovies,
-                  onreview: () => openReview(),
+                  onsearch: () => movies.search(),
+                  onreview: () => movies.openReview(),
                 }
               : step.rule.type === "series"
                 ? {
-                    ...seriesCounts,
-                    show: searchedShows.length ? searchedShows.map((c) => `${c.title}${c.year ? ` (${c.year})` : ""}`).join(", ") : null,
-                    progress: tvProgress ?? (tmdbProgress?.kind === "saveTv" ? t("sidecarsWriting", tmdbProgress) : null),
-                    onsearch: () => searchSeries(step.rule as Extract<Rule, { type: "series" }>),
-                    onreview: () => openEpisodeReview(),
+                    ...tv.counts,
+                    show: tv.searched.length ? tv.searched.map((c) => `${c.title}${c.year ? ` (${c.year})` : ""}`).join(", ") : null,
+                    progress: tv.progress ?? (movies.progress?.kind === "saveTv" ? t("sidecarsWriting", movies.progress) : null),
+                    onsearch: () => tv.search(step.rule as Extract<Rule, { type: "series" }>),
+                    onreview: () => tv.openReview(),
                   }
                 : step.rule.type === "music"
                   ? {
-                      ...albumCounts,
-                      progress: mbProgress
-                        ? t({ search: "mbSearching", listen: "mbListening", save: "coversWriting", tags: "tagsWriting" }[mbProgress.kind] as "mbSearching", mbProgress)
+                      ...music.counts,
+                      progress: music.progress
+                        ? t({ search: "mbSearching", listen: "mbListening", save: "coversWriting", tags: "tagsWriting" }[music.progress.kind] as "mbSearching", music.progress)
                         : null,
-                      onsearch: () => searchAlbums(step.rule as Extract<Rule, { type: "music" }>),
-                      onreview: () => openAlbumReview(),
+                      onsearch: () => music.search(step.rule as Extract<Rule, { type: "music" }>),
+                      onreview: () => music.openReview(),
                       edit: {
-                        n: selectedSongs.length,
-                        typed: Object.keys(songEdits).length,
-                        label: t("editButton", { n: selectedSongs.length }),
+                        n: music.selected.length,
+                        typed: Object.keys(music.edits).length,
+                        label: t("editButton", { n: music.selected.length }),
                         hint: t("songEditButtonHint"),
-                        onclick: openSongEdit,
+                        onclick: () => music.openEdit(),
                       },
                     }
                   : step.rule.type === "comic"
                     ? {
-                        ...comicCounts,
+                        ...comics.counts,
                         show: null,
-                        progress: comicProgress,
-                        onsearch: () => searchComics(step.rule as Extract<Rule, { type: "comic" }>),
-                        onreview: () => openComicReview(),
+                        progress: comics.progress,
+                        onsearch: () => comics.search(step.rule as Extract<Rule, { type: "comic" }>),
+                        onreview: () => comics.openReview(),
                         edit: {
-                          n: selectedComics.length,
-                          typed: Object.keys(comicEdits).length,
-                          label: t("editButton", { n: selectedComics.length }),
+                          n: comics.selected.length,
+                          typed: Object.keys(comics.edits).length,
+                          label: t("editButton", { n: comics.selected.length }),
                           hint: t("comicEditButtonHint"),
-                          onclick: openComicEdit,
+                          onclick: () => comics.openEdit(),
                         },
                       }
                   : step.rule.type === "book"
                     ? {
-                        ...bookCounts,
-                        progress: bookProgress ? t(bookProgress.kind === "search" ? "olSearching" : "sidecarsWriting", bookProgress) : null,
-                        onsearch: searchBooks,
-                        onreview: () => openBookReview(),
+                        ...books.counts,
+                        progress: books.progress ? t(books.progress.kind === "search" ? "olSearching" : "sidecarsWriting", books.progress) : null,
+                        onsearch: () => books.search(),
+                        onreview: () => books.openReview(),
                         edit: {
-                          n: selectedBooks.length,
-                          typed: Object.keys(bookEdits).length,
-                          label: t("editButton", { n: selectedBooks.length }),
+                          n: books.selected.length,
+                          typed: Object.keys(books.edits).length,
+                          label: t("editButton", { n: books.selected.length }),
                           hint: t("bookEditButtonHint"),
-                          onclick: openBookEdit,
+                          onclick: () => books.openEdit(),
                         },
                       }
                     : undefined}
-            summary={step.rule.type === "music" && step.enabled && untaggedCount
-              ? t(step.rule.listen ? "musicUntaggedListenN" : "musicUntaggedN", { n: untaggedCount })
+            summary={step.rule.type === "music" && step.enabled && music.untagged
+              ? t(step.rule.listen ? "musicUntaggedListenN" : "musicUntaggedN", { n: music.untagged })
               : step.rule.type === "photo" && step.enabled && undatedCount
                 ? t("photoUndatedN", { n: undatedCount })
                 : null}
@@ -2686,11 +1446,11 @@
           {outside}
           available={availableColumns}
           onmatch={(p) => {
-            if (seriesRule && series[p]) openEpisodeReview(p);
-            else if (movieRule && movies[p]) openReview(p);
-            else if (musicRule && albumOf.has(p)) openAlbumReview(albumOf.get(p));
-            else if (bookRule && books[p]) openBookReview(p);
-            else if (comicRule && comics[p]) openComicReview(p);
+            if (tv.rule && tv.state[p]) tv.openReview(p);
+            else if (movies.rule && movies.state[p]) movies.openReview(p);
+            else if (music.rule && music.albumOf.has(p)) music.openReview(music.albumOf.get(p));
+            else if (books.rule && books.state[p]) books.openReview(p);
+            else if (comics.rule && comics.state[p]) comics.openReview(p);
           }}
         />
         {#if !preview.items.length}<p class="no-match">{t("noMatch")}</p>{/if}
@@ -2827,107 +1587,107 @@
   </div>
 {/if}
 
-{#if subsReview}
+{#if subs.review}
   <SubtitleReview
     rows={preview.items
-      .filter((i) => subsFound[i.path])
+      .filter((i) => subs.found[i.path])
       .map((i) => {
-        const s = subsFound[i.path];
-        return { path: i.path, name: i.original, candidates: s.candidates, langs: subsLangs.map((l) => ({ lang: l, have: s.have.includes(l), pick: s.pick[l] ?? -1 })) };
+        const s = subs.found[i.path];
+        return { path: i.path, name: i.original, candidates: s.candidates, langs: subs.langs.map((l) => ({ lang: l, have: s.have.includes(l), pick: s.pick[l] ?? -1 })) };
       })}
-    remaining={subsRemaining}
-    onpick={(path, lang, index) => (subsFound[path].pick[lang] = index)}
-    onclose={() => (subsReview = false)}
+    remaining={subs.remaining}
+    onpick={(path, lang, index) => (subs.found[path].pick[lang] = index)}
+    onclose={() => (subs.review = false)}
   />
 {/if}
 
-{#if review}
+{#if movies.review}
   <MovieReview
-    queue={review}
-    {movies}
+    queue={movies.review}
+    movies={movies.state}
     names={Object.fromEntries(preview.items.map((i) => [i.path, i.original]))}
-    onchoose={chooseMovie}
-    onclose={() => (review = null)}
+    onchoose={(p, c, cs) => movies.choose(p, c, cs)}
+    onclose={() => (movies.review = null)}
   />
 {/if}
 
-{#if episodeReview}
+{#if tv.review}
   <EpisodeReview
-    queue={episodeReview}
-    {series}
-    {shows}
+    queue={tv.review}
+    series={tv.state}
+    shows={tv.shows}
     names={Object.fromEntries(preview.items.map((i) => [i.path, i.original]))}
-    onchoose={chooseEpisode}
-    onclose={() => (episodeReview = null)}
+    onchoose={(p, c) => tv.choose(p, c)}
+    onclose={() => (tv.review = null)}
   />
 {/if}
 
-{#if bookReview}
+{#if books.review}
   <BookReview
-    queue={bookReview}
-    {books}
+    queue={books.review}
+    books={books.state}
     names={Object.fromEntries(preview.items.map((i) => [i.path, i.original]))}
-    onchoose={chooseBook}
-    onclose={() => (bookReview = null)}
+    onchoose={(p, c, cs) => books.choose(p, c, cs)}
+    onclose={() => (books.review = null)}
   />
 {/if}
 
-{#if comicReview}
+{#if comics.review}
   <ComicReview
-    queue={comicReview}
-    {comics}
-    volumes={comicVolumes}
+    queue={comics.review}
+    comics={comics.state}
+    volumes={comics.volumes}
     names={Object.fromEntries(preview.items.map((i) => [i.path, i.original]))}
-    onchoose={chooseComic}
-    onclose={() => (comicReview = null)}
+    onchoose={(p, i) => comics.choose(p, i)}
+    onclose={() => (comics.review = null)}
   />
 {/if}
 
-{#if comicPick}
-  <ComicPicker source={comicPick.source} skip={comicPick.skip} query={comicPick.query} files={comicPick.files} highest={comicPick.highest} candidates={comicPick.candidates} path={comicPick.path} comic={comicPick.comic} onpick={(v) => comicPick?.resolve(v)} />
+{#if comics.pick}
+  <ComicPicker source={comics.pick.source} skip={comics.pick.skip} query={comics.pick.query} files={comics.pick.files} highest={comics.pick.highest} candidates={comics.pick.candidates} path={comics.pick.path} comic={comics.pick.comic} onpick={(v) => comics.pick?.resolve(v)} />
 {/if}
 
-{#if comicEdit}
+{#if comics.edit}
   <DetailsEdit
-    heading={t("comicEditTitleN", { n: comicEdit.comics.length })}
+    heading={t("comicEditTitleN", { n: comics.edit.comics.length })}
     hint={t("detailsEditHint")}
-    fields={COMIC_FIELDS}
-    rows={comicEdit.comics.map((m) => asText(m, COMIC_FIELDS))}
-    onsave={saveComicEdit}
-    onclose={() => (comicEdit = null)}
+    fields={comics.fields}
+    rows={comics.edit.comics.map((m) => asText(m, comics.fields))}
+    onsave={(c) => comics.saveEdit(c)}
+    onclose={() => (comics.edit = null)}
   />
 {/if}
-{#if bookEdit}
+{#if books.edit}
   <DetailsEdit
-    heading={t("bookEditTitleN", { n: bookEdit.books.length })}
+    heading={t("bookEditTitleN", { n: books.edit.books.length })}
     hint={t("detailsEditHint")}
-    fields={BOOK_FIELDS}
-    rows={bookEdit.books.map(bookText)}
-    onsave={saveBookEdit}
-    onclose={() => (bookEdit = null)}
+    fields={books.fields}
+    rows={books.edit.books.map((m) => books.text(m))}
+    onsave={(c) => books.saveEdit(c)}
+    onclose={() => (books.edit = null)}
   />
 {/if}
-{#if songEdit}
+{#if music.edit}
   <DetailsEdit
-    heading={t("songEditTitleN", { n: songEdit.songs.length })}
+    heading={t("songEditTitleN", { n: music.edit.songs.length })}
     hint={t("detailsEditHint")}
-    fields={SONG_FIELDS}
-    rows={songEdit.songs.map((m) => asText(m, SONG_FIELDS))}
-    onsave={saveSongEdit}
-    onclose={() => (songEdit = null)}
+    fields={music.fields}
+    rows={music.edit.songs.map((m) => asText(m, music.fields))}
+    onsave={(c) => music.saveEdit(c)}
+    onclose={() => (music.edit = null)}
   />
 {/if}
 
-{#if albumReview}
-  <AlbumReview queue={albumReview} {albums} onchoose={chooseAlbum} onclose={() => (albumReview = null)} />
+{#if music.review}
+  <AlbumReview queue={music.review} albums={music.albums} onchoose={(i, c, cs) => music.choose(i, c, cs)} onclose={() => (music.review = null)} />
 {/if}
 
 {#if compare}
   <PictureCompare kind={compare.kind} groups={compare.kind === "similar" ? similarGroups : copyGroups} start={compare.start} onclose={closeCompare} />
 {/if}
 
-{#if showPick}
-  <ShowPicker source={showPick.source} query={showPick.query} candidates={showPick.candidates} onpick={(c) => showPick?.resolve(c)} />
+{#if tv.pick}
+  <ShowPicker source={tv.pick.source} query={tv.pick.query} candidates={tv.pick.candidates} onpick={(c) => tv.pick?.resolve(c)} />
 {/if}
 
 {#if help}
