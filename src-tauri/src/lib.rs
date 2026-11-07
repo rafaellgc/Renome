@@ -4,6 +4,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use renome_core::links::{self, Link};
 use renome_core::music::AudioTags;
 use renome_core::rules::{any_song_tags, song_tags};
 use renome_core::scan::Skipped;
@@ -891,12 +892,17 @@ async fn tmdb_search(
     title: String,
     year: Option<u16>,
 ) -> Result<Vec<renome_core::tmdb::Candidate>, String> {
-    let guess = renome_core::tmdb::Guess {
-        title,
-        year,
-        id: None,
+    let client = tmdb::Client::new(&key, &lang);
+    // A link or id pasted: that movie.
+    let id = match links::parse(&title) {
+        Some(Link::Tmdb { tv: true, .. }) => return Err("linkOther".into()),
+        Some(Link::Tmdb { id, .. }) => Some(id),
+        Some(Link::Imdb(tt)) => Some(client.find_imdb(&tt, false).await.ok_or("linkNotFound")?),
+        Some(_) => return Err("linkOther".into()),
+        None => None,
     };
-    Ok(tmdb::Client::new(&key, &lang).search(&guess).await?.0)
+    let guess = renome_core::tmdb::Guess { title, year, id };
+    Ok(client.search(&guess).await?.0)
 }
 
 /// Finds a show by what the user typed (a name, a TMDB id or link), or by
@@ -908,7 +914,19 @@ async fn tv_search(
     query: String,
     items: Vec<tmdb::TvItem>,
 ) -> Result<tmdb::ShowSearch, String> {
-    tmdb::search_show(&tmdb::Client::new(&key, &lang), &query, &items).await
+    let client = tmdb::Client::new(&key, &lang);
+    // An IMDb id pasted: the show it names.
+    let query = match links::parse(&query) {
+        Some(Link::Imdb(tt)) => client
+            .find_imdb(&tt, true)
+            .await
+            .ok_or("linkNotFound")?
+            .to_string(),
+        Some(Link::Tmdb { tv: true, .. }) | None => query,
+        Some(_) if query.contains("tmdbid") => query,
+        Some(_) => return Err("linkOther".into()),
+    };
+    tmdb::search_show(&client, &query, &items).await
 }
 
 /// Fetches a show's episodes and finds each file's episode.
@@ -1130,6 +1148,20 @@ async fn mb_search(
     discogs: Option<bool>,
 ) -> Result<Vec<renome_core::musicbrainz::Candidate>, String> {
     let state = app.state::<AppState>();
+    // A link pasted: that release.
+    match links::parse(&query.album) {
+        Some(Link::MusicBrainz(id)) => {
+            let r = state.mb.release(&id).await?;
+            return Ok(vec![renome_core::musicbrainz::summary(&r, 1.0)]);
+        }
+        Some(Link::Discogs(id)) => {
+            let id = format!("{}{id}", renome_core::discogs::PREFIX);
+            let r = state.dg.release(&id).await?;
+            return Ok(vec![renome_core::musicbrainz::summary(&r, 1.0)]);
+        }
+        Some(_) => return Err("linkOther".into()),
+        None => {}
+    }
     if discogs == Some(true) {
         state.dg.search(&query).await
     } else {
@@ -1356,6 +1388,10 @@ struct InsideJob {
     /// The book's language as Open Library gives it.
     #[serde(default)]
     language: String,
+    /// The comic's `ComicInfo.xml` is cleared: written with only `comic`'s
+    /// details, or (without `comic`) taken out.
+    #[serde(default)]
+    fresh: bool,
     /// Converts the comic to CBZ first (with `comic`'s details in it, when
     /// given), its original kept beside or sent to the trash.
     #[serde(default)]
@@ -1393,10 +1429,11 @@ async fn write_inside(
             let ok = match (&j.convert, &j.comic, &j.book) {
                 (Some(_), _, _) => true,
                 (_, Some(_), _) => inside::comic_writable(&j.path),
+                (_, _, None) if j.fresh => inside::comic_writable(&j.path),
                 (_, _, Some(_)) => inside::book_writable(&j.path),
                 _ => false,
             };
-            if !ok && (j.comic.is_some() || j.book.is_some()) {
+            if !ok && (j.comic.is_some() || j.book.is_some() || j.fresh) {
                 let why = if j.comic.is_some() {
                     "comicUnsupported"
                 } else {
@@ -1447,11 +1484,14 @@ async fn write_inside(
                         (Some(d.backup), d.not_trashed)
                     })
                 }
-                (_, Some(_), _) => inside::write_comic(&path, &values(), &store).map(|b| (b, None)),
+                (_, Some(_), _) => {
+                    inside::write_comic_with(&path, &values(), job.fresh, &store).map(|b| (b, None))
+                }
                 (_, _, Some(b)) => {
                     inside::write_book(&path, &inside::book_values(b, &job.language), &store)
                         .map(|b| (b, None))
                 }
+                _ if job.fresh => inside::remove_comic(&path, &store).map(|b| (b, None)),
                 _ => Ok((None, None)),
             }
         })
@@ -1569,6 +1609,10 @@ async fn book_search(
     title: String,
     author: String,
 ) -> Result<Vec<renome_core::books::Candidate>, String> {
+    // An ISBN or a link pasted: that book.
+    if let Some(link) = links::parse(&title) {
+        return app.state::<AppState>().ol.by_link(&link, &lang).await;
+    }
     let guess = renome_core::books::Guess {
         title,
         author,
@@ -1621,6 +1665,8 @@ async fn gcd_check(app: AppHandle, email: String, password: String) -> Result<()
 /// `mangadex`, `anilist`, `mangaupdates`), from a year and by a publisher
 /// when given (the manga catalogues are not searched by publisher), best
 /// first. `key` is Comic Vine's key or Metron's token.
+// The command's arguments are what the window sends, each by name.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 async fn comic_search(
     app: AppHandle,
@@ -1630,16 +1676,49 @@ async fn comic_search(
     year: Option<u16>,
     publisher: String,
     lang: String,
+    skip: Option<String>,
 ) -> Result<Vec<renome_core::comics::Volume>, String> {
     let state = app.state::<AppState>();
-    match source.as_str() {
+    // A link pasted: that series, from the catalogue the rule uses.
+    if let Some(link) = links::parse(&query) {
+        let ours = if source.is_empty() {
+            "gcd"
+        } else {
+            source.as_str()
+        };
+        if link.comic_source() != Some(ours) {
+            return Err("linkOther".into());
+        }
+        let v = match link {
+            Link::ComicVine { issue, id } => {
+                let id = match issue {
+                    true => state.cv.volume_of(&key, &id).await?,
+                    false => id,
+                };
+                state.cv.issues(&key, &id).await?.0
+            }
+            Link::Metron(id) => state.mt.issues(&key, &id).await?.0,
+            Link::Gcd(id) => state.gcd.issues(&id).await?.0,
+            Link::MangaDex(id) => state.md.series(&id, &lang).await?,
+            Link::AniList { id, .. } => state.al.manga(id).await?,
+            Link::MangaUpdates(id) => state.mu.series(&id, "").await?,
+            _ => return Err("linkOther".into()),
+        };
+        return Ok(vec![v]);
+    }
+    let found = match source.as_str() {
         "comicvine" => state.cv.search(&key, &query, year, &publisher, &lang).await,
         "metron" => state.mt.search(&key, &query, year, &publisher, &lang).await,
         "mangadex" => state.md.search(&query, year, &lang).await,
         "anilist" => state.al.search(&query, year).await,
         "mangaupdates" => state.mu.search(&query, year).await,
         _ => state.gcd.search(&query, year, &publisher, &lang).await,
-    }
+    }?;
+    // The publishers the rule leaves out.
+    Ok(renome_core::comics::skip_publishers(
+        found,
+        skip.as_deref().unwrap_or_default(),
+    ))
 }
 
 /// A series and its issues, and the issue each comic is (by its number).

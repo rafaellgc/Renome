@@ -360,6 +360,16 @@ pub fn comic_differs(m: &ComicMatch, info: Option<&ComicInfo>) -> bool {
 /// it is one) are kept but for those `values` change, all in the schema's
 /// order. `None` when `old` already has them all.
 pub fn comic_xml(old: Option<&str>, values: &[(&'static str, String)]) -> Option<String> {
+    comic_xml_with(old, values, false)
+}
+
+/// Like [`comic_xml`]; `fresh`: of `old`, only the list of pages (which
+/// tells readers the cover and double pages) is kept.
+pub fn comic_xml_with(
+    old: Option<&str>,
+    values: &[(&'static str, String)],
+    fresh: bool,
+) -> Option<String> {
     let old = old.map(|o| o.trim_start_matches('\u{feff}'));
     let doc = old.and_then(|o| roxmltree::Document::parse(o).ok());
     let root = doc
@@ -375,6 +385,12 @@ pub fn comic_xml(old: Option<&str>, values: &[(&'static str, String)]) -> Option
             .collect(),
         _ => Vec::new(),
     };
+    let before = children.len();
+    if fresh {
+        children.retain(|(n, _)| {
+            n.eq_ignore_ascii_case("Pages") || values.iter().any(|(v, _)| v.eq_ignore_ascii_case(n))
+        });
+    }
     let current = |name: &str, children: &[(String, String)]| -> Option<String> {
         let (_, raw) = children
             .iter()
@@ -384,7 +400,7 @@ pub fn comic_xml(old: Option<&str>, values: &[(&'static str, String)]) -> Option
             d.root_element().text().unwrap_or_default().trim(),
         ))
     };
-    let mut changed = root.is_none();
+    let mut changed = root.is_none() || children.len() != before;
     for (name, value) in values {
         if current(name, &children).as_deref() == Some(value.as_str()) {
             continue;
@@ -430,9 +446,11 @@ pub fn write_comic(
     values: &[(&'static str, String)],
     store: &Path,
 ) -> Result<Option<Backup>, String> {
-    if !comic_writable(path) {
-        return Err("comicUnsupported".into());
-    }
+    write_comic_with(path, values, false, store)
+}
+
+/// The comic's `ComicInfo.xml` (its name in the archive) and text.
+fn comic_entry(path: &Path) -> Result<(Option<String>, Option<String>), String> {
     let mut zip = open(path)?;
     let all = names(&zip);
     // The one a reader takes: at the root first.
@@ -451,12 +469,53 @@ pub fn write_comic(
         Some(n) => Some(read_text(&mut zip, n)?),
         None => None,
     };
-    drop(zip);
-    let Some(new) = comic_xml(old.as_deref(), values) else {
+    Ok((found, old))
+}
+
+/// Like [`write_comic`]; `fresh`: what the `ComicInfo.xml` had goes (but
+/// its list of pages), so only `values` are left.
+pub fn write_comic_with(
+    path: &Path,
+    values: &[(&'static str, String)],
+    fresh: bool,
+    store: &Path,
+) -> Result<Option<Backup>, String> {
+    if !comic_writable(path) {
+        return Err("comicUnsupported".into());
+    }
+    let (found, old) = comic_entry(path)?;
+    let Some(new) = comic_xml_with(old.as_deref(), values, fresh) else {
         return Ok(None);
     };
     let name = found.unwrap_or_else(|| INFO.to_string());
     write_entry(path, &name, old.as_deref(), &new, store).map(Some)
+}
+
+/// Takes the `ComicInfo.xml` out of a CBZ, kept for undo. `None` when it
+/// has none.
+pub fn remove_comic(path: &Path, store: &Path) -> Result<Option<Backup>, String> {
+    if !comic_writable(path) {
+        return Err("comicUnsupported".into());
+    }
+    let (Some(name), Some(old)) = comic_entry(path)? else {
+        return Ok(None);
+    };
+    let kept = keep(&old, store)?;
+    rewrite(path, &name, None)?;
+    Ok(Some(Backup {
+        path: path.to_path_buf(),
+        fields: Vec::new(),
+        pictures: None,
+        cleaned: false,
+        removed: Vec::new(),
+        raw: Vec::new(),
+        kept_text: Vec::new(),
+        converted: None,
+        entry: Some(Entry {
+            name,
+            old: Some(kept),
+        }),
+    }))
 }
 
 // ---------------------------------------------------------------- books
@@ -1101,6 +1160,37 @@ mod tests {
         assert_eq!(entry_of(&cbz, INFO), None);
         crate::tagwrite::restore(&b, &store).unwrap();
         assert_eq!(entry_of(&cbz, "sub/comicinfo.xml").unwrap(), old);
+    }
+
+    #[test]
+    fn comic_info_cleared_or_removed() {
+        let old = "<ComicInfo><Summary>Lixo de outro programa.</Summary><Pages><Page Image=\"0\" Type=\"FrontCover\"/></Pages><Series>Velha</Series></ComicInfo>";
+        let x = comic_xml_with(Some(old), &comic_values(&comic(), "", false), true).unwrap();
+        assert!(!x.contains("Lixo") && !x.contains("Velha"));
+        assert!(x.contains("FrontCover") && x.contains("Lanterna"));
+        // Nothing but the pages left, already: nothing to do.
+        assert_eq!(
+            comic_xml_with(Some(&x), &comic_values(&comic(), "", false), true),
+            None
+        );
+
+        let d = tempfile::tempdir().unwrap();
+        let store = d.path().join("store");
+        let cbz = d.path().join("a.cbz");
+        zip_with(
+            &cbz,
+            &[
+                ("01.jpg", b"x", true),
+                ("ComicInfo.xml", old.as_bytes(), false),
+            ],
+            "",
+        );
+        let b = remove_comic(&cbz, &store).unwrap().unwrap();
+        assert_eq!(entry_of(&cbz, INFO), None);
+        assert_eq!(names(&open(&cbz).unwrap()), vec!["01.jpg"]);
+        assert_eq!(remove_comic(&cbz, &store).unwrap(), None);
+        crate::tagwrite::restore(&b, &store).unwrap();
+        assert_eq!(entry_of(&cbz, INFO).unwrap(), old);
     }
 
     #[test]

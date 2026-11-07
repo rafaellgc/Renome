@@ -99,7 +99,7 @@
 
     <form class="search" onsubmit={search}>
       <span class="muted">{t("reviewGuess")}</span>
-      <input class="title" bind:value={title} placeholder={t("reviewTitleField")} spellcheck="false" />
+      <input class="title" bind:value={title} placeholder={t("reviewTitleField")} title={t("linkHintMovie")} spellcheck="false" />
       <input class="year" bind:value={year} oninput={() => (year = year.replace(/\D/g, ""))} placeholder={t("reviewYear")} inputmode="numeric" maxlength="4" />
       <button type="submit" disabled={searching}>{t("reviewSearch")}</button>
     </form>

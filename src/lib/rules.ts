@@ -153,7 +153,7 @@ export function newRule(type: RuleType): Rule {
     }
     case "comic": {
       const [template, folderTemplate] = COMIC_TEMPLATE[settings.lang];
-      return { type, template, colon: " - ", series: "", source: "gcd", folders: false, folderTemplate, byFolder: false, writeInfo: false, convert: false, original: "keep", drawPages: true, pageSize: 2400, missing: true, barcode: false };
+      return { type, template, colon: " - ", series: "", source: "gcd", folders: false, folderTemplate, byFolder: false, writeInfo: false, cleanInfo: false, convert: false, original: "keep", drawPages: true, pageSize: 2400, missing: true, barcode: false, skipPublishers: "" };
     }
   }
 }

@@ -171,6 +171,39 @@ impl Client {
         Ok(ranked)
     }
 
+    /// A manga by its id (a link pasted into the search).
+    pub async fn series(&self, id: &str, lang: &str) -> Result<Volume, String> {
+        let question = format!("one {id}");
+        let v = match crate::kept::<Value>("mangadex", &question) {
+            Some(v) => v,
+            None => {
+                let mut last = self.last.lock().await;
+                if let Some(t) = *last {
+                    tokio::time::sleep(Duration::from_millis(500).saturating_sub(t.elapsed()))
+                        .await;
+                }
+                let res = self
+                    .http
+                    .get(format!("{}/manga/{id}", api_base()))
+                    .query(&[("includes[]", "cover_art"), ("includes[]", "author")])
+                    .send()
+                    .await;
+                *last = Some(Instant::now());
+                drop(last);
+                let res = res.map_err(net_error)?;
+                match res.status().as_u16() {
+                    200 => {}
+                    400 | 404 => return Err("linkNotFound".into()),
+                    429 => return Err("mdBusy".into()),
+                    code => return Err(format!("mdNetwork: HTTP {code}")),
+                }
+                let body = res.bytes().await.map_err(net_error)?;
+                crate::keep("mangadex", &question, &body).map_err(|e| format!("mdNetwork: {e}"))?
+            }
+        };
+        Ok(volume(&v["data"], lang))
+    }
+
     /// The covers of a manga's volume `volume` (one a language, often),
     /// by address. Every cover of the manga is asked once a session.
     pub async fn volume_covers(&self, id: &str, volume: u32) -> Result<Vec<String>, String> {

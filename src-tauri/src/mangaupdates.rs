@@ -288,3 +288,62 @@ mod live {
         });
     }
 }
+
+/// Pasted links fetched from the real services (`RENOME_LIVE=1`), those
+/// that need no key.
+#[cfg(test)]
+mod live_links {
+    use renome_core::links::{Link, parse};
+
+    #[test]
+    fn real_links() {
+        if std::env::var("RENOME_LIVE").is_err() {
+            return;
+        }
+        tauri::async_runtime::block_on(async {
+            let Some(Link::MangaUpdates(id)) =
+                parse("https://www.mangaupdates.com/series/pb8uwds/one-piece")
+            else {
+                panic!()
+            };
+            let v = crate::mangaupdates::Client::default()
+                .series(&id, "")
+                .await
+                .unwrap();
+            println!("mangaupdates: {} {:?} {}", v.name, v.start_year, v.count);
+            let al = crate::anilist::Client::default();
+            let v = al.manga(30013).await.unwrap();
+            println!("anilist manga: {} {:?} {}", v.name, v.start_year, v.writer);
+            println!("anilist bad: {:?}", al.manga(999_999_999).await.err());
+            let md = crate::mangadex::Client::default();
+            let v = md
+                .series("a1c7c817-4e59-43b7-9365-09675a149a6f", "pt-BR")
+                .await
+                .unwrap();
+            println!("mangadex: {} {:?} {}", v.name, v.start_year, v.writer);
+            let ol = crate::openlibrary::Client::default();
+            for l in [
+                "https://openlibrary.org/works/OL45804W",
+                "https://openlibrary.org/books/OL7353617M",
+                "978-0-14-032872-1",
+            ] {
+                let c = ol.by_link(&parse(l).unwrap(), "pt-BR").await.unwrap();
+                let c = &c[0];
+                println!(
+                    "openlibrary {l}: {} / {:?} / {} / {}",
+                    c.title, c.authors, c.edition, c.isbn
+                );
+            }
+            let mb = crate::musicbrainz::Client::default();
+            let r = mb
+                .release("b84ee12a-09ef-421b-82de-0441a926375b")
+                .await
+                .unwrap();
+            let c = renome_core::musicbrainz::summary(&r, 1.0);
+            println!(
+                "musicbrainz: {} - {} {} {}",
+                c.artist, c.title, c.date, c.tracks
+            );
+        });
+    }
+}

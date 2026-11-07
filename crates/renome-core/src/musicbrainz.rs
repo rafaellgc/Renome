@@ -301,7 +301,7 @@ fn year_of(date: &Option<String>) -> Option<u16> {
     date.as_deref()?.get(..4)?.parse().ok()
 }
 
-fn summary(r: &Release, score: f64) -> Candidate {
+pub fn summary(r: &Release, score: f64) -> Candidate {
     let mut formats: Vec<String> = r.media.iter().filter_map(|m| m.format.clone()).collect();
     formats.dedup();
     let format = match formats.as_slice() {

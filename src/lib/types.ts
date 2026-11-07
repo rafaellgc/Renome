@@ -44,7 +44,7 @@ export type Rule =
       folders: boolean; folderTemplate: string; cover: boolean; playlist: boolean; listen: boolean; writeTags: boolean; embedCover: boolean; coverSize: number; cleanTags: boolean; missing: boolean;
     }
   | { type: "book"; template: string; colon: string; folders: boolean; folderTemplate: string; cover: boolean; opf: boolean; writeEpub?: boolean; missing: boolean }
-  | { type: "comic"; template: string; colon: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; byFolder: boolean; writeInfo?: boolean; convert?: boolean; original?: "keep" | "delete"; drawPages?: boolean; pageSize?: number; missing: boolean; barcode?: boolean }
+  | { type: "comic"; template: string; colon: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; byFolder: boolean; writeInfo?: boolean; cleanInfo?: boolean; convert?: boolean; original?: "keep" | "delete"; drawPages?: boolean; pageSize?: number; missing: boolean; barcode?: boolean; skipPublishers?: string }
   | {
       type: "photo"; template: string; fromName: boolean; modified: boolean; shiftHours: number;
       folders: boolean; folderTemplate: string; setModified: boolean;

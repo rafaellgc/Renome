@@ -101,7 +101,7 @@ before it is read. The preview sends that name to the app
 | TV show (TMDB, AniList) | the source (TMDB, or AniList for anime); the show (name, TMDB or AniList id or link; empty: from the files); template with `{show}`, `{original}`, `{year}`, `{season}`, `{episode}`, `{title}`, `{id}`, `{resolution}`, `{video codec}` (as for movies, see 2.1; not in the show folder) (default `{show} ({year}) - S{season}E{episode} - {title}`); what `:` becomes; show and season folders (show folder template, default `{show} ({year}) [tmdbid-{id}]`); save `.nfo` files and images (optionally fanart and logo); show the missing episodes. See 2.2 |
 | Music (tags) | template with `{track}`, `{title}`, `{artist}`, `{album artist}`, `{album}`, `{year}`, `{disc}`, `{genre}`, `{composer}`, `{total tracks}`, `{total discs}`, `{original year}`, `{label}`, `{catalog}`, `{artist sort}`, `{album artist sort}`, `{initial}`, `{format}`, `{bitrate}`, `{sample rate}`, `{bits}` (default `{track} - {title}`); what `:` becomes; disc number in the track on multi-disc albums; fill in from the file name; artist and album folders (default `{album artist}/{album} ({year})`); show the missing tracks. See 2.3 |
 | Book (Open Library) | template with `{author}`, `{authors}`, `{author sort}`, `{initial}`, `{title}`, `{original}`, `{year}`, `{edition year}`, `{publisher}`, `{isbn}`, `{series}`, `{volume}`, `{id}` (default `{author} - {title} ({year})`); what `:` becomes; author and book folders (default `{author}/{title}`); save the cover and `metadata.opf`; write the details inside EPUBs; show the series' missing volumes. See 2.4 |
-| Comic (ComicInfo.xml, GCD, Metron, Comic Vine, MangaDex, AniList, MangaUpdates) | template with `{series}`, `{series year}`, `{number}`, `{volume}`, `{chapter}`, `{title}`, `{year}`, `{count}`, `{publisher}`, `{writer}`, `{artist}`, `{id}` (default `{series} v{volume} #{number} c{chapter} - {title} ({year})`); what `:` becomes; the series (empty: from the files); the catalogue; series folders (default `{series} ({series year})`); series from the folder; write `ComicInfo.xml` into CBZs; convert CBR, CB7, CBT and PDF to CBZ (the original kept beside or deleted); show the missing issues. See 2.5 |
+| Comic (ComicInfo.xml, GCD, Metron, Comic Vine, MangaDex, AniList, MangaUpdates) | template with `{series}`, `{series year}`, `{number}`, `{volume}`, `{chapter}`, `{title}`, `{year}`, `{count}`, `{publisher}`, `{writer}`, `{artist}`, `{id}` (default `{series} v{volume} #{number} c{chapter} - {title} ({year})`); what `:` becomes; the series (empty: from the files); the catalogue; series folders (default `{series} ({series year})`); series from the folder; write `ComicInfo.xml` into CBZs (or clear it); publishers to leave out; details typed by hand; convert CBR, CB7, CBT and PDF to CBZ (the original kept beside or deleted); show the missing issues. See 2.5 |
 
 Positions count **visible characters** (Unicode graphemes), starting at 1.
 
@@ -988,7 +988,10 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   read).
 - The file name is read for what that lacks: release notes in brackets
   are dropped (a year among them is the issue's, `(of N)` the count),
-  dots and underscores stand for spaces (not in `12.1`), then a chapter
+  dots and underscores stand for spaces (not in `12.1`); a name with no
+  spaces left is split where a capital follows a small letter (not after
+  `Mc`/`Mac` or a single first small letter) and where a digit follows a
+  word of 3+ letters (`split_joined`; `v2`, `t03`, `c2c` stay), then a chapter
   (`Ch.`, `Cap.`, `Chapter`, `c045`), a volume (`v2`, `Vol.`, `Volume`,
   `Tome`, `Tomo`, `T05`, `Book`, `Livro`), an issue number (`#12`, `#12.1`,
   `nº`, `No.`, `Issue`, `Edição`), else the last bare number that is not
@@ -1077,7 +1080,11 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   its publisher (part of the name, case and accents ignored; not on
   the manga catalogues; on Metron only when its list tells publishers; one of the names typed, split at `;`, `/` or `,`, holds the
   catalogue's whole words or is part of it: `Titan Comics` finds
-  `Titan`); a progress bar shows while it searches. The GCD asks the
+  `Titan`); a progress bar shows while it searches. The rule's
+  "Publishers to leave out" (`skipPublishers`, same matching) drops their
+  series from every search, automatic or in the picker
+  (`comics::skip_publishers`); a pasted link is not filtered; series
+  without a publisher (MangaDex, AniList) always stay. The GCD asks the
   name as typed and without its punctuation (`:`, `,`, `;`, `.`, `!`,
   `?`, dashes; hyphens stay); with a year, it asks the name's longest word
   from that year instead (`/series/name/<word>/year/<year>/`), which
@@ -1177,6 +1184,27 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   rows count (in the Rename button) when their `ComicInfo.xml` (or other
   details read, see "What is already there") says something else
   (`retag`). A `MetronInfo.xml` is never updated.
+- "Edit the details (N selected)" (`ComicEdit.svelte`): for the comics
+  selected in the list, a window with series, series year, volume,
+  number, title, year, publisher, writer and artist, prefilled from the
+  current match, else the file's own reading (`comic_guesses`); with
+  several, a field with different values shows empty ("(several)") and
+  only the fields typed in are applied to all. The result goes into
+  `comicEdits` (per path, for the session), which override the catalogue
+  matches in `view.comics` (naming, `retag`); changing series or number
+  clears the catalogue id. With "Write the details" they are written to
+  `ComicInfo.xml` with no Web address and not as manga. Clear and removing
+  files forget them; Ctrl+Z after those brings them back with the rest.
+- "Remove the ComicInfo.xml from CBZ files" (`cleanInfo`, off by
+  default; core `clean_info` marks such rows `junk`): without "Write the
+  details", after renaming, the `ComicInfo.xml` of each CBZ of the rule
+  that has details is taken out (`inside::remove_comic`, kept in the
+  history's folder; undo puts it back); unchanged rows count in the
+  Rename button. With "Write the details" it reads "Write from scratch":
+  a matched CBZ's `ComicInfo.xml` keeps only the elements written and its
+  `Pages` (`comic_xml_with(fresh)`); unmatched ones are left alone (their
+  details name them). Only `ComicInfo.xml` goes (`MetronInfo.xml` and the
+  zip comment stay); a comic converted to CBZ is not cleared.
 - "Convert CBR, CB7, CBT, PDF, EPUB, MOBI/AZW3 and picture folders to CBZ"
   (off by default), with "The
   original file": keep beside (default) or delete; "PDF pages that are
@@ -1434,6 +1462,22 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   there: the request under way finishes, what was found is kept, the
   files not reached are left as they were (searching again goes on with
   them), and a note says the search was stopped.
+- Pasted links (`links.rs`): the search field of each choice window also
+  takes the item's page in its catalogue, and then fetches that one item
+  instead of searching by name. Movie: TMDB movie link, `tmdbid-N`, IMDb
+  link or `tt…` (TMDB `/find`). TV show: TMDB id or link, IMDb link or
+  `tt…`, AniList id or link. Book (title field): an ISBN alone (10 or 13
+  digits, dashes, spaces, an `ISBN` prefix; looked up like a file's
+  ISBN), an Open Library work (`OL…W`, search `key:"/works/…"`) or
+  edition (`OL…M`, search `edition_key:`). Album (album field): a
+  MusicBrainz release or a Discogs release (needs the token). Comic
+  series: a link in the catalogue the rule uses: Comic Vine volume
+  (`4050-N`) or issue (`4000-N`, its volume), Metron series by number
+  (`metron.cloud/series/N`; links by slug are not read), GCD series,
+  MangaDex title, AniList manga, MangaUpdates series (the site's base-36
+  id turned into the API's number). A link from another catalogue gives
+  "not from the catalogue used here"; a number alone stays a title
+  (except in the TV show field, where it is a TMDB or AniList id).
 
 ### Identical copies
 

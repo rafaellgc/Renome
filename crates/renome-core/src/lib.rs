@@ -40,6 +40,7 @@ pub mod fingerprint;
 pub mod identical;
 pub mod inside;
 pub mod kind;
+pub mod links;
 pub mod music;
 pub mod musicbrainz;
 pub(crate) mod pages;

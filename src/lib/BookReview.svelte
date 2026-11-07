@@ -130,7 +130,7 @@
 
     <form class="search" onsubmit={search}>
       <span class="muted">{t("reviewGuess")}</span>
-      <input class="title" bind:value={title} placeholder={t("reviewTitleField")} spellcheck="false" />
+      <input class="title" bind:value={title} placeholder={t("reviewTitleField")} title={t("linkHintBook")} spellcheck="false" />
       <button type="button" class="icon" title={t("bookSwap")} aria-label={t("bookSwap")} onclick={() => ([title, author] = [author, title])}>⇄</button>
       <input class="author" bind:value={author} placeholder={t("bookAuthorField")} spellcheck="false" />
       <button type="submit" disabled={searching}>{t("reviewSearch")}</button>

@@ -36,6 +36,8 @@
       none: number;
       onsearch: () => void;
       onreview: () => void;
+      /** Comic rule: details typed in for the comics chosen in the list. */
+      edit?: { n: number; typed: number; onclick: () => void };
     };
     /** Movie and series rules: the subtitles' search state and actions. */
     subs?: {
@@ -404,7 +406,10 @@
         <label class="colon">{t("colonLabel")} <input class="mono sep" bind:value={r.colon} spellcheck="false" /></label>
         <label class="check"><input type="checkbox" bind:checked={r.byFolder} /> <span>{t("comicByFolder")}<small>{t("comicByFolderHint")}</small></span></label>
         <label class="check"><input type="checkbox" bind:checked={r.folders} /> <span>{t("comicFolders")}<small>{t("comicFoldersHint")}</small></span></label>
+        <label>{t("comicSkipPublishers")} <input bind:value={r.skipPublishers} placeholder={t("comicSkipPublishersPlaceholder")} spellcheck="false" /></label>
+        <p class="hint">{t("comicSkipPublishersHint")}</p>
         <label class="check"><input type="checkbox" bind:checked={r.writeInfo} /> <span>{t("comicWriteInfo")}<small>{t("comicWriteInfoHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.cleanInfo} /> <span>{t(r.writeInfo ? "comicCleanInfoWrite" : "comicCleanInfo")}<small>{t(r.writeInfo ? "comicCleanInfoWriteHint" : "comicCleanInfoHint")}</small></span></label>
         <label class="check"><input type="checkbox" bind:checked={r.convert} /> <span>{t("comicConvert")}<small>{t("comicConvertHint")}</small></span></label>
         {#if r.convert}
           <label class="sub">{t("comicOriginal")}
@@ -450,6 +455,12 @@
         <label>{t("comicSeries")} <input bind:value={r.series} placeholder={t("comicSeriesPlaceholder")} spellcheck="false" /></label>
         {#if lookup?.show}<p class="hint">{t("seriesCurrent", { show: lookup.show })}</p>{/if}
         {@render actions(t("comicSearch"), "comicSummary")}
+        {#if lookup?.edit}
+          <div class="movie-actions">
+            <button disabled={!lookup.edit.n || !!lookup.progress} onclick={lookup.edit.onclick}>{t("comicEditButton", { n: lookup.edit.n })}</button>
+          </div>
+          <p class="hint">{t("comicEditButtonHint")}{lookup.edit.typed ? ` ${t("comicEditTypedN", { n: lookup.edit.typed })}` : ""}</p>
+        {/if}
       {/if}
 
       {#if summary}<p class="hint">{summary}</p>{/if}

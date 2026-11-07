@@ -743,7 +743,9 @@ mod tests {
     fn the_cache_is_kept_in_a_file() {
         let dir = tempfile::tempdir().unwrap();
         // A tab in the name tests the cache's line format; Windows refuses it.
-        let pic = dir.path().join(if cfg!(windows) { "a b.png" } else { "a\tb.png" });
+        let pic = dir
+            .path()
+            .join(if cfg!(windows) { "a b.png" } else { "a\tb.png" });
         std::fs::write(&pic, encode(&scene(200, 150, 4), ImageFormat::Png)).unwrap();
         let flat = dir.path().join("flat.png");
         let grey: RgbImage = ImageBuffer::from_pixel(50, 50, Rgb([9, 9, 9]));

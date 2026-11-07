@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use futures_util::{StreamExt, stream};
 use renome_core::books::{self, AuthorPage, BookMatch, Candidate, Guess, Query, SearchPage, Work};
 use renome_core::ebook;
+use renome_core::links::Link;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
@@ -292,6 +293,34 @@ impl Client {
             }
         }
         Ok(best)
+    }
+
+    /// The book a pasted ISBN or Open Library link names.
+    pub async fn by_link(&self, link: &Link, lang: &str) -> Result<Vec<Candidate>, String> {
+        let q = match link {
+            Link::Isbn(i) => {
+                let g = Guess {
+                    isbns: vec![i.clone()],
+                    from_file: true,
+                    ..Default::default()
+                };
+                return Ok(self.find(&g, lang).await?.0);
+            }
+            Link::OpenLibrary(id) if id.ends_with('W') => format!("key:\"/works/{id}\""),
+            Link::OpenLibrary(id) => format!("edition_key:{id}"),
+            _ => return Err("linkOther".into()),
+        };
+        let page = self.search(&Query::Text(q), lang).await?;
+        let Some(first) = page.docs.first() else {
+            return Err("linkNotFound".into());
+        };
+        // Its own title, so the ranking keeps it.
+        let g = Guess {
+            title: first.title.clone(),
+            from_file: true,
+            ..Default::default()
+        };
+        Ok(books::rank(&g, page.docs, None, lang).0)
     }
 
     pub async fn work(&self, id: &str) -> Result<Work, String> {

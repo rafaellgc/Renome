@@ -149,7 +149,8 @@ pub struct PreviewItem {
     /// music rule can write them), or a CBZ matched to an issue its
     /// `ComicInfo.xml` does not tell (the comic rule can write it).
     pub retag: bool,
-    /// A matched song with tags that cleaning would take away.
+    /// A matched song with tags that cleaning would take away, or a CBZ
+    /// with details the comic rule clears.
     pub junk: bool,
     /// A comic the comic rule converts to CBZ (a RAR, 7z or tar inside, or
     /// a PDF; see [`crate::convert`]), named `.cbz` here.
@@ -1110,6 +1111,7 @@ pub fn preview(
 
     let music = pipeline.music();
     let converts = pipeline.converts_comics();
+    let cleans = pipeline.cleans_comic_info();
     // Songs' tags, with the album-wide fields agreed across each album.
     let songs: HashMap<&Path, AudioTags> = match music {
         None => HashMap::new(),
@@ -1408,7 +1410,9 @@ pub fn preview(
                     file.ext.eq_ignore_ascii_case("cbz")
                         && crate::inside::comic_differs(m, file.comic_info())
                 });
-            let junk = matched.is_some() && own.junk;
+            // A CBZ whose `ComicInfo.xml` the comic rule clears.
+            let junk = (matched.is_some() && own.junk)
+                || (cleans && file.ext.eq_ignore_ascii_case("cbz") && file.comic_info().is_some());
             let convert = converts.is_some_and(|draw| crate::rules::converts(file, draw));
             let drawn = convert
                 .then(|| file.convert_check())
@@ -3388,6 +3392,7 @@ mod tests {
                     convert,
                     draw_pages: true,
                     page_size: 2400,
+                    clean_info: false,
                 },
             }]
         };
@@ -3457,6 +3462,7 @@ mod tests {
                 convert: false,
                 draw_pages: true,
                 page_size: 2400,
+                clean_info: false,
             },
         }];
         let p = preview(&files, &steps, &HashMap::new(), &view);

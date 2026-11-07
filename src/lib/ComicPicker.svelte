@@ -9,6 +9,7 @@
 
   let {
     source,
+    skip = "",
     query: initial,
     files,
     highest,
@@ -18,6 +19,8 @@
     onpick,
   }: {
     source: ComicSource;
+    /** Publishers the rule leaves out. */
+    skip?: string;
     /** What was searched for. */
     query: string;
     /** How many files are of this series. */
@@ -50,7 +53,7 @@
     const y = Number.parseInt(year, 10);
     try {
       const lang = settings.lang === "pt" ? "pt-br" : settings.lang;
-      const found = await api.comicSearch(source, comicKey(source), query.trim(), lang, y >= 1800 && y <= 2200 ? y : null, publisher.trim());
+      const found = await api.comicSearch(source, comicKey(source), query.trim(), lang, y >= 1800 && y <= 2200 ? y : null, publisher.trim(), skip);
       candidates = byFit(found, highest);
       if (own) compareCovers(candidates);
     } catch (err) {
@@ -161,7 +164,7 @@
     </header>
 
     <form class="search" onsubmit={search}>
-      <input bind:value={query} placeholder={t("comicSeriesPlaceholder")} spellcheck="false" />
+      <input bind:value={query} placeholder={t("comicSeriesPlaceholder")} title={t("linkHintComic")} spellcheck="false" />
       <input class="year" bind:value={year} oninput={() => (year = year.replace(/\D/g, ""))} inputmode="numeric" maxlength="4" placeholder={t("comicPickYear")} title={t("comicPickYearHint")} />
       {#if !seriesOnly(source)}
         <input class="publisher" bind:value={publisher} placeholder={t("comicPickPublisher")} title={t(source === "gcd" ? "comicPickPublisherGcd" : "comicPickPublisherHint")} spellcheck="false" />

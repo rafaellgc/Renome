@@ -671,6 +671,9 @@ pub fn parse_name(stem: &str, folder: &str) -> ComicGuess {
             })
             .collect();
     }
+    if !s.contains(' ') {
+        s = split_joined(&s);
+    }
     // What is in brackets: the year, the count, or release notes.
     for c in BRACKETS.captures_iter(&s.clone()) {
         let inner = c
@@ -823,6 +826,38 @@ pub fn parse_name(stem: &str, folder: &str) -> ComicGuess {
         g.volume = f.volume;
     }
     g
+}
+
+/// A name written with no spaces (`TheAmazingHero012(2016)`) with spaces
+/// where a capital follows a small letter and where a number follows a
+/// word (`The Amazing Hero 012(2016)`). `Mc`/`Mac` names (`McLane`) and a
+/// first small letter (`iHero`) stay joined; a letter or two before a
+/// number (`v2`, `t03`, `c2c`) too.
+fn split_joined(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len() + 8);
+    // Letters since the last thing that was not one.
+    let mut run = 0;
+    for (i, &c) in chars.iter().enumerate() {
+        if i > 0 {
+            let prev = chars[i - 1];
+            let word: String = chars[i - run..i].iter().collect();
+            let camel = prev.is_lowercase()
+                && c.is_uppercase()
+                && run > 1
+                && !matches!(word.as_str(), "Mc" | "Mac");
+            let number = prev.is_alphabetic() && c.is_ascii_digit() && run > 2;
+            if camel || number {
+                out.push(' ');
+                if camel {
+                    run = 0;
+                }
+            }
+        }
+        run = if c.is_alphabetic() { run + 1 } else { 0 };
+        out.push(c);
+    }
+    out
 }
 
 /// Letters that look like a colon, put in names instead of `:` (which
@@ -1472,31 +1507,50 @@ pub fn longest_word(query: &str) -> String {
 /// of the names typed (`Heroic Signatures; Titan Comics`) holds the
 /// catalogue's (`Titan`), or is part of it; case and accents ignored.
 pub fn filter_volumes(found: Vec<Volume>, year: Option<u16>, publisher: &str) -> Vec<Volume> {
-    let fold = |s: &str| {
-        text::strip_accents(&s.to_lowercase())
-            .split(|c: char| !c.is_alphanumeric())
-            .filter(|w| !w.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ")
-    };
-    let typed: Vec<String> = publisher
-        .split([';', '/', ','])
-        .map(fold)
-        .filter(|p| !p.is_empty())
-        .collect();
-    let words = |s: &str| format!(" {s} ");
-    let by = |v: &Volume| {
-        let name = fold(&v.publisher);
-        !name.is_empty()
-            && typed
-                .iter()
-                .any(|t| words(t).contains(&words(&name)) || name.contains(t.as_str()))
-    };
+    let typed = publishers(publisher);
     found
         .into_iter()
         .filter(|v| year.is_none() || v.start_year == year)
-        .filter(|v| typed.is_empty() || by(v))
+        .filter(|v| typed.is_empty() || published_by(v, &typed))
         .collect()
+}
+
+/// The series found but those of the publishers in `skip` (written like
+/// [`filter_volumes`]' `publisher`), which are never the files' series.
+pub fn skip_publishers(found: Vec<Volume>, skip: &str) -> Vec<Volume> {
+    let typed = publishers(skip);
+    found
+        .into_iter()
+        .filter(|v| typed.is_empty() || !published_by(v, &typed))
+        .collect()
+}
+
+fn fold_words(s: &str) -> String {
+    text::strip_accents(&s.to_lowercase())
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Publishers typed, separated by `;`, `/` or `,`.
+fn publishers(typed: &str) -> Vec<String> {
+    typed
+        .split([';', '/', ','])
+        .map(fold_words)
+        .filter(|p| !p.is_empty())
+        .collect()
+}
+
+/// The series' publisher is one typed: its short name (`Titan` for
+/// `Titan Comics`) or part of its name.
+fn published_by(v: &Volume, typed: &[String]) -> bool {
+    let words = |s: &str| format!(" {s} ");
+    let name = fold_words(&v.publisher);
+    !name.is_empty()
+        && typed
+            .iter()
+            .any(|t| words(t).contains(&words(&name)) || name.contains(t.as_str()))
 }
 
 /// Which of a series' issues are its own, not another cover of one
@@ -1652,6 +1706,22 @@ pub fn with_issue(own: &ComicMatch, volume: &Volume, issue: Option<&Issue>) -> C
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn publishers_skipped() {
+        let v = |p: &str| Volume {
+            id: p.into(),
+            publisher: p.into(),
+            ..Default::default()
+        };
+        let found = vec![v("Editora Sol"), v("Lua Comics"), v(""), v("Solaris")];
+        let ids = |l: Vec<Volume>| l.into_iter().map(|v| v.id).collect::<Vec<_>>();
+        assert_eq!(
+            ids(skip_publishers(found.clone(), "lua; editora sol")),
+            ["", "Solaris"]
+        );
+        assert_eq!(ids(skip_publishers(found.clone(), "")).len(), 4);
+    }
+
     #[test]
     fn search_names_without_punctuation() {
         assert_eq!(
@@ -1878,6 +1948,14 @@ mod tests {
             "Linha Azul #003 - maio 1987 [Ana Prado] Volta (Grupo Scan)"
         );
         // What follows `--` is a note.
+        let g = parse_name("LinhaAzulDaSerra012(1987)", "");
+        assert_eq!(
+            (g.series.as_str(), g.number.as_str(), g.year),
+            ("Linha Azul Da Serra", "012", Some(1987))
+        );
+        let g = parse_name("McLaneDetetiveV2", "");
+        assert_eq!((g.series.as_str(), g.volume), ("McLane Detetive", Some(2)));
+        assert_eq!(split_joined("iHeroiNaRua"), "iHeroi Na Rua");
         let g = parse_name("Linha Azul 004--notas do grupo", "");
         assert_eq!(
             (g.series.as_str(), g.number.as_str()),

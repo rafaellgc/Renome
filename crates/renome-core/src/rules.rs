@@ -408,6 +408,11 @@ pub enum Rule {
         /// by the app).
         #[serde(default = "page_size")]
         page_size: u32,
+        /// The `ComicInfo.xml` CBZ files already have is cleared: written
+        /// again with only what the app writes (with `writeInfo`), or
+        /// taken out (without it). Done by the app; marks such files.
+        #[serde(default)]
+        clean_info: bool,
     },
     /// Names photos and videos by when they were taken (see
     /// [`crate::photos`]); files without a date are left alone.
@@ -588,6 +593,19 @@ impl Pipeline {
                 ..
             }) => Some(*draw_pages),
             _ => None,
+        })
+    }
+
+    /// A comic rule clears the `ComicInfo.xml` CBZ files have.
+    pub fn cleans_comic_info(&self) -> bool {
+        self.steps.iter().any(|s| {
+            matches!(
+                s,
+                Compiled::Plain(Rule::Comic {
+                    clean_info: true,
+                    ..
+                })
+            )
         })
     }
 

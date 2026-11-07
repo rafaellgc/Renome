@@ -120,7 +120,7 @@
       </p>
       <form class="search" onsubmit={search}>
         <input class="artist" bind:value={artist} placeholder={t("albumArtistField")} spellcheck="false" />
-        <input class="album" bind:value={album} placeholder={t("albumField")} spellcheck="false" />
+        <input class="album" bind:value={album} placeholder={t("albumField")} title={t("linkHintAlbum")} spellcheck="false" />
         {#if settings.discogsToken.trim()}
           <select bind:value={source} aria-label={t("albumSource")} title={t("albumSource")}>
             <option value="musicbrainz">MusicBrainz</option>

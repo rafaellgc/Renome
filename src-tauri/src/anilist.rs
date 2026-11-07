@@ -93,6 +93,21 @@ const MANGA: &str = "query ($search: String, $from: FuzzyDateInt, $to: FuzzyDate
   }
 }";
 
+/// One manga by its id.
+const MANGA_ONE: &str = "query ($id: Int) {
+  Media(id: $id, type: MANGA) {
+    id
+    title { romaji english }
+    synonyms
+    startDate { year }
+    volumes
+    countryOfOrigin
+    format
+    coverImage { medium }
+    staff(perPage: 8) { edges { role node { name { full } } } }
+  }
+}";
+
 fn volume(m: &Value, query: &str) -> Volume {
     fn s(v: &Value) -> &str {
         v.as_str().unwrap_or_default()
@@ -445,6 +460,18 @@ impl Client {
         Ok(ranked)
     }
 
+    /// A manga by its id (a link pasted into the search).
+    pub async fn manga(&self, id: u64) -> Result<Volume, String> {
+        let v = self
+            .kept_or_ask(MANGA_ONE, json!({ "id": id }), &format!("manga one {id}"))
+            .await?;
+        let m = &v["data"]["Media"];
+        if !m.is_object() {
+            return Err("linkNotFound".into());
+        }
+        Ok(volume(m, ""))
+    }
+
     /// A question kept, else asked.
     async fn kept_or_ask(&self, query: &str, vars: Value, question: &str) -> Result<Value, String> {
         match crate::kept::<Value>("anilist", question) {
@@ -580,6 +607,7 @@ impl Client {
         let res = res.map_err(net_error)?;
         match res.status().as_u16() {
             200 => {}
+            404 => return Err("linkNotFound".into()),
             429 => return Err("alBusy".into()),
             code => return Err(format!("alNetwork: HTTP {code}")),
         }

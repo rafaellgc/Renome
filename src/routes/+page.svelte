@@ -12,6 +12,7 @@
   import Help from "$lib/Help.svelte";
   import AlbumReview from "$lib/AlbumReview.svelte";
   import BookReview from "$lib/BookReview.svelte";
+  import ComicEdit from "$lib/ComicEdit.svelte";
   import ComicPicker from "$lib/ComicPicker.svelte";
   import PictureCompare from "$lib/PictureCompare.svelte";
   import ComicReview from "$lib/ComicReview.svelte";
@@ -245,7 +246,7 @@
   /** Files in the comic review window; null when closed. */
   let comicReview = $state<string[] | null>(null);
   /** The series picker, while open. */
-  let comicPick = $state<{ source: ComicSource; query: string; files: number; highest: number; candidates: ComicVolume[]; path?: string; comic?: ComicMatch; resolve: (v: ComicVolume | null) => void } | null>(null);
+  let comicPick = $state<{ source: ComicSource; skip: string; query: string; files: number; highest: number; candidates: ComicVolume[]; path?: string; comic?: ComicMatch; resolve: (v: ComicVolume | null) => void } | null>(null);
   /** Whether this session was told that the GCD works better with an account. */
   let gcdWarned = false;
   let comicProgress = $state<string | null>(null);
@@ -292,8 +293,12 @@
     out.date = date;
     return out;
   }
-  const comicMatches = $derived(
-    Object.fromEntries(
+  /** Comics whose details were typed in (over what the catalogue said). */
+  let comicEdits = $state<Record<string, ComicMatch>>({});
+  /** The comic details window, while open. */
+  let comicEdit = $state<{ paths: string[]; comics: ComicMatch[] } | null>(null);
+  const comicMatches = $derived({
+    ...Object.fromEntries(
       Object.entries(comics).flatMap(([p, c]): [string, ComicMatch][] => {
         const v = comicVolumes[c.volumeKey];
         if (!v || c.choice == null) return [];
@@ -302,7 +307,49 @@
         return c.choice === "" || issue ? [[p, withIssue(c.own, v.volume, issue)]] : [];
       }),
     ),
-  );
+    ...comicEdits,
+  });
+  /** The comics among the rows chosen in the list. */
+  const selectedComics = $derived(preview.items.filter((i) => selected.has(i.path) && (i.isDir ? i.convert : isComic(i.original))));
+
+  async function openComicEdit() {
+    const rows = selectedComics;
+    if (!rows.length) return;
+    const r = comicRule?.rule;
+    const missing = rows.filter((i) => !comicMatches[i.path] && !comics[i.path]);
+    const guessed: Record<string, ComicMatch | null> = {};
+    if (missing.length) {
+      const got = await api.comicGuesses(
+        missing.map((i) => i.path),
+        missing.map((i) => (i.lookupName ? (i.isDir ? i.lookupName : splitExt(i.lookupName)[0]) : null)),
+        r?.type === "comic" && !!r.byFolder,
+      );
+      missing.forEach((i, n) => (guessed[i.path] = got[n]));
+    }
+    const empty: ComicMatch = { series: "", seriesYear: null, number: "", volume: null, chapter: "", title: "", year: null, count: null, publisher: "", writer: "", artist: "", id: "" };
+    comicEdit = {
+      paths: rows.map((i) => i.path),
+      comics: rows.map((i) => $state.snapshot(comicMatches[i.path] ?? comics[i.path]?.own ?? guessed[i.path] ?? empty)),
+    };
+  }
+
+  function saveComicEdit(changed: Partial<Record<"series" | "seriesYear" | "number" | "volume" | "title" | "year" | "publisher" | "writer" | "artist", string>>) {
+    if (!comicEdit) return;
+    const num = (v: string) => (v ? Number.parseInt(v, 10) : null);
+    const next = { ...comicEdits };
+    comicEdit.paths.forEach((p, i) => {
+      const m: ComicMatch = { ...comicEdit!.comics[i] };
+      for (const [k, v] of Object.entries(changed) as [keyof typeof changed, string][]) {
+        if (k === "seriesYear" || k === "volume" || k === "year") m[k] = num(v);
+        else m[k] = v;
+      }
+      // The catalogue's issue no longer tells it.
+      if (changed.series !== undefined || changed.number !== undefined) m.id = "";
+      next[p] = m;
+    });
+    comicEdits = next;
+    comicEdit = null;
+  }
   const comicCounts = $derived(counts(comics));
   /** Comics whose names are already right but that get converted to CBZ
    *  (a RAR named `.cbz`), or whose ComicInfo.xml says something else. */
@@ -312,16 +359,26 @@
     return preview.items.filter(
       (i) =>
         i.status === "unchanged" &&
-        ((r.convert && i.convert) || (r.writeInfo && i.retag && comicMatches[i.path] && extOf(i.original) === "cbz")),
+        ((r.convert && i.convert) ||
+          (extOf(i.original) === "cbz" && ((r.writeInfo && (i.retag || (r.cleanInfo && i.junk)) && comicMatches[i.path]) || clearsInfo(r, i.junk)))),
     );
   });
+  /** A CBZ whose ComicInfo.xml the comic rule takes out: with "clear", the
+   *  ones it does not write (without "write", every one; with it, none:
+   *  an unmatched comic's details are what name it). */
+  function clearsInfo(r: Rule, junk: boolean) {
+    return r.type === "comic" && !!r.cleanInfo && junk && !r.writeInfo;
+  }
   /** What converting a comic to CBZ and writing its ComicInfo.xml need: the
    *  original's fate, its match and its page in the catalogue. */
   function comicInsideItem(key: string, path: string, convert: boolean) {
     const r = comicRule?.rule;
     const original = r?.type === "comic" && r.convert && convert ? (r.original ?? "keep") : undefined;
     const pdf = r?.type === "comic" ? { draw: r.drawPages !== false, size: r.pageSize ?? 2400, info: !!r.writeInfo } : undefined;
-    if (!(r?.type === "comic" && r.writeInfo && comicMatches[key] && comics[key])) return { path, convert: original, pdf };
+    const fresh = r?.type === "comic" && !!r.cleanInfo;
+    // Typed in: no page in a catalogue.
+    if (r?.type === "comic" && r.writeInfo && comicEdits[key]) return { path, comic: comicEdits[key], web: "", manga: false, convert: original, pdf, fresh };
+    if (!(r?.type === "comic" && r.writeInfo && comicMatches[key] && comics[key])) return { path, convert: original, pdf, fresh };
     const c = comics[key];
     const [source, volume] = [c.volumeKey.slice(0, c.volumeKey.indexOf(":")), c.volumeKey.slice(c.volumeKey.indexOf(":") + 1)];
     const issue = c.choice || "";
@@ -337,7 +394,7 @@
               : source === "mangaupdates" && /^\d+$/.test(volume)
                 ? `https://www.mangaupdates.com/series/${BigInt(volume).toString(36)}`
                 : "";
-    return { path, comic: comicMatches[key], web, manga: seriesOnly(source), convert: original, pdf };
+    return { path, comic: comicMatches[key], web, manga: seriesOnly(source), convert: original, pdf, fresh };
   }
   /** TMDB episodes per file, for the series rule. */
   let series = $state<Record<string, EpisodeState>>({});
@@ -972,6 +1029,7 @@
     const bookMeta = bookMetaOnly.map((i) => bookSidecarItem(i.path, i.path));
     /** Comics renamed `.cbz` to be converted. */
     const converting = new Set(preview.items.filter((i) => i.convert).map((i) => i.path));
+    const cleared = new Set(preview.items.filter((i) => i.junk).map((i) => i.path));
     const insideOnly = [
       ...comicInfoOnly.map((i) => comicInsideItem(i.path, i.path, i.convert)),
       ...epubOnly.map((i) => bookInsideItem(i.path, i.path)),
@@ -1102,9 +1160,15 @@
       {
         const crule = comicRule?.rule;
         const items = [
-          ...(crule?.type === "comic" && (crule.writeInfo || crule.convert)
+          ...(crule?.type === "comic" && (crule.writeInfo || crule.convert || crule.cleanInfo)
             ? r.done
-                .filter((op) => extOf(op.to) === "cbz" && ((crule.convert && converting.has(op.from)) || (crule.writeInfo && comicMatches[op.from])))
+                .filter(
+                  (op) =>
+                    extOf(op.to) === "cbz" &&
+                    ((crule.convert && converting.has(op.from)) ||
+                      (crule.writeInfo && comicMatches[op.from]) ||
+                      clearsInfo(crule, cleared.has(op.from))),
+                )
                 .map((op) => comicInsideItem(op.from, op.to, converting.has(op.from)))
             : []),
           ...(brule?.type === "book" && brule.writeEpub
@@ -1441,6 +1505,7 @@
    *  issue by its number. */
   async function searchComics(rule: Extract<Rule, { type: "comic" }>) {
     const source = rule.source ?? "gcd";
+    const skip = rule.skipPublishers?.trim() ?? "";
     const key = comicKey(source);
     if ((source === "comicvine" || source === "metron") && !key) {
       const ok = await confirm({ title: t("rule.comic"), text: t(source === "metron" ? "mtNeedsKey" : "cvNeedsKey"), ok: t("options"), cancel: t("cancel") });
@@ -1538,10 +1603,10 @@
         }
         if (!volume) {
           comicProgress = t("comicSearching", { series: g.query });
-          let found = await api.comicSearch(source, key, g.query, lang);
+          let found = await api.comicSearch(source, key, g.query, lang, null, "", skip);
           // `Series: Story` may be a story in `Series`: the series alone.
           const head = g.query.split(/\s*[:–]\s*|\s+-\s+/)[0].trim();
-          if (!found.length && head && head !== g.query.trim()) found = await api.comicSearch(source, key, head, lang);
+          if (!found.length && head && head !== g.query.trim()) found = await api.comicSearch(source, key, head, lang, null, "", skip);
           if (stopRun !== run) break;
           const year = g.owns.find((o) => o.seriesYear)?.seriesYear ?? null;
           // A common name (`Saga`) may leave the series out of what the
@@ -1549,7 +1614,7 @@
           // their issues'), whose series come first.
           const dated = year ?? g.owns.find((o) => o.year)?.year ?? null;
           if (dated && !found.some((v) => fold(v.name) === k)) {
-            const more = await api.comicSearch(source, key, g.query, lang, dated).catch(() => []);
+            const more = await api.comicSearch(source, key, g.query, lang, dated, "", skip).catch(() => []);
             if (stopRun !== run) break;
             found = [...more, ...found.filter((v) => !more.some((m) => m.id === v.id))];
           }
@@ -1577,7 +1642,7 @@
               : await new Promise<ComicVolume | null>((resolve) => {
                   // The file whose cover is compared: the first with a number.
                   const at = Math.max(0, g.owns.findIndex((o) => o.number || o.volume != null));
-                  comicPick = { source, query: g.query, files: g.paths.length, highest, candidates: sorted, path: g.paths[at], comic: g.owns[at], resolve };
+                  comicPick = { source, skip, query: g.query, files: g.paths.length, highest, candidates: sorted, path: g.paths[at], comic: g.owns[at], resolve };
                 });
           comicPick = null;
           if (!volume) continue;
@@ -1915,9 +1980,9 @@
   /** Saves the list and the hand-edited names before an edit, for Ctrl+Z. */
   /** What the lookups found per file, kept along each list checkpoint
    *  that takes files out (null: the edit left them as they were). */
-  type Found = { movies: typeof movies; books: typeof books; comics: typeof comics; series: typeof series; albums: AlbumState[]; pickedShows: typeof pickedShows; pickedComics: typeof pickedComics; searchedShows: Candidate[] };
+  type Found = { movies: typeof movies; books: typeof books; comics: typeof comics; comicEdits: typeof comicEdits; series: typeof series; albums: AlbumState[]; pickedShows: typeof pickedShows; pickedComics: typeof pickedComics; searchedShows: Candidate[] };
   let foundUndo: (Found | null)[] = [];
-  const found = (): Found => ({ movies, books, comics, series, albums, pickedShows, pickedComics, searchedShows });
+  const found = (): Found => ({ movies, books, comics, comicEdits, series, albums, pickedShows, pickedComics, searchedShows });
   const remember = (keep: Found | null = null) => {
     if (foundUndo.length === 100) foundUndo.shift();
     foundUndo.push(keep);
@@ -1936,6 +2001,7 @@
       movies = {};
       books = {};
       comics = {};
+      comicEdits = {};
       series = {};
       albums = [];
       pickedShows = {};
@@ -1948,6 +2014,7 @@
     subsFound = keep(subsFound);
     books = keep(books);
     comics = keep(comics);
+    comicEdits = keep(comicEdits);
     series = keep(series);
     albums = albums
       .map((a) => ({ ...a, files: a.files.filter((p) => !paths.has(p)), matches: keep(a.matches) }))
@@ -1963,7 +2030,7 @@
       return;
     }
     const was = foundUndo.pop();
-    if (was) ({ movies, books, comics, series, albums, pickedShows, pickedComics, searchedShows } = was);
+    if (was) ({ movies, books, comics, comicEdits, series, albums, pickedShows, pickedComics, searchedShows } = was);
     overrides = prev;
     await refresh();
     checkIdentical();
@@ -2376,6 +2443,7 @@
                         progress: comicProgress,
                         onsearch: () => searchComics(step.rule as Extract<Rule, { type: "comic" }>),
                         onreview: () => openComicReview(),
+                        edit: { n: selectedComics.length, typed: Object.keys(comicEdits).length, onclick: openComicEdit },
                       }
                   : step.rule.type === "book"
                     ? {
@@ -2630,7 +2698,11 @@
 {/if}
 
 {#if comicPick}
-  <ComicPicker source={comicPick.source} query={comicPick.query} files={comicPick.files} highest={comicPick.highest} candidates={comicPick.candidates} path={comicPick.path} comic={comicPick.comic} onpick={(v) => comicPick?.resolve(v)} />
+  <ComicPicker source={comicPick.source} skip={comicPick.skip} query={comicPick.query} files={comicPick.files} highest={comicPick.highest} candidates={comicPick.candidates} path={comicPick.path} comic={comicPick.comic} onpick={(v) => comicPick?.resolve(v)} />
+{/if}
+
+{#if comicEdit}
+  <ComicEdit comics={comicEdit.comics} onsave={saveComicEdit} onclose={() => (comicEdit = null)} />
 {/if}
 
 {#if albumReview}
