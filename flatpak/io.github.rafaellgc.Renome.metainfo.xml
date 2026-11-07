@@ -63,6 +63,16 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.28.0" date="2026-11-07">
+      <description>
+        <p>Subtitles can be downloaded for movies and TV shows from OpenSubtitles and SubDL. A catalogue link or id can be pasted in any search. Song tags, book details, comic details and photo dates can be typed by hand. Undo shows its progress and can be stopped.</p>
+      </description>
+    </release>
+    <release version="0.27.0" date="2026-11-05">
+      <description>
+        <p>Photos and phone videos are named and sorted into folders by when they were taken. Similar pictures are found and compared side by side, and a file's cover is compared with the catalogue's covers.</p>
+      </description>
+    </release>
     <release version="0.26.0" date="2026-11-05">
       <description>
         <p>Comics can be looked up on Metron (also by barcode), AniList and MangaUpdates, and anime on AniList. Books can be looked up on Google Books too, with your own free key.</p>
