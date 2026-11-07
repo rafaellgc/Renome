@@ -242,29 +242,29 @@ pub(crate) fn epub(path: &Path) -> Result<EpubComic, String> {
 
 // ---------------------------------------------------------------- Kindle
 
-fn be16(b: &[u8], at: usize) -> Option<u16> {
+pub(crate) fn be16(b: &[u8], at: usize) -> Option<u16> {
     Some(u16::from_be_bytes(b.get(at..at + 2)?.try_into().ok()?))
 }
 
-fn be32(b: &[u8], at: usize) -> Option<u32> {
+pub(crate) fn be32(b: &[u8], at: usize) -> Option<u32> {
     Some(u32::from_be_bytes(b.get(at..at + 4)?.try_into().ok()?))
 }
 
 /// The records of a Palm database (what a Kindle book is), read from the
 /// file as asked.
-struct Records {
+pub(crate) struct Records {
     file: RefCell<File>,
-    starts: Vec<u64>,
+    pub(crate) starts: Vec<u64>,
 }
 
 impl Records {
-    fn open(path: &Path) -> Result<Records, String> {
+    pub(crate) fn open(path: &Path) -> Result<Records, String> {
         let mut file = File::open(path).map_err(|e| e.to_string())?;
         let size = file.metadata().map_err(|e| e.to_string())?.len();
         let mut head = [0u8; 78];
         file.read_exact(&mut head)
             .map_err(|_| "comicUnsupported".to_string())?;
-        if &head[60..68] != b"BOOKMOBI" {
+        if &head[60..68] != b"BOOKMOBI" && &head[60..68] != b"TEXtREAd" {
             return Err("comicUnsupported".into());
         }
         let count = be16(&head, 76).unwrap_or(0) as usize;
@@ -284,12 +284,12 @@ impl Records {
         })
     }
 
-    fn span(&self, i: usize) -> Option<(u64, u64)> {
+    pub(crate) fn span(&self, i: usize) -> Option<(u64, u64)> {
         Some((*self.starts.get(i)?, *self.starts.get(i + 1)?))
     }
 
     /// At most `limit` bytes from the start of record `i`.
-    fn read(&self, i: usize, limit: u64) -> Option<Vec<u8>> {
+    pub(crate) fn read(&self, i: usize, limit: u64) -> Option<Vec<u8>> {
         let (a, b) = self.span(i)?;
         let len = (b - a).min(limit);
         let mut f = self.file.borrow_mut();
@@ -302,22 +302,22 @@ impl Records {
 
 /// The book part of a Kindle file: an old one (MOBI), or the newer one
 /// (KF8, AZW3), alone or after an old one in the same file.
-struct Part {
+pub(crate) struct Part {
     /// The record of its header.
-    at: usize,
-    compression: u16,
-    text_records: usize,
-    encrypted: bool,
-    first_picture: usize,
-    trailing: u16,
-    kf8: bool,
+    pub(crate) at: usize,
+    pub(crate) compression: u16,
+    pub(crate) text_records: usize,
+    pub(crate) encrypted: bool,
+    pub(crate) first_picture: usize,
+    pub(crate) trailing: u16,
+    pub(crate) kf8: bool,
     /// Where the newer part starts (in an old part's header).
-    boundary: Option<usize>,
+    pub(crate) boundary: Option<usize>,
     /// The cover, counted from the first picture.
-    cover: Option<usize>,
+    pub(crate) cover: Option<usize>,
 }
 
-fn part(r: &Records, at: usize) -> Option<Part> {
+pub(crate) fn part(r: &Records, at: usize) -> Option<Part> {
     let h = r.read(at, 64 << 10)?;
     if h.get(16..20)? != b"MOBI" {
         return None;
@@ -363,7 +363,7 @@ fn part(r: &Records, at: usize) -> Option<Part> {
 }
 
 /// A text record without the bytes appended after its text.
-fn without_trailing(rec: &[u8], flags: u16) -> &[u8] {
+pub(crate) fn without_trailing(rec: &[u8], flags: u16) -> &[u8] {
     let mut end = rec.len();
     for bit in 1..16 {
         if flags & (1 << bit) == 0 {
@@ -387,7 +387,7 @@ fn without_trailing(rec: &[u8], flags: u16) -> &[u8] {
 }
 
 /// PalmDOC compression undone.
-fn palmdoc(input: &[u8], out: &mut Vec<u8>) {
+pub(crate) fn palmdoc(input: &[u8], out: &mut Vec<u8>) {
     let start = out.len();
     let mut i = 0;
     while i < input.len() {

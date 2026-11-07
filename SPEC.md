@@ -100,7 +100,7 @@ before it is read. The preview sends that name to the app
 | Movie (TMDB) | template with `{title}`, `{original}`, `{year}`, `{id}`, `{resolution}`, `{video codec}` (default `{title} ({year}) [tmdbid-{id}]`); what `:` becomes (default ` - `); a folder for each movie; save `.nfo` and poster (optionally fanart and logo) next to renamed videos; show the collection's missing movies. See 2.1 |
 | TV show (TMDB, AniList) | the source (TMDB, or AniList for anime); the show (name, TMDB or AniList id or link; empty: from the files); template with `{show}`, `{original}`, `{year}`, `{season}`, `{episode}`, `{title}`, `{id}`, `{resolution}`, `{video codec}` (as for movies, see 2.1; not in the show folder) (default `{show} ({year}) - S{season}E{episode} - {title}`); what `:` becomes; show and season folders (show folder template, default `{show} ({year}) [tmdbid-{id}]`); save `.nfo` files and images (optionally fanart and logo); show the missing episodes. See 2.2 |
 | Music (tags) | template with `{track}`, `{title}`, `{artist}`, `{album artist}`, `{album}`, `{year}`, `{disc}`, `{genre}`, `{composer}`, `{total tracks}`, `{total discs}`, `{original year}`, `{label}`, `{catalog}`, `{artist sort}`, `{album artist sort}`, `{initial}`, `{format}`, `{bitrate}`, `{sample rate}`, `{bits}` (default `{track} - {title}`); what `:` becomes; disc number in the track on multi-disc albums; fill in from the file name; artist and album folders (default `{album artist}/{album} ({year})`); show the missing tracks. See 2.3 |
-| Book (Open Library) | template with `{author}`, `{authors}`, `{author sort}`, `{initial}`, `{title}`, `{original}`, `{year}`, `{edition year}`, `{publisher}`, `{isbn}`, `{series}`, `{volume}`, `{id}` (default `{author} - {title} ({year})`); what `:` becomes; author and book folders (default `{author}/{title}`); save the cover and `metadata.opf`; write the details inside EPUBs; show the series' missing volumes. See 2.4 |
+| Book (Open Library) | template with `{author}`, `{authors}`, `{author sort}`, `{initial}`, `{title}`, `{original}`, `{year}`, `{edition year}`, `{publisher}`, `{isbn}`, `{series}`, `{volume}`, `{id}` (default `{author} - {title} ({year})`); what `:` becomes; author and book folders (default `{author}/{title}`); save the cover and `metadata.opf`; write the details inside EPUBs; show the series' missing volumes; convert books and documents to EPUB, AZW3, FB2 or PDF (original kept beside or trashed). See 2.4 and 2.4b |
 | Comic (ComicInfo.xml, GCD, Metron, Comic Vine, MangaDex, AniList, MangaUpdates) | template with `{series}`, `{series year}`, `{number}`, `{volume}`, `{chapter}`, `{title}`, `{year}`, `{count}`, `{publisher}`, `{writer}`, `{artist}`, `{id}` (default `{series} v{volume} #{number} c{chapter} - {title} ({year})`); what `:` becomes; the series (empty: from the files); the catalogue; series folders (default `{series} ({series year})`); series from the folder; write `ComicInfo.xml` into CBZs (or clear it); publishers to leave out; details typed by hand; convert CBR, CB7, CBT and PDF to CBZ (the original kept beside or deleted); show the missing issues. See 2.5 |
 
 Positions count **visible characters** (Unicode graphemes), starting at 1.
@@ -1001,6 +1001,108 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
 - Only the searched title, author and ISBN are sent to Open Library and
   Google Books, and only the ISBN to BrasilAPI. Without the option above the book files are
   never changed.
+
+### 2.4b Book conversion (`bookconv`)
+
+- Rule option `convertTo` (`epub`, `azw3`, `fb2`, `pdf`; empty: none) and
+  `original` (`keep` | `delete`, app side). Files taking part: book
+  extensions plus `docx`, `odt`, `rtf`, `txt`, `html`, `htm`, `xhtml`,
+  `htmlz`, `fbz`. `FileEntry::book_source` caches what the content is
+  (`bookconv::source_of`: magic bytes, zip member names, XML root) and
+  whether DRM locks it (`bookconv::drm`). `rules::converts_book`: readable
+  source, not locked, `Target::takes` (not the same format; a KF8 file is
+  not made AZW3 again). The plan names such files with the target's
+  extension (`PreviewItem.book_to`); locked ones get `drm: true` (tag
+  "DRM") and keep their extension.
+- After renaming, `write_inside` jobs with `bookTo` convert in place:
+  `bookconv::convert` reads the file into a `Book` (chapters of clean
+  XHTML, resources, CSS, table of contents, cover, details, fixed-layout
+  flag), applies the chosen/typed details (`with_values`), fills an empty
+  title from the name, drops links to missing ids, takes chapter titles
+  from the table of contents, writes `.name.renome-tags`, then the
+  original steps aside with its real extension (`source_ext`) and the new
+  file takes the name (`finish`, the comic converter's pattern; undo via
+  `Backup.converted`; a trashed original makes undo give the old name the
+  new extension). Errors: `bookFormat`, `bookDrm`, `bookBroken`,
+  `convertTaken`, `pdfPrint`; a failed conversion takes its extension
+  back (`History::retarget`).
+- DRM (`drm.rs`), never opened: EPUB with `rights.xml`, `sinf.xml`,
+  `license.lcpl` or an `encryption.xml` encrypting more than fonts (the
+  IDPF/Adobe font obfuscation algorithms alone are not DRM; those fonts
+  are left out); Kindle record 0 encryption type ≠ 0; KFX `\xeaDRMION`;
+  PDF with `/Encrypt` anywhere in a file up to 4 MB, else its first and
+  last megabyte.
+- Readers: `xhtml.rs` (forgiving HTML/XML tree builder with implied end
+  tags, HTML 4 entities, Windows-1252 numeric refs; writer keeps a fixed
+  element set, safe attributes, `epub:type`, styles limited to alignment,
+  emphasis, indents in em/%, breaks; old `<font size>`, `<center>`,
+  `<tt>`, MOBI `<p width|height>`, SVG-wrapped pictures; drops `hidden`
+  and landmark/page-list navs; `tidy` splits inline elements holding
+  blocks, wraps loose list/table content); `epub_in.rs` (one chapter per
+  spine file, own CSS with `url()` rewritten, classes kept, nav/NCX,
+  cover, fixed layout); `fb2.rs` (title-info/publish-info, sections →
+  chapters and headings, epigraphs, poems, cites, tables, notes body →
+  notes chapter with back links, base64 binaries; FBZ); `office.rs` (DOCX:
+  styles with `basedOn`, heading names/outline levels, numbering →
+  `ol`/`ul` nesting, runs b/i/u/strike/smallCaps/vertAlign, footnotes and
+  endnotes, hyperlinks, bookmarks, drawings via relationships, tables with
+  gridSpan/vMerge, page breaks, text boxes, content controls; ODT:
+  automatic and common styles with parents, `text:h`, lists by list
+  style, notes, frames, tables with spans; empty paragraphs as spacing);
+  `text_in.rs` (encoding by BOM, declaration, UTF-8, else Windows-1251 vs
+  1252; TXT paragraphs by blank lines, wrap width, indents; chapter
+  headings by common names; `_italic_`/`*bold*`; HTML/HTMLZ with pictures;
+  `add_document` cuts chapters at the highest heading level used twice,
+  at page breaks when told, and at ~150 KB); `mobi.rs` (MOBI 6: text
+  records PalmDOC/none/HUFF-CDIC, `filepos` targets and NCX index entries
+  marked as anchors, NCX top entries start chapters, `recindex` pictures;
+  KF8: FDST flows, SKEL/FRAG indexes reassembled, `kindle:pos:fid:off`
+  targets marked, `kindle:embed`/`kindle:flow`, NCX index with depths;
+  fonts left out; PalmDOC `.pdb` texts); `pdf_in.rs` (below).
+- PDF → book (`pdf_in.rs`): hayro's interpreter with an own `Device`
+  collects glyphs (unicode, origin, size from the transform, advance,
+  bold/italic from the font's name/weight/flags) and raster pictures (JPEG
+  kept unless CMYK, else PNG over white); vertical and rotated text
+  skipped; ligatures/soft hyphens normalised. Glyphs without unicode get
+  their code moved by the font's dominant code shift (subset fonts).
+  Pages whose text is mostly not letters are drawn as pictures; a book
+  with under 30 glyphs per page becomes fixed layout from
+  `convert::pdf_pictures`. Invisible text counts only on pages without
+  visible text (then the page picture is dropped). Lines by baseline;
+  raised small glyphs are note marks; chunks split at gaps > 1.6 em;
+  spacing accents composed; drop caps joined; blocks by overlap and
+  spacing; reading order by XY cuts (vertical gutters first, then the
+  first horizontal band). Headers/footers: ≤2-line blocks in the top or
+  bottom 12% that are page numbers or repeat (digits ignored) on
+  max(3, 1/5) of pages. Body size = most common size; heading levels from
+  up to three larger sizes, a first line ≥4.5% bigger or bold over plain,
+  short all-bold lines (lowest level) and outline titles (which also split
+  a heading off a paragraph or are inserted when not found). Paragraph
+  breaks: indent, short line ending a sentence in justified blocks, gap
+  > 1.45× typical, centred line; continuation when the line does not end
+  strongly and the next starts in lower case (also across blocks and
+  pages); blocks of mostly short lines keep `<br/>`. Hyphen joins use the
+  book's vocabulary. Footnotes: small blocks in the lower 45% starting
+  with a mark the page raised, one per mark; linked both ways and placed
+  at the end of the chapter. All-bold/italic books ignore that style.
+- Writers: `epub_out.rs` (EPUB 3 + NCX, `nav.xhtml` with landmarks, OPF
+  with refines for roles and series (also `calibre:series` metas), stable
+  uuid from content, cover page and `cover-image`, fixed layout
+  `rendition:layout`; all files flat in `OEBPS/`); `fb2.rs` (sections from
+  headings, notes body, binaries); `azw3_out.rs` (KF8 only: one skeleton +
+  one fragment per chapter, CSS as flow 1, `kindle:` addresses, text in
+  4096-byte PalmDOC records with multibyte overlap, FDST, SKEL/FRAG/NCX
+  INDX with TAGX and CNCX, FLIS/FCIS/EOF, EXTH 100/101/103–106/503/524/
+  501 EBOK/201/129); `print.rs` (EPUB→PDF: one HTML page in a temp folder,
+  ids prefixed per chapter, A5 print CSS, pictures over 1400 px shrunk;
+  the app loads it in a hidden web view and prints with WebKitGTK's print
+  operation to the file printer, named by GTK's own translation of "Print
+  to File"; then lopdf sets Info Title/Author/Creator and `/Lang`, and
+  photo-like Flate images (>600 colours) are re-stored as JPEG; Linux
+  only, `pdf_print_available`).
+- Measured on copies of real files (not in the repo): 145 EPUB/DOCX/ODT/
+  MOBI, 38 PDFs, 21 MOBI convert to EPUB, FB2 and AZW3 with every link and
+  id resolving and the same words read back.
 
 ### 2.5 Comics (ComicInfo.xml, Comic Vine)
 

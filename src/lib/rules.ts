@@ -145,7 +145,7 @@ export function newRule(type: RuleType): Rule {
     }
     case "book": {
       const [template, folderTemplate] = BOOK_TEMPLATE[settings.lang];
-      return { type, template, colon: " - ", folders: false, folderTemplate, cover: false, opf: false, writeEpub: false, missing: true };
+      return { type, template, colon: " - ", folders: false, folderTemplate, cover: false, opf: false, writeEpub: false, missing: true, convertTo: "", original: "keep" };
     }
     case "photo": {
       const p = PHOTO_TEMPLATES[settings.lang];

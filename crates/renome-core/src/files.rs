@@ -49,6 +49,10 @@ pub struct FileEntry {
     /// be drawn (see [`crate::convert::check`]); checked on first use.
     #[serde(skip)]
     pub(crate) convert_pages: OnceLock<Option<usize>>,
+    /// A book's real format and whether DRM locks it (see
+    /// [`crate::bookconv`]).
+    #[serde(skip)]
+    pub(crate) book: OnceLock<Option<(crate::bookconv::Source, bool)>>,
     /// A photo's or video's date, camera and size (see
     /// [`crate::photos::Inside`]), read on first use.
     #[serde(skip)]
@@ -82,6 +86,7 @@ impl FileEntry {
             video: OnceLock::new(),
             kind: OnceLock::new(),
             convert_pages: OnceLock::new(),
+            book: OnceLock::new(),
             photo: OnceLock::new(),
         })
     }
@@ -143,6 +148,18 @@ impl FileEntry {
             .get_or_init(|| crate::convert::check(&self.path))
     }
 
+    /// What a book (or a document the book rule converts) really is, and
+    /// whether DRM locks it. Read once and cached.
+    pub fn book_source(&self) -> Option<(crate::bookconv::Source, bool)> {
+        if self.is_dir {
+            return None;
+        }
+        *self.book.get_or_init(|| {
+            let s = crate::bookconv::source_of(&self.path)?;
+            Some((s, crate::bookconv::drm::locked(&self.path, s)))
+        })
+    }
+
     /// The `ComicInfo.xml` inside a comic file. Read once and cached.
     pub fn comic_info(&self) -> Option<&crate::comics::ComicInfo> {
         if !self.is_dir && !crate::comics::is_comic(&self.ext) {
@@ -161,6 +178,7 @@ impl FileEntry {
         // A comic converted to CBZ is now a zip.
         self.kind = OnceLock::new();
         self.convert_pages = OnceLock::new();
+        self.book = OnceLock::new();
         if let Some(fresh) = std::fs::metadata(&self.path)
             .ok()
             .and_then(|m| Self::from_path(&self.path, &m))
@@ -195,6 +213,9 @@ impl FileEntry {
         }
         if let (None, Some(k)) = (self.kind.get(), other.kind.get()) {
             let _ = self.kind.set(k.clone());
+        }
+        if let (None, Some(b)) = (self.book.get(), other.book.get()) {
+            let _ = self.book.set(*b);
         }
     }
 

@@ -1435,6 +1435,160 @@ struct InsideJob {
     /// whether their own title and author go in).
     #[serde(default)]
     pdf: renome_core::convert::PdfOptions,
+    /// Converts the book to this format (with `book`'s details in it, when
+    /// given), its original kept beside or sent to the trash (`convert`).
+    #[serde(default)]
+    book_to: Option<renome_core::bookconv::Target>,
+}
+
+/// Makes the book of `job` (renamed `.pdf`) into a PDF: its page is
+/// written, printed by the system's web view, and takes the book's place.
+async fn print_book(
+    app: &AppHandle,
+    job: InsideJob,
+) -> Result<(Option<renome_core::tagwrite::Backup>, Option<String>), String> {
+    use renome_core::bookconv::print;
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let work = std::env::temp_dir().join(format!("renome-print-{}-{n}", std::process::id()));
+    let path = job.path.clone();
+    let values = job
+        .book
+        .as_ref()
+        .map(|b| renome_core::inside::book_values(b, &job.language));
+    let original = job.convert.unwrap_or(renome_core::convert::Original::Keep);
+    let prep = {
+        let (path, work) = (path.clone(), work.clone());
+        tauri::async_runtime::spawn_blocking(move || print::prepare(&path, values.as_ref(), &work))
+            .await
+            .map_err(|e| e.to_string())??
+    };
+    if let Err(e) = print_to_pdf(app, &prep.html, &prep.pdf).await {
+        let _ = std::fs::remove_dir_all(&prep.dir);
+        let _ = std::fs::remove_file(&prep.pdf);
+        return Err(e);
+    }
+    let done = tauri::async_runtime::spawn_blocking(move || print::finish(&path, &prep, original))
+        .await
+        .map_err(|e| e.to_string())??;
+    Ok((Some(done.backup), done.not_trashed))
+}
+
+/// Whether this system's web view can print books to PDF.
+#[tauri::command]
+fn pdf_print_available() -> bool {
+    cfg!(target_os = "linux")
+}
+
+/// Prints the page `html` to the PDF file `pdf` with a hidden web view.
+async fn print_to_pdf(app: &AppHandle, html: &Path, pdf: &Path) -> Result<(), String> {
+    use tauri::webview::PageLoadEvent;
+    use tauri::{WebviewUrl, WebviewWindowBuilder};
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let url = tauri::Url::from_file_path(html).map_err(|_| "pdfPrint".to_string())?;
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    let tx = std::sync::Mutex::new(Some(tx));
+    let label = format!(
+        "print{}",
+        N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    );
+    let win = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
+        .visible(false)
+        .on_page_load(move |_, p| {
+            if p.event() == PageLoadEvent::Finished
+                && let Some(t) = tx.lock().unwrap().take()
+            {
+                let _ = t.send(());
+            }
+        })
+        .build()
+        .map_err(|e| e.to_string())?;
+    let loaded = tokio::time::timeout(std::time::Duration::from_secs(120), rx).await;
+    if !matches!(loaded, Ok(Ok(()))) {
+        let _ = win.destroy();
+        return Err("pdfPrint".into());
+    }
+    let (dtx, drx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+    let dtx = std::sync::Arc::new(std::sync::Mutex::new(Some(dtx)));
+    let out = pdf.to_path_buf();
+    let started = print_webview(&win, out, dtx.clone());
+    if let Err(e) = started {
+        let _ = win.destroy();
+        return Err(e);
+    }
+    let r = tokio::time::timeout(std::time::Duration::from_secs(600), drx).await;
+    let _ = win.destroy();
+    match r {
+        Ok(Ok(r)) => r,
+        _ => Err("pdfPrint".into()),
+    }
+}
+
+type PrintDone =
+    std::sync::Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<Result<(), String>>>>>;
+
+#[cfg(target_os = "linux")]
+fn print_webview(win: &tauri::WebviewWindow, out: PathBuf, done: PrintDone) -> Result<(), String> {
+    win.with_webview(move |pw| {
+        use webkit2gtk::PrintOperationExt;
+        let send = move |r: Result<(), String>| {
+            if let Some(t) = done.lock().unwrap().take() {
+                let _ = t.send(r);
+            }
+        };
+        let Ok(uri) = tauri::Url::from_file_path(&out) else {
+            send(Err("pdfPrint".into()));
+            return;
+        };
+        let op = webkit2gtk::PrintOperation::new(&pw.inner());
+        let settings = gtk::PrintSettings::new();
+        // The printer that writes files has a name in the desktop's
+        // language: GTK's own translation of it.
+        let name = gtk::glib::dgettext(Some("gtk30"), "Print to File");
+        settings.set_printer(name.as_str());
+        settings.set(gtk::PRINT_SETTINGS_OUTPUT_FILE_FORMAT, Some("pdf"));
+        settings.set(gtk::PRINT_SETTINGS_OUTPUT_URI, Some(uri.as_str()));
+        op.set_print_settings(&settings);
+        let setup = gtk::PageSetup::new();
+        setup.set_paper_size(&gtk::PaperSize::new(Some("iso_a5")));
+        for (side, mm) in [
+            ("top", 16.0),
+            ("bottom", 18.0),
+            ("left", 14.0),
+            ("right", 14.0),
+        ] {
+            match side {
+                "top" => setup.set_top_margin(mm, gtk::Unit::Mm),
+                "bottom" => setup.set_bottom_margin(mm, gtk::Unit::Mm),
+                "left" => setup.set_left_margin(mm, gtk::Unit::Mm),
+                _ => setup.set_right_margin(mm, gtk::Unit::Mm),
+            }
+        }
+        op.set_page_setup(&setup);
+        let send = std::rc::Rc::new(std::cell::RefCell::new(Some(send)));
+        let s1 = send.clone();
+        // The operation is kept until it ends.
+        let keep = op.clone();
+        op.connect_finished(move |_| {
+            let _ = &keep;
+            if let Some(f) = s1.borrow_mut().take() {
+                f(Ok(()));
+            }
+        });
+        let s2 = send.clone();
+        op.connect_failed(move |_, e| {
+            if let Some(f) = s2.borrow_mut().take() {
+                f(Err(format!("pdfPrint: {e}")));
+            }
+        });
+        op.print();
+    })
+    .map_err(|e| e.to_string())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn print_webview(_: &tauri::WebviewWindow, _: PathBuf, _: PrintDone) -> Result<(), String> {
+    Err("pdfPrint".into())
 }
 
 /// Writes each comic's details into its `ComicInfo.xml` (CBZ) and each
@@ -1455,13 +1609,14 @@ async fn write_inside(
         .into_iter()
         .map(|mut j| {
             // Already a zip (or not an archive): only its details.
-            if j.convert.is_some() && !convert::convertible(&j.path) {
+            if j.book_to.is_none() && j.convert.is_some() && !convert::convertible(&j.path) {
                 j.convert = None;
             }
             j
         })
         .filter(|j| {
             let ok = match (&j.convert, &j.comic, &j.book) {
+                _ if j.book_to.is_some() => true,
                 (Some(_), _, _) => true,
                 (_, Some(_), _) => inside::comic_writable(&j.path),
                 (_, _, None) if j.fresh => inside::comic_writable(&j.path),
@@ -1502,37 +1657,53 @@ async fn write_inside(
     for (done, job) in items.into_iter().enumerate() {
         let (path, store) = (job.path.clone(), store.clone());
         let job_path = job.path.clone();
-        let converting = job.convert.is_some();
+        let converting = job.convert.is_some() && job.book_to.is_none();
+        let book_converting = job.book_to.is_some();
         let drawn = pages.clone();
         note.start(&path);
-        let result = tauri::async_runtime::spawn_blocking(move || {
-            let values = || {
-                job.comic
-                    .as_ref()
-                    .map(|c| inside::comic_values(c, &job.web, job.manga))
-                    .unwrap_or_default()
-            };
-            match (job.convert, &job.comic, &job.book) {
-                (Some(original), _, _) => {
-                    convert::convert_with(&path, &values(), original, job.pdf).map(|d| {
-                        drawn.fetch_add(d.drawn_pages, std::sync::atomic::Ordering::Relaxed);
-                        (Some(d.backup), d.not_trashed)
-                    })
+        // A book made into PDF: its page printed by the web view.
+        let result = if job.book_to == Some(renome_core::bookconv::Target::Pdf) {
+            print_book(&app, job).await
+        } else {
+            tauri::async_runtime::spawn_blocking(move || {
+                let values = || {
+                    job.comic
+                        .as_ref()
+                        .map(|c| inside::comic_values(c, &job.web, job.manga))
+                        .unwrap_or_default()
+                };
+                if let Some(to) = job.book_to {
+                    let values = job
+                        .book
+                        .as_ref()
+                        .map(|b| inside::book_values(b, &job.language));
+                    let original = job.convert.unwrap_or(convert::Original::Keep);
+                    return renome_core::bookconv::convert(&path, to, original, values.as_ref())
+                        .map(|d| (Some(d.backup), d.not_trashed));
                 }
-                (_, Some(_), _) => {
-                    inside::write_comic_with(&path, &values(), job.fresh, &store).map(|b| (b, None))
+                match (job.convert, &job.comic, &job.book) {
+                    (Some(original), _, _) => {
+                        convert::convert_with(&path, &values(), original, job.pdf).map(|d| {
+                            drawn.fetch_add(d.drawn_pages, std::sync::atomic::Ordering::Relaxed);
+                            (Some(d.backup), d.not_trashed)
+                        })
+                    }
+                    (_, Some(_), _) => {
+                        inside::write_comic_with(&path, &values(), job.fresh, &store)
+                            .map(|b| (b, None))
+                    }
+                    (_, _, Some(b)) => {
+                        inside::write_book(&path, &inside::book_values(b, &job.language), &store)
+                            .map(|b| (b, None))
+                    }
+                    _ if job.fresh => inside::remove_comic(&path, &store).map(|b| (b, None)),
+                    _ => Ok((None, None)),
                 }
-                (_, _, Some(b)) => {
-                    inside::write_book(&path, &inside::book_values(b, &job.language), &store)
-                        .map(|b| (b, None))
-                }
-                _ if job.fresh => inside::remove_comic(&path, &store).map(|b| (b, None)),
-                _ => Ok((None, None)),
-            }
-        })
-        .await
-        .map_err(|e| e.to_string())
-        .and_then(|r| r);
+            })
+            .await
+            .map_err(|e| e.to_string())
+            .and_then(|r| r)
+        };
         let result = result.map(|(b, not_trashed)| {
             if let Some(why) = not_trashed {
                 report.errors.push((job_path.display().to_string(), why));
@@ -1547,13 +1718,22 @@ async fn write_inside(
             }
             Ok(None) => {}
             Err(e) => {
-                // Named `.cbz` to be converted, it could not be: its own
-                // extension back.
-                if converting
-                    && let Some(k) = convert::kind(&job_path).filter(|k| *k != convert::Kind::Zip)
+                // Named `.cbz` (or `.epub`…) to be converted, it could not
+                // be: its own extension back.
+                let back = if book_converting {
+                    renome_core::bookconv::beside(&job_path).filter(|b| *b != job_path)
+                } else if converting {
+                    convert::kind(&job_path)
+                        .filter(|k| *k != convert::Kind::Zip)
+                        .map(|k| convert::beside(&job_path, k))
+                } else {
+                    None
+                };
+                if let Some(back) = back
+                    && std::fs::symlink_metadata(&back).is_err()
+                    && state.history.retarget(&id, &job_path, &back) == Ok(true)
                 {
-                    let back = convert::beside(&job_path, k);
-                    if state.history.retarget(&id, &job_path, &back) == Ok(true) {
+                    {
                         let moved = renome_core::apply::ApplyReport {
                             done: vec![renome_core::apply::Operation {
                                 from: job_path.clone(),
@@ -2292,6 +2472,7 @@ pub fn run() {
             dg: discogs::Client::default(),
         })
         .invoke_handler(tauri::generate_handler![
+            pdf_print_available,
             checkpoint,
             drop_checkpoint,
             undo_list,

@@ -35,3 +35,5 @@ regex = "1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
+# Already used by the web view; here to print books to PDF.
+webkit2gtk = "2.0.2"

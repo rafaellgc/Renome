@@ -160,6 +160,13 @@ pub struct PreviewItem {
     /// a PDF; see [`crate::convert`]), named `.cbz` here.
     #[serde(default)]
     pub convert: bool,
+    /// A book the book rule converts, to this format (named with its
+    /// extension here; see [`crate::bookconv`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub book_to: Option<crate::bookconv::Target>,
+    /// A book locked by DRM: never converted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub drm: bool,
     /// A PDF converted: how many of its pages would be drawn (none:
     /// `None`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1115,6 +1122,7 @@ pub fn preview(
 
     let music = pipeline.music();
     let converts = pipeline.converts_comics();
+    let book_to = pipeline.converts_books();
     let cleans = pipeline.cleans_comic_info();
     // Songs' tags, with the album-wide fields agreed across each album.
     let songs: HashMap<&Path, AudioTags> = match music {
@@ -1424,6 +1432,11 @@ pub fn preview(
             let junk = (matched.is_some() && own.junk)
                 || (cleans && file.ext.eq_ignore_ascii_case("cbz") && file.comic_info().is_some());
             let convert = converts.is_some_and(|draw| crate::rules::converts(file, draw));
+            let to_book = book_to.filter(|t| crate::rules::converts_book(file, *t));
+            let drm = book_to.is_some()
+                && !file.is_dir
+                && (crate::ebook::is_book(&file.ext) || crate::bookconv::is_document(&file.ext))
+                && file.book_source().is_some_and(|(_, locked)| locked);
             let drawn = convert
                 .then(|| file.convert_check())
                 .flatten()
@@ -1446,6 +1459,8 @@ pub fn preview(
                 retag,
                 junk,
                 convert,
+                book_to: to_book,
+                drm,
                 drawn,
                 lookup_name,
                 within: view.send_to.as_ref().map(|_| file.base.clone()),
@@ -2715,6 +2730,7 @@ mod tests {
                 cover: false,
                 opf: false,
                 missing: false,
+                convert_to: String::new(),
             },
         }];
         // The same book in two formats, and a file the rule knows nothing of.
@@ -3305,6 +3321,7 @@ mod tests {
                 cover: false,
                 opf: false,
                 missing: false,
+                convert_to: String::new(),
             },
         }];
         let p = preview(&files, &steps, &HashMap::new(), &view);

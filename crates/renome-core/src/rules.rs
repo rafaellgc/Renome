@@ -366,6 +366,12 @@ pub enum Rule {
         /// app).
         #[serde(default = "yes")]
         missing: bool,
+        /// Converts the books (and Word, OpenDocument, text and HTML
+        /// documents) to this format: `epub`, `azw3`, `fb2` or `pdf`;
+        /// empty: no conversion. They are named with its extension here;
+        /// the app converts them after renaming (see [`crate::bookconv`]).
+        #[serde(default)]
+        convert_to: String,
     },
     /// Names comics after their series and number: the issue chosen on
     /// Comic Vine, else what the file's `ComicInfo.xml` and name say. Files
@@ -592,6 +598,16 @@ impl Pipeline {
                 draw_pages,
                 ..
             }) => Some(*draw_pages),
+            _ => None,
+        })
+    }
+
+    /// A book rule converts books: to what.
+    pub fn converts_books(&self) -> Option<crate::bookconv::Target> {
+        self.steps.iter().find_map(|s| match s {
+            Compiled::Plain(Rule::Book { convert_to, .. }) => {
+                crate::bookconv::Target::from_ext(convert_to)
+            }
             _ => None,
         })
     }
@@ -1162,13 +1178,21 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
         }
 
         Rule::Book {
-            template, colon, ..
+            template,
+            colon,
+            convert_to,
+            ..
         } => {
             if let Some(m) = ctx.book {
                 let name = books::book_name(template, m, colon);
                 if !name.is_empty() {
                     *stem = name;
                 }
+            }
+            if let Some(t) = crate::bookconv::Target::from_ext(convert_to)
+                && converts_book(ctx.file, t)
+            {
+                *ext = t.ext().into();
             }
         }
 
@@ -1225,6 +1249,23 @@ pub fn converts(file: &crate::files::FileEntry, draw: bool) -> bool {
     }
     matches!(ext.as_str(), "cbz" | "cbr" | "cb7" | "cbt")
         && kind.and_then(|k| k.comic).is_some_and(|c| c != "cbz")
+}
+
+/// A book (or document) the book rule's "convert" turns into `t`: one in
+/// another format that can be read and is not locked by DRM.
+pub fn converts_book(file: &crate::files::FileEntry, t: crate::bookconv::Target) -> bool {
+    if file.is_dir || !(crate::ebook::is_book(&file.ext) || crate::bookconv::is_document(&file.ext))
+    {
+        return false;
+    }
+    match file.book_source() {
+        Some((s, locked)) => {
+            !locked
+                && crate::bookconv::takes_file(t, s, &file.path)
+                && crate::bookconv::readable(s, t)
+        }
+        None => false,
+    }
 }
 
 /// The comic a file is: the issue chosen for it, else what it says about
@@ -1558,6 +1599,7 @@ mod tests {
             video: Default::default(),
             kind: Default::default(),
             convert_pages: Default::default(),
+            book: Default::default(),
             photo: Default::default(),
         }
     }

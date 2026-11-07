@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// Extensions of books (the ones whose details can be read, and DjVu,
 /// which is only named).
 const BOOKS: &[&str] = &[
-    "epub", "kepub", "mobi", "azw", "azw3", "prc", "pdf", "fb2", "djvu", "djv",
+    "epub", "kepub", "mobi", "azw", "azw3", "prc", "pdf", "fb2", "fbz", "djvu", "djv",
 ];
 
 pub fn is_book(ext: &str) -> bool {
@@ -51,6 +51,7 @@ pub fn read(path: &Path) -> BookMeta {
         "mobi" | "azw" | "azw3" | "prc" => mobi(&path),
         "pdf" => pdf(&path),
         "fb2" => fb2(&path),
+        "fbz" => fbz(&path),
         _ => None,
     });
     let mut m = m.ok().flatten().unwrap_or_default();
@@ -774,6 +775,23 @@ fn fb2(path: &Path) -> Option<BookMeta> {
 
 /// FictionBook 2: the `<description>` part, in the encoding its first
 /// line declares (often windows-1251).
+/// An FB2 inside a zip.
+fn fbz(path: &Path) -> Option<BookMeta> {
+    let mut z = zip::ZipArchive::new(BufReader::new(File::open(path).ok()?)).ok()?;
+    let name = z
+        .file_names()
+        .filter_map(Result::ok)
+        .find(|n| n.to_ascii_lowercase().ends_with(".fb2"))?
+        .to_string();
+    let mut bytes = Vec::new();
+    z.by_name(&name)
+        .ok()?
+        .take(64 << 20)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    parse_fb2(&bytes)
+}
+
 fn parse_fb2(bytes: &[u8]) -> Option<BookMeta> {
     static ENCODING: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r#"encoding=["']([A-Za-z0-9_-]+)["']"#).unwrap());

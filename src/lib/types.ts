@@ -5,6 +5,9 @@ export type CaseMode = "lower" | "upper" | "sentence" | "title" | "titleSmart";
 export type Anchor = "start" | "end" | "index" | "fromEnd";
 export type Bound = "start" | "end" | "position" | "text";
 
+/** The formats the book rule converts to (empty: none). */
+export type BookTarget = "" | "epub" | "azw3" | "fb2" | "pdf";
+
 export type Rule =
   | { type: "replace"; find: string; replace: string; caseSensitive: boolean; firstOnly: boolean; target: Target }
   | { type: "regex"; pattern: string; replace: string; caseSensitive: boolean; firstOnly: boolean; target: Target }
@@ -43,7 +46,7 @@ export type Rule =
       type: "music"; template: string; colon: string; discPrefix: boolean; fromName: boolean;
       folders: boolean; folderTemplate: string; cover: boolean; playlist: boolean; listen: boolean; writeTags: boolean; embedCover: boolean; coverSize: number; cleanTags: boolean; missing: boolean;
     }
-  | { type: "book"; template: string; colon: string; folders: boolean; folderTemplate: string; cover: boolean; opf: boolean; writeEpub?: boolean; missing: boolean }
+  | { type: "book"; template: string; colon: string; folders: boolean; folderTemplate: string; cover: boolean; opf: boolean; writeEpub?: boolean; missing: boolean; convertTo?: BookTarget; original?: "keep" | "delete" }
   | { type: "comic"; template: string; colon: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; byFolder: boolean; writeInfo?: boolean; cleanInfo?: boolean; convert?: boolean; original?: "keep" | "delete"; drawPages?: boolean; pageSize?: number; missing: boolean; barcode?: boolean; skipPublishers?: string }
   | {
       type: "photo"; template: string; fromName: boolean; modified: boolean; shiftHours: number;
@@ -87,6 +90,10 @@ export interface PreviewItem {
   convert: boolean;
   /** A PDF converted: how many of its pages would be drawn. */
   drawn?: number;
+  /** A book the book rule converts, to this format. */
+  bookTo?: BookTarget;
+  /** A book locked by DRM: never converted. */
+  drm?: boolean;
   /** With a photo rule, where a photo's date came from ("none": it has none). */
   photoDate?: "typed" | "inside" | "name" | "modified" | "none";
   /** The name the lookups read, when the rules above the first lookup rule

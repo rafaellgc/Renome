@@ -725,7 +725,7 @@ fn load_pdf_from(from: Result<&[u8], &Path>, light: bool) -> Result<lopdf::Docum
 
 /// The PDF as hayro reads it (for drawing pages), from bytes shared with
 /// the other readers.
-fn hayro_pdf(data: &Arc<Vec<u8>>) -> Result<hayro::hayro_syntax::Pdf, String> {
+pub(crate) fn hayro_pdf(data: &Arc<Vec<u8>>) -> Result<hayro::hayro_syntax::Pdf, String> {
     hayro::hayro_syntax::Pdf::new(hayro::hayro_syntax::PdfData::from(data.clone())).map_err(|e| {
         match e {
             hayro::hayro_syntax::LoadPdfError::Decryption(_) => "pdfLocked".to_string(),
@@ -2578,6 +2578,42 @@ pub fn convert_with(
         not_trashed,
         drawn_pages,
     })
+}
+
+/// One page of a PDF drawn, its long side `long` pixels at most.
+pub(crate) fn draw_page(
+    data: &Arc<Vec<u8>>,
+    index: usize,
+    long: f32,
+) -> Option<(Vec<u8>, &'static str)> {
+    let pdf = hayro_pdf(data).ok()?;
+    let (w, h) = pdf.pages().get(index)?.render_dimensions();
+    drawn(&pdf, index, long / w.max(h).max(1.0)).ok()
+}
+
+/// Each page of a PDF as one picture, as a comic's would be (taken out
+/// as it is, or drawn): for books without text.
+pub(crate) fn pdf_pictures(path: &Path) -> Result<Vec<(Vec<u8>, &'static str)>, String> {
+    let mut out = Vec::new();
+    let mut drawn = 0;
+    pdf_files(
+        path,
+        &mut |p, r| {
+            let mut v = Vec::new();
+            r.read_to_end(&mut v).map_err(|e| e.to_string())?;
+            let ext = match p.name.rsplit('.').next().unwrap_or("") {
+                "png" => "png",
+                "gif" => "gif",
+                "webp" => "webp",
+                _ => "jpg",
+            };
+            out.push((v, ext));
+            Ok(())
+        },
+        &mut drawn,
+        PdfOptions::default(),
+    )?;
+    Ok(out)
 }
 
 /// Undo: a kept original takes the CBZ's place again (the CBZ goes); one

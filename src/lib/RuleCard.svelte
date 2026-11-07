@@ -3,6 +3,11 @@
   import { comicPreset, comicPresetOf, defaultSubLangs, PHOTO_TEMPLATES, splitExt, splitParts, type ComicPreset } from "./rules";
   import { settings } from "./settings.svelte";
   import type { Step } from "./types";
+  import { api } from "./api";
+
+  /** Whether this system can print books to PDF (asked once). */
+  let canPrint = $state(false);
+  api.pdfPrintAvailable().then((v) => (canPrint = v)).catch(() => {});
 
   let {
     step = $bindable(),
@@ -394,6 +399,24 @@
         <label class="check"><input type="checkbox" bind:checked={r.cover} /> <span>{t("bookCover")}<small>{t("bookCoverHint")}</small></span></label>
         <label class="check"><input type="checkbox" bind:checked={r.opf} /> <span>{t("bookOpf")}<small>{t("bookOpfHint")}</small></span></label>
         <label class="check"><input type="checkbox" bind:checked={r.writeEpub} /> <span>{t("bookWriteEpub")}<small>{t("bookWriteEpubHint")}</small></span></label>
+        <label title={t("bookConvertHint")}>{t("bookConvert")}
+          <select bind:value={r.convertTo}>
+            <option value="">{t("bookConvertNone")}</option>
+            <option value="epub">EPUB</option>
+            <option value="azw3">{t("bookConvertAzw3")}</option>
+            <option value="fb2">FB2</option>
+            {#if canPrint || r.convertTo === "pdf"}<option value="pdf">PDF</option>{/if}
+          </select>
+        </label>
+        <p class="hint">{t("bookConvertHint")}</p>
+        {#if r.convertTo}
+          <label class="sub">{t("comicOriginal")}
+            <select bind:value={r.original}>
+              <option value="keep">{t("bookOriginalKeep")}</option>
+              <option value="delete">{t("comicOriginalDelete")}</option>
+            </select>
+          </label>
+        {/if}
         <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("bookMissingLabel")}<small>{t("bookMissingHint")}</small></span></label>
         {@render actions(t("olSearch"), "bookSummary")}
       {:else if r.type === "comic"}

@@ -8,7 +8,7 @@ import { notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
 import { isBook, splitExt } from "$lib/rules";
 import { tmdbLang } from "$lib/settings.svelte";
-import type { BookCandidate, BookGuess, BookMatch, BookState, EditField } from "$lib/types";
+import type { BookCandidate, BookGuess, BookMatch, BookState, BookTarget, EditField } from "$lib/types";
 import { counts, isEpub, moved, ruleOf, without, type PageCtx } from "./common";
 
 /** What the rule uses of a chosen book: the edition's publisher and ISBN
@@ -82,8 +82,14 @@ export class Books {
   epubOnly = $derived.by(() => {
     const r = this.rule?.rule;
     return r?.type === "book" && r.writeEpub
-      ? this.#ctx.items.filter((i) => i.status === "unchanged" && this.has(i.path) && isEpub(i.original))
+      ? this.#ctx.items.filter((i) => i.status === "unchanged" && this.has(i.path) && isEpub(i.original) && !i.bookTo)
       : [];
+  });
+  /** Books whose names are already right but that get converted (an
+   *  `.epub` that is really another format). */
+  convertOnly = $derived.by(() => {
+    const r = this.rule?.rule;
+    return r?.type === "book" && r.convertTo ? this.#ctx.items.filter((i) => i.status === "unchanged" && !!i.bookTo) : [];
   });
   /** The details window's fields. */
   fields = $derived<EditField[]>([
@@ -123,6 +129,15 @@ export class Books {
     const b = this.state[key];
     const c = b.choice!;
     return { path, book: this.matches[key], language: c.exact ? c.language : b.guess.language };
+  }
+
+  /** What converting a book needs: the format, the original's fate and,
+   *  when it has some, the details to write in it. */
+  convertItem(key: string, path: string, to: BookTarget) {
+    const r = this.rule?.rule;
+    const original = r?.type === "book" ? (r.original ?? "keep") : "keep";
+    const base = this.has(key) ? this.insideItem(key, path) : { path };
+    return { ...base, bookTo: to, convert: original };
   }
 
   /** What the cover and metadata.opf of a book need; `key` is the path before renaming. */

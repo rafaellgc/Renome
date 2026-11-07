@@ -91,6 +91,17 @@ A built-in manual (F1) explains every rule with examples.
   `Author/Title` folders and saves `cover.jpg` and a `metadata.opf`
   (read by Audiobookshelf and e-book managers), and can write the details
   inside EPUBs (undone like any rename).
+- Book conversion: turns EPUB, MOBI/AZW3, PDF, FB2/FBZ, Word (DOCX),
+  LibreOffice (ODT), text and HTML files into EPUB, AZW3 (Kindle), FB2 or
+  PDF after renaming, with the details found or typed in; headings,
+  emphasis, lists, tables, footnotes (linked both ways), pictures and the
+  cover go along. PDFs are rebuilt into flowing text (columns, repeated
+  headers and page numbers, broken words, paragraphs across pages,
+  bookmarks as chapters); scanned PDFs become fixed-page books. Printing
+  to PDF uses the system's web view (Linux for now). The original stays
+  beside or goes to the trash; undo puts it back. Books locked by DRM are
+  never converted, and the lock is never opened. Written from scratch,
+  with no converter or new library added.
 - Comics: names CBZ, CBR, CB7, CBT, PDF, EPUB and MOBI/AZW3 files by series and
   number (`Series #012 (2019)`, `Series v03` for manga volumes), from the
   `ComicInfo.xml` inside the file or from its name (issue numbers,

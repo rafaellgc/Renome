@@ -29,6 +29,7 @@ export interface PictureCard {
 type TvItem = { path: string; name: string; isDir: boolean };
 
 export const api = {
+  pdfPrintAvailable: () => invoke<boolean>("pdf_print_available"),
   checkpoint: (overrides: Overrides) => invoke<void>("checkpoint", { overrides }),
   dropCheckpoint: () => invoke<void>("drop_checkpoint"),
   undoList: () => invoke<Overrides | null>("undo_list"),

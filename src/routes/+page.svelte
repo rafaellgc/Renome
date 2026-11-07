@@ -270,7 +270,7 @@
       [!!tv.rule, (i) => !i.isDir && isScreen(i.original), "outsideSeries"],
       // Songs bring their lyrics, cue sheets, playlists and covers along.
       [!!music.rule, (i) => !i.isDir && (isAudio(i.original) || /\.(lrc|cue|m3u8?|pls|jpe?g|png|webp)$/i.test(i.original)), "outsideMusic"],
-      [!!books.rule, (i) => !i.isDir && isBook(i.original), "outsideBook"],
+      [!!books.rule, (i) => !i.isDir && (isBook(i.original) || !!i.bookTo), "outsideBook"],
       [!!comics.rule, (i) => (i.isDir ? i.convert : isComic(i.original)), "outsideComic"],
     ];
     const on = kinds.filter(([enabled]) => enabled);
@@ -558,12 +558,15 @@
     const subsUnchanged = subs.only.map((i) => i.path);
     const subsPlanned = subs.wanted === null ? 0 : preview.items.reduce((n, i) => n + (i.status !== "conflict" ? subs.chosen(subs.found[i.path]) : 0), 0);
     const bookMeta = books.metaOnly.map((i) => books.sidecarItem(i.path, i.path));
+    /** Books renamed with the format they are converted to. */
+    const bookTo = new Map(preview.items.filter((i) => i.bookTo).map((i) => [i.path, i.bookTo!]));
     /** Comics renamed `.cbz` to be converted. */
     const converting = new Set(preview.items.filter((i) => i.convert).map((i) => i.path));
     const cleared = new Set(preview.items.filter((i) => i.junk).map((i) => i.path));
     const insideOnly = [
       ...comics.infoOnly.map((i) => comics.insideItem(i.path, i.path, i.convert)),
       ...books.epubOnly.map((i) => books.insideItem(i.path, i.path)),
+      ...books.convertOnly.map((i) => books.convertItem(i.path, i.path, i.bookTo!)),
     ];
     if (!preview.changed && !meta.length && !tvMeta.length && !bookMeta.length && !music.coverOnly && !listOnly.length && !retagOnly.length && !insideOnly.length && !subsUnchanged.length) return;
     // Files left behind in a show's old folder are always told first.
@@ -703,7 +706,10 @@
                 .map((op) => comics.insideItem(op.from, op.to, converting.has(op.from)))
             : []),
           ...(brule?.type === "book" && brule.writeEpub
-            ? r.done.filter((op) => books.has(op.from) && isEpub(op.to)).map((op) => books.insideItem(op.from, op.to))
+            ? r.done.filter((op) => books.has(op.from) && isEpub(op.to) && !bookTo.has(op.from)).map((op) => books.insideItem(op.from, op.to))
+            : []),
+          ...(brule?.type === "book" && brule.convertTo
+            ? r.done.filter((op) => bookTo.has(op.from)).map((op) => books.convertItem(op.from, op.to, bookTo.get(op.from)!))
             : []),
           ...insideOnly,
         ];
@@ -1319,8 +1325,8 @@
           <button onclick={() => pickSendTo(true)}>{t("sendCopyTo")}</button>
         </div>
       {/if}
-      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !movies.metaOnly.length && !tv.metaOnly.length && !books.metaOnly.length && !music.coverOnly && !music.playlistOnly.length && !music.tagsOnly.length && !comics.infoOnly.length && !books.epubOnly.length && !subs.only.length) || busy || !!working} onclick={applyAll}>
-        {t(sendTo ? (sendTo.copy ? "copyAction" : "moveAction") : "rename")} {preview.changed + movies.metaOnly.length + tv.metaOnly.length + books.metaOnly.length + music.coverOnly + music.playlistOnly.length + music.tagsOnly.length + comics.infoOnly.length + books.epubOnly.length + subs.only.length || ""}
+      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !movies.metaOnly.length && !tv.metaOnly.length && !books.metaOnly.length && !music.coverOnly && !music.playlistOnly.length && !music.tagsOnly.length && !comics.infoOnly.length && !books.epubOnly.length && !books.convertOnly.length && !subs.only.length) || busy || !!working} onclick={applyAll}>
+        {t(sendTo ? (sendTo.copy ? "copyAction" : "moveAction") : "rename")} {preview.changed + movies.metaOnly.length + tv.metaOnly.length + books.metaOnly.length + music.coverOnly + music.playlistOnly.length + music.tagsOnly.length + comics.infoOnly.length + books.epubOnly.length + books.convertOnly.length + subs.only.length || ""}
       </button>
     </div>
   </header>

@@ -929,15 +929,21 @@ pub struct HistoryEntry {
     pub tagged: usize,
 }
 
-/// Comics converted to CBZ whose original went to the trash: undo gives
-/// them their old name back, as the CBZ they now are (a CBZ named `.cbr`
-/// would be wrong).
+/// Comics converted to CBZ (and books converted) whose original went to
+/// the trash: undo gives them their old name back, with the extension of
+/// what they now are (a CBZ named `.cbr`, an EPUB named `.pdf`, would be
+/// wrong).
 fn trashed_originals(j: &mut Journal, backups: &[crate::tagwrite::Backup]) {
     for b in backups {
         if !b.converted.as_ref().is_some_and(|c| c.original.is_none()) {
             continue;
         }
         let folder = b.converted.as_ref().is_some_and(|c| c.folder);
+        let ext = b
+            .path
+            .extension()
+            .map(|e| e.to_string_lossy().to_string())
+            .unwrap_or_else(|| "cbz".into());
         for op in j.ops.iter_mut().filter(|op| !op.copy && op.to == b.path) {
             // A folder's name has no extension to replace.
             if folder {
@@ -946,12 +952,12 @@ fn trashed_originals(j: &mut Journal, backups: &[crate::tagwrite::Backup]) {
                 op.from = op.from.with_file_name(name);
                 continue;
             }
-            let cbz = op
+            let same = op
                 .from
                 .extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("cbz"));
-            if !cbz {
-                op.from = op.from.with_extension("cbz");
+                .is_some_and(|e| e.eq_ignore_ascii_case(&ext));
+            if !same {
+                op.from = op.from.with_extension(&ext);
             }
         }
     }
