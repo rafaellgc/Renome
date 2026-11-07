@@ -1399,6 +1399,20 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   `shift_hours` is added to the inside and name dates (not to a name's day
   without a time). Files with
   none stay; they are marked (`photo_date: none`) and counted on the card.
+- "Set the date (N selected)" (photo rule card): for the photos and
+  videos the rule reads selected in the list, a window with day, month,
+  year and optional hour and minute (`DetailsEdit.svelte`; empty start
+  unless typed before; an impossible date is refused and the window
+  stays). The result goes into `Photos.dates` (per path, `2018-03-27` or
+  `2018-03-27 14:05`, for the session), sent as `view.dates`; every field
+  cleared removes it. In the core (`photos::typed`) it counts over every
+  other date (`photo_date: typed`, ranked first among a photo's files):
+  without a typed time the file keeps its own time of day when it has one
+  from inside or its name, else none; camera and size stay. It names the
+  file, picks its date folder and, with "Set the file date", becomes its
+  modified date; nothing is written inside the file. Marked "Date typed
+  by hand" (✓). Clear and removing files forget it; Ctrl+Z after those
+  brings it back; it follows renamed files.
 - Reading (`photos::read_all`, up to 8 threads; the app runs it before
   the preview and emits `photos-progress`): only headers are read. JPEG
   and PNG EXIF come from `files::read_exif`, which walks segments/chunks

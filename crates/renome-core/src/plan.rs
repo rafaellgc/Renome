@@ -86,6 +86,10 @@ pub struct View {
     /// other comics are named from what they say about themselves.
     #[serde(default)]
     pub comics: HashMap<PathBuf, crate::comics::ComicMatch>,
+    /// Dates typed in for photos and videos (`2018-03-27`, with the time
+    /// after a space when typed), by path, over what the photo rule reads.
+    #[serde(default)]
+    pub dates: HashMap<PathBuf, String>,
     /// What an old folder is called after when files stay in it
     /// (`Show (2010) [tmdbid-7] (additional files)`), in the UI's language.
     #[serde(default)]
@@ -1181,7 +1185,13 @@ pub fn preview(
                 let Some(&(group, _)) = photo_groups.get(f.path.as_path()) else {
                     continue;
                 };
-                let Some(s) = crate::photos::shot(f, &opts) else {
+                let own = crate::photos::shot(f, &opts);
+                // A date typed in counts over the file's.
+                let s = match view.dates.get(&f.path) {
+                    Some(d) => crate::photos::typed(f, own, d),
+                    None => own,
+                };
+                let Some(s) = s else {
                     continue;
                 };
                 let better = match lead.get(&group) {
@@ -2000,6 +2010,35 @@ mod tests {
         );
         assert_eq!(got("notes.txt"), (String::new(), "notes.txt".into(), None));
         assert!(p.items.iter().all(|i| i.status != Status::Conflict));
+
+        // A date typed in counts over the name's and a dateless file's;
+        // a time typed names it too.
+        let typed = View {
+            dates: HashMap::from([
+                (fotos.join("IMG-20190513-WA0001.jpg"), "2018-03-27".into()),
+                (fotos.join("foto.jpg"), "2018-03-27 14:05".into()),
+            ]),
+            ..View::default()
+        };
+        let p2 = preview(&files, &steps, &HashMap::new(), &typed);
+        let got2 = |name: &str| {
+            let i = p2.items.iter().find(|i| i.original == name).unwrap();
+            (
+                i.folder.clone().unwrap_or_default(),
+                i.new_name.clone(),
+                i.photo_date,
+            )
+        };
+        let march = |s: &str| {
+            (
+                "2018/2018-03".to_string(),
+                s.to_string(),
+                Some(DateFrom::Typed),
+            )
+        };
+        assert_eq!(got2("IMG-20190513-WA0001.jpg"), march("2018-03-27.jpg"));
+        assert_eq!(got2("foto.jpg"), march("2018-03-27 14.05.00.jpg"));
+        assert_eq!(got2("IMG-20190513-WA0002.jpg").2, Some(DateFrom::Name));
 
         // An identical copy alone is not numbered: the duplicate check
         // tells it.

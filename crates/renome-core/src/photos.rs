@@ -173,6 +173,8 @@ fn camera(make: &str, model: &str) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum DateFrom {
+    /// Typed in by hand (see [`typed`]).
+    Typed,
     /// The file's own data (EXIF, the video's header).
     Inside,
     /// Its name.
@@ -289,6 +291,40 @@ pub fn shot(file: &FileEntry, opts: &Options) -> Option<Shot> {
         camera: inside.camera,
         width: inside.width,
         height: inside.height,
+    })
+}
+
+/// A date typed in for a file (`2018-03-27`, or `2018-03-27 14:30` with
+/// the time, seconds optional) over the one it has (`own`, from
+/// [`shot`]): without a time typed, the photo's own time of day stays when
+/// it has one (from inside it or its name), else it has none. `None` when
+/// the text is no date.
+pub fn typed(file: &FileEntry, own: Option<Shot>, text: &str) -> Option<Shot> {
+    let text = text.trim();
+    let (day, time) = match text.split_once([' ', 'T']) {
+        Some((d, t)) => (d, Some(t.trim())),
+        None => (text, None),
+    };
+    let day = NaiveDate::parse_from_str(day, "%Y-%m-%d").ok()?;
+    let at = match time.filter(|t| !t.is_empty()) {
+        Some(t) => Some(
+            chrono::NaiveTime::parse_from_str(t, "%H:%M:%S")
+                .or_else(|_| chrono::NaiveTime::parse_from_str(t, "%H:%M"))
+                .ok()?,
+        ),
+        None => own
+            .as_ref()
+            .filter(|o| o.has_time && matches!(o.from, DateFrom::Inside | DateFrom::Name))
+            .map(|o| o.taken.time()),
+    };
+    let inside = file.photo_inside().cloned().unwrap_or_default();
+    Some(Shot {
+        taken: day.and_time(at.unwrap_or_default()),
+        has_time: at.is_some(),
+        from: DateFrom::Typed,
+        camera: own.as_ref().map_or(inside.camera, |o| o.camera.clone()),
+        width: own.as_ref().map_or(inside.width, |o| o.width),
+        height: own.as_ref().map_or(inside.height, |o| o.height),
     })
 }
 
@@ -425,10 +461,11 @@ pub fn groups<'a>(files: &[&'a FileEntry]) -> HashMap<&'a Path, (usize, String)>
 /// change date, in the same order.
 pub fn lead_rank(file: &FileEntry, s: &Shot) -> (u8, u8) {
     let from = match s.from {
-        DateFrom::Inside => 0,
-        DateFrom::Name => 1,
-        DateFrom::Modified => 2,
-        DateFrom::None => 3,
+        DateFrom::Typed => 0,
+        DateFrom::Inside => 1,
+        DateFrom::Name => 2,
+        DateFrom::Modified => 3,
+        DateFrom::None => 4,
     };
     let kind = if is_photo(&file.ext) {
         0

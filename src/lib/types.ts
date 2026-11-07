@@ -88,7 +88,7 @@ export interface PreviewItem {
   /** A PDF converted: how many of its pages would be drawn. */
   drawn?: number;
   /** With a photo rule, where a photo's date came from ("none": it has none). */
-  photoDate?: "inside" | "name" | "modified" | "none";
+  photoDate?: "typed" | "inside" | "name" | "modified" | "none";
   /** The name the lookups read, when the rules above the first lookup rule
    *  change it (else the original). */
   lookupName?: string;
@@ -131,6 +131,8 @@ export interface View {
   books: Record<string, BookMatch>;
   /** The issue chosen for each file (Comic Vine), for the comic rule. */
   comics: Record<string, ComicMatch>;
+  /** Dates typed in for photos (`2018-03-27`, `2018-03-27 14:05`), by path. */
+  dates?: Record<string, string>;
   /** What a show's old folder is called after when files stay in it. */
   leftoverSuffix: string;
   /** Another folder the files go to, moved or copied. */

@@ -14,6 +14,7 @@
     onremove,
     lookup,
     subs,
+    edit,
     summary = null,
   }: {
     step: Step;
@@ -26,6 +27,9 @@
     onremove: () => void;
     /** A line about the rule's effect (songs without tags). */
     summary?: string | null;
+    /** Photo rule: dates typed in for the files chosen in the list (the
+     *  button's text and hint, already translated). */
+    edit?: { n: number; typed: number; label: string; hint: string; onclick: () => void };
     /** Movie and series rules: search state and actions. */
     lookup?: {
       /** The show found last (series rule). */
@@ -329,6 +333,12 @@
           <input type="number" min="-48" max="48" step="1" bind:value={r.shiftHours} />
         </label>
         <p class="hint">{t("photoShiftHint")}</p>
+        {#if edit}
+          <div class="movie-actions">
+            <button disabled={!edit.n} onclick={edit.onclick}>{edit.label}</button>
+          </div>
+          <p class="hint">{edit.hint}{edit.typed ? ` ${t("photoEditTypedN", { n: edit.typed })}` : ""}</p>
+        {/if}
         <label class="check"><input type="checkbox" bind:checked={r.folders} /> <span>{t("photoFolders")}<small>{t("photoFoldersHint")}</small></span></label>
         {#if r.folders}
           <label class="sub">{t("photoFolderReady")}

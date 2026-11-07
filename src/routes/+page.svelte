@@ -11,6 +11,7 @@
   import { Movies } from "$lib/page/movies.svelte";
   import { Series } from "$lib/page/series.svelte";
   import { Subtitles } from "$lib/page/subtitles.svelte";
+  import { Photos } from "$lib/page/photos.svelte";
   import { asText, counts, extOf, isEpub, moved, without, type PageCtx } from "$lib/page/common";
   import Dialog from "$lib/Dialog.svelte";
   import { closeDialog, confirm, dialog, notify } from "$lib/dialogs.svelte";
@@ -116,6 +117,8 @@
   const tv = new Series(ctx);
   /** Subtitles for the videos those two identified. */
   const subs = new Subtitles(ctx, movies, tv);
+  /** Dates typed in for the photo rule. */
+  const photos = new Photos(ctx);
   /** Details being written inside comics and books. */
   let insideProgress = $state<{ done: number; total: number } | null>(null);
   /** A long operation under way: the list waits for it, with what it is
@@ -241,6 +244,7 @@
         if (i.photoDate === "none") out[i.path] = { status: "none", tip: t("photoUndatedTip") };
         else if (i.photoDate === "name") out[i.path] = { status: "auto", tip: t("photoFromNameTip") };
         else if (i.photoDate === "modified") out[i.path] = { status: "choose", tip: t("photoFromModifiedTip") };
+        else if (i.photoDate === "typed") out[i.path] = { status: "chosen", tip: t("photoTypedTip") };
       }
     }
     return out;
@@ -280,7 +284,7 @@
     return out;
   });
 
-  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, alikeOnly, similarOnly, movies: movies.matches, episodes: tv.matches, songs: music.matches, books: books.matches, comics: comics.matches, leftoverSuffix: t("leftoverSuffix"), sendTo });
+  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, alikeOnly, similarOnly, movies: movies.matches, episodes: tv.matches, songs: music.matches, books: books.matches, comics: comics.matches, dates: photos.dates, leftoverSuffix: t("leftoverSuffix"), sendTo });
   /** Example name for rule cards: the first file in natural name order, so
    *  it does not jump around while the preview re-sorts. */
   const collator = new Intl.Collator(undefined, { numeric: true });
@@ -915,7 +919,7 @@
       for (const op of r.done) if (inside(q, op.from)) q = op.to + q.slice(op.from.length);
       return q;
     };
-    for (const m of [movies, tv, subs, books, comics, music]) m.follow(follow);
+    for (const m of [movies, tv, subs, books, comics, music, photos]) m.follow(follow);
   }
 
   /** Writes .nfo files and images (undone with the rename); movies.progress
@@ -942,9 +946,9 @@
   /** Saves the list and the hand-edited names before an edit, for Ctrl+Z. */
   /** What the lookups found per file, kept along each list checkpoint
    *  that takes files out (null: the edit left them as they were). */
-  type Found = { movies: ReturnType<Movies["snapshot"]>; tv: ReturnType<Series["snapshot"]>; books: ReturnType<Books["snapshot"]>; music: ReturnType<Music["snapshot"]>; comics: ReturnType<Comics["snapshot"]> };
+  type Found = { movies: ReturnType<Movies["snapshot"]>; tv: ReturnType<Series["snapshot"]>; books: ReturnType<Books["snapshot"]>; music: ReturnType<Music["snapshot"]>; comics: ReturnType<Comics["snapshot"]>; photos: ReturnType<Photos["snapshot"]> };
   let foundUndo: (Found | null)[] = [];
-  const found = (): Found => ({ movies: movies.snapshot(), tv: tv.snapshot(), books: books.snapshot(), music: music.snapshot(), comics: comics.snapshot() });
+  const found = (): Found => ({ movies: movies.snapshot(), tv: tv.snapshot(), books: books.snapshot(), music: music.snapshot(), comics: comics.snapshot(), photos: photos.snapshot() });
   const remember = (keep: Found | null = null) => {
     if (foundUndo.length === 100) foundUndo.shift();
     foundUndo.push(keep);
@@ -958,7 +962,7 @@
    *  with the shows and series picked, when the list is cleared), so a
    *  file added again starts fresh. */
   function forget(paths: Set<string> | null) {
-    for (const m of [movies, tv, subs, books, comics, music]) m.forget(paths);
+    for (const m of [movies, tv, subs, books, comics, music, photos]) m.forget(paths);
   }
 
   /** Undoes the last edit to the list (Ctrl+Z). Renames are undone in the History. */
@@ -976,6 +980,7 @@
       comics.restore(was.comics);
       books.restore(was.books);
       music.restore(was.music);
+      photos.restore(was.photos);
     }
     overrides = prev;
     await refresh();
@@ -1423,6 +1428,15 @@
                         },
                       }
                     : undefined}
+            edit={step.rule.type === "photo"
+              ? {
+                  n: photos.selected.length,
+                  typed: Object.keys(photos.dates).length,
+                  label: t("photoEditButton", { n: photos.selected.length }),
+                  hint: t("photoEditButtonHint"),
+                  onclick: () => photos.openEdit(),
+                }
+              : undefined}
             summary={step.rule.type === "music" && step.enabled && music.untagged
               ? t(step.rule.listen ? "musicUntaggedListenN" : "musicUntaggedN", { n: music.untagged })
               : step.rule.type === "photo" && step.enabled && undatedCount
@@ -1679,6 +1693,16 @@
     rows={comics.edit.comics.map((m) => asText(m, comics.fields))}
     onsave={(c) => comics.saveEdit(c)}
     onclose={() => (comics.edit = null)}
+  />
+{/if}
+{#if photos.edit}
+  <DetailsEdit
+    heading={t("photoEditTitleN", { n: photos.edit.rows.length })}
+    hint={t("photoEditHint")}
+    fields={photos.fields}
+    rows={photos.edit.rows}
+    onsave={(c) => photos.saveEdit(c)}
+    onclose={() => (photos.edit = null)}
   />
 {/if}
 {#if books.edit}
