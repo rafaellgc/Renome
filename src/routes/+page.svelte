@@ -12,7 +12,7 @@
   import Help from "$lib/Help.svelte";
   import AlbumReview from "$lib/AlbumReview.svelte";
   import BookReview from "$lib/BookReview.svelte";
-  import ComicEdit from "$lib/ComicEdit.svelte";
+  import DetailsEdit from "$lib/DetailsEdit.svelte";
   import ComicPicker from "$lib/ComicPicker.svelte";
   import PictureCompare from "$lib/PictureCompare.svelte";
   import ComicReview from "$lib/ComicReview.svelte";
@@ -27,7 +27,7 @@
   import { RULE_TYPES, LOOKUP_TYPES, isLookup, oneLookup, byFit, isAudio, isBook, isComic, isScreen, isVideo, newRule, newStep, seriesOnly, splitExt, defaultSubLangs } from "$lib/rules";
   import { comicKey, loadSecrets, loadSettings, saveSecrets, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
-    AlbumState, ApplyReport, BookCandidate, BookMatch, BookState, Candidate, ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, Copies, MbCandidate, SongMatch, EpKey, EpisodeMatch, EpisodeState, MovieMatch, MovieSet, MovieState, MovieStatus, HistoryEntry,
+    AlbumState, ApplyReport, BookCandidate, BookMatch, BookState, Candidate, ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, Copies, EditField, MbCandidate, SongMatch, EpKey, EpisodeMatch, EpisodeState, MovieMatch, MovieSet, MovieState, MovieStatus, HistoryEntry,
     OpError, Preview, PreviewItem, Rule, RuleType, Show, Step, SubCandidate, SubsAuth, View, ViewSort,
   } from "$lib/types";
   import { DETAIL_COLUMNS, type DetailColumn } from "$lib/types";
@@ -332,16 +332,34 @@
       comics: rows.map((i) => $state.snapshot(comicMatches[i.path] ?? comics[i.path]?.own ?? guessed[i.path] ?? empty)),
     };
   }
+  /** The comic details window's fields. */
+  const COMIC_FIELDS = $derived<EditField[]>([
+    { key: "series", label: t("comicEditSeries"), wide: true },
+    { key: "seriesYear", label: t("comicEditSeriesYear"), numeric: true },
+    { key: "volume", label: t("comicEditVolume"), numeric: true },
+    { key: "number", label: t("comicEditNumber") },
+    { key: "title", label: t("comicEditTitle"), wide: true },
+    { key: "year", label: t("comicEditYear"), numeric: true },
+    { key: "publisher", label: t("comicEditPublisher") },
+    { key: "writer", label: t("comicEditWriter") },
+    { key: "artist", label: t("comicEditArtist") },
+  ]);
+  /** Values as the details window shows them (nothing: empty). */
+  const asText = (m: object, keys: EditField[]) =>
+    Object.fromEntries(keys.map((f) => {
+      const v = (m as Record<string, unknown>)[f.key];
+      return [f.key, v == null || v === 0 ? "" : String(v)];
+    }));
 
-  function saveComicEdit(changed: Partial<Record<"series" | "seriesYear" | "number" | "volume" | "title" | "year" | "publisher" | "writer" | "artist", string>>) {
+  function saveComicEdit(changed: Record<string, string>) {
     if (!comicEdit) return;
     const num = (v: string) => (v ? Number.parseInt(v, 10) : null);
     const next = { ...comicEdits };
     comicEdit.paths.forEach((p, i) => {
       const m: ComicMatch = { ...comicEdit!.comics[i] };
-      for (const [k, v] of Object.entries(changed) as [keyof typeof changed, string][]) {
+      for (const [k, v] of Object.entries(changed)) {
         if (k === "seriesYear" || k === "volume" || k === "year") m[k] = num(v);
-        else m[k] = v;
+        else (m as unknown as Record<string, string>)[k] = v;
       }
       // The catalogue's issue no longer tells it.
       if (changed.series !== undefined || changed.number !== undefined) m.id = "";
@@ -421,10 +439,66 @@
   /** Albums in the review window (indexes); null when closed. */
   let albumReview = $state<number[] | null>(null);
   let mbProgress = $state<{ done: number; total: number; kind: "search" | "listen" | "save" | "tags" } | null>(null);
+  /** Songs whose tags were typed in (over what the release said). */
+  let songEdits = $state<Record<string, SongMatch>>({});
   /** Each song's details from its chosen release. */
-  const songMatches = $derived(
-    Object.fromEntries(albums.flatMap((a) => (a.choice ? Object.entries(a.matches) : []))) as Record<string, SongMatch>,
-  );
+  const songMatches = $derived({
+    ...(Object.fromEntries(albums.flatMap((a) => (a.choice ? Object.entries(a.matches) : []))) as Record<string, SongMatch>),
+    ...songEdits,
+  });
+  /** The song details window, while open. */
+  let songEdit = $state<{ paths: string[]; songs: SongMatch[] } | null>(null);
+  /** The songs among the rows chosen in the list. */
+  const selectedSongs = $derived(preview.items.filter((i) => selected.has(i.path) && !i.isDir && isAudio(i.original)));
+  const SONG_FIELDS = $derived<EditField[]>([
+    { key: "title", label: t("songEditTitle"), wide: true },
+    { key: "artist", label: t("songEditArtist") },
+    { key: "albumArtist", label: t("songEditAlbumArtist") },
+    { key: "genre", label: t("songEditGenre") },
+    { key: "album", label: t("songEditAlbum"), wide: true },
+    { key: "year", label: t("songEditYear"), numeric: true },
+    { key: "track", label: t("songEditTrack"), numeric: true },
+    { key: "trackTotal", label: t("songEditTrackTotal"), numeric: true },
+    { key: "disc", label: t("songEditDisc"), numeric: true },
+    { key: "discTotal", label: t("songEditDiscTotal"), numeric: true },
+  ]);
+
+  async function openSongEdit() {
+    const rows = selectedSongs;
+    if (!rows.length) return;
+    const r = musicRule?.rule;
+    const missing = rows.filter((i) => !songMatches[i.path]);
+    const own: Record<string, SongMatch | null> = {};
+    if (missing.length) {
+      const got = await api.songTags(missing.map((i) => i.path), r?.type === "music" && r.fromName);
+      missing.forEach((i, n) => (own[i.path] = got[n]));
+    }
+    const empty: SongMatch = { release: "", title: "", artist: "", albumArtist: "", album: "", year: null, track: 0, trackTotal: 0, disc: 0, discTotal: 0, typed: true };
+    songEdit = {
+      paths: rows.map((i) => i.path),
+      songs: rows.map((i) => $state.snapshot(songMatches[i.path] ?? own[i.path] ?? empty)),
+    };
+  }
+
+  function saveSongEdit(changed: Record<string, string>) {
+    if (!songEdit) return;
+    const next = { ...songEdits };
+    songEdit.paths.forEach((p, i) => {
+      const m: SongMatch = { ...songEdit!.songs[i] };
+      for (const [k, v] of Object.entries(changed)) {
+        if (k === "year") m.year = v ? Number.parseInt(v, 10) : null;
+        else if (k === "track" || k === "trackTotal" || k === "disc" || k === "discTotal") m[k] = v ? Number.parseInt(v, 10) : 0;
+        else (m as unknown as Record<string, string>)[k] = v;
+      }
+      // Another album: the release's ids no longer tell it.
+      if (m.typed || !m.release || changed.album !== undefined || changed.albumArtist !== undefined) {
+        Object.assign(m, { typed: true, release: "", recording: "", trackId: "", releaseGroup: "", artistIds: [], albumArtistIds: [] });
+      }
+      next[p] = m;
+    });
+    songEdits = next;
+    songEdit = null;
+  }
   /** The album each song is in. */
   const albumOf = $derived(new Map(albums.flatMap((a, i) => a.files.map((p): [string, number] => [p, i]))));
   /** Albums whose songs keep their names but still get a cover: those
@@ -1980,9 +2054,9 @@
   /** Saves the list and the hand-edited names before an edit, for Ctrl+Z. */
   /** What the lookups found per file, kept along each list checkpoint
    *  that takes files out (null: the edit left them as they were). */
-  type Found = { movies: typeof movies; books: typeof books; comics: typeof comics; comicEdits: typeof comicEdits; series: typeof series; albums: AlbumState[]; pickedShows: typeof pickedShows; pickedComics: typeof pickedComics; searchedShows: Candidate[] };
+  type Found = { movies: typeof movies; books: typeof books; comics: typeof comics; comicEdits: typeof comicEdits; songEdits: typeof songEdits; series: typeof series; albums: AlbumState[]; pickedShows: typeof pickedShows; pickedComics: typeof pickedComics; searchedShows: Candidate[] };
   let foundUndo: (Found | null)[] = [];
-  const found = (): Found => ({ movies, books, comics, comicEdits, series, albums, pickedShows, pickedComics, searchedShows });
+  const found = (): Found => ({ movies, books, comics, comicEdits, songEdits, series, albums, pickedShows, pickedComics, searchedShows });
   const remember = (keep: Found | null = null) => {
     if (foundUndo.length === 100) foundUndo.shift();
     foundUndo.push(keep);
@@ -2002,6 +2076,7 @@
       books = {};
       comics = {};
       comicEdits = {};
+      songEdits = {};
       series = {};
       albums = [];
       pickedShows = {};
@@ -2015,6 +2090,7 @@
     books = keep(books);
     comics = keep(comics);
     comicEdits = keep(comicEdits);
+    songEdits = keep(songEdits);
     series = keep(series);
     albums = albums
       .map((a) => ({ ...a, files: a.files.filter((p) => !paths.has(p)), matches: keep(a.matches) }))
@@ -2030,7 +2106,7 @@
       return;
     }
     const was = foundUndo.pop();
-    if (was) ({ movies, books, comics, comicEdits, series, albums, pickedShows, pickedComics, searchedShows } = was);
+    if (was) ({ movies, books, comics, comicEdits, songEdits, series, albums, pickedShows, pickedComics, searchedShows } = was);
     overrides = prev;
     await refresh();
     checkIdentical();
@@ -2435,6 +2511,13 @@
                         : null,
                       onsearch: () => searchAlbums(step.rule as Extract<Rule, { type: "music" }>),
                       onreview: () => openAlbumReview(),
+                      edit: {
+                        n: selectedSongs.length,
+                        typed: Object.keys(songEdits).length,
+                        label: t("editButton", { n: selectedSongs.length }),
+                        hint: t("songEditButtonHint"),
+                        onclick: openSongEdit,
+                      },
                     }
                   : step.rule.type === "comic"
                     ? {
@@ -2443,7 +2526,13 @@
                         progress: comicProgress,
                         onsearch: () => searchComics(step.rule as Extract<Rule, { type: "comic" }>),
                         onreview: () => openComicReview(),
-                        edit: { n: selectedComics.length, typed: Object.keys(comicEdits).length, onclick: openComicEdit },
+                        edit: {
+                          n: selectedComics.length,
+                          typed: Object.keys(comicEdits).length,
+                          label: t("editButton", { n: selectedComics.length }),
+                          hint: t("comicEditButtonHint"),
+                          onclick: openComicEdit,
+                        },
                       }
                   : step.rule.type === "book"
                     ? {
@@ -2702,7 +2791,24 @@
 {/if}
 
 {#if comicEdit}
-  <ComicEdit comics={comicEdit.comics} onsave={saveComicEdit} onclose={() => (comicEdit = null)} />
+  <DetailsEdit
+    heading={t("comicEditTitleN", { n: comicEdit.comics.length })}
+    hint={t("detailsEditHint")}
+    fields={COMIC_FIELDS}
+    rows={comicEdit.comics.map((m) => asText(m, COMIC_FIELDS))}
+    onsave={saveComicEdit}
+    onclose={() => (comicEdit = null)}
+  />
+{/if}
+{#if songEdit}
+  <DetailsEdit
+    heading={t("songEditTitleN", { n: songEdit.songs.length })}
+    hint={t("detailsEditHint")}
+    fields={SONG_FIELDS}
+    rows={songEdit.songs.map((m) => asText(m, SONG_FIELDS))}
+    onsave={saveSongEdit}
+    onclose={() => (songEdit = null)}
+  />
 {/if}
 
 {#if albumReview}

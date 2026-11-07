@@ -314,6 +314,31 @@ async fn file_details(
     .await
 }
 
+/// Each song's own tags (with what its name says, with `from_name`), as
+/// a start for typing its details in; `None` for what is not a song.
+#[tauri::command]
+async fn song_own_tags(
+    app: AppHandle,
+    paths: Vec<PathBuf>,
+    from_name: bool,
+) -> Result<Vec<Option<renome_core::musicbrainz::SongMatch>>, String> {
+    in_background(app, move |state| {
+        let s = state.session.lock().unwrap();
+        let by_path: HashMap<&PathBuf, &renome_core::FileEntry> =
+            s.files.iter().map(|f| (&f.path, f)).collect();
+        paths
+            .iter()
+            .map(|p| {
+                let f = by_path.get(p)?;
+                song_tags(f, from_name)
+                    .or_else(|| any_song_tags(f))
+                    .map(|t| renome_core::musicbrainz::SongMatch::from_tags(&t))
+            })
+            .collect()
+    })
+    .await
+}
+
 #[tauri::command]
 async fn preview(
     app: AppHandle,
@@ -1291,7 +1316,11 @@ async fn write_tags(
     let mut backups = Vec::new();
     let mut written = Vec::new();
     for (done, job) in items.into_iter().enumerate() {
-        let image = if cover {
+        // Typed in: no release to ask (the folder's cover still counts).
+        let typed = job.song.typed || job.song.release.is_empty();
+        let image = if cover && typed {
+            job.path.parent().and_then(folder_cover)
+        } else if cover {
             if !covers.contains_key(&job.song.release) {
                 let mut found = musicbrainz::front_cover(
                     &state.mb,
@@ -1311,7 +1340,7 @@ async fn write_tags(
         } else {
             None
         };
-        if !full.contains_key(&job.song.release) {
+        if !typed && !full.contains_key(&job.song.release) {
             let r = if renome_core::discogs::is_discogs(&job.song.release) {
                 state.dg.release(&job.song.release).await.ok()
             } else {
@@ -1320,8 +1349,14 @@ async fn write_tags(
             full.insert(job.song.release.clone(), r);
         }
         let mut fields = tagwrite::fields_of(&job.song);
-        if let Some(r) = &full[&job.song.release] {
-            fields.extend(tagwrite::details(r, &job.song.track_id));
+        if let Some(Some(r)) = full.get(&job.song.release).filter(|_| !typed) {
+            // A genre typed in counts over the release's.
+            let typed_genre = !job.song.genre.is_empty();
+            fields.extend(
+                tagwrite::details(r, &job.song.track_id)
+                    .into_iter()
+                    .filter(|(f, _)| !(typed_genre && *f == tagwrite::Field::Genre)),
+            );
         }
         let (path, store) = (job.path.clone(), store.clone());
         note.start(&path);
@@ -2269,6 +2304,7 @@ pub fn run() {
             book_lookup,
             book_search,
             comic_guesses,
+            song_own_tags,
             comic_check,
             comic_search,
             comic_issues,

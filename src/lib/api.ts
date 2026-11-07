@@ -99,6 +99,7 @@ export const api = {
   tmdbImages: () => invoke<string>("tmdb_images"),
   comicGuesses: (paths: string[], names: (string | null)[], byFolder: boolean) =>
     invoke<(ComicMatch | null)[]>("comic_guesses", { paths, names, byFolder }),
+  songTags: (paths: string[], fromName: boolean) => invoke<(SongMatch | null)[]>("song_own_tags", { paths, fromName }),
   comicCheck: (key: string) => invoke<void>("comic_check", { key }),
   comicSearch: (source: ComicSource, key: string, query: string, lang: string, year: number | null = null, publisher = "", skip = "") =>
     invoke<ComicVolume[]>("comic_search", { source, key, query, year, publisher, lang, skip }),

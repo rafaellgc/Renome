@@ -153,6 +153,16 @@ export interface MbCandidate {
   image?: string;
 }
 
+/** A field of the details window: its key, its label (already
+ *  translated), whether only digits go in it and whether it takes the
+ *  whole row. */
+export interface EditField {
+  key: string;
+  label: string;
+  numeric?: boolean;
+  wide?: boolean;
+}
+
 export interface SongMatch {
   release: string;
   title: string;
@@ -170,6 +180,10 @@ export interface SongMatch {
   releaseGroup?: string;
   artistIds?: string[];
   albumArtistIds?: string[];
+  /** Typed in by hand. */
+  genre?: string;
+  /** Typed in by hand, not from a release (no catalogue ids). */
+  typed?: boolean;
 }
 
 export interface AlbumQuery {

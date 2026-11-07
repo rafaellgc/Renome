@@ -192,9 +192,23 @@ pub type Fields = Vec<(Field, Vec<String>)>;
 /// does not say is left as it is.
 pub fn fields_of(m: &SongMatch) -> Fields {
     // A Discogs release's ids are not MusicBrainz's: they are not written.
-    let mb = !crate::discogs::is_discogs(&m.release);
+    let mb = !m.typed && !crate::discogs::is_discogs(&m.release);
     let one = |s: &str| (!s.is_empty()).then(|| vec![s.to_string()]);
-    let id = |s: &str| one(s).filter(|_| mb);
+    // Typed in: the ids the song had name another release; they go.
+    let id = |s: &str| {
+        if m.typed {
+            Some(Vec::new())
+        } else {
+            one(s).filter(|_| mb)
+        }
+    };
+    let ids = |v: &Vec<String>| {
+        if m.typed {
+            Some(Vec::new())
+        } else {
+            (mb && !v.is_empty()).then(|| v.clone())
+        }
+    };
     let date = if m.date.is_empty() {
         m.year.map(|y| y.to_string()).unwrap_or_default()
     } else {
@@ -214,14 +228,9 @@ pub fn fields_of(m: &SongMatch) -> Fields {
         (Field::RecordingId, id(&m.recording)),
         (Field::TrackId, id(&m.track_id)),
         (Field::ReleaseGroupId, id(&m.release_group)),
-        (
-            Field::ArtistId,
-            (mb && !m.artist_ids.is_empty()).then(|| m.artist_ids.clone()),
-        ),
-        (
-            Field::AlbumArtistId,
-            (mb && !m.album_artist_ids.is_empty()).then(|| m.album_artist_ids.clone()),
-        ),
+        (Field::ArtistId, ids(&m.artist_ids)),
+        (Field::AlbumArtistId, ids(&m.album_artist_ids)),
+        (Field::Genre, one(&m.genre)),
     ];
     fields
         .into_iter()
@@ -1105,6 +1114,40 @@ mod tests {
     }
 
     const FORMATS: [&str; 5] = ["song.mp3", "song.flac", "song.ogg", "song.opus", "song.m4a"];
+
+    #[test]
+    fn typed_in_takes_the_ids_away() {
+        for name in FORMATS {
+            let d = tempfile::tempdir().unwrap();
+            let p = d.path().join(name);
+            fs::copy(Path::new("tests/fixtures").join(name), &p).unwrap();
+            let store = d.path().join("store");
+            let mut m = song_match();
+            m.release = "rel-1".into();
+            write(&p, &fields_of(&m), None, false, &store).unwrap();
+            assert_eq!(
+                crate::music::read(&p).unwrap().mb_release,
+                "rel-1",
+                "{name}"
+            );
+            let typed = SongMatch {
+                album: "Fita Caseira".into(),
+                genre: "Forró".into(),
+                typed: true,
+                ..song_match()
+            };
+            let t = crate::music::read(&p).unwrap();
+            assert!(typed.differs(&t), "{name}");
+            write(&p, &fields_of(&typed), None, false, &store).unwrap();
+            let t = crate::music::read(&p).unwrap();
+            assert_eq!(
+                (t.album.as_str(), t.genre.as_str(), t.mb_release.as_str()),
+                ("Fita Caseira", "Forró", ""),
+                "{name}"
+            );
+            assert!(!typed.differs(&t), "{name}");
+        }
+    }
 
     #[test]
     fn writes_and_puts_back() {

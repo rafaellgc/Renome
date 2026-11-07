@@ -410,9 +410,35 @@ pub struct SongMatch {
     pub artist_sort: String,
     #[serde(default)]
     pub album_artist_sort: String,
+    /// Typed in by hand (empty: what the release or the file says).
+    #[serde(default)]
+    pub genre: String,
+    /// Typed in by hand, not from a release: the song has no catalogue
+    /// ids (those its tags have are taken out when writing).
+    #[serde(default)]
+    pub typed: bool,
 }
 
 impl SongMatch {
+    /// A song's own tags, as a start for typing its details in (no
+    /// catalogue: `typed`).
+    pub fn from_tags(t: &AudioTags) -> SongMatch {
+        SongMatch {
+            title: t.title.clone(),
+            artist: t.artist.clone(),
+            album_artist: t.album_artist.clone(),
+            album: t.album.clone(),
+            year: t.year,
+            track: t.track.unwrap_or(0),
+            track_total: t.track_total.unwrap_or(0),
+            disc: t.disc.unwrap_or(0),
+            disc_total: t.disc_total.unwrap_or(0),
+            genre: t.genre.clone(),
+            typed: true,
+            ..SongMatch::default()
+        }
+    }
+
     /// The song's own tags say something else than the release.
     pub fn differs(&self, t: &AudioTags) -> bool {
         t.title != self.title
@@ -424,8 +450,12 @@ impl SongMatch {
             || t.track_total != Some(self.track_total)
             || t.disc != Some(self.disc)
             || t.disc_total != Some(self.disc_total)
+            || (!self.genre.is_empty() && t.genre != self.genre)
+            // Typed in: the ids it had go away.
+            || (self.typed && !t.mb_release.is_empty())
             // A Discogs release leaves no id in the tags.
-            || (!crate::discogs::is_discogs(&self.release)
+            || (!self.typed
+                && !crate::discogs::is_discogs(&self.release)
                 && (t.mb_release != self.release
                     // Not written from this track yet (its other tags may be junk).
                     || (!self.track_id.is_empty() && t.mb_track != self.track_id)))
@@ -449,6 +479,7 @@ impl SongMatch {
             }
         };
         take(&mut t.label, &self.label);
+        take(&mut t.genre, &self.genre);
         take(&mut t.date, &self.date);
         take(&mut t.catalog, &self.catalog);
         take(&mut t.artist_sort, &self.artist_sort);
@@ -622,6 +653,8 @@ pub fn match_tracks(release: &Release, songs: &[Song]) -> (Vec<(PathBuf, SongMat
                 catalog: catalog.clone().unwrap_or_default(),
                 artist_sort,
                 album_artist_sort: album_artist_sort.clone(),
+                genre: String::new(),
+                typed: false,
             },
         ));
     }

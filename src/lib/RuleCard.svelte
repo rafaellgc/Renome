@@ -36,8 +36,9 @@
       none: number;
       onsearch: () => void;
       onreview: () => void;
-      /** Comic rule: details typed in for the comics chosen in the list. */
-      edit?: { n: number; typed: number; onclick: () => void };
+      /** Comic and music rules: details typed in for the files chosen in
+       *  the list (the button's text and hint, already translated). */
+      edit?: { n: number; typed: number; label: string; hint: string; onclick: () => void };
     };
     /** Movie and series rules: the subtitles' search state and actions. */
     subs?: {
@@ -455,12 +456,6 @@
         <label>{t("comicSeries")} <input bind:value={r.series} placeholder={t("comicSeriesPlaceholder")} spellcheck="false" /></label>
         {#if lookup?.show}<p class="hint">{t("seriesCurrent", { show: lookup.show })}</p>{/if}
         {@render actions(t("comicSearch"), "comicSummary")}
-        {#if lookup?.edit}
-          <div class="movie-actions">
-            <button disabled={!lookup.edit.n || !!lookup.progress} onclick={lookup.edit.onclick}>{t("comicEditButton", { n: lookup.edit.n })}</button>
-          </div>
-          <p class="hint">{t("comicEditButtonHint")}{lookup.edit.typed ? ` ${t("comicEditTypedN", { n: lookup.edit.typed })}` : ""}</p>
-        {/if}
       {/if}
 
       {#if summary}<p class="hint">{summary}</p>{/if}
@@ -499,6 +494,12 @@
       <p class="hint">{lookup.progress}</p>
     {:else if lookup.found || lookup.choose || lookup.none}
       <p class="hint">{t(summary, { found: lookup.found, choose: lookup.choose, none: lookup.none })}</p>
+    {/if}
+    {#if lookup.edit}
+      <div class="movie-actions">
+        <button disabled={!lookup.edit.n || !!lookup.progress} onclick={lookup.edit.onclick}>{lookup.edit.label}</button>
+      </div>
+      <p class="hint">{lookup.edit.hint}{lookup.edit.typed ? ` ${t("editTypedN", { n: lookup.edit.typed })}` : ""}</p>
     {/if}
   {/if}
 {/snippet}

@@ -849,6 +849,21 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   deletes the copies left beside songs and puts the songs written into
   the entry, to undo (an undo of tags is noted the same way, for its
   copies).
+- "Edit the details (N selected)" (`DetailsEdit.svelte`, shared with
+  the comic rule): for the songs selected in the list, a window with
+  title, artist, album artist, genre, album, year, track, total tracks,
+  disc and total discs, prefilled from the release match, else the song's
+  own tags as the rule reads them (`song_own_tags`, with "Fill in from the
+  file name when a tag is missing" when on); with several, a field with
+  different values shows empty and only the fields typed in are applied to all. The result goes
+  into `songEdits` (per path, for the session), which override the
+  release matches in `view.songs` (naming, `retag`, tag writing). Changing
+  album or album artist, or editing a song with no release, makes it
+  `typed`: its release ids are cleared, writing removes the MusicBrainz
+  ids from the tags, no release is fetched (the cover comes only from the
+  folder) and `differs` ignores the release id. A typed genre is written
+  (`Genre`) and counts over the release's genres. Clear and removing
+  files forget them; Ctrl+Z after those brings them back with the rest.
 - "Show the missing tracks" (on by default; old saved rules get it on):
   for each album with a release (picked or chosen), the release's tracks
   no listed song is matched to become faded rows like the missing
@@ -1184,7 +1199,7 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   rows count (in the Rename button) when their `ComicInfo.xml` (or other
   details read, see "What is already there") says something else
   (`retag`). A `MetronInfo.xml` is never updated.
-- "Edit the details (N selected)" (`ComicEdit.svelte`): for the comics
+- "Edit the details (N selected)" (`DetailsEdit.svelte`): for the comics
   selected in the list, a window with series, series year, volume,
   number, title, year, publisher, writer and artist, prefilled from the
   current match, else the file's own reading (`comic_guesses`); with
