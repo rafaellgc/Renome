@@ -20,6 +20,8 @@
 //! - [`video`]: a video's picture size and codec, from its headers.
 //! - [`inside`]: details written inside CBZ and EPUB files.
 //! - [`convert`]: comics converted to CBZ (from RAR, 7z, tar).
+//! - [`subtext`]: text subtitles read, cleaned, retimed, made SubRip.
+//! - [`mkvsubs`]: text subtitles taken out of Matroska videos.
 //! - [`details`]: what the optional columns of the list show.
 
 pub mod acoustid;
@@ -52,6 +54,8 @@ pub mod rules;
 pub mod scan;
 pub mod similar;
 pub mod subtitles;
+pub mod subtext;
+pub mod mkvsubs;
 pub mod tagwrite;
 pub mod text;
 pub mod tmdb;

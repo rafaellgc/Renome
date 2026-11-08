@@ -353,31 +353,6 @@ pub fn target(video: &Path, lang: &str, hearing_impaired: bool, ext: &str) -> Pa
     video.with_file_name(format!("{stem}.{lang}{flag}.{ext}"))
 }
 
-/// A subtitle's text as UTF-8: kept when it is (a byte order mark
-/// dropped), read as UTF-16 with its mark, else as Windows-1252, the
-/// most common for Western languages (an ISO-8859-1 file reads the same).
-pub fn to_utf8(bytes: &[u8]) -> Vec<u8> {
-    if let Some(rest) = bytes.strip_prefix(b"\xEF\xBB\xBF") {
-        return rest.to_vec();
-    }
-    if bytes.starts_with(b"\xFF\xFE") || bytes.starts_with(b"\xFE\xFF") {
-        let enc = if bytes[0] == 0xFF {
-            encoding_rs::UTF_16LE
-        } else {
-            encoding_rs::UTF_16BE
-        };
-        return enc.decode(&bytes[2..]).0.into_owned().into_bytes();
-    }
-    if std::str::from_utf8(bytes).is_ok() {
-        return bytes.to_vec();
-    }
-    encoding_rs::WINDOWS_1252
-        .decode(bytes)
-        .0
-        .into_owned()
-        .into_bytes()
-}
-
 /// The subtitle in a downloaded archive (SubDL sends zips): the one file
 /// with a subtitle extension (macOS' `__MACOSX` copies left out); when
 /// there are several, the one for the episode (`S01E02`), else the
@@ -534,13 +509,6 @@ mod tests {
             target(v, "en", false, "zip"),
             Path::new("/m/Movie (2010)/Movie (2010).en.srt")
         );
-    }
-
-    #[test]
-    fn text_to_utf8() {
-        assert_eq!(to_utf8(b"\xEF\xBB\xBFol\xC3\xA1"), "olá".as_bytes());
-        assert_eq!(to_utf8(b"ol\xE1 a\xE7\xE3o"), "olá ação".as_bytes());
-        assert_eq!(to_utf8(b"\xFF\xFEo\x00l\x00\xE1\x00"), "olá".as_bytes());
     }
 
     #[test]

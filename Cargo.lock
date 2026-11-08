@@ -3863,6 +3863,7 @@ dependencies = [
  "chrono",
  "encoding_rs",
  "fax 0.3.0",
+ "flate2",
  "globset",
  "hayro",
  "hayro-jbig2",

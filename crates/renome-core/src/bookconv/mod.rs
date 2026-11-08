@@ -624,6 +624,7 @@ pub fn finish(path: &Path, left: &Path, tmp: &Path, original: Original) -> Resul
             removed: Vec::new(),
             raw: Vec::new(),
             kept_text: Vec::new(),
+            saved: None,
             entry: None,
             converted: Some(Converted {
                 original: kept,

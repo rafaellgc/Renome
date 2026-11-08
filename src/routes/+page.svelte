@@ -121,12 +121,23 @@
   const photos = new Photos(ctx);
   /** Details being written inside comics and books. */
   let insideProgress = $state<{ done: number; total: number } | null>(null);
+  /** Subtitles being fixed or taken out of videos (`part`: how far into
+   *  the video being read). */
+  let subToolsProgress = $state<{ done: number; total: number; part: number } | null>(null);
+  /** Subtitles and videos the subtitle rule works on that keep their names. */
+  const subToolsOnly = $derived(
+    preview.items.filter((i) => i.status === "unchanged" && ((i.subFix && !i.subFix.noFps) || i.subExtract)),
+  );
   /** A long operation under way: the list waits for it, with what it is
    *  doing and how far it got (no count: still finding out). Searches can
    *  be stopped (`stop`). */
   const working = $derived.by((): { label: string; done?: number; total?: number; stop?: boolean } | null => {
     const counted = (label: string, p: { done: number; total: number }, stop: boolean) => ({ label, done: p.done, total: p.total, stop });
     if (insideProgress) return counted(t("insideWriting", insideProgress), insideProgress, false);
+    if (subToolsProgress) {
+      const p = subToolsProgress;
+      return { label: t("subToolsWorking", { done: p.done, total: p.total }), done: p.done + Math.min(p.part, 0.99), total: p.total, stop: true };
+    }
     if (subs.progress)
       return counted(t(subs.progress.kind === "search" ? "subsSearching" : "subsWriting", subs.progress), subs.progress, true);
     if (books.progress)
@@ -563,12 +574,21 @@
     /** Comics renamed `.cbz` to be converted. */
     const converting = new Set(preview.items.filter((i) => i.convert).map((i) => i.path));
     const cleared = new Set(preview.items.filter((i) => i.junk).map((i) => i.path));
+    /** What the subtitle rule does to each file: fix a subtitle, take out a video's tracks. */
+    const strule = steps.find((s) => s.enabled && s.rule.type === "subtitle")?.rule;
+    // Taken now: the preview changes once files are renamed.
+    const toolsOnly = subToolsOnly;
+    const subJobs = new Map(
+      preview.items
+        .filter((i) => i.status !== "conflict" && ((i.subFix && !i.subFix.noFps) || i.subExtract))
+        .map((i) => [i.path, { fix: !!i.subFix && !i.subFix.noFps, extract: !!i.subExtract }]),
+    );
     const insideOnly = [
       ...comics.infoOnly.map((i) => comics.insideItem(i.path, i.path, i.convert)),
       ...books.epubOnly.map((i) => books.insideItem(i.path, i.path)),
       ...books.convertOnly.map((i) => books.convertItem(i.path, i.path, i.bookTo!)),
     ];
-    if (!preview.changed && !meta.length && !tvMeta.length && !bookMeta.length && !music.coverOnly && !listOnly.length && !retagOnly.length && !insideOnly.length && !subsUnchanged.length) return;
+    if (!preview.changed && !meta.length && !tvMeta.length && !bookMeta.length && !music.coverOnly && !listOnly.length && !retagOnly.length && !insideOnly.length && !subsUnchanged.length && !toolsOnly.length) return;
     // Files left behind in a show's old folder are always told first.
     const left = preview.leftFolders.map((f) => t("confirmLeftover", { n: f.files, from: basename(f.from), to: basename(f.to) }));
     if (settings.confirmApply || left.length) {
@@ -585,6 +605,7 @@
         listOnly.length ? t("confirmPlaylists", { n: listOnly.length }) : "",
         retagOnly.length ? t("confirmTags", { n: retagOnly.length }) : "",
         insideOnly.length ? t("confirmInside", { n: insideOnly.length }) : "",
+        toolsOnly.length ? t("confirmSubTools", { n: toolsOnly.length }) : "",
         subsPlanned ? t("confirmSubs", { n: subsPlanned }) : "",
         preview.conflicts ? t("confirmConflicts", { n: preview.conflicts }) : "",
       ].filter(Boolean);
@@ -746,6 +767,32 @@
           );
         }
       }
+      let subTools = { written: 0, created: 0 };
+      if (recorded && strule?.type === "subtitle" && subJobs.size) {
+        const items = [
+          ...r.done.filter((op) => subJobs.has(op.from)).map((op) => ({ path: op.to, ...subJobs.get(op.from)! })),
+          ...toolsOnly.map((i) => ({ path: i.path, ...subJobs.get(i.path)! })),
+        ];
+        if (items.length) {
+          subToolsProgress = { done: 0, total: items.length, part: 0 };
+          try {
+            const tools = { toSrt: strule.toSrt, utf8: strule.utf8, ads: strule.ads, hearing: strule.hearing, shiftMs: strule.shiftMs, fpsFrom: strule.fpsFrom, fpsTo: strule.fpsTo };
+            const res = await api.subtitleTools(r.historyId, items, tools, strule.original ?? "keep", strule.extract ? strule.extractLangs : "");
+            subTools = res;
+            if (res.errors.length) {
+              await notify({
+                title: t("subToolsTitle"),
+                text: t("subToolsN", { n: res.written, m: res.created }),
+                items: res.errors.map(([file, why]) => (file ? `${file} — ${tError(why)}` : tError(why))),
+              });
+            }
+          } catch (e) {
+            await notify({ title: t("subToolsTitle"), text: tError(e) });
+          } finally {
+            subToolsProgress = null;
+          }
+        }
+      }
       let subsSaved = 0;
       if (recorded && subs.wanted !== null) {
         const pairs: [string, string][] = [
@@ -789,6 +836,7 @@
         r.listsRemoved ? t("listsRemovedN", { n: r.listsRemoved }) : "",
         saved ? t("sidecarsN", { n: saved }) : "",
         subsSaved ? t("subsSavedN", { n: subsSaved }) : "",
+        subTools.written || subTools.created ? t("subToolsN", { n: subTools.written, m: subTools.created }) : "",
         keptLists ? t("playlistsKeptN", { n: keptLists }) : "",
         tagged ? t("tagsN", { n: tagged }) : "",
         inside ? t("insideN", { n: inside }) : "",
@@ -1213,6 +1261,9 @@
     const unlistenInside = listen<{ done: number; total: number }>("inside-progress", (e) => {
       if (insideProgress) insideProgress = e.payload;
     });
+    const unlistenSubTools = listen<{ done: number; total: number; part: number }>("subtools-progress", (e) => {
+      if (subToolsProgress) subToolsProgress = e.payload;
+    });
     const unlistenApply = listen<{ done: number; total: number }>("apply-progress", (e) => {
       if (task === "rename") applyProgress = e.payload;
     });
@@ -1268,6 +1319,7 @@
       unlistenBooks.then((f) => f());
       unlistenSubs.then((f) => f());
       unlistenInside.then((f) => f());
+      unlistenSubTools.then((f) => f());
     };
   });
 </script>
@@ -1325,8 +1377,8 @@
           <button onclick={() => pickSendTo(true)}>{t("sendCopyTo")}</button>
         </div>
       {/if}
-      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !movies.metaOnly.length && !tv.metaOnly.length && !books.metaOnly.length && !music.coverOnly && !music.playlistOnly.length && !music.tagsOnly.length && !comics.infoOnly.length && !books.epubOnly.length && !books.convertOnly.length && !subs.only.length) || busy || !!working} onclick={applyAll}>
-        {t(sendTo ? (sendTo.copy ? "copyAction" : "moveAction") : "rename")} {preview.changed + movies.metaOnly.length + tv.metaOnly.length + books.metaOnly.length + music.coverOnly + music.playlistOnly.length + music.tagsOnly.length + comics.infoOnly.length + books.epubOnly.length + books.convertOnly.length + subs.only.length || ""}
+      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !movies.metaOnly.length && !tv.metaOnly.length && !books.metaOnly.length && !music.coverOnly && !music.playlistOnly.length && !music.tagsOnly.length && !comics.infoOnly.length && !books.epubOnly.length && !books.convertOnly.length && !subs.only.length && !subToolsOnly.length) || busy || !!working} onclick={applyAll}>
+        {t(sendTo ? (sendTo.copy ? "copyAction" : "moveAction") : "rename")} {preview.changed + movies.metaOnly.length + tv.metaOnly.length + books.metaOnly.length + music.coverOnly + music.playlistOnly.length + music.tagsOnly.length + comics.infoOnly.length + books.epubOnly.length + books.convertOnly.length + subs.only.length + subToolsOnly.length || ""}
       </button>
     </div>
   </header>

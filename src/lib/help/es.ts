@@ -712,6 +712,37 @@ ${ex("IMG-20190513-WA0001.jpg", "2019-05-13.jpg")}
 </ul>`,
   },
   {
+    id: "r-subtitle",
+    title: "Subtítulo",
+    sub: true,
+    html: `
+<p>Arregla <b>subtítulos de texto</b> y saca los que vienen <b>dentro de vídeos MKV</b>. Funciona sin internet y no cambia el nombre de los archivos: solo la extensión, cuando el subtítulo pasa a SRT. Puede usarse junto a la regla Película o Serie, que dan el nombre. Todo se puede deshacer desde el Historial: el subtítulo vuelve exactamente como era, y los extraídos se borran.</p>
+${ex("Película.es.ass", "Película.es.srt")}
+<p>Formatos leídos: <b>SRT</b> (SubRip), <b>ASS</b> y <b>SSA</b> (SubStation), <b>VTT</b> (WebVTT), <b>SUB</b> de texto (MicroDVD y SubViewer) y <b>SMI</b> (SAMI). El formato se reconoce por el contenido, no por la extensión. Un archivo que no es un subtítulo de texto conocido (un <code>.sub</code> de imagen de VobSub, un <code>.sub</code> que es otra cosa) <b>no se toca</b>. En la lista, cada subtítulo que va a cambiar lleva una marca con lo que se hará (pase el ratón para ver los detalles).</p>
+<h4>Opciones</h4>
+<ul>
+  <li><b>Convertir a SRT</b>: los subtítulos en otros formatos pasan a SRT, que lee casi todo aparato, TV y programa. Cursiva, negrita, subrayado y el subtítulo colocado arriba (<code>{\\an8}</code>) van juntos; en SubStation, también un estilo en cursiva. Colores, fuentes, tamaños, posiciones exactas, karaoke y dibujos se pierden. El original queda al lado, con su extensión, o va a la Papelera, como usted elija.</li>
+  <li><b>Grabar en UTF-8</b> (activada por defecto): los subtítulos antiguos en otras codificaciones pasan a UTF-8, y los acentos dejan de verse como símbolos raros. La codificación se deduce por el idioma del nombre del archivo (<code>.ru</code> es Windows-1251, <code>.pl</code> es Windows-1250…) o, sin idioma, por el propio texto, entre la occidental, la de Europa Central y la cirílica. Sin esta opción, un subtítulo editado sigue en la codificación que tenía.</li>
+  <li><b>Quitar publicidad y créditos</b>: quita las líneas con avisos de sitios de subtítulos (en cualquier punto de la película) y, solo al principio y al final, direcciones web y créditos de quien hizo, sincronizó o tradujo el subtítulo (<code>Subtítulos por…</code>, <code>Traducción:</code> con los nombres debajo). Una frase que solo menciona un sitio, en medio de un diálogo, se queda.</li>
+  <li><b>Quitar marcas para sordos</b>: quita sonidos y descripciones entre corchetes (<code>[música]</code>, <code>[risas]</code>); entre paréntesis cuando están en mayúsculas, solos y cortos en la línea, o antes de lo que se dice (<code>(Suspira)</code>); nombres de quien habla, en mayúsculas, antes de dos puntos (<code>JUAN: ¿Dónde estabas?</code>); y líneas solo de notas musicales. Cuando queda una sola frase de un diálogo, su guion también se quita.</li>
+  <li><b>Retrasar o adelantar</b>: segundos sumados a todos los tiempos (positivo retrasa, negativo adelanta; admite décimas, como <code>-1,5</code>). Las líneas que quedarían antes del principio del vídeo se quitan.</li>
+  <li><b>Fotogramas por segundo</b>: para el subtítulo que empieza bien y se va atrasando o adelantando poco a poco. Se hizo para otra versión del vídeo (cine y Blu-ray a 23,976 fotogramas por segundo, TV europea a 25). Elija de qué valor a cuál: los tiempos se estiran o encogen en la misma proporción.</li>
+  <li><b>Extraer subtítulos de vídeos MKV</b>: los subtítulos de texto (SRT, ASS, VTT) de dentro del vídeo pasan a archivos a su lado, con el nombre del vídeo, el idioma de la pista y las marcas <code>.forced</code> y <code>.sdh</code> cuando la pista lo dice (<code>Película.es.forced.srt</code>). En <b>Idiomas</b>, elija cuáles (<code>es, en</code>); vacío, todos. Con <b>Convertir a SRT</b> salen en SRT; las limpiezas también valen para ellos, pero los tiempos no cambian, porque la pista ya está a tiempo con el vídeo. El vídeo no se modifica.</li>
+</ul>
+<p><b>Limitaciones:</b></p>
+<ul>
+  <li>Los <b>subtítulos en imagen</b> (PGS de los Blu-ray, VobSub de los DVD, DVB) no son texto: no se pueden extraer ni convertir, porque habría que reconocer las letras de cada imagen. La lista dice cuántos hay en cada vídeo.</li>
+  <li>La extracción lee el <b>vídeo entero</b> (el subtítulo está repartido por el archivo): en un disco externo, una película de 20 GB tarda unos minutos. Hay progreso y el botón Detener. Solo vídeos MKV y WebM: los subtítulos dentro de MP4 y AVI no se extraen.</li>
+  <li>La conversión a SRT pierde lo que el SRT no tiene: colores, fuentes, posiciones exactas, efectos y karaoke. Un subtítulo ASS lleno de rótulos colocados los deja todos como frases normales, abajo.</li>
+  <li>La <b>codificación</b> de un subtítulo antiguo sin idioma en el nombre es una suposición entre la occidental, la de Europa Central y la cirílica: un subtítulo griego, turco o árabe sin <code>.el</code>, <code>.tr</code> o <code>.ar</code> en el nombre puede salir mal. Deshacer devuelve el archivo original.</li>
+  <li>Las limpiezas siguen patrones, no entienden el texto: una frase entera corta entre paréntesis, o un nombre en mayúsculas antes de dos puntos, también se quita; un sonido descrito en minúsculas en medio de una frase se queda. Los subtítulos escritos todos en mayúsculas solo pierden lo que está entre corchetes o solo entre paréntesis. Los créditos se buscan en portugués, inglés y español.</li>
+  <li>Un subtítulo que solo tiene publicidad o créditos no se vacía: queda como está, con un aviso.</li>
+  <li>Un subtítulo <b>MicroDVD</b> marca los tiempos en fotogramas: sin los fotogramas por segundo en él (<code>{1}{1}23.976</code>) o en un vídeo al lado cuyo nombre empiece igual, no se puede convertir ni cambiar de tiempo, y lleva la marca <b>sin fotogramas/s</b>.</li>
+  <li>SAMI (<code>.smi</code>) con varios idiomas: solo se convierte el primero. Un SAMI solo se limpia o cambia de tiempo cuando se convierte a SRT.</li>
+  <li>Un subtítulo editado se graba de nuevo entero, en la forma estándar del formato: la numeración de las frases, líneas en blanco de más y finales de línea mezclados pueden cambiar, sin cambiar lo que se ve en pantalla.</li>
+</ul>`,
+  },
+  {
     id: "preview",
     title: "Vista previa y conflictos",
     html: `

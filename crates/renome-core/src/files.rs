@@ -57,6 +57,13 @@ pub struct FileEntry {
     /// [`crate::photos::Inside`]), read on first use.
     #[serde(skip)]
     pub(crate) photo: OnceLock<Option<crate::photos::Inside>>,
+    /// A text subtitle's format, encoding and what cleaning would take
+    /// out (see [`crate::subtext::summary`]), read on first use.
+    #[serde(skip)]
+    pub(crate) subtitle: OnceLock<Option<crate::subtext::Summary>>,
+    /// A Matroska video's subtitle tracks, read on first use.
+    #[serde(skip)]
+    pub(crate) sub_tracks: OnceLock<Vec<crate::mkvsubs::Track>>,
 }
 
 impl FileEntry {
@@ -88,6 +95,8 @@ impl FileEntry {
             convert_pages: OnceLock::new(),
             book: OnceLock::new(),
             photo: OnceLock::new(),
+            subtitle: OnceLock::new(),
+            sub_tracks: OnceLock::new(),
         })
     }
 
@@ -142,6 +151,30 @@ impl FileEntry {
     /// A comic the comic rule can convert to CBZ (a PDF, EPUB or Kindle
     /// book): how many of its pages would be drawn; `None` when it cannot
     /// be. Checked once and cached.
+    /// A subtitle file's summary (`None` for other files and formats not
+    /// known).
+    pub fn subtitle(&self) -> Option<&crate::subtext::Summary> {
+        self.subtitle
+            .get_or_init(|| {
+                (!self.is_dir && crate::subtext::is_text_ext(&self.ext))
+                    .then(|| crate::subtext::summary(&self.path))
+                    .flatten()
+            })
+            .as_ref()
+    }
+
+    /// A Matroska video's subtitle tracks.
+    pub fn sub_tracks(&self) -> &[crate::mkvsubs::Track] {
+        self.sub_tracks.get_or_init(|| {
+            let mkv = ["mkv", "webm", "mk3d"].contains(&self.ext.to_ascii_lowercase().as_str());
+            if self.is_dir || !mkv {
+                Vec::new()
+            } else {
+                crate::mkvsubs::tracks(&self.path)
+            }
+        })
+    }
+
     pub fn convert_check(&self) -> Option<usize> {
         *self
             .convert_pages
@@ -179,6 +212,7 @@ impl FileEntry {
         self.kind = OnceLock::new();
         self.convert_pages = OnceLock::new();
         self.book = OnceLock::new();
+        self.subtitle = OnceLock::new();
         if let Some(fresh) = std::fs::metadata(&self.path)
             .ok()
             .and_then(|m| Self::from_path(&self.path, &m))

@@ -184,6 +184,7 @@ fn write_entry(
         removed: Vec::new(),
         raw: Vec::new(),
         kept_text: Vec::new(),
+        saved: None,
         converted: None,
         entry: Some(Entry {
             name: name.to_string(),
@@ -510,6 +511,7 @@ pub fn remove_comic(path: &Path, store: &Path) -> Result<Option<Backup>, String>
         removed: Vec::new(),
         raw: Vec::new(),
         kept_text: Vec::new(),
+        saved: None,
         converted: None,
         entry: Some(Entry {
             name,

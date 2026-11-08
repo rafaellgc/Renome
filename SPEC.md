@@ -1566,6 +1566,92 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   (choose, tip), none (none, tip). Identical copies and similar pictures
   work as for any files.
 
+### 2.5c Subtitles (`subtext`, `mkvsubs`, offline)
+
+- Rule `subtitle` { toSrt, utf8 (default on), ads, hearing, shiftMs,
+  fpsFrom, fpsTo, extract, extractLangs } (+ UI-only `original`
+  keep|delete for files made SubRip). It renames nothing except the
+  extension: a text subtitle in another known format becomes `.srt` with
+  `toSrt` (not a MicroDVD whose frame rate is unknown). Not a lookup rule.
+- Formats, told by content (never by extension): SubRip, WebVTT,
+  SubStation (SSA/ASS: `[Events]` `Format:` order, styles' Italic),
+  MicroDVD (frames; rate from `{1}{1}23.976`, else from the video beside
+  whose stem starts the subtitle's: MKV DefaultDuration, AVI strh
+  rate/scale, MP4 mdhd scale over the first stts delta), SubViewer 2,
+  SAMI (read only; first class with text). Picture subtitles (VobSub
+  `00 00 01 BA`, PGS `PG`) and unknown content are never touched, not
+  even recoded.
+- A document keeps everything but its cues verbatim (SRT head, VTT
+  NOTE/STYLE/REGION blocks and cue ids/settings, ASS sections and other
+  fields, MicroDVD rate line, SubViewer header); editing rewrites only
+  cue times and texts; a file unchanged by the edits is written as it was
+  (no normalisation). Line end: the most used one. SRT reading is
+  forgiving (BOM, `.` or `,` and 1–4 digit fractions, missing numbers, a
+  cue's next number without a blank line, stray lines kept with the
+  previous cue; whitespace-only lines kept).
+- Encodings: UTF-8 (BOM kept), UTF-16 with BOM, else the legacy encoding
+  of the language in the name (`.ru` 1251, `.pl` 1250, `.el` 1253, `.tr`
+  1254, `.he` 1255, `.ar` 1256, Baltic 1257, `.vi` 1258, `.th` 874, `.ja`
+  Shift_JIS, `.ko` EUC-KR, `.zh` GBK / Big5 for TW/HK/MO, Western 1252),
+  else a guess: Cyrillic when most high bytes come in runs and outnumber
+  ASCII letters, Central European when ≥3 bytes rare in 1252 (³ ¹ œ £ ¥,
+  undefined ones) make ≥5% of the high bytes, else 1252. Output keeps
+  the encoding unless `utf8`; a character the old encoding cannot hold
+  makes it UTF-8. Invalid UTF-8 with no other reading: refused
+  (`subEncoding`). Downloaded subtitles are decoded the same way, with
+  their language.
+- Ads (line level): subtitle sites' notices anywhere; at the edges (first
+  or last 6 cues, first 2 min, last 3 min), lines ≤90 characters with a
+  credit (`subtitles by`, `legendas por`, `tradução de`, `X:`…, the word
+  then at most two more, then by/por/from/colon) or a web address alone
+  (≤2 other words) or with selling words (visit, acesse, download,
+  torrent…). A cue whose line is a credit heading alone (`Legendas:`)
+  goes whole. Nothing left → refused (`subNothingLeft`), never an empty
+  file.
+- Hearing-impaired (line level): `[…]` always; `(…)` when in capitals
+  (not in all-capitals files), alone on the line with ≤4 words, or
+  before the speech with one word or a capitalised ≤3-word name; a
+  speaker in capitals before a colon only when lower-case speech follows
+  on the line (signs like `WANTED: OGRES` stay); lines of only music
+  notes. Cuts take their spaces; empty `<i></i>` and `{\i1}{\i0}` are
+  removed; a dialogue left with one line loses its dash. Cues emptied by
+  the edit are removed, cues empty already stay.
+- Timing: `t × fpsFrom/fpsTo + shiftMs`; cues ending ≤0 removed, starts
+  clamped at 0; WebVTT inline timestamps follow.
+- To SubRip: time order, CRLF, numbered from 1; VTT voices/classes/ruby/
+  timestamps dropped, `line:` near the top → `{\an8}`; ASS `\N`, `\h`,
+  `\i \b \u` (overrides with other letters, like `\iclip`, ignored),
+  `\an7-9`/old `\a` on top → `{\an8}`, drawings (`\p1`) skipped,
+  comments skipped, a style with Italic wrapped in `<i>`, identical
+  layered lines once; MicroDVD `{y:…}`/`{Y:…}` styles. The original is
+  left with its own extension (`.ssa` told by `[V4 Styles]` without
+  `v4.00+`) or trashed (`bookconv::finish`); a name taken → `convertTaken`.
+- Edited in place: old bytes saved in the history entry's folder
+  (`sub-<name>`), new content written to the `.renome-tags` temp and
+  renamed over; `Backup.saved` names the copy and undo writes it back
+  the same way. Converted: `Backup.converted` as books.
+- Extraction (MKV/WebM): tracks from `Tracks` (number, `S_TEXT/UTF8`,
+  `S_TEXT/ASS|SSA`, `S_TEXT/WEBVTT`/`D_WEBVTT/*`; others counted as
+  pictures), language BCP 47 else ISO 639-2 else `eng`, FlagForced,
+  FlagHearingImpaired, CodecPrivate, ContentEncodings (zlib or header
+  stripping for frames, zlib for the private data; encryption or others →
+  unreadable). One sequential pass over the clusters (1 MiB buffer,
+  others' blocks skipped by header; unknown-size clusters ended by the
+  next non-child id; Xiph/EBML/fixed lacing; BlockDuration, else the
+  track's default duration, else the next start capped at 5 s). Files:
+  `<video stem>[.<lang>][.forced][.sdh].<srt|ass|vtt>` (unknown codes kept
+  as written, `und` none, `.2`… for repeats), names taken skipped, written
+  with create-new + sync, cleaned (ads, hearing, SRT) but never retimed;
+  recorded as created files (undo deletes them). Checked against ffmpeg
+  on 61 real tracks: same lines and times to the millisecond (ffmpeg
+  trims leading spaces; Renome keeps them).
+- Preview: `subFix` {convert, encoding, ads, hearing, retime, noFps}
+  per subtitle (from a cached `Summary`), `subExtract` / `subPictures`
+  per MKV; tags in the list. After the rename (after the shows' `.nfo`,
+  before downloads) the app's `subtitle_tools` runs the jobs with
+  progress (`subtools-progress`, with the part of the video read) and
+  Stop; files already named right are included (confirm line).
+
 ### 2.6 Order of operations
 
 - Preview: each file's name goes through the rules from top to bottom
@@ -1582,7 +1668,8 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   the movies' `.nfo` and images, the albums' covers, the playlists, the
   songs' tags, the books' cover and `metadata.opf`, the comics converted
   to CBZ and the details inside comics and books (one pass), the shows'
-  `.nfo` and images.
+  `.nfo` and images, the subtitles fixed and taken out of videos, the
+  subtitles downloaded.
 
 ## 3. Preview
 

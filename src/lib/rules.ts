@@ -2,7 +2,7 @@ import { settings } from "./settings.svelte";
 import type { Rule, RuleType, Step } from "./types";
 
 export const RULE_TYPES: RuleType[] = [
-  "replace", "regex", "rearrange", "case", "insert", "number", "remove", "convert", "removeRange", "charAt", "extension", "movie", "series", "music", "book", "comic", "photo",
+  "replace", "regex", "rearrange", "case", "insert", "number", "remove", "convert", "removeRange", "charAt", "extension", "movie", "series", "music", "book", "comic", "photo", "subtitle",
 ];
 
 const NAME_VAR = { pt: "{nome}", en: "{name}", es: "{nombre}" } as const;
@@ -108,6 +108,15 @@ const SHOT = new Set([
 ]);
 export const isShot = (name: string) => SHOT.has(splitExt(name)[1].toLowerCase());
 
+/** Files the subtitle rule works on: subtitles, and MKV videos (their tracks). */
+export const isSubtitleFile = (name: string) => /\.(srt|ass|ssa|vtt|sub|smi|sami)$/i.test(name);
+export const isMatroska = (name: string) => /\.(mkv|webm|mk3d)$/i.test(name);
+
+/** Frame rates the subtitle rule retimes between: subtitle's → video's. */
+export const FPS_PAIRS: [number, number][] = [
+  [23.976, 25], [25, 23.976], [24, 25], [25, 24], [23.976, 24], [24, 23.976], [29.97, 25], [25, 29.97],
+];
+
 export function newRule(type: RuleType): Rule {
   switch (type) {
     case "replace":
@@ -151,6 +160,8 @@ export function newRule(type: RuleType): Rule {
       const p = PHOTO_TEMPLATES[settings.lang];
       return { type, template: p.names[0], fromName: true, modified: false, shiftHours: 0, folders: false, folderTemplate: p.folders[0], setModified: false };
     }
+    case "subtitle":
+      return { type, toSrt: false, utf8: true, ads: false, hearing: false, shiftMs: 0, fpsFrom: 0, fpsTo: 0, extract: false, extractLangs: "", original: "keep" };
     case "comic": {
       const [template, folderTemplate] = COMIC_TEMPLATE[settings.lang];
       return { type, template, colon: " - ", series: "", source: "gcd", folders: false, folderTemplate, byFolder: false, writeInfo: false, cleanInfo: false, convert: false, original: "keep", drawPages: true, pageSize: 2400, missing: true, barcode: false, skipPublishers: "" };

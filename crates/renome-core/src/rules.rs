@@ -446,6 +446,34 @@ pub enum Rule {
         #[serde(default)]
         set_modified: bool,
     },
+    /// Subtitle tools (see [`crate::subtext`], [`crate::mkvsubs`]): other
+    /// text formats named `.srt` (the app then makes them SubRip); the
+    /// rest (encoding, cleaning, times, tracks taken out of videos) is
+    /// done by the app after the rename. Names are not changed otherwise.
+    Subtitle {
+        #[serde(default)]
+        to_srt: bool,
+        #[serde(default = "yes")]
+        utf8: bool,
+        #[serde(default)]
+        ads: bool,
+        #[serde(default)]
+        hearing: bool,
+        /// Milliseconds added to every time.
+        #[serde(default)]
+        shift_ms: i64,
+        /// Frame rates to retime from and to (0: not).
+        #[serde(default)]
+        fps_from: f64,
+        #[serde(default)]
+        fps_to: f64,
+        /// Text tracks of Matroska videos written beside them.
+        #[serde(default)]
+        extract: bool,
+        /// The languages taken out (`pt-BR, en`; empty: all).
+        #[serde(default)]
+        extract_langs: String,
+    },
 }
 
 fn photo_folder() -> String {
@@ -608,6 +636,36 @@ impl Pipeline {
             Compiled::Plain(Rule::Book { convert_to, .. }) => {
                 crate::bookconv::Target::from_ext(convert_to)
             }
+            _ => None,
+        })
+    }
+
+    /// The subtitle rule's tools, and whether (and which languages) it
+    /// takes text tracks out of videos, when one is on.
+    pub fn subtitle_tools(&self) -> Option<(crate::subtext::Tools, Option<String>)> {
+        self.steps.iter().find_map(|s| match s {
+            Compiled::Plain(Rule::Subtitle {
+                to_srt,
+                utf8,
+                ads,
+                hearing,
+                shift_ms,
+                fps_from,
+                fps_to,
+                extract,
+                extract_langs,
+            }) => Some((
+                crate::subtext::Tools {
+                    to_srt: *to_srt,
+                    utf8: *utf8,
+                    ads: *ads,
+                    hearing: *hearing,
+                    shift_ms: *shift_ms,
+                    fps_from: *fps_from,
+                    fps_to: *fps_to,
+                },
+                extract.then(|| extract_langs.clone()),
+            )),
             _ => None,
         })
     }
@@ -1226,6 +1284,13 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             }
         }
 
+        Rule::Subtitle { to_srt: true, .. } => {
+            if !ctx.file.is_dir && crate::subtext::converts(ext, ctx.file.subtitle()) {
+                *ext = "srt".into();
+            }
+        }
+        Rule::Subtitle { .. } => {}
+
         Rule::Replace { .. } | Rule::Regex { .. } => unreachable!("compiled separately"),
     }
 }
@@ -1601,6 +1666,8 @@ mod tests {
             convert_pages: Default::default(),
             book: Default::default(),
             photo: Default::default(),
+            subtitle: Default::default(),
+            sub_tracks: Default::default(),
         }
     }
 

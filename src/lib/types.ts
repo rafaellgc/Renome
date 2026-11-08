@@ -51,7 +51,29 @@ export type Rule =
   | {
       type: "photo"; template: string; fromName: boolean; modified: boolean; shiftHours: number;
       folders: boolean; folderTemplate: string; setModified: boolean;
+    }
+  | {
+      type: "subtitle"; toSrt: boolean; utf8: boolean; ads: boolean; hearing: boolean;
+      /** Milliseconds added to every time; frame rates to retime from and to (0: not). */
+      shiftMs: number; fpsFrom: number; fpsTo: number;
+      /** Text tracks of MKV videos written beside them, in `extractLangs` (empty: all). */
+      extract: boolean; extractLangs: string;
+      /** What becomes of a subtitle made SubRip. */
+      original?: "keep" | "delete";
     };
+
+/** What the subtitle rule does to a subtitle. */
+export interface SubFix {
+  /** Made into SubRip (named `.srt` already). */
+  convert: boolean;
+  /** Written as UTF-8, read from this encoding. */
+  encoding?: string;
+  ads: number;
+  hearing: number;
+  retime: boolean;
+  /** MicroDVD whose times cannot be known: left as it is. */
+  noFps: boolean;
+}
 
 export type RuleType = Rule["type"];
 
@@ -94,6 +116,12 @@ export interface PreviewItem {
   bookTo?: BookTarget;
   /** A book locked by DRM: never converted. */
   drm?: boolean;
+  /** What the subtitle rule does to this subtitle. */
+  subFix?: SubFix;
+  /** Text subtitle tracks the subtitle rule takes out of this video. */
+  subExtract?: number;
+  /** Its picture subtitle tracks, which are not taken out. */
+  subPictures?: number;
   /** With a photo rule, where a photo's date came from ("none": it has none). */
   photoDate?: "typed" | "inside" | "name" | "modified" | "none";
   /** The name the lookups read, when the rules above the first lookup rule

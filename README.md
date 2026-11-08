@@ -55,6 +55,11 @@ A built-in manual (F1) explains every rule with examples.
   `.xmp`, Live Photo video) stay together; shots from the same second are
   numbered. Can also set each file's date to when it was taken (undone
   with the rename). Nothing is written inside the files.
+- Subtitles: converts ASS/SSA, VTT, SUB and SMI to SRT, rewrites old
+  encodings as UTF-8, removes ads and credits and hearing-impaired marks,
+  delays or advances them and fixes frame-rate drift, and takes the text
+  subtitles out of MKV videos into files beside them. Offline; undone with
+  the rename.
 - Movies: names files from TMDB (`Title (Year) [tmdbid-12345]`, the format
   Jellyfin recognizes), picking the movie automatically when sure and
   letting you choose when not; optionally saves `.nfo` and poster next

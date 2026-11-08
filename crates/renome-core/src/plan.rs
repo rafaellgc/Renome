@@ -187,6 +187,19 @@ pub struct PreviewItem {
     /// photo was taken, with the photo rule's "set the file date".
     #[serde(skip)]
     pub touch: Option<i64>,
+    /// What the subtitle rule does to this subtitle.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sub_fix: Option<crate::subtext::Fix>,
+    /// Text subtitle tracks the subtitle rule takes out of this video.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub sub_extract: usize,
+    /// Its picture subtitle tracks, which are not taken out.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub sub_pictures: usize,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -1172,6 +1185,11 @@ pub fn preview(
     // The photo rule names a photo's files (raw, edits, a Live Photo's
     // video) by the date of the one that has it (see `photos::lead_rank`).
     let photo_rule = pipeline.photos();
+    let sub_tools = pipeline.subtitle_tools();
+    let sub_langs = sub_tools
+        .as_ref()
+        .and_then(|(_, l)| l.as_deref())
+        .map(crate::subtitles::langs);
     let photo_groups: HashMap<&Path, (usize, String)> = match photo_rule {
         None => HashMap::new(),
         Some(_) => {
@@ -1441,7 +1459,24 @@ pub fn preview(
                 .then(|| file.convert_check())
                 .flatten()
                 .filter(|n| *n > 0 && file.ext.eq_ignore_ascii_case("pdf"));
+            let sub_fix = sub_tools.as_ref().and_then(|(t, _)| {
+                let ext = new_name.rsplit_once('.').map_or("", |(_, e)| e);
+                file.subtitle().and_then(|s| crate::subtext::plan(s, t, ext))
+            });
+            let (sub_extract, sub_pictures) = match (&sub_tools, &sub_langs) {
+                (Some((t, _)), Some(langs)) if !file.is_dir => {
+                    let tracks = file.sub_tracks();
+                    (
+                        crate::mkvsubs::targets(&file.path, tracks, langs, t.to_srt).len(),
+                        tracks.iter().filter(|t| !t.readable()).count(),
+                    )
+                }
+                _ => (0, 0),
+            };
             PreviewItem {
+                sub_fix,
+                sub_extract,
+                sub_pictures,
                 path: file.path.clone(),
                 dir: file.dir.clone(),
                 size: file.size,
@@ -1949,6 +1984,54 @@ mod tests {
                 target: Target::Name,
             },
         }]
+    }
+
+    #[test]
+    fn subtitle_rule_names_and_marks() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path();
+        fs::write(
+            dir.join("Movie.en.ass"),
+            "[Script Info]\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hi\n",
+        )
+        .unwrap();
+        fs::write(dir.join("Movie.pt.srt"), b"1\r\n00:00:01,000 --> 00:00:02,000\r\nOl\xE1 [RISOS]\r\n\r\n").unwrap();
+        fs::write(dir.join("Movie.mkv"), crate::mkvsubs::tests::sample()).unwrap();
+        fs::write(dir.join("Movie.sub"), "{25}{50}Hi\n").unwrap();
+        let files: Vec<FileEntry> = ["Movie.en.ass", "Movie.pt.srt", "Movie.mkv", "Movie.sub"]
+            .iter()
+            .map(|n| {
+                let p = dir.join(n);
+                FileEntry::from_path(&p, &fs::metadata(&p).unwrap()).unwrap()
+            })
+            .collect();
+        let steps = vec![Step {
+            enabled: true,
+            rule: Rule::Subtitle {
+                to_srt: true,
+                utf8: true,
+                ads: false,
+                hearing: true,
+                shift_ms: 0,
+                fps_from: 0.0,
+                fps_to: 0.0,
+                extract: true,
+                extract_langs: String::new(),
+            },
+        }];
+        let p = preview(&files, &steps, &HashMap::new(), &View::default());
+        let get = |name: &str| p.items.iter().find(|i| i.original == name).unwrap();
+        assert_eq!(get("Movie.en.ass").new_name, "Movie.en.srt");
+        assert!(get("Movie.en.ass").sub_fix.as_ref().unwrap().convert);
+        let srt = get("Movie.pt.srt");
+        assert_eq!(srt.status, Status::Unchanged);
+        let fix = srt.sub_fix.as_ref().unwrap();
+        assert_eq!((fix.encoding, fix.hearing), (Some("windows-1252"), 1));
+        // Its times are frames of a rate not known: left as it is.
+        assert_eq!(get("Movie.sub").new_name, "Movie.sub");
+        let mkv = get("Movie.mkv");
+        // Its Portuguese track is beside it already.
+        assert_eq!((mkv.sub_extract, mkv.sub_pictures), (1, 1));
     }
 
     #[test]

@@ -682,7 +682,11 @@ pub async fn write(
                         let to = subs::target(&item.path, &c.lang, c.hearing_impaired, &ext);
                         let text = ["srt", "ass", "ssa", "vtt", "sub"]
                             .contains(&ext.to_lowercase().as_str());
-                        let bytes = if text { subs::to_utf8(&bytes) } else { bytes };
+                        let bytes = if text {
+                            renome_core::subtext::to_utf8(&bytes, Some(&c.lang))
+                        } else {
+                            bytes
+                        };
                         match write_new(&to, &bytes) {
                             Ok(()) => out.created.push(to),
                             Err(e) => {

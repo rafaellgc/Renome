@@ -712,6 +712,37 @@ ${ex("IMG-20190513-WA0001.jpg", "2019-05-13.jpg")}
 </ul>`,
   },
   {
+    id: "r-subtitle",
+    title: "Legenda",
+    sub: true,
+    html: `
+<p>Arruma <b>legendas de texto</b> e tira as que vêm <b>dentro de vídeos MKV</b>. Funciona sem internet e não muda o nome dos arquivos: só a extensão, quando a legenda vira SRT. Pode ficar junto com a regra Filme ou Série, que dão o nome. Tudo pode ser desfeito pelo Histórico: a legenda volta exatamente como era, e as extraídas são apagadas.</p>
+${ex("Filme.pt-BR.ass", "Filme.pt-BR.srt")}
+<p>Formatos lidos: <b>SRT</b> (SubRip), <b>ASS</b> e <b>SSA</b> (SubStation), <b>VTT</b> (WebVTT), <b>SUB</b> de texto (MicroDVD e SubViewer) e <b>SMI</b> (SAMI). O formato é reconhecido pelo conteúdo, não pela extensão. Um arquivo que não é legenda de texto conhecida (um <code>.sub</code> de imagem do VobSub, um <code>.sub</code> que é outra coisa) <b>não é tocado</b>. Na lista, cada legenda que vai mudar ganha uma marca com o que será feito (passe o mouse para ver os detalhes).</p>
+<h4>Opções</h4>
+<ul>
+  <li><b>Converter para SRT</b>: as legendas em outros formatos viram SRT, que quase todo aparelho, TV e programa lê. Itálico, negrito, sublinhado e a legenda posicionada no alto (<code>{\\an8}</code>) vão junto; na SubStation, um estilo em itálico também. Cores, fontes, tamanhos, posições exatas, karaokê e desenhos se perdem. O original fica ao lado, com a extensão dele, ou vai para a Lixeira, como você escolher.</li>
+  <li><b>Gravar em UTF-8</b> (ligada por padrão): legendas antigas em outras codificações passam para UTF-8, e acentos deixam de virar símbolos estranhos. A codificação é deduzida pelo idioma no nome do arquivo (<code>.ru</code> é Windows-1251, <code>.pl</code> é Windows-1250…) ou, sem idioma, pelo próprio texto, entre a ocidental, a da Europa Central e a cirílica. Sem essa opção, uma legenda editada continua na codificação que tinha.</li>
+  <li><b>Tirar propagandas e créditos</b>: tira as linhas com avisos de sites de legenda (em qualquer ponto do filme) e, só no começo e no fim, endereços de sites e créditos de quem fez, sincronizou ou traduziu a legenda (<code>Legendas por…</code>, <code>Tradução:</code> com os nomes embaixo). Uma frase que só menciona um site, no meio de uma fala, fica.</li>
+  <li><b>Tirar marcações para surdos</b>: tira sons e descrições entre colchetes (<code>[música]</code>, <code>[risos]</code>); entre parênteses quando estão em maiúsculas, sozinhos e curtos na linha, ou antes da fala (<code>(Suspira)</code>); nomes de quem fala, em maiúsculas, antes de dois-pontos (<code>JOÃO: Onde você estava?</code>); e linhas só de notas musicais. Quando sobra só uma fala de um diálogo, o travessão dela sai também.</li>
+  <li><b>Atrasar ou adiantar</b>: segundos somados a todos os tempos (positivo atrasa, negativo adianta; aceita décimos, como <code>-1,5</code>). Linhas que ficariam antes do começo do vídeo saem.</li>
+  <li><b>Taxa de quadros</b>: para a legenda que começa certa e vai se atrasando ou adiantando aos poucos. Ela foi feita para outra versão do vídeo (cinema e Blu-ray em 23,976 quadros por segundo, TV europeia em 25). Escolha de qual taxa para qual: os tempos são esticados ou encolhidos na mesma proporção.</li>
+  <li><b>Extrair legendas de vídeos MKV</b>: as legendas de texto (SRT, ASS, VTT) de dentro do vídeo viram arquivos ao lado dele, com o nome do vídeo, o idioma da faixa e as marcas <code>.forced</code> e <code>.sdh</code> quando a faixa diz (<code>Filme.pt-BR.forced.srt</code>). Em <b>Idiomas</b>, escolha quais (<code>pt-BR, en</code>); vazio, são todas. Com <b>Converter para SRT</b>, saem em SRT; as limpezas também valem para elas, mas os tempos não mudam, porque a faixa já está no tempo do vídeo. O vídeo não é alterado.</li>
+</ul>
+<p><b>Limitações:</b></p>
+<ul>
+  <li><b>Legendas em imagem</b> (PGS dos Blu-ray, VobSub dos DVD, DVB) não são texto: não podem ser extraídas nem convertidas, porque seria preciso reconhecer as letras de cada imagem. A lista diz quantas dessas há em cada vídeo.</li>
+  <li>A extração lê o <b>vídeo inteiro</b> (a legenda está espalhada pelo arquivo): num HD externo, um filme de 20 GB leva alguns minutos. Há andamento e o botão Parar. Só vídeos MKV e WebM: legendas dentro de MP4 e AVI não são extraídas.</li>
+  <li>A conversão para SRT perde o que o SRT não tem: cores, fontes, posições exatas, efeitos e karaokê. Uma legenda ASS cheia de letreiros posicionados fica com todos eles como falas comuns, embaixo.</li>
+  <li>A <b>codificação</b> de uma legenda antiga sem idioma no nome é um palpite entre a ocidental, a da Europa Central e a cirílica: uma legenda grega, turca ou árabe sem <code>.el</code>, <code>.tr</code> ou <code>.ar</code> no nome pode sair errada. Desfazer volta o arquivo original.</li>
+  <li>As limpezas seguem padrões, não entendem o texto: uma fala inteira entre parênteses e curta, ou um nome em maiúsculas antes de dois-pontos, também sai; um som descrito em minúsculas no meio da fala fica. Legendas escritas todas em maiúsculas só perdem o que está entre colchetes ou sozinho entre parênteses. Os créditos são procurados em português, inglês e espanhol.</li>
+  <li>Uma legenda que só tem propaganda ou créditos não é esvaziada: fica como está, com aviso.</li>
+  <li>Uma legenda <b>MicroDVD</b> marca os tempos em quadros: sem a taxa de quadros nela (<code>{1}{1}23.976</code>) ou num vídeo ao lado com o mesmo começo de nome, ela não pode ser convertida nem ter os tempos mudados, e ganha a marca <b>sem quadros/s</b>.</li>
+  <li>SAMI (<code>.smi</code>) com vários idiomas: só o primeiro é convertido. Um SAMI só é limpo ou mudado de tempo quando é convertido para SRT.</li>
+  <li>Uma legenda editada é gravada de novo inteira, na forma padrão do formato: a numeração das falas, linhas em branco a mais e finais de linha misturados podem mudar, sem mudar o que aparece na tela.</li>
+</ul>`,
+  },
+  {
     id: "preview",
     title: "Pré-visualização e conflitos",
     html: `

@@ -145,6 +145,14 @@ export const api = {
       | { path: string; book: BookMatch; language: string }
     )[],
   ) => invoke<{ written: number; drawn: number; errors: [string, string][] }>("write_inside", { historyId, items }),
+  subtitleTools: (
+    historyId: string | null,
+    items: { path: string; fix: boolean; extract: boolean }[],
+    tools: { toSrt: boolean; utf8: boolean; ads: boolean; hearing: boolean; shiftMs: number; fpsFrom: number; fpsTo: number },
+    original: "keep" | "delete",
+    extractLangs: string,
+  ) =>
+    invoke<{ written: number; created: number; errors: [string, string][] }>("subtitle_tools", { historyId, items, tools, original, extractLangs }),
   writePlaylists: (historyId: string | null, dirs: string[]) =>
     invoke<{ created: string[]; errors: [string, string][]; kept: number }>("write_playlists", { historyId, dirs }),
   writeCovers: (historyId: string | null, items: { dir: string; release: string }[]) =>

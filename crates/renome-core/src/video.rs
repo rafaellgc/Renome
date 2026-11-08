@@ -121,7 +121,7 @@ pub fn read(path: &Path) -> Option<VideoInfo> {
 
 /// An EBML number: the element ids keep their length marker, sizes lose
 /// it (all ones: unknown). Returns the value and its length.
-fn vint(data: &[u8], keep_marker: bool) -> Option<(u64, usize)> {
+pub(crate) fn vint(data: &[u8], keep_marker: bool) -> Option<(u64, usize)> {
     let first = *data.first()?;
     let len = first.leading_zeros() as usize + 1;
     if len > 8 {
@@ -142,7 +142,7 @@ fn vint(data: &[u8], keep_marker: bool) -> Option<(u64, usize)> {
 }
 
 /// The EBML elements in `data`: id and content.
-fn ebml(data: &[u8]) -> impl Iterator<Item = (u64, &[u8])> {
+pub(crate) fn ebml(data: &[u8]) -> impl Iterator<Item = (u64, &[u8])> {
     let mut at = 0usize;
     std::iter::from_fn(move || {
         let (id, a) = vint(data.get(at..)?, true)?;
@@ -156,7 +156,7 @@ fn ebml(data: &[u8]) -> impl Iterator<Item = (u64, &[u8])> {
     })
 }
 
-fn ebml_uint(data: &[u8]) -> u64 {
+pub(crate) fn ebml_uint(data: &[u8]) -> u64 {
     data.iter().fold(0, |n, &b| (n << 8) | u64::from(b))
 }
 
@@ -202,12 +202,94 @@ pub fn subtitle_tracks(path: &Path) -> Vec<String> {
         .collect()
 }
 
+/// A video's frames per second, from its headers: Matroska's default
+/// frame duration, AVI's stream rate, MP4's media time scale over its
+/// first sample's duration. `None` when it does not say (or varies).
+pub fn frame_rate(path: &Path) -> Option<f64> {
+    let mut f = BufReader::new(File::open(path).ok()?);
+    let mut head = [0u8; 12];
+    f.read_exact(&mut head).ok()?;
+    f.seek(SeekFrom::Start(0)).ok()?;
+    let fps = match head {
+        [0x1a, 0x45, 0xdf, 0xa3, ..] => {
+            let tracks = matroska_tracks(&mut f)?;
+            ebml(&tracks)
+                .filter(|(id, _)| *id == 0xae)
+                .find_map(|(_, entry)| {
+                    let (mut kind, mut dur) = (0, 0);
+                    for (id, data) in ebml(entry) {
+                        match id {
+                            0x83 => kind = ebml_uint(data),
+                            0x23_e383 => dur = ebml_uint(data),
+                            _ => {}
+                        }
+                    }
+                    (kind == 1 && dur > 0).then(|| 1e9 / dur as f64)
+                })
+        }
+        [b'R', b'I', b'F', b'F', _, _, _, _, b'A', b'V', b'I', b' '] => {
+            let mut buf = vec![0u8; 64 * 1024];
+            let n = f.read(&mut buf).ok()?;
+            let buf = &buf[..n];
+            let le32 = |at: usize| Some(u32::from_le_bytes(buf.get(at..at + 4)?.try_into().ok()?));
+            // strh of the video stream: type, handler, flags, priority and
+            // language, initial frames, then scale and rate.
+            let mut at = 0;
+            loop {
+                let strh = at + buf.get(at..)?.windows(4).position(|w| w == b"strh")?;
+                if buf.get(strh + 8..strh + 12)? == b"vids" {
+                    let (scale, rate) = (le32(strh + 28)?, le32(strh + 32)?);
+                    break (scale > 0 && rate > 0).then(|| f64::from(rate) / f64::from(scale));
+                }
+                at = strh + 4;
+            }
+        }
+        _ if [b"ftyp", b"moov", b"mdat", b"free", b"wide", b"skip"]
+            .iter()
+            .any(|k| head[4..8] == k[..]) =>
+        {
+            let moov = moov(&mut f)?;
+            children(&moov)
+                .filter(|(k, _)| *k == b"trak")
+                .find_map(|(_, trak)| {
+                    let mdia = child(trak, b"mdia")?;
+                    if child(mdia, b"hdlr")?.get(8..12)? != b"vide" {
+                        return None;
+                    }
+                    let mdhd = child(mdia, b"mdhd")?;
+                    // Version 1 has 64-bit times before the scale.
+                    let at = if *mdhd.first()? == 1 { 20 } else { 12 };
+                    let scale = u32::from_be_bytes(mdhd.get(at..at + 4)?.try_into().ok()?);
+                    let stts = child(child(child(mdia, b"minf")?, b"stbl")?, b"stts")?;
+                    // Version and flags, entry count, then (count, delta).
+                    let delta = u32::from_be_bytes(stts.get(12..16)?.try_into().ok()?);
+                    (scale > 0 && delta > 0).then(|| f64::from(scale) / f64::from(delta))
+                })
+        }
+        _ => None,
+    }?;
+    // Common rates as they are meant (23.976 is 24000/1001).
+    let known = [23.976, 24.0, 25.0, 29.97, 30.0, 48.0, 50.0, 59.94, 60.0];
+    let fps = known
+        .iter()
+        .copied()
+        .find(|k| (k - fps).abs() < 0.01)
+        .unwrap_or(fps);
+    (1.0..=300.0).contains(&fps).then_some(fps)
+}
+
 /// Matroska and WebM: the segment's elements are walked by their headers
 /// until its track list, which is returned; the clusters before it, if
 /// any, are skipped.
 fn matroska_tracks<R: Read + Seek>(f: &mut R) -> Option<Vec<u8>> {
+    matroska_element(f, 0x1654_ae6b)
+}
+
+/// Matroska: the content of the segment's first element `want` (its
+/// track list, its information), found by walking the elements' headers.
+pub(crate) fn matroska_element<R: Read + Seek>(f: &mut R, want: u64) -> Option<Vec<u8>> {
     const SEGMENT: u64 = 0x1853_8067;
-    const TRACKS: u64 = 0x1654_ae6b;
+    let tracks_id = want;
     let size = f.seek(SeekFrom::End(0)).ok()?;
     let mut pos = 0u64;
     let mut head = [0u8; 16];
@@ -223,7 +305,7 @@ fn matroska_tracks<R: Read + Seek>(f: &mut R) -> Option<Vec<u8>> {
         if id == SEGMENT {
             // Its children follow.
             pos = start;
-        } else if id == TRACKS {
+        } else if id == tracks_id {
             let len = len.min(size - start).min(16 << 20);
             let mut body = vec![0u8; len as usize];
             f.seek(SeekFrom::Start(start)).ok()?;

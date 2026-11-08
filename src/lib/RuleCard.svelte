@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t, type Key } from "./i18n";
-  import { comicPreset, comicPresetOf, defaultSubLangs, PHOTO_TEMPLATES, splitExt, splitParts, type ComicPreset } from "./rules";
+  import { comicPreset, comicPresetOf, defaultSubLangs, FPS_PAIRS, PHOTO_TEMPLATES, splitExt, splitParts, type ComicPreset } from "./rules";
   import { settings } from "./settings.svelte";
   import type { Step } from "./types";
   import { api } from "./api";
@@ -356,6 +356,53 @@
         {/if}
         <label class="check"><input type="checkbox" bind:checked={r.setModified} /> <span>{t("photoSetModified")}<small>{t("photoSetModifiedHint")}</small></span></label>
         <p class="hint">{t("photoCopiesHint")}</p>
+      {:else if r.type === "subtitle"}
+        {@const fps = (n: number) => n.toLocaleString(settings.lang === "en" ? "en-US" : "pt-BR")}
+        <p class="hint top">{t("subToolsHint")}</p>
+        <label class="check"><input type="checkbox" bind:checked={r.toSrt} /> <span>{t("subToSrt")}<small>{t("subToSrtHint")}</small></span></label>
+        {#if r.toSrt}
+          <label class="sub">{t("comicOriginal")}
+            <select bind:value={r.original}>
+              <option value="keep">{t("bookOriginalKeep")}</option>
+              <option value="delete">{t("comicOriginalDelete")}</option>
+            </select>
+          </label>
+        {/if}
+        <label class="check"><input type="checkbox" bind:checked={r.utf8} /> <span>{t("subUtf8")}<small>{t("subUtf8Hint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.ads} /> <span>{t("subAds")}<small>{t("subAdsHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.hearing} /> <span>{t("subHearing")}<small>{t("subHearingHint")}</small></span></label>
+        <label class="shift">{t("subShift")}
+          <input
+            type="number"
+            step="0.1"
+            min="-36000"
+            max="36000"
+            value={r.shiftMs / 1000}
+            oninput={(e) => {
+              const v = Number((e.currentTarget as HTMLInputElement).value);
+              r.shiftMs = Number.isFinite(v) ? Math.round(v * 1000) : 0;
+            }}
+          />
+        </label>
+        <p class="hint">{t("subShiftHint")}</p>
+        <label>{t("subFps")}
+          <select
+            value={r.fpsFrom ? `${r.fpsFrom}:${r.fpsTo}` : ""}
+            onchange={(e) => {
+              const [a, b] = (e.currentTarget as HTMLSelectElement).value.split(":").map(Number);
+              r.fpsFrom = a || 0;
+              r.fpsTo = b || 0;
+            }}
+          >
+            <option value="">{t("subFpsNone")}</option>
+            {#each FPS_PAIRS as [a, b] (`${a}:${b}`)}<option value={`${a}:${b}`}>{t("subFpsPair", { from: fps(a), to: fps(b) })}</option>{/each}
+          </select>
+        </label>
+        <p class="hint">{t("subFpsHint")}</p>
+        <label class="check"><input type="checkbox" bind:checked={r.extract} /> <span>{t("subExtract")}<small>{t("subExtractHint")}</small></span></label>
+        {#if r.extract}
+          <label class="sub">{t("subExtractLangs")} <input class="mono" bind:value={r.extractLangs} placeholder={t("subExtractAll")} spellcheck="false" /></label>
+        {/if}
       {:else if r.type === "music"}
         <p class="hint top">{t("musicHint")}</p>
         <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>

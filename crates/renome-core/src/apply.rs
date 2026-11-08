@@ -1855,6 +1855,65 @@ mod tests {
     }
 
     #[test]
+    fn undo_takes_subtitle_tools_back() {
+        use crate::convert::Original;
+        use crate::subtext::{Tools, fix_file};
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        let old = b"1\r\n00:00:01,000 --> 00:00:02,000\r\n[M\xDASICA]\r\nOl\xE1!\r\n\r\n".to_vec();
+        fs::write(p.join("movie.pt.srt"), &old).unwrap();
+        let ass = "[Script Info]\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hi\n";
+        fs::write(p.join("movie.en.ass"), ass).unwrap();
+        fs::write(p.join("movie.mkv"), crate::mkvsubs::tests::sample()).unwrap();
+        let h = History::new(p.join("hist"));
+        // Renamed (the SubStation one as SubRip), then the tools.
+        let id = h
+            .apply(&[
+                op(p, "movie.pt.srt", "Movie (2010).pt.srt"),
+                op(p, "movie.en.ass", "Movie (2010).en.srt"),
+                op(p, "movie.mkv", "Movie (2010).mkv"),
+            ])
+            .history_id
+            .unwrap();
+        let store = h.files_dir(&id).unwrap();
+        let tools = Tools {
+            to_srt: true,
+            utf8: true,
+            hearing: true,
+            ..Default::default()
+        };
+        let mut backups = Vec::new();
+        for f in ["Movie (2010).pt.srt", "Movie (2010).en.srt"] {
+            let done = fix_file(&p.join(f), &tools, Original::Keep, &store).unwrap();
+            backups.push(done.backup.unwrap());
+        }
+        assert_eq!(
+            fs::read_to_string(p.join("Movie (2010).pt.srt")).unwrap(),
+            "1\r\n00:00:01,000 --> 00:00:02,000\r\nOlá!\r\n\r\n"
+        );
+        assert!(p.join("Movie (2010).en.ass").exists());
+        h.add_tags(&id, backups).unwrap();
+        let x = crate::mkvsubs::extract(&p.join("Movie (2010).mkv"), &tools, &[], &|| false, &|_, _| {})
+            .unwrap();
+        assert_eq!(x.created.len(), 1, "{:?}", x.errors);
+        h.add_created(&id, &x.created).unwrap();
+
+        let u = h.undo(&id).unwrap();
+        assert!(u.errors.is_empty(), "{:?}", u.errors);
+        assert_eq!(fs::read(p.join("movie.pt.srt")).unwrap(), old);
+        assert_eq!(fs::read_to_string(p.join("movie.en.ass")).unwrap(), ass);
+        assert!(p.join("movie.mkv").exists());
+        let mut left: Vec<String> = fs::read_dir(p)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n != "hist")
+            .collect();
+        left.sort();
+        assert_eq!(left, ["movie.en.ass", "movie.mkv", "movie.pt.srt"]);
+    }
+
+    #[test]
     fn a_comic_not_converted_gets_its_extension_back() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path();

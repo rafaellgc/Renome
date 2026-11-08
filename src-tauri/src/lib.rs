@@ -1783,6 +1783,155 @@ async fn write_inside(
     Ok(report)
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SubJob {
+    /// Where the file is now (after renaming).
+    path: PathBuf,
+    /// A subtitle the tools change (encoding, cleaning, times, SubRip).
+    #[serde(default)]
+    fix: bool,
+    /// A video whose text tracks are taken out.
+    #[serde(default)]
+    extract: bool,
+}
+
+#[derive(Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SubToolsReport {
+    /// Subtitles changed.
+    written: usize,
+    /// Subtitles taken out of videos.
+    created: usize,
+    /// File name and reason.
+    errors: Vec<(String, String)>,
+}
+
+/// The subtitle rule's work after the rename: subtitles changed where they
+/// are (their old content kept in the history entry for undo) or made
+/// into SubRip (their original kept beside or sent to the trash), and the
+/// text tracks of videos written beside them (deleted by undo). `stop`
+/// ends it between files (and while a video is read).
+#[tauri::command]
+async fn subtitle_tools(
+    app: AppHandle,
+    history_id: Option<String>,
+    items: Vec<SubJob>,
+    tools: renome_core::subtext::Tools,
+    original: renome_core::convert::Original,
+    extract_langs: String,
+) -> Result<SubToolsReport, String> {
+    use renome_core::{mkvsubs, subtext};
+    let state = app.state::<AppState>();
+    let mut report = SubToolsReport::default();
+    let items: Vec<SubJob> = items.into_iter().filter(|j| j.fix || j.extract).collect();
+    if items.is_empty() {
+        return Ok(report);
+    }
+    let own_entry = history_id.is_none();
+    let id = match history_id {
+        Some(id) => id,
+        None => state.history.record_files(&[])?,
+    };
+    let store = state.history.files_dir(&id)?;
+    let mut note = state.history.tagging(&id)?;
+    let langs = std::sync::Arc::new(renome_core::subtitles::langs(&extract_langs));
+    let stop = std::sync::Arc::new(stop_signal(&app));
+    let total = items.len();
+    let progress = |done: usize, part: f64| {
+        let _ = app.emit(
+            "subtools-progress",
+            serde_json::json!({ "done": done, "total": total, "part": part }),
+        );
+    };
+    progress(0, 0.0);
+    let mut backups = Vec::new();
+    let mut created = Vec::new();
+    let mut changed = Vec::new();
+    for (done, job) in items.into_iter().enumerate() {
+        if stop() {
+            break;
+        }
+        let name = job
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if job.fix {
+            note.start(&job.path);
+            let (path, store) = (job.path.clone(), store.clone());
+            let r = tauri::async_runtime::spawn_blocking(move || {
+                subtext::fix_file(&path, &tools, original, &store)
+            })
+            .await
+            .map_err(|e| e.to_string())
+            .and_then(|r| r);
+            match r {
+                Ok(f) => {
+                    if let Some(why) = f.not_trashed {
+                        report.errors.push((name.clone(), why));
+                    }
+                    if let Some(b) = f.backup {
+                        note.done(&b);
+                        changed.push(b.path.clone());
+                        backups.push(b);
+                    }
+                }
+                Err(e) => report.errors.push((name.clone(), e)),
+            }
+        }
+        if job.extract {
+            let (path, langs, stop) = (job.path.clone(), langs.clone(), stop.clone());
+            let app2 = app.clone();
+            let r = tauri::async_runtime::spawn_blocking(move || {
+                let tell = |at: u64, size: u64| {
+                    let part = if size > 0 { at as f64 / size as f64 } else { 0.0 };
+                    let _ = app2.emit(
+                        "subtools-progress",
+                        serde_json::json!({ "done": done, "total": total, "part": part }),
+                    );
+                };
+                mkvsubs::extract(&path, &tools, &langs, &*stop, &tell)
+            })
+            .await
+            .map_err(|e| e.to_string())
+            .and_then(|r| r);
+            match r {
+                Ok(x) => {
+                    created.extend(x.created);
+                    report.errors.extend(x.errors);
+                }
+                Err(e) if e == "stopped" => break,
+                Err(e) => report.errors.push((name, e)),
+            }
+        }
+        progress(done + 1, 0.0);
+    }
+    report.written = backups.len();
+    report.created = created.len();
+    let mut saved = Ok(());
+    if !backups.is_empty() {
+        saved = state.history.add_tags(&id, backups);
+    }
+    if saved.is_ok() && !created.is_empty() {
+        saved = state.history.add_created(&id, &created);
+    }
+    if report.written == 0 && report.created == 0 && own_entry {
+        let _ = state.history.delete(&id);
+    }
+    match saved {
+        Ok(()) => note.finish(),
+        Err(e) => report.errors.push((String::new(), format!("err.history: {e}"))),
+    }
+    let changed: HashSet<PathBuf> = changed.into_iter().collect();
+    for f in state.session.lock().unwrap().files.iter_mut() {
+        if changed.contains(&f.path) {
+            f.forget_tags();
+        }
+    }
+    Ok(report)
+}
+
 /// An album folder's own cover image (`cover`, `folder` or `front`).
 fn folder_cover(dir: &Path) -> Option<Vec<u8>> {
     let rd = std::fs::read_dir(dir).ok()?;
@@ -2507,6 +2656,7 @@ pub fn run() {
             write_tv_sidecars,
             subs_search,
             write_subtitles,
+            subtitle_tools,
             os_check,
             subdl_check,
             mb_lookup,

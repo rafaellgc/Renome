@@ -712,6 +712,37 @@ ${ex("IMG-20190513-WA0001.jpg", "2019-05-13.jpg")}
 </ul>`,
   },
   {
+    id: "r-subtitle",
+    title: "Subtitle",
+    sub: true,
+    html: `
+<p>Fixes <b>text subtitles</b> and takes out those <b>inside MKV videos</b>. Works offline and does not change file names: only the extension, when a subtitle becomes SRT. It can be used along with the Movie or TV show rule, which give the names. Everything can be undone from the History: the subtitle comes back exactly as it was, and those extracted are deleted.</p>
+${ex("Movie.en.ass", "Movie.en.srt")}
+<p>Formats read: <b>SRT</b> (SubRip), <b>ASS</b> and <b>SSA</b> (SubStation), <b>VTT</b> (WebVTT), text <b>SUB</b> (MicroDVD and SubViewer) and <b>SMI</b> (SAMI). The format is told by the content, not the extension. A file that is not a known text subtitle (a VobSub picture <code>.sub</code>, a <code>.sub</code> that is something else) <b>is not touched</b>. In the list, each subtitle that will change gets a tag with what will be done (hover it for the details).</p>
+<h4>Options</h4>
+<ul>
+  <li><b>Convert to SRT</b>: subtitles in other formats become SRT, which almost every device, TV and program reads. Italics, bold, underline and lines placed on top (<code>{\\an8}</code>) go along; in SubStation, an italic style too. Colours, fonts, sizes, exact positions, karaoke and drawings are lost. The original stays beside, with its own extension, or goes to the Trash, as you choose.</li>
+  <li><b>Write as UTF-8</b> (on by default): old subtitles in other encodings become UTF-8, and accents stop turning into odd symbols. The encoding is told by the language in the file name (<code>.ru</code> is Windows-1251, <code>.pl</code> is Windows-1250…) or, without one, by the text itself, among Western, Central European and Cyrillic. Without this option, an edited subtitle keeps the encoding it had.</li>
+  <li><b>Remove ads and credits</b>: removes lines with subtitle sites' notices (anywhere in the film) and, only at the start and the end, web addresses and credits of who made, synced or translated the subtitle (<code>Subtitles by…</code>, <code>Translation:</code> with the names under it). A sentence that only mentions a site, in the middle of a line, stays.</li>
+  <li><b>Remove hearing-impaired marks</b>: removes sounds and descriptions in brackets (<code>[music]</code>, <code>[laughs]</code>); in parentheses when in capitals, short and alone on the line, or before the speech (<code>(Sighs)</code>); speakers' names in capitals before a colon (<code>JOHN: Where were you?</code>); and lines of only music notes. When only one line of a dialogue is left, its dash goes too.</li>
+  <li><b>Delay or advance</b>: seconds added to every time (positive delays, negative brings forward; tenths are fine, like <code>-1.5</code>). Lines that would fall before the start of the video are removed.</li>
+  <li><b>Frame rate</b>: for a subtitle that starts right and slowly drifts later or earlier. It was made for another version of the video (cinema and Blu-ray at 23.976 frames per second, European TV at 25). Choose from which rate to which: times are stretched or shrunk in the same proportion.</li>
+  <li><b>Extract subtitles from MKV videos</b>: the text subtitles (SRT, ASS, VTT) inside the video become files beside it, with the video's name, the track's language and the <code>.forced</code> and <code>.sdh</code> marks when the track says so (<code>Movie.en.forced.srt</code>). In <b>Languages</b>, choose which (<code>pt-BR, en</code>); empty, all of them. With <b>Convert to SRT</b> they come out as SRT; the cleanings apply to them too, but times do not change, since the track is already in time with the video. The video is not changed.</li>
+</ul>
+<p><b>Limitations:</b></p>
+<ul>
+  <li><b>Picture subtitles</b> (Blu-ray PGS, DVD VobSub, DVB) are not text: they cannot be extracted or converted, since the letters of each picture would have to be recognised. The list tells how many of them each video has.</li>
+  <li>Extracting reads the <b>whole video</b> (the subtitle is spread through the file): on an external disk, a 20 GB film takes a few minutes. There is progress and the Stop button. MKV and WebM videos only: subtitles inside MP4 and AVI are not extracted.</li>
+  <li>Converting to SRT loses what SRT does not have: colours, fonts, exact positions, effects and karaoke. An ASS subtitle full of placed signs gets all of them as ordinary lines, at the bottom.</li>
+  <li>The <b>encoding</b> of an old subtitle without a language in its name is a guess among Western, Central European and Cyrillic: a Greek, Turkish or Arabic subtitle without <code>.el</code>, <code>.tr</code> or <code>.ar</code> in its name may come out wrong. Undo brings the original file back.</li>
+  <li>The cleanings follow patterns, they do not understand the text: a whole short line in parentheses, or a name in capitals before a colon, is removed too; a sound described in lower case in the middle of a line stays. Subtitles written all in capitals only lose what is in brackets or alone in parentheses. Credits are looked for in Portuguese, English and Spanish.</li>
+  <li>A subtitle that has only ads or credits is not emptied: it stays as it is, with a warning.</li>
+  <li>A <b>MicroDVD</b> subtitle counts times in frames: without the frame rate in it (<code>{1}{1}23.976</code>) or in a video beside whose name starts the same, it cannot be converted or retimed, and gets the <b>no frame rate</b> tag.</li>
+  <li>SAMI (<code>.smi</code>) with several languages: only the first is converted. A SAMI is only cleaned or retimed when converted to SRT.</li>
+  <li>An edited subtitle is written again in full, in the format's standard form: the line numbering, extra blank lines and mixed line ends may change, without changing what is shown on screen.</li>
+</ul>`,
+  },
+  {
     id: "preview",
     title: "Preview and conflicts",
     html: `

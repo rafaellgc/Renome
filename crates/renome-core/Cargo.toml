@@ -9,6 +9,8 @@ description = "Renome core: renaming rules, preview and safe apply"
 chrono = { version = "0.4", features = ["serde"] }
 encoding_rs = "0.8"
 fax = "0.3.0"
+# Already built for zip and hayro; reads compressed Matroska subtitles.
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 globset = "0.4"
 hayro = "0.9.0"
 hayro-jbig2 = "0.4.0"

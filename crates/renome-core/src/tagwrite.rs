@@ -475,6 +475,29 @@ pub struct Backup {
     /// empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub converted: Option<crate::convert::Converted>,
+    /// A subtitle edited where it is (see [`crate::subtext`]): the file
+    /// in the history's folder with its old content; the rest is then
+    /// empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub saved: Option<String>,
+}
+
+impl Backup {
+    /// A backup of `path` with nothing in it yet.
+    pub fn empty(path: &Path) -> Self {
+        Self {
+            path: path.to_path_buf(),
+            fields: Vec::new(),
+            pictures: None,
+            cleaned: false,
+            removed: Vec::new(),
+            raw: Vec::new(),
+            kept_text: Vec::new(),
+            entry: None,
+            converted: None,
+            saved: None,
+        }
+    }
 }
 
 /// The copy a song's tags are written in before it takes the song's place.
@@ -905,6 +928,7 @@ pub fn write(
         removed: Vec::new(),
         raw: Vec::new(),
         kept_text: Vec::new(),
+        saved: None,
         entry: None,
         converted: None,
     };
@@ -1004,6 +1028,9 @@ pub fn write(
 pub fn restore(b: &Backup, store: &Path) -> Result<(), String> {
     if let Some(c) = &b.converted {
         return crate::convert::restore(&b.path, c);
+    }
+    if let Some(saved) = &b.saved {
+        return crate::subtext::restore(&b.path, saved, store);
     }
     if let Some(e) = &b.entry {
         return crate::inside::restore(&b.path, e, store);
