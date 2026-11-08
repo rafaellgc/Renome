@@ -7,7 +7,7 @@ import { confirm, notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
 import { byFit, isComic, seriesOnly, splitExt } from "$lib/rules";
 import { comicKey, settings } from "$lib/settings.svelte";
-import type { ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, EditField, Rule } from "$lib/types";
+import type { ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, EditField, Rule, BookTarget } from "$lib/types";
 import { counts, extOf, moved, ruleOf, without, type PageCtx } from "./common";
 
 /** What a file's series has after the catalogue's (as the Rust core's `story`). */
@@ -130,14 +130,16 @@ export class Comics {
 
   /** What converting a comic to CBZ and writing its ComicInfo.xml need: the
    *  original's fate, its match and its page in the catalogue. */
-  insideItem(key: string, path: string, convert: boolean) {
+  insideItem(key: string, path: string, convert: boolean, details?: boolean) {
     const r = this.rule?.rule;
+    /** The issue's details go along (to write them, or for an e-book). */
+    const want = details ?? (r?.type === "comic" && !!r.writeInfo);
     const original = r?.type === "comic" && r.convert && convert ? (r.original ?? "keep") : undefined;
     const pdf = r?.type === "comic" ? { draw: r.drawPages !== false, size: r.pageSize ?? 2400, info: !!r.writeInfo } : undefined;
     const fresh = r?.type === "comic" && !!r.cleanInfo;
     // Typed in: no page in a catalogue.
-    if (r?.type === "comic" && r.writeInfo && this.edits[key]) return { path, comic: this.edits[key], web: "", manga: false, convert: original, pdf, fresh };
-    if (!(r?.type === "comic" && r.writeInfo && this.matches[key] && this.state[key])) return { path, convert: original, pdf, fresh };
+    if (r?.type === "comic" && want && this.edits[key]) return { path, comic: this.edits[key], web: "", manga: false, convert: original, pdf, fresh };
+    if (!(r?.type === "comic" && want && this.matches[key] && this.state[key])) return { path, convert: original, pdf, fresh };
     const c = this.state[key];
     const [source, volume] = [c.volumeKey.slice(0, c.volumeKey.indexOf(":")), c.volumeKey.slice(c.volumeKey.indexOf(":") + 1)];
     const issue = c.choice || "";
@@ -155,6 +157,21 @@ export class Comics {
                 : "";
     return { path, comic: this.matches[key], web, manga: seriesOnly(source), convert: original, pdf, fresh };
   }
+  /** What making a comic an e-book needs: the format, the reader, the
+   *  original's fate and, when it has some, its details. */
+  ebookItem(key: string, path: string, to: BookTarget) {
+    const r = this.rule?.rule;
+    if (r?.type !== "comic") return { path };
+    const base = this.insideItem(key, path, false, true);
+    return {
+      ...base,
+      fresh: false,
+      comicTo: to,
+      ebook: { device: r.device ?? "kindle-pw", crop: r.crop ?? true, split: r.split ?? true },
+      convert: r.original ?? "keep",
+    };
+  }
+
 
   /** The chosen catalogue (GCD, Metron, Comic Vine, a manga one) for the
    *  visible comics: on Metron, first each file's barcode (recorded in it,

@@ -164,6 +164,10 @@ pub struct PreviewItem {
     /// extension here; see [`crate::bookconv`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub book_to: Option<crate::bookconv::Target>,
+    /// A comic the comic rule makes an e-book, in this format (named with
+    /// its extension here; see [`crate::comicbook`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comic_to: Option<crate::bookconv::Target>,
     /// A book locked by DRM: never converted.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub drm: bool,
@@ -1136,6 +1140,7 @@ pub fn preview(
     let music = pipeline.music();
     let converts = pipeline.converts_comics();
     let book_to = pipeline.converts_books();
+    let comic_ebook = pipeline.comic_ebook();
     let cleans = pipeline.cleans_comic_info();
     // Songs' tags, with the album-wide fields agreed across each album.
     let songs: HashMap<&Path, AudioTags> = match music {
@@ -1473,7 +1478,11 @@ pub fn preview(
                 }
                 _ => (0, 0),
             };
+            let comic_to = comic_ebook
+                .filter(|(_, draw)| crate::rules::to_ebook(file, *draw))
+                .map(|(t, _)| t);
             PreviewItem {
+                comic_to,
                 sub_fix,
                 sub_extract,
                 sub_pictures,
@@ -3541,6 +3550,10 @@ mod tests {
                     draw_pages: true,
                     page_size: 2400,
                     clean_info: false,
+                    ebook: String::new(),
+                    device: Default::default(),
+                    crop: false,
+                    split: false,
                 },
             }]
         };
@@ -3611,6 +3624,10 @@ mod tests {
                 draw_pages: true,
                 page_size: 2400,
                 clean_info: false,
+                ebook: String::new(),
+                device: Default::default(),
+                crop: false,
+                split: false,
             },
         }];
         let p = preview(&files, &steps, &HashMap::new(), &view);

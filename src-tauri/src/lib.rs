@@ -1453,6 +1453,13 @@ struct InsideJob {
     /// written in the same pass when given.
     #[serde(default)]
     polish: Option<renome_core::bookmeta::Polish>,
+    /// A comic made into an e-book in this format (with `comic`'s details
+    /// when given), its original kept beside or sent to the trash
+    /// (`convert`).
+    #[serde(default)]
+    comic_to: Option<renome_core::bookconv::Target>,
+    #[serde(default)]
+    ebook: renome_core::comicbook::EbookOptions,
 }
 
 /// Makes the book of `job` (renamed `.pdf`) into a PDF: its page is
@@ -1623,14 +1630,18 @@ async fn write_inside(
         .into_iter()
         .map(|mut j| {
             // Already a zip (or not an archive): only its details.
-            if j.book_to.is_none() && j.convert.is_some() && !convert::convertible(&j.path) {
+            if j.book_to.is_none()
+                && j.comic_to.is_none()
+                && j.convert.is_some()
+                && !convert::convertible(&j.path)
+            {
                 j.convert = None;
             }
             j
         })
         .filter(|j| {
             let ok = match (&j.convert, &j.comic, &j.book) {
-                _ if j.book_to.is_some() => true,
+                _ if j.book_to.is_some() || j.comic_to.is_some() => true,
                 _ if j.polish.is_some() => inside::book_writable(&j.path),
                 (Some(_), _, _) => true,
                 (_, Some(_), _) => inside::comic_writable(&j.path),
@@ -1674,7 +1685,8 @@ async fn write_inside(
     for (done, job) in items.into_iter().enumerate() {
         let (path, store) = (job.path.clone(), store.clone());
         let job_path = job.path.clone();
-        let converting = job.convert.is_some() && job.book_to.is_none();
+        let converting = job.convert.is_some() && job.book_to.is_none() && job.comic_to.is_none();
+        let comic_ebook = job.comic_to.is_some();
         let book_converting = job.book_to.is_some();
         let drawn = pages.clone();
         note.start(&path);
@@ -1689,6 +1701,19 @@ async fn write_inside(
                         .map(|c| inside::comic_values(c, &job.web, job.manga))
                         .unwrap_or_default()
                 };
+                if let Some(to) = job.comic_to {
+                    let original = job.convert.unwrap_or(convert::Original::Keep);
+                    return renome_core::comicbook::convert(
+                        &path,
+                        to,
+                        job.ebook,
+                        &values(),
+                        job.manga,
+                        original,
+                        job.pdf,
+                    )
+                    .map(|d| (Some(d.backup), d.not_trashed));
+                }
                 if let Some(p) = job.polish {
                     let values = job
                         .book
@@ -1749,7 +1774,9 @@ async fn write_inside(
             Err(e) => {
                 // Named `.cbz` (or `.epub`…) to be converted, it could not
                 // be: its own extension back.
-                let back = if book_converting {
+                let back = if comic_ebook {
+                    convert::kind(&job_path).map(|k| convert::beside(&job_path, k))
+                } else if book_converting {
                     renome_core::bookconv::beside(&job_path).filter(|b| *b != job_path)
                 } else if converting {
                     convert::kind(&job_path)

@@ -166,7 +166,7 @@ export function newRule(type: RuleType): Rule {
       return { type, toSrt: false, utf8: true, ads: false, hearing: false, shiftMs: 0, fpsFrom: 0, fpsTo: 0, extract: false, extractLangs: "", original: "keep" };
     case "comic": {
       const [template, folderTemplate] = COMIC_TEMPLATE[settings.lang];
-      return { type, template, colon: " - ", series: "", source: "gcd", folders: false, folderTemplate, byFolder: false, writeInfo: false, cleanInfo: false, convert: false, original: "keep", drawPages: true, pageSize: 2400, missing: true, barcode: false, skipPublishers: "" };
+      return { type, template, colon: " - ", series: "", source: "gcd", folders: false, folderTemplate, byFolder: false, writeInfo: false, cleanInfo: false, convert: false, original: "keep", drawPages: true, pageSize: 2400, missing: true, barcode: false, skipPublishers: "", ebook: "", device: "kindle-pw", crop: true, split: true };
     }
   }
 }

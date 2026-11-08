@@ -2,7 +2,9 @@
   import { t, type Key } from "./i18n";
   import { comicPreset, comicPresetOf, defaultSubLangs, FPS_PAIRS, PHOTO_TEMPLATES, splitExt, splitParts, type ComicPreset } from "./rules";
   import { settings } from "./settings.svelte";
-  import type { Step } from "./types";
+  import type { ComicDevice, Step } from "./types";
+  /** The readers a comic e-book can be made for, in the menu's order. */
+  const DEVICES: ComicDevice[] = ["kindle-pw", "kindle", "kindle-scribe", "kindle-color", "kobo", "kobo-color", "tablet", "original"];
   import { api } from "./api";
 
   /** Whether this system can print books to PDF (asked once). */
@@ -515,6 +517,31 @@
                 <option value={1600}>1600 px</option>
                 <option value={2400}>{t("comicPageSize2400")}</option>
                 <option value={3200}>3200 px</option>
+              </select>
+            </label>
+          {/if}
+        {/if}
+        <label>{t("comicEbook")}
+          <select bind:value={r.ebook}>
+            <option value="">{t("comicEbookNone")}</option>
+            <option value="epub">{t("comicEbookEpub")}</option>
+            <option value="azw3">{t("comicEbookAzw3")}</option>
+          </select>
+        </label>
+        <p class="hint">{t("comicEbookHint")}</p>
+        {#if r.ebook}
+          <label class="sub">{t("comicDevice")}
+            <select value={r.device ?? "kindle-pw"} onchange={(e) => (r.device = (e.currentTarget as HTMLSelectElement).value as ComicDevice)}>
+              {#each DEVICES as d (d)}<option value={d}>{t(`comicDevice_${d}`)}</option>{/each}
+            </select>
+          </label>
+          <label class="check sub"><input type="checkbox" checked={r.crop ?? true} onchange={(e) => (r.crop = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicCrop")}<small>{t("comicCropHint")}</small></span></label>
+          <label class="check sub"><input type="checkbox" checked={r.split ?? true} onchange={(e) => (r.split = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicSplit")}<small>{t("comicSplitHint")}</small></span></label>
+          {#if !r.convert}
+            <label class="sub">{t("comicOriginal")}
+              <select bind:value={r.original}>
+                <option value="keep">{t("comicOriginalKeep")}</option>
+                <option value="delete">{t("comicOriginalDelete")}</option>
               </select>
             </label>
           {/if}

@@ -98,6 +98,12 @@ pub fn read(path: &Path) -> Result<Book, String> {
     if let Some(at) = kf8_at
         && let Some(p) = part(&r, at)
     {
+        // Pages of pictures laid out as they are (a comic), and their
+        // direction.
+        if let Some(h) = r.read(at, 64 << 10) {
+            book.fixed = exth(&h, 122).is_some_and(|v| v == b"true");
+            book.rtl = exth(&h, 527).is_some_and(|v| v == b"rtl");
+        }
         match kf8(&r, &p, at, &mut book) {
             Ok(()) => return finish(&r, book, &p),
             Err(e) if p0.kf8 => return Err(e),
@@ -109,6 +115,27 @@ pub fn read(path: &Path) -> Result<Book, String> {
     }
     mobi6(&r, &p0, &mut book)?;
     finish(&r, book, &p0)
+}
+
+/// The data of the first EXTH record of type `ty` in a header record.
+fn exth(h: &[u8], ty: u32) -> Option<&[u8]> {
+    let be = |at: usize| Some(u32::from_be_bytes(h.get(at..at + 4)?.try_into().ok()?));
+    let start = 16 + be(20)? as usize;
+    if h.get(start..start + 4)? != b"EXTH" {
+        return None;
+    }
+    let mut at = start + 12;
+    for _ in 0..be(start + 8)? {
+        let (t, len) = (be(at)?, be(at + 4)? as usize);
+        if len < 8 {
+            return None;
+        }
+        if t == ty {
+            return h.get(at + 8..at + len);
+        }
+        at += len;
+    }
+    None
 }
 
 fn finish(r: &Records, mut book: Book, p: &crate::pages::Part) -> Result<Book, String> {

@@ -427,6 +427,19 @@ pub enum Rule {
         /// taken out (without it). Done by the app; marks such files.
         #[serde(default)]
         clean_info: bool,
+        /// Comics made into an e-book for readers: `epub` or `azw3` (named
+        /// so here; the app converts them, see [`crate::comicbook`]).
+        #[serde(default)]
+        ebook: String,
+        /// The reader the pages are fit to.
+        #[serde(default)]
+        device: crate::comicbook::Device,
+        /// Empty margins cut away.
+        #[serde(default)]
+        crop: bool,
+        /// Double pages split in two.
+        #[serde(default)]
+        split: bool,
     },
     /// Names photos and videos by when they were taken (see
     /// [`crate::photos`]); files without a date are left alone.
@@ -674,6 +687,17 @@ impl Pipeline {
                 },
                 extract.then(|| extract_langs.clone()),
             )),
+            _ => None,
+        })
+    }
+
+    /// A comic rule makes comics e-books: the format, how, and whether it
+    /// draws PDF pages.
+    pub fn comic_ebook(&self) -> Option<(crate::bookconv::Target, bool)> {
+        self.steps.iter().find_map(|s| match s {
+            Compiled::Plain(Rule::Comic {
+                ebook, draw_pages, ..
+            }) => ebook_target(ebook).map(|t| (t, *draw_pages)),
             _ => None,
         })
     }
@@ -1268,6 +1292,7 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             by_folder,
             convert,
             draw_pages,
+            ebook,
             ..
         } => {
             // A folder only when it becomes a CBZ.
@@ -1280,6 +1305,11 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             }
             if *convert && converts(ctx.file, *draw_pages) {
                 *ext = "cbz".into();
+            }
+            if let Some(t) = ebook_target(ebook)
+                && to_ebook(ctx.file, *draw_pages)
+            {
+                *ext = t.ext().into();
             }
         }
 
@@ -1322,6 +1352,29 @@ pub fn converts(file: &crate::files::FileEntry, draw: bool) -> bool {
     }
     matches!(ext.as_str(), "cbz" | "cbr" | "cb7" | "cbt")
         && kind.and_then(|k| k.comic).is_some_and(|c| c != "cbz")
+}
+
+/// The e-book format a comic rule's `ebook` names.
+pub fn ebook_target(s: &str) -> Option<crate::bookconv::Target> {
+    match s {
+        "epub" => Some(crate::bookconv::Target::Epub),
+        "azw3" => Some(crate::bookconv::Target::Azw3),
+        _ => None,
+    }
+}
+
+/// A comic the comic rule can make an e-book: a CBZ, or anything it can
+/// make a CBZ of (CBR, CB7, CBT, a PDF of pictures); not a folder, nor a
+/// comic that is an e-book already.
+pub fn to_ebook(file: &crate::files::FileEntry, draw: bool) -> bool {
+    if file.is_dir {
+        return false;
+    }
+    let ext = file.ext.to_lowercase();
+    if matches!(ext.as_str(), "epub" | "mobi" | "azw3" | "azw") {
+        return false;
+    }
+    (ext == "cbz" && file.kind().and_then(|k| k.comic) == Some("cbz")) || converts(file, draw)
 }
 
 /// A book (or document) the book rule's "convert" turns into `t`: one in

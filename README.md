@@ -132,6 +132,9 @@ A built-in manual (F1) explains every rule with examples.
   as well as EPUB and Kindle (MOBI/AZW3) comics whose pages are all
   pictures, and folders of pictures, keeping or deleting the original (undone like any
   rename). RAR files are read with libarchive, built into the app.
+  Can also make comics into fixed-page EPUB or Kindle AZW3 books fit to a
+  reader's screen (Kindle, Kobo, tablet), cutting empty margins and
+  splitting double pages, manga right to left.
 - Movie, TV show, book and comic lookups read the name as the rules above
   them leave it, so a "Replace text" can fix an abbreviation first.
 - Edit any new name by hand right in the preview (double-click or F2).

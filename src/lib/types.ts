@@ -54,7 +54,7 @@ export type Rule =
       /** EPUB 2 brought to EPUB 3; large pictures made smaller. */
       epub3?: boolean; shrinkImages?: boolean;
     }
-  | { type: "comic"; template: string; colon: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; byFolder: boolean; writeInfo?: boolean; cleanInfo?: boolean; convert?: boolean; original?: "keep" | "delete"; drawPages?: boolean; pageSize?: number; missing: boolean; barcode?: boolean; skipPublishers?: string }
+  | { type: "comic"; template: string; colon: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; byFolder: boolean; writeInfo?: boolean; cleanInfo?: boolean; convert?: boolean; original?: "keep" | "delete"; drawPages?: boolean; pageSize?: number; missing: boolean; barcode?: boolean; skipPublishers?: string; ebook?: "" | "epub" | "azw3"; device?: ComicDevice; crop?: boolean; split?: boolean }
   | {
       type: "photo"; template: string; fromName: boolean; modified: boolean; shiftHours: number;
       folders: boolean; folderTemplate: string; setModified: boolean;
@@ -81,6 +81,9 @@ export interface SubFix {
   /** MicroDVD whose times cannot be known: left as it is. */
   noFps: boolean;
 }
+
+/** The reader a comic e-book is made for. */
+export type ComicDevice = "original" | "kindle" | "kindle-pw" | "kindle-scribe" | "kindle-color" | "kobo" | "kobo-color" | "tablet";
 
 export type RuleType = Rule["type"];
 
@@ -123,6 +126,8 @@ export interface PreviewItem {
   bookTo?: BookTarget;
   /** A book locked by DRM: never converted. */
   drm?: boolean;
+  /** A comic the comic rule makes an e-book, in this format. */
+  comicTo?: BookTarget;
   /** What the subtitle rule does to this subtitle. */
   subFix?: SubFix;
   /** Text subtitle tracks the subtitle rule takes out of this video. */

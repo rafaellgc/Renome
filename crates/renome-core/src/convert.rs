@@ -174,6 +174,16 @@ fn is_page(name: &str) -> bool {
     )
 }
 
+/// Whether an archive entry is a page (a picture).
+pub(crate) fn is_page_name(name: &str) -> bool {
+    is_page(name)
+}
+
+/// Names in reading order (`2` before `10`).
+pub(crate) fn natural_order(a: &str, b: &str) -> std::cmp::Ordering {
+    natural(a, b)
+}
+
 /// Folders inside a folder of pages (chapters): at most this deep.
 const FOLDER_DEPTH: usize = 3;
 
@@ -2393,7 +2403,7 @@ fn is_info(name: &str) -> bool {
 /// `values` written into its `ComicInfo.xml` (see
 /// [`crate::inside::comic_xml`]; made when it has none) unless empty.
 /// Returns how many files it holds, and how many PDF pages were drawn.
-fn write_zip(
+pub(crate) fn write_zip(
     path: &Path,
     kind: Kind,
     out: &Path,

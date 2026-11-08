@@ -1521,6 +1521,54 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   `.tagging` note like songs (see 2.3): a stop halfway removes the copy
   and keeps what was written for undo.
 
+### 2.5e Comics as e-books (`comicbook`)
+
+- Comic rule `ebook` (`""`, `epub`, `azw3`), `device` (`original`,
+  `kindle` 1072×1448 grey, `kindle-pw` 1236×1648 grey, `kindle-scribe`
+  1860×2480 grey, `kindle-color` 1264×1680, `kobo` 1072×1448 grey,
+  `kobo-color` 1264×1680, `tablet` 1600×2560; UI default `kindle-pw`),
+  `crop`, `split` (UI defaults on), `original` keep|delete. A comic file
+  that is a CBZ or that the CBZ conversion can read (CBR, CB7, CBT, a
+  PDF of pictures, or one it may draw) is named with the e-book's
+  extension in the preview (`PreviewItem.comic_to`; over the CBZ
+  conversion); folders and comics that are EPUB/MOBI/AZW3 already are
+  not. After the rename, `write_inside` (`InsideJob.comic_to`, `ebook`,
+  with the issue's details when there is a match or typed details, and
+  `manga`) calls `comicbook::convert`.
+- Pages: a CBZ is read directly; anything else is first made into a
+  hidden CBZ beside it by the CBZ conversion's own reader
+  (`convert::write_zip`), read, removed. Pictures in natural name order
+  (`__MACOSX` out), `ComicInfo.xml` read for the details the values lack
+  (Series, Number, Title, Writer, Publisher, LanguageISO, Year) and for
+  `Manga` = `YesAndRightToLeft` (right to left, as is a match from a
+  manga source).
+- Each page, on up to 8 threads: decoded; crop: on an 800 px grey copy,
+  the edges' mean says the margin colour (≥200 white, ≤55 black, else no
+  crop), rows and columns with more than max(2, 0.5%) pixels differing
+  by >48 are content, 1% kept around, applied when it keeps 40–97% of the
+  area; split: wider than 1.15 × tall and not the first page → halves
+  (right first when right to left); fit: shrunk (Lanczos3) into the
+  device's box, never enlarged; a JPEG with no geometric change is kept
+  byte for byte (unless a grey device gets a colour page); else JPEG q85
+  (grey on grey devices), retried at q72 when it exceeds by 10% the
+  page's share (by area) of the source bytes. Unreadable pages are left
+  out.
+- Book: fixed layout, one chapter per picture (`picture_page`, viewport
+  of the picture's size), the first picture the cover, title `Series
+  #Number - Title` (else the series, the title, the file name), authors
+  from Writer, one table-of-contents entry. EPUB 3 pre-paginated (and
+  `page-progression-direction="rtl"`); AZW3 with EXTH 122 `true`, 123
+  `comic`, 124 `none`, 126 the first page's `WxH`, 132 `false`, and for
+  right to left 525 `horizontal-rl`, 527 `rtl`; each KF8 page has its
+  viewport. The MOBI reader reads 122/527 back. Written to a temporary
+  file, then `bookconv::finish` (original beside with its kind's
+  extension, or trashed; `Backup.converted`); a failure gives the comic
+  its own extension back.
+- Real copies (8 comics, CBR and CBZ, 23–187 pages, a manga): 0.1–1 s
+  each, read back fixed, right to left for the manga, sizes from 0.27×
+  (large colour scans for a grey Kindle) to about 1.05× (small scans
+  cropped).
+
 ### 2.5b Photos (dates, offline)
 
 - Rule `photo` (`photos.rs`): names photos, raw files, phone/camera videos

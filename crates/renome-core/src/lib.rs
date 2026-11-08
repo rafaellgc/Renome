@@ -22,6 +22,7 @@
 //! - [`videotags`]: title, date, show and cover written inside MKV and MP4.
 //! - [`inside`]: details written inside CBZ and EPUB files.
 //! - [`convert`]: comics converted to CBZ (from RAR, 7z, tar).
+//! - [`comicbook`]: comics made into fixed-layout EPUB or AZW3 for readers.
 //! - [`subtext`]: text subtitles read, cleaned, retimed, made SubRip.
 //! - [`mkvsubs`]: text subtitles taken out of Matroska videos.
 //! - [`details`]: what the optional columns of the list show.
@@ -33,6 +34,7 @@ pub mod apply;
 pub mod barcode;
 pub mod bookconv;
 pub mod bookmeta;
+pub mod comicbook;
 pub mod books;
 pub mod comics;
 pub mod convert;

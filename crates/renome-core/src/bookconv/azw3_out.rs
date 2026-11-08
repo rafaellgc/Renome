@@ -360,8 +360,13 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
         } else {
             &c.title
         };
+        // A fixed page says its size, as the Kindle lays it out by.
+        let viewport = c
+            .page
+            .map(|(w, h)| format!("<meta name=\"viewport\" content=\"width={w}, height={h}\"/>\n"))
+            .unwrap_or_default();
         let head = format!(
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"{l}\" lang=\"{l}\">\n<head>\n<title>{t}</title>\n<link href=\"kindle:flow:0001?mime=text/css\" rel=\"stylesheet\" type=\"text/css\"/>\n</head>\n<body aid=\"0\">",
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"{l}\" lang=\"{l}\">\n<head>\n{viewport}<title>{t}</title>\n<link href=\"kindle:flow:0001?mime=text/css\" rel=\"stylesheet\" type=\"text/css\"/>\n</head>\n<body aid=\"0\">",
             l = esc_attr(if c.lang.is_empty() { &lang } else { &c.lang }),
             t = esc(title)
         );
@@ -585,6 +590,21 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
     exth.push((503, m.title.as_bytes().to_vec()));
     exth.push((524, lang.as_bytes().to_vec()));
     exth.push((501, b"EBOK".to_vec()));
+    // Pages of pictures (a comic): laid out as they are, at their size,
+    // turning right to left when the book does.
+    if book.fixed {
+        exth.push((122, b"true".to_vec()));
+        exth.push((123, b"comic".to_vec()));
+        exth.push((124, b"none".to_vec()));
+        if let Some((w, h)) = book.chapters.iter().find_map(|c| c.page) {
+            exth.push((126, format!("{w}x{h}").into_bytes()));
+        }
+        exth.push((132, b"false".to_vec()));
+        if book.rtl {
+            exth.push((525, b"horizontal-rl".to_vec()));
+            exth.push((527, b"rtl".to_vec()));
+        }
+    }
     if let Some(c) = &book.cover
         && let Some(n) = pic_no.get(c.as_str())
     {

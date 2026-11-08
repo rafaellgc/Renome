@@ -600,6 +600,8 @@
     const bookTo = new Map(preview.items.filter((i) => i.bookTo).map((i) => [i.path, i.bookTo!]));
     /** Comics renamed `.cbz` to be converted. */
     const converting = new Set(preview.items.filter((i) => i.convert).map((i) => i.path));
+    /** Comics renamed with the e-book format they are made into. */
+    const comicTo = new Map(preview.items.filter((i) => i.comicTo).map((i) => [i.path, i.comicTo!]));
     const cleared = new Set(preview.items.filter((i) => i.junk).map((i) => i.path));
     /** What the subtitle rule does to each file: fix a subtitle, take out a video's tracks. */
     const strule = steps.find((s) => s.enabled && s.rule.type === "subtitle")?.rule;
@@ -754,6 +756,9 @@
                       clearsInfo(crule, cleared.has(op.from))),
                 )
                 .map((op) => comics.insideItem(op.from, op.to, converting.has(op.from)))
+            : []),
+          ...(crule?.type === "comic" && crule.ebook
+            ? r.done.filter((op) => comicTo.has(op.from)).map((op) => comics.ebookItem(op.from, op.to, comicTo.get(op.from)!))
             : []),
           ...(brule?.type === "book"
             ? r.done.filter((op) => !bookTo.has(op.from) && books.writes(op.from, op.to)).map((op) => books.writeItem(op.from, op.to))
