@@ -8,7 +8,7 @@
 //! are written again. A file whose format is not recognised is not
 //! touched. Picture subtitles (VobSub, PGS) cannot be read as text.
 
-use std::fs;
+use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -1990,10 +1990,23 @@ pub fn fix_file(path: &Path, tools: &Tools, original: Original, store: &Path) ->
     })
 }
 
-/// Puts back a subtitle's old content saved by [`fix_file`].
+/// Puts back a file's old content saved whole in `store` (a subtitle
+/// edited by [`fix_file`], a book rewritten by [`crate::bookmeta`]):
+/// copied beside it, then taking its place.
 pub fn restore(path: &Path, saved: &str, store: &Path) -> Result<(), String> {
-    let bytes = fs::read(store.join(saved)).map_err(|e| e.to_string())?;
-    replace_with(path, &bytes)
+    let tmp = crate::tagwrite::temp_of(path);
+    let copied = fs::copy(store.join(saved), &tmp).and_then(|_| File::open(&tmp)?.sync_all());
+    if let Err(e) = copied {
+        let _ = fs::remove_file(&tmp);
+        return Err(e.to_string());
+    }
+    if let Ok(m) = fs::metadata(path) {
+        let _ = fs::set_permissions(&tmp, m.permissions());
+    }
+    fs::rename(&tmp, path).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        e.to_string()
+    })
 }
 
 /// The text of a subtitle made from `text` (SubRip, WebVTT or SubStation,

@@ -1522,6 +1522,9 @@ impl History {
             .flatten();
         let (tagged, mut back) = (j.tags.len(), 0);
         let mut stopped = false;
+        // Last written, first put back: a file changed twice gets its
+        // first state back.
+        j.tags.reverse();
         j.tags.retain(|b| {
             if stopped || (hooks.stop)() {
                 stopped = true;
@@ -1545,6 +1548,7 @@ impl History {
                 }
             }
         });
+        j.tags.reverse();
         if let Some(n) = note {
             n.finish();
         }

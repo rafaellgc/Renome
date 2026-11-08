@@ -985,6 +985,47 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   `META-INF/rights.xml` or content encrypted by anything but font
   obfuscation (DRM) are refused (`epubDrm`). Writing works like the
   comics' (see 2.5), with the same history, recovery and undo.
+- The same option ("Write the details inside the book") also covers
+  FB2 and Kindle files (`bookmeta`): Kindle (MOBI, AZW3, AZW, PRC; Palm
+  database `BOOKMOBI`, unencrypted): each header record (record 0 and,
+  in a combined book, the KF8 one EXTH 121 names) gets its EXTH records
+  100 (one per author), 101, 104, 106 (year), 503 (title), 524
+  (language) replaced, others kept, the full name rewritten in the
+  header's text encoding (UTF-8 or Windows-1252), the bytes after the old
+  name kept (or as much zero padding), the EXTH flag set; the database's
+  record offsets are recomputed, every other record copied as it is.
+  FB2: decoded in the encoding its XML declaration names, `title-info`
+  rebuilt in schema order (genre, author, book-title, annotation,
+  keywords, date, coverpage, lang, src-lang, translator, sequence; ours
+  replace author — `first-name`/`last-name`, one word `nickname` —,
+  book-title, date, lang, sequence with a whole-number `number`), the
+  same for `publish-info` (publisher, year, isbn; added after
+  `document-info` when absent), the result parsed again, encoded back in
+  its encoding (characters it lacks as numeric references). Both are
+  written whole to a temporary file that takes the book's place, the old
+  file copied into the history entry's folder (`Backup.saved`, restored
+  by copying it back the same way).
+- "Upgrade EPUB 2 to EPUB 3" and "Shrink large EPUB pictures" (off by
+  default; `bookmeta::polish`, for EPUBs renamed or already named right,
+  with the details written in the same pass when that option is on too):
+  the zip is written anew in the same entry order (raw copies, the OPF
+  and replaced pictures written; `mimetype` stays first and stored).
+  EPUB 3: only for `version="2.x"` packages with an NCX; `version`
+  becomes `3.0`, a `nav.xhtml` (or `navN.xhtml`) beside the OPF is made
+  from the NCX's `navMap` (nested `ol`, depth ≤ 8, links rebased from the
+  NCX's folder) with `properties="nav"`, the cover item named by `meta
+  name="cover"` gets `properties="cover-image"`, a `dcterms:modified` is
+  added; the NCX and the spine's `toc` stay. Shrink: manifest JPEG/PNG
+  items over 1600 px on the long side are resized (Lanczos3), JPEGs over
+  300 KB re-encoded at quality 85 (on white), PNGs re-encoded at best
+  compression; each kept only when ≥10% smaller, stored uncompressed in
+  the zip. The written zip is opened again before it replaces the book;
+  locked EPUBs (`drm::epub_locked`) refused; over 1 GB refused. Undo:
+  `Backup.saved` (the whole old file). Undo restores an entry's
+  backups last-written first, so a file changed twice gets its first
+  state back. Real probe: 60 EPUBs polished (with details), 60 AZW3 and
+  60 FB2 made from them and 26 MOBI given details: all read back with
+  the details and the same text, all undone byte for byte.
 - "Edit the details (N selected)" (`DetailsEdit.svelte`, shared with
   the comic and music rules): for the books selected in the list, a window
   with title, authors (`;`-separated), year, publisher, language, series,

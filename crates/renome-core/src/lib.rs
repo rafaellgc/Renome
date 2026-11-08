@@ -32,6 +32,7 @@ pub mod answers;
 pub mod apply;
 pub mod barcode;
 pub mod bookconv;
+pub mod bookmeta;
 pub mod books;
 pub mod comics;
 pub mod convert;

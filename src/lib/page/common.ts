@@ -35,6 +35,8 @@ export function counts(state: Record<string, { status: MovieStatus }>, items: Pr
 /** A path's extension, lower case. */
 export const extOf = (p: string) => splitExt(p.split(/[\\/]/).pop() ?? p)[1].toLowerCase();
 export const isEpub = (p: string) => ["epub", "kepub"].includes(extOf(p));
+/** Books whose details can be written inside: EPUB, FB2 and Kindle's. */
+export const isWritableBook = (p: string) => ["epub", "kepub", "fb2", "mobi", "azw3", "azw", "prc"].includes(extOf(p));
 
 /** The first enabled rule of a type. */
 export const ruleOf = (steps: Step[], type: string) => steps.find((s) => s.enabled && s.rule.type === type);

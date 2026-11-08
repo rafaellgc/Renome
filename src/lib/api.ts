@@ -150,7 +150,7 @@ export const api = {
           convert?: "keep" | "delete";
           pdf?: { draw: boolean; size: number; info: boolean };
         }
-      | { path: string; book: BookMatch; language: string }
+      | { path: string; book?: BookMatch; language?: string; polish?: { epub3: boolean; shrink: boolean } }
     )[],
   ) => invoke<{ written: number; drawn: number; errors: [string, string][] }>("write_inside", { historyId, items }),
   writeVideoTags: (

@@ -1449,6 +1449,10 @@ struct InsideJob {
     /// given), its original kept beside or sent to the trash (`convert`).
     #[serde(default)]
     book_to: Option<renome_core::bookconv::Target>,
+    /// An EPUB polished (EPUB 3, smaller pictures), with `book`'s details
+    /// written in the same pass when given.
+    #[serde(default)]
+    polish: Option<renome_core::bookmeta::Polish>,
 }
 
 /// Makes the book of `job` (renamed `.pdf`) into a PDF: its page is
@@ -1627,13 +1631,16 @@ async fn write_inside(
         .filter(|j| {
             let ok = match (&j.convert, &j.comic, &j.book) {
                 _ if j.book_to.is_some() => true,
+                _ if j.polish.is_some() => inside::book_writable(&j.path),
                 (Some(_), _, _) => true,
                 (_, Some(_), _) => inside::comic_writable(&j.path),
                 (_, _, None) if j.fresh => inside::comic_writable(&j.path),
-                (_, _, Some(_)) => inside::book_writable(&j.path),
+                (_, _, Some(_)) => {
+                    inside::book_writable(&j.path) || renome_core::bookmeta::writable(&j.path)
+                }
                 _ => false,
             };
-            if !ok && (j.comic.is_some() || j.book.is_some() || j.fresh) {
+            if !ok && (j.comic.is_some() || j.book.is_some() || j.fresh || j.polish.is_some()) {
                 let why = if j.comic.is_some() {
                     "comicUnsupported"
                 } else {
@@ -1682,6 +1689,14 @@ async fn write_inside(
                         .map(|c| inside::comic_values(c, &job.web, job.manga))
                         .unwrap_or_default()
                 };
+                if let Some(p) = job.polish {
+                    let values = job
+                        .book
+                        .as_ref()
+                        .map(|b| inside::book_values(b, &job.language));
+                    return renome_core::bookmeta::polish(&path, p, values.as_ref(), &store)
+                        .map(|d| (d.backup, None));
+                }
                 if let Some(to) = job.book_to {
                     let values = job
                         .book
@@ -1703,8 +1718,12 @@ async fn write_inside(
                             .map(|b| (b, None))
                     }
                     (_, _, Some(b)) => {
-                        inside::write_book(&path, &inside::book_values(b, &job.language), &store)
-                            .map(|b| (b, None))
+                        let v = inside::book_values(b, &job.language);
+                        if inside::book_writable(&path) {
+                            inside::write_book(&path, &v, &store).map(|b| (b, None))
+                        } else {
+                            renome_core::bookmeta::write(&path, &v, &store).map(|b| (b, None))
+                        }
                     }
                     _ if job.fresh => inside::remove_comic(&path, &store).map(|b| (b, None)),
                     _ => Ok((None, None)),

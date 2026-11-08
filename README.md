@@ -101,7 +101,8 @@ A built-in manual (F1) explains every rule with examples.
   and lets you choose when not; optionally organizes them into
   `Author/Title` folders and saves `cover.jpg` and a `metadata.opf`
   (read by Audiobookshelf and e-book managers), and can write the details
-  inside EPUBs (undone like any rename).
+  inside EPUB, AZW3, MOBI and FB2 books, bring EPUB 2 books to EPUB 3 and
+  shrink their large pictures (all undone like any rename).
 - Book conversion: turns EPUB, MOBI/AZW3, PDF, FB2/FBZ, Word (DOCX),
   LibreOffice (ODT), text and HTML files into EPUB, AZW3 (Kindle), FB2 or
   PDF after renaming, with the details found or typed in; headings,

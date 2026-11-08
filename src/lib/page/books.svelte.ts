@@ -9,7 +9,7 @@ import { t, tError } from "$lib/i18n";
 import { isBook, splitExt } from "$lib/rules";
 import { tmdbLang } from "$lib/settings.svelte";
 import type { BookCandidate, BookGuess, BookMatch, BookState, BookTarget, EditField } from "$lib/types";
-import { counts, isEpub, moved, ruleOf, without, type PageCtx } from "./common";
+import { counts, isEpub, moved, ruleOf, without, type PageCtx, isWritableBook } from "./common";
 
 /** What the rule uses of a chosen book: the edition's publisher and ISBN
  *  only when it was found by the file's ISBN (otherwise they would be
@@ -77,14 +77,33 @@ export class Books {
       ? this.#ctx.items.filter((i) => i.status === "unchanged" && this.has(i.path) && isBook(i.original))
       : [];
   });
-  /** EPUBs whose names are already right but whose details get written
-   *  (those that already have them are skipped when writing). */
-  epubOnly = $derived.by(() => {
+  /** Books whose names are already right but whose details get written
+   *  or that get polished (those that already have them are skipped). */
+  epubOnly = $derived.by(() =>
+    this.#ctx.items.filter((i) => i.status === "unchanged" && !i.isDir && !i.bookTo && this.writes(i.path, i.path)),
+  );
+
+  /** The EPUB polish the rule asks for, if any. */
+  get polish() {
     const r = this.rule?.rule;
-    return r?.type === "book" && r.writeEpub
-      ? this.#ctx.items.filter((i) => i.status === "unchanged" && this.has(i.path) && isEpub(i.original) && !i.bookTo)
-      : [];
-  });
+    return r?.type === "book" && (r.epub3 || r.shrinkImages) ? { epub3: !!r.epub3, shrink: !!r.shrinkImages } : null;
+  }
+
+  /** Whether a book (`key` before renaming, `path` after) gets its details
+   *  written inside or gets polished. */
+  writes(key: string, path: string) {
+    const r = this.rule?.rule;
+    if (r?.type !== "book") return false;
+    return (!!r.writeEpub && this.has(key) && isWritableBook(path)) || (!!this.polish && isEpub(path));
+  }
+
+  /** What writing a book's details inside it and polishing it need. */
+  writeItem(key: string, path: string) {
+    const r = this.rule?.rule;
+    const details = r?.type === "book" && r.writeEpub && this.has(key) ? this.insideItem(key, path) : { path };
+    const polish = isEpub(path) ? this.polish : null;
+    return polish ? { ...details, polish } : details;
+  }
   /** Books whose names are already right but that get converted (an
    *  `.epub` that is really another format). */
   convertOnly = $derived.by(() => {

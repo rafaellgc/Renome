@@ -49,7 +49,11 @@ export type Rule =
       type: "music"; template: string; colon: string; discPrefix: boolean; fromName: boolean;
       folders: boolean; folderTemplate: string; cover: boolean; playlist: boolean; listen: boolean; writeTags: boolean; embedCover: boolean; coverSize: number; cleanTags: boolean; missing: boolean;
     }
-  | { type: "book"; template: string; colon: string; folders: boolean; folderTemplate: string; cover: boolean; opf: boolean; writeEpub?: boolean; missing: boolean; convertTo?: BookTarget; original?: "keep" | "delete" }
+  | {
+      type: "book"; template: string; colon: string; folders: boolean; folderTemplate: string; cover: boolean; opf: boolean; writeEpub?: boolean; missing: boolean; convertTo?: BookTarget; original?: "keep" | "delete";
+      /** EPUB 2 brought to EPUB 3; large pictures made smaller. */
+      epub3?: boolean; shrinkImages?: boolean;
+    }
   | { type: "comic"; template: string; colon: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; byFolder: boolean; writeInfo?: boolean; cleanInfo?: boolean; convert?: boolean; original?: "keep" | "delete"; drawPages?: boolean; pageSize?: number; missing: boolean; barcode?: boolean; skipPublishers?: string }
   | {
       type: "photo"; template: string; fromName: boolean; modified: boolean; shiftHours: number;

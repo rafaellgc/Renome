@@ -613,7 +613,7 @@
     );
     const insideOnly = [
       ...comics.infoOnly.map((i) => comics.insideItem(i.path, i.path, i.convert)),
-      ...books.epubOnly.map((i) => books.insideItem(i.path, i.path)),
+      ...books.epubOnly.map((i) => books.writeItem(i.path, i.path)),
       ...books.convertOnly.map((i) => books.convertItem(i.path, i.path, i.bookTo!)),
     ];
     if (!preview.changed && !meta.length && !tvMeta.length && !bookMeta.length && !music.coverOnly && !listOnly.length && !retagOnly.length && !insideOnly.length && !subsUnchanged.length && !toolsOnly.length && !tagOnly.length) return;
@@ -755,8 +755,8 @@
                 )
                 .map((op) => comics.insideItem(op.from, op.to, converting.has(op.from)))
             : []),
-          ...(brule?.type === "book" && brule.writeEpub
-            ? r.done.filter((op) => books.has(op.from) && isEpub(op.to) && !bookTo.has(op.from)).map((op) => books.insideItem(op.from, op.to))
+          ...(brule?.type === "book"
+            ? r.done.filter((op) => !bookTo.has(op.from) && books.writes(op.from, op.to)).map((op) => books.writeItem(op.from, op.to))
             : []),
           ...(brule?.type === "book" && brule.convertTo
             ? r.done.filter((op) => bookTo.has(op.from)).map((op) => books.convertItem(op.from, op.to, bookTo.get(op.from)!))
