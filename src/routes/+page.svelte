@@ -4,7 +4,7 @@
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import { open, save } from "@tauri-apps/plugin-dialog";
   import { openUrl } from "@tauri-apps/plugin-opener";
-  import { api } from "$lib/api";
+  import { api, type WorkGroup } from "$lib/api";
   import { Books } from "$lib/page/books.svelte";
   import { Music } from "$lib/page/music.svelte";
   import { Comics, clearsInfo } from "$lib/page/comics.svelte";
@@ -70,6 +70,9 @@
   let alike = $state<Record<string, Copies>>({});
   let alikeOnly = $state(false);
   const alikeCount = $derived(Object.keys(alike).length);
+  /** Of those, the movies, episodes, comics and books (each file's group). */
+  let works = $state<Record<string, WorkGroup>>({});
+  const worksCount = $derived(Object.keys(works).length);
   /** Pictures that look like another in the list. */
   let similar = $state<Record<string, Copies>>({});
   let similarOnly = $state(false);
@@ -914,9 +917,12 @@
       };
       copies = byGroup(found.identical);
       copyGroups = found.identical;
-      alike = byGroup(found.songs);
+      alike = byGroup([...found.songs, ...found.works.map((g) => g.items.map((i) => i.path))]);
+      const w: Record<string, WorkGroup> = {};
+      for (const g of found.works) for (const i of g.items) w[i.path] = g;
+      works = w;
       if (!found.identical.length) identicalOnly = false;
-      if (!found.songs.length) alikeOnly = false;
+      if (!found.songs.length && !found.works.length) alikeOnly = false;
       identicalProgress = null;
       await refresh();
       checkSimilar(byGroup);
@@ -1535,6 +1541,7 @@
           onoverride={setOverride}
           {copies}
           {alike}
+          {works}
           {similar}
           oncompare={openCompare}
           {matches}
@@ -1600,9 +1607,9 @@
         class="link"
         class:on={alikeOnly}
         aria-pressed={alikeOnly}
-        title={t("alikeFilterHint")}
+        title={t(worksCount ? "repeatedFilterHint" : "alikeFilterHint")}
         onclick={() => (alikeOnly = !alikeOnly)}
-      >♪ {t("alikeCount", { n: alikeCount })}</button>
+      >{worksCount === alikeCount ? `≡ ${t("repeatedCount", { n: alikeCount })}` : worksCount ? `♪≡ ${t("repeatedCount", { n: alikeCount })}` : `♪ ${t("alikeCount", { n: alikeCount })}`}</button>
     {/if}
     {#if similarProgress !== null && identicalProgress === null}
       <span>{t("similarScanning", { p: Math.floor(similarProgress * 100) })}</span>

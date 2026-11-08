@@ -417,6 +417,8 @@ fn stop_search(state: State<AppState>) {
 struct Copies {
     identical: Vec<Vec<PathBuf>>,
     songs: Vec<Vec<PathBuf>>,
+    /// The same movie, episode, comic or book in several files.
+    works: Vec<renome_core::repeated::Group>,
 }
 
 /// Searches the list for files with identical content, then for songs
@@ -460,12 +462,19 @@ async fn find_identical(app: AppHandle) -> Result<Option<Copies>, String> {
         let identical = by_group(&groups);
         // The songs' tags are read on the copy, without holding the list.
         let songs = renome_core::alike::same_songs(&files, &identical, &stale)?;
+        let works = renome_core::repeated::same_works(&files, &identical, &stale)?;
         if stale() {
             return None;
         }
         let mut s = state.session.lock().unwrap();
         s.identical = identical;
-        s.alike = by_group(&songs);
+        // One filter for both: songs' groups first, then the works'.
+        let all: Vec<Vec<PathBuf>> = songs
+            .iter()
+            .cloned()
+            .chain(works.iter().map(|g| g.items.iter().map(|i| i.path.clone()).collect()))
+            .collect();
+        s.alike = by_group(&all);
         let read: HashMap<&PathBuf, &FileEntry> = files.iter().map(|f| (&f.path, f)).collect();
         for f in s.files.iter_mut() {
             if let Some(other) = read.get(&f.path) {
@@ -475,6 +484,7 @@ async fn find_identical(app: AppHandle) -> Result<Option<Copies>, String> {
         Some(Copies {
             identical: groups,
             songs,
+            works,
         })
     })
     .await

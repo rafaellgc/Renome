@@ -64,6 +64,10 @@ pub struct FileEntry {
     /// A Matroska video's subtitle tracks, read on first use.
     #[serde(skip)]
     pub(crate) sub_tracks: OnceLock<Vec<crate::mkvsubs::Track>>,
+    /// A book's first ISBN and title as its details have them (see
+    /// [`crate::repeated`]), read on first use.
+    #[serde(skip)]
+    pub(crate) isbn_title: OnceLock<Option<(String, String)>>,
 }
 
 impl FileEntry {
@@ -97,6 +101,7 @@ impl FileEntry {
             photo: OnceLock::new(),
             subtitle: OnceLock::new(),
             sub_tracks: OnceLock::new(),
+            isbn_title: OnceLock::new(),
         })
     }
 
@@ -213,6 +218,7 @@ impl FileEntry {
         self.convert_pages = OnceLock::new();
         self.book = OnceLock::new();
         self.subtitle = OnceLock::new();
+        self.isbn_title = OnceLock::new();
         if let Some(fresh) = std::fs::metadata(&self.path)
             .ok()
             .and_then(|m| Self::from_path(&self.path, &m))
@@ -251,6 +257,22 @@ impl FileEntry {
         if let (None, Some(b)) = (self.book.get(), other.book.get()) {
             let _ = self.book.set(*b);
         }
+        if let (None, Some(c)) = (self.comic.get(), other.comic.get()) {
+            let _ = self.comic.set(c.clone());
+        }
+        if let (None, Some(i)) = (self.isbn_title.get(), other.isbn_title.get()) {
+            let _ = self.isbn_title.set(i.clone());
+        }
+    }
+
+    /// A book's first ISBN and its title (`None` without an ISBN).
+    pub fn isbn_title(&self) -> Option<&(String, String)> {
+        self.isbn_title
+            .get_or_init(|| {
+                let m = crate::ebook::read(&self.path);
+                m.isbns.into_iter().next().map(|i| (i, m.title))
+            })
+            .as_ref()
     }
 
     pub fn file_name(&self) -> String {

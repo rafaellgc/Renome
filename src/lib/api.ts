@@ -28,6 +28,14 @@ export interface PictureCard {
 }
 type TvItem = { path: string; name: string; isDir: boolean };
 
+/** The same movie, episode, comic or book in several files. */
+export interface WorkGroup {
+  kind: "movie" | "episode" | "comic" | "book";
+  items: { path: string; size: number; picture?: string; codec?: string }[];
+  /** The one worth keeping, when one stands out. */
+  best?: string;
+}
+
 export const api = {
   pdfPrintAvailable: () => invoke<boolean>("pdf_print_available"),
   checkpoint: (overrides: Overrides) => invoke<void>("checkpoint", { overrides }),
@@ -44,7 +52,7 @@ export const api = {
   stopSearch: () => invoke<void>("stop_search"),
   /** Identical files, and songs that are the same music; null when a
    *  newer search replaced this one. */
-  findIdentical: () => invoke<{ identical: string[][]; songs: string[][] } | null>("find_identical"),
+  findIdentical: () => invoke<{ identical: string[][]; songs: string[][]; works: WorkGroup[] } | null>("find_identical"),
   findSimilar: () => invoke<string[][] | null>("find_similar"),
   ownCover: (path: string) => invoke<OwnCover | null>("own_cover", { path }),
   coverDistances: (hash: string, urls: string[]) => invoke<(number | null)[]>("cover_distances", { hash, urls }),

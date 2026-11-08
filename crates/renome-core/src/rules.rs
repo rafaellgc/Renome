@@ -1668,6 +1668,7 @@ mod tests {
             photo: Default::default(),
             subtitle: Default::default(),
             sub_tracks: Default::default(),
+            isbn_title: Default::default(),
         }
     }
 

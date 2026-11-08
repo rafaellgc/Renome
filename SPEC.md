@@ -1749,6 +1749,31 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   number; hover: which files), selecting one highlights the others, and
   the footer shows how many songs are repeated; clicking it shows only
   those, grouped. Nothing is changed.
+- **Repeated works** (`repeated`): in the same pass, the same movie,
+  episode, comic or book in several files, offline, joined by keys
+  (union-find; two files sharing any key are one work; movies and
+  episodes never joined with books): movies by `[tmdbid-…]` and by
+  title + year (+ what follows the year after a dash, so `Movie (2010) -
+  Making Of` is apart; no year → no key; a TMDB id only when nothing
+  follows the year); extras skipped (`-trailer`, `-sample`… suffixes,
+  folders `Extras`, `Bonus`, `Trailers`…); episodes by show (name, else
+  the folder, above a season folder) + season/episodes, date, or an
+  absolute number that is not a year, + `Part N`; comics by series +
+  volume + number from `ComicInfo.xml` (strong) or the name (for PDF/EPUB
+  only when the series is in the file's own name, and weak); books by
+  first ISBN + details' title (strong; cached per file) and by the sorted
+  words of the name without bracketed notes and format words (weak).
+  Book groups joined only by weak keys need two formats (same-name bills
+  are not one book). Groups made only of identical copies are left out.
+  Best (★, only when one stands out): videos by pixels then size; comics
+  by size, a CBZ within 5% of the largest preferred; books by format
+  (EPUB > AZW3 > MOBI > FB2 > PDF) then size. Returned with the songs
+  (`Copies.works`); the footer filter shows both (`≡ N repeated
+  files`), rows get ≡ or ★ and the group number; hover lists every file
+  with picture, codec, size and why the best. Nothing is changed. Real
+  probe (24 013 files of the user's libraries): no false group after the
+  rules above (same-name bills, trailers and bonus files were the
+  first-version false alarms).
 - **Similar pictures**: then, pictures that look alike (the same photo
   resized, recompressed, in another format or lightly edited; shots taken
   a moment apart) are found by a 64-bit fingerprint of their shapes: the

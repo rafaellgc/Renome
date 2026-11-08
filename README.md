@@ -43,6 +43,9 @@ A built-in manual (F1) explains every rule with examples.
 - The preview highlights what is removed and added in each name.
 - Finds files with identical content in the list (even with different
   names) and shows them grouped.
+- Finds the same movie, episode, comic or book in several files (a film
+  in 4K and 1080p, an issue as CBR and CBZ, a book as EPUB and PDF) and
+  marks the one worth keeping.
 - Finds pictures that look alike (the same photo resized, recompressed or
   lightly edited, and shots taken one after another) and shows them
   grouped. Pictures in either kind of group can be compared side by side

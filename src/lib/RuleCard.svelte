@@ -363,7 +363,7 @@
         {#if r.toSrt}
           <label class="sub">{t("comicOriginal")}
             <select bind:value={r.original}>
-              <option value="keep">{t("bookOriginalKeep")}</option>
+              <option value="keep">{t("subOriginalKeep")}</option>
               <option value="delete">{t("comicOriginalDelete")}</option>
             </select>
           </label>

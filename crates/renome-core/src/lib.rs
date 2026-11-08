@@ -8,6 +8,7 @@
 //! - [`apply`]: renames in two phases, with a history for undo.
 //! - [`identical`]: finds files with identical content.
 //! - [`alike`]: finds songs that are the same music in different files.
+//! - [`repeated`]: finds the same movie, episode, comic or book in several files.
 //! - [`similar`]: finds pictures that look alike.
 //! - [`music`]: tags of audio files and the names built from them.
 //! - [`musicbrainz`]: albums from MusicBrainz (ranking, matching tracks).
@@ -56,6 +57,7 @@ pub mod similar;
 pub mod subtitles;
 pub mod subtext;
 pub mod mkvsubs;
+pub mod repeated;
 pub mod tagwrite;
 pub mod text;
 pub mod tmdb;
