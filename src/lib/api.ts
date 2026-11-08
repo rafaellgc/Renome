@@ -153,6 +153,13 @@ export const api = {
       | { path: string; book: BookMatch; language: string }
     )[],
   ) => invoke<{ written: number; drawn: number; errors: [string, string][] }>("write_inside", { historyId, items }),
+  writeVideoTags: (
+    key: string,
+    lang: string,
+    historyId: string | null,
+    items: { path: string; movie?: number; show?: number; season?: number; episodes?: number[] }[],
+    cover: boolean,
+  ) => invoke<{ written: number; drawn: number; errors: [string, string][] }>("write_video_tags", { key, lang, historyId, items, cover }),
   subtitleTools: (
     historyId: string | null,
     items: { path: string; fix: boolean; extract: boolean }[],

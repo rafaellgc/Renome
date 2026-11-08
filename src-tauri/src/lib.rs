@@ -1793,6 +1793,103 @@ async fn write_inside(
     Ok(report)
 }
 
+/// Writes each renamed movie's or episode's details (title, date,
+/// description, genres, show, season, episode and, with `cover`, the
+/// poster) inside its video, MKV or MP4, keeping what changed in the
+/// rename's history entry (or one of its own) for undo.
+#[tauri::command]
+async fn write_video_tags(
+    app: AppHandle,
+    key: String,
+    lang: String,
+    history_id: Option<String>,
+    items: Vec<tmdb::VideoTagItem>,
+    cover: bool,
+) -> Result<TagReport, String> {
+    use renome_core::videotags;
+    let state = app.state::<AppState>();
+    let mut report = TagReport::default();
+    let name = |p: &Path| {
+        p.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    let items: Vec<tmdb::VideoTagItem> = items
+        .into_iter()
+        .filter(|i| {
+            let ok = videotags::writable(&i.path);
+            if !ok {
+                report.errors.push((name(&i.path), "videoUnsupported".into()));
+            }
+            ok
+        })
+        .collect();
+    if items.is_empty() {
+        return Ok(report);
+    }
+    let total = items.len();
+    let _ = app.emit("inside-progress", serde_json::json!({ "done": 0, "total": total }));
+    let client = tmdb::Client::new(&key, &lang);
+    let metas = tmdb::video_meta(&client, &items, cover).await;
+    let own_entry = history_id.is_none();
+    let id = match history_id {
+        Some(id) => id,
+        None => state.history.record_files(&[])?,
+    };
+    let store = state.history.files_dir(&id)?;
+    let mut note = state.history.tagging(&id)?;
+    let stop = stop_signal(&app);
+    let mut backups = Vec::new();
+    for (done, (item, meta)) in items.into_iter().zip(metas).enumerate() {
+        if stop() {
+            break;
+        }
+        let meta = match meta {
+            Ok(m) => m,
+            Err(e) => {
+                report.errors.push((name(&item.path), e));
+                continue;
+            }
+        };
+        note.start(&item.path);
+        let (path, store) = (item.path.clone(), store.clone());
+        let r = tauri::async_runtime::spawn_blocking(move || videotags::write(&path, &meta, &store))
+            .await
+            .map_err(|e| e.to_string())
+            .and_then(|r| r);
+        match r {
+            Ok(Some(edit)) => {
+                let b = renome_core::tagwrite::Backup {
+                    video: Some(edit),
+                    ..renome_core::tagwrite::Backup::empty(&item.path)
+                };
+                note.done(&b);
+                backups.push(b);
+            }
+            Ok(None) => {}
+            Err(e) => report.errors.push((name(&item.path), e)),
+        }
+        let _ = app.emit(
+            "inside-progress",
+            serde_json::json!({ "done": done + 1, "total": total }),
+        );
+    }
+    report.written = backups.len();
+    let saved = if backups.is_empty() {
+        if own_entry {
+            let _ = state.history.delete(&id);
+        }
+        Ok(())
+    } else {
+        state.history.add_tags(&id, backups)
+    };
+    match saved {
+        Ok(()) => note.finish(),
+        Err(e) => report.errors.push((String::new(), format!("err.history: {e}"))),
+    }
+    Ok(report)
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SubJob {
@@ -2667,6 +2764,7 @@ pub fn run() {
             subs_search,
             write_subtitles,
             subtitle_tools,
+            write_video_tags,
             os_check,
             subdl_check,
             mb_lookup,

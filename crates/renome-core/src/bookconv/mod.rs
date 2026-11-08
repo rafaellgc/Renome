@@ -625,6 +625,7 @@ pub fn finish(path: &Path, left: &Path, tmp: &Path, original: Original) -> Resul
             raw: Vec::new(),
             kept_text: Vec::new(),
             saved: None,
+            video: None,
             entry: None,
             converted: Some(Converted {
                 original: kept,

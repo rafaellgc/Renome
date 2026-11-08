@@ -2570,6 +2570,7 @@ pub fn convert_with(
             raw: Vec::new(),
             kept_text: Vec::new(),
             saved: None,
+            video: None,
             entry: None,
             converted: Some(Converted {
                 original: kept,

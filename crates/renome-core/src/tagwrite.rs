@@ -480,6 +480,10 @@ pub struct Backup {
     /// empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub saved: Option<String>,
+    /// A video's details written inside it (see [`crate::videotags`]);
+    /// the rest is then empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video: Option<crate::videotags::VideoEdit>,
 }
 
 impl Backup {
@@ -496,6 +500,7 @@ impl Backup {
             entry: None,
             converted: None,
             saved: None,
+            video: None,
         }
     }
 }
@@ -929,6 +934,7 @@ pub fn write(
         raw: Vec::new(),
         kept_text: Vec::new(),
         saved: None,
+        video: None,
         entry: None,
         converted: None,
     };
@@ -1031,6 +1037,9 @@ pub fn restore(b: &Backup, store: &Path) -> Result<(), String> {
     }
     if let Some(saved) = &b.saved {
         return crate::subtext::restore(&b.path, saved, store);
+    }
+    if let Some(v) = &b.video {
+        return crate::videotags::restore(&b.path, v, store);
     }
     if let Some(e) = &b.entry {
         return crate::inside::restore(&b.path, e, store);

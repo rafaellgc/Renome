@@ -2484,6 +2484,7 @@ mod tests {
                 missing: false,
                 subtitles: false,
                 sub_langs: String::new(),
+                video_tags: false,
             },
         }];
         // With something else in the folder: not the movie's own.
@@ -2543,6 +2544,7 @@ mod tests {
                 missing: false,
                 subtitles: false,
                 sub_langs: String::new(),
+                video_tags: false,
             },
         }];
         let old = "Alice no Pais das Maravilhas (2010) [tmdbid-12155]";
@@ -2594,6 +2596,7 @@ mod tests {
                 missing: false,
                 subtitles: false,
                 sub_langs: String::new(),
+                video_tags: false,
             },
         }];
         fs::write(d.path().join("notes.ods"), "n").unwrap();
@@ -2634,6 +2637,7 @@ mod tests {
                 missing: false,
                 subtitles: false,
                 sub_langs: String::new(),
+                video_tags: false,
             },
         }];
         // Two movie folders, each added on its own, with what a media
@@ -2750,6 +2754,7 @@ mod tests {
                     missing: false,
                     subtitles: false,
                     sub_langs: String::new(),
+                    video_tags: false,
                 },
             },
         ];
@@ -2877,6 +2882,7 @@ mod tests {
                 missing: true,
                 subtitles: false,
                 sub_langs: String::new(),
+                video_tags: false,
             },
         }];
         let files = entries(
@@ -2929,6 +2935,7 @@ mod tests {
                 missing: true,
                 subtitles: false,
                 sub_langs: String::new(),
+                video_tags: false,
             },
         }];
         let files = entries(&old, &["show.s01e02.mkv"]);
@@ -2960,6 +2967,7 @@ mod tests {
                 missing: true,
                 subtitles: false,
                 sub_langs: String::new(),
+                video_tags: false,
             },
         }]
     }
@@ -3260,6 +3268,7 @@ mod tests {
                 missing: false,
                 subtitles: false,
                 sub_langs: String::new(),
+                video_tags: false,
             },
         }];
         let old = d.path().join("Filme.2001.1080p.BluRay");

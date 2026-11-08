@@ -34,11 +34,14 @@ export type Rule =
       type: "movie"; template: string; colon: string; sidecar: boolean; fanart: boolean; folder: boolean; missing: boolean;
       /** Download subtitles in `subLangs` (`pt-BR, en`) with the rename. */
       subtitles?: boolean; subLangs?: string;
+      /** Title, date and cover written inside MKV and MP4 videos. */
+      videoTags?: boolean;
     }
   | {
       type: "series"; template: string; colon: string; show: string;
       folders: boolean; folderTemplate: string; sidecar: boolean; fanart: boolean; missing: boolean;
       subtitles?: boolean; subLangs?: string;
+      videoTags?: boolean;
       /** Where shows are looked up (TMDB when not set). */
       source?: "tmdb" | "anilist";
     }

@@ -1004,3 +1004,147 @@ pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
         })?;
     f.write_all(bytes).map_err(|e| e.to_string())
 }
+
+/// A renamed video whose details go inside it: a movie, or a show's
+/// episode(s).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoTagItem {
+    pub path: PathBuf,
+    #[serde(default)]
+    pub movie: Option<u64>,
+    #[serde(default)]
+    pub show: Option<u64>,
+    #[serde(default)]
+    pub season: u16,
+    #[serde(default)]
+    pub episodes: Vec<u16>,
+}
+
+impl Client {
+    /// A poster at a size fit to go inside a video (780 px wide).
+    async fn poster(&self, path: &str) -> Result<Vec<u8>, String> {
+        let base = image_base();
+        let base = base.strip_suffix("/original").map_or(base.clone(), |b| format!("{b}/w780"));
+        let res = self
+            .http
+            .get(format!("{base}{path}"))
+            .send()
+            .await
+            .and_then(|r| r.error_for_status())
+            .map_err(net_error)?;
+        Ok(res.bytes().await.map_err(net_error)?.to_vec())
+    }
+}
+
+/// The details of each video, from TMDB (each movie, show and season
+/// fetched once; the poster too, when `cover`).
+pub async fn video_meta(
+    client: &Client,
+    items: &[VideoTagItem],
+    cover: bool,
+) -> Vec<Result<renome_core::videotags::VideoMeta, String>> {
+    use renome_core::videotags::VideoMeta;
+    let mut movies: Vec<u64> = items.iter().filter_map(|i| i.movie).collect();
+    movies.sort_unstable();
+    movies.dedup();
+    let mut shows: Vec<u64> = items.iter().filter_map(|i| i.show).collect();
+    shows.sort_unstable();
+    shows.dedup();
+    let mut seasons: Vec<(u64, u16)> = items
+        .iter()
+        .filter_map(|i| i.show.map(|s| (s, i.season)))
+        .collect();
+    seasons.sort_unstable();
+    seasons.dedup();
+    let movies: HashMap<u64, Result<Details, String>> = stream::iter(movies)
+        .map(|id| async move { (id, client.details(id).await) })
+        .buffer_unordered(4)
+        .collect()
+        .await;
+    let shows: HashMap<u64, Result<ShowDetails, String>> = stream::iter(shows)
+        .map(|id| async move { (id, client.show_details(id).await) })
+        .buffer_unordered(4)
+        .collect()
+        .await;
+    let seasons: HashMap<(u64, u16), Result<SeasonFull, String>> = stream::iter(seasons)
+        .map(|(id, n)| async move { ((id, n), client.season(id, n).await) })
+        .buffer_unordered(4)
+        .collect()
+        .await;
+    // Posters: a movie's, a season's (else the show's).
+    let mut posters: Vec<String> = Vec::new();
+    if cover {
+        for d in movies.values().flatten() {
+            posters.extend(d.poster_path.clone());
+        }
+        for ((id, _), s) in &seasons {
+            let p = s
+                .as_ref()
+                .ok()
+                .and_then(|s| s.poster_path.clone())
+                .or_else(|| shows.get(id).and_then(|d| d.as_ref().ok()?.poster_path.clone()));
+            posters.extend(p);
+        }
+        posters.sort();
+        posters.dedup();
+    }
+    let images: HashMap<String, Vec<u8>> = stream::iter(posters)
+        .map(|p| async move {
+            let b = client.poster(&p).await;
+            (p, b)
+        })
+        .buffer_unordered(4)
+        .filter_map(|(p, b)| async move { b.ok().map(|b| (p, b)) })
+        .collect()
+        .await;
+    items
+        .iter()
+        .map(|item| {
+            if let Some(id) = item.movie {
+                let d = movies.get(&id).ok_or("tmdbNotFound")?.as_ref().map_err(Clone::clone)?;
+                return Ok(VideoMeta {
+                    title: d.title.clone(),
+                    date: d.release_date.clone().unwrap_or_default(),
+                    description: d.overview.clone().unwrap_or_default(),
+                    genres: d.genres.iter().map(|g| g.name.clone()).collect(),
+                    imdb: d.imdb_id.clone().unwrap_or_default(),
+                    tmdb: format!("movie/{}", d.id),
+                    cover: d.poster_path.as_ref().and_then(|p| images.get(p).cloned()),
+                    ..Default::default()
+                });
+            }
+            let id = item.show.ok_or("tmdbNotFound")?;
+            let show = shows.get(&id).ok_or("tmdbNotFound")?.as_ref().map_err(Clone::clone)?;
+            let season = seasons
+                .get(&(id, item.season))
+                .ok_or("tmdbNotFound")?
+                .as_ref()
+                .map_err(Clone::clone)?;
+            let eps: Vec<&EpisodeDetails> = item
+                .episodes
+                .iter()
+                .filter_map(|&n| season.episodes.iter().find(|e| e.episode_number == n))
+                .collect();
+            let first = eps.first().ok_or("tmdbNotFound")?;
+            let title = eps
+                .iter()
+                .filter_map(|e| e.name.clone())
+                .collect::<Vec<_>>()
+                .join(" / ");
+            let poster = season.poster_path.as_ref().or(show.poster_path.as_ref());
+            Ok(VideoMeta {
+                title,
+                date: first.air_date.clone().unwrap_or_default(),
+                description: first.overview.clone().unwrap_or_default(),
+                genres: show.genres.iter().map(|g| g.name.clone()).collect(),
+                show: show.name.clone(),
+                season: Some(u32::from(item.season)),
+                episode: Some(u32::from(first.episode_number)),
+                imdb: show.external_ids.imdb_id.clone().unwrap_or_default(),
+                tmdb: format!("tv/{}", show.id),
+                cover: poster.and_then(|p| images.get(p).cloned()),
+            })
+        })
+        .collect()
+}

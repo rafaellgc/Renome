@@ -111,6 +111,8 @@ export const isShot = (name: string) => SHOT.has(splitExt(name)[1].toLowerCase()
 /** Files the subtitle rule works on: subtitles, and MKV videos (their tracks). */
 export const isSubtitleFile = (name: string) => /\.(srt|ass|ssa|vtt|sub|smi|sami)$/i.test(name);
 export const isMatroska = (name: string) => /\.(mkv|webm|mk3d)$/i.test(name);
+/** Videos whose details can be written inside (MKV and MP4). */
+export const isTaggableVideo = (name: string) => /\.(mkv|webm|mk3d|mp4|m4v|mov)$/i.test(name);
 
 /** Frame rates the subtitle rule retimes between: subtitle's → video's. */
 export const FPS_PAIRS: [number, number][] = [

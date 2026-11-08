@@ -1566,6 +1566,59 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   (choose, tip), none (none, tip). Identical copies and similar pictures
   work as for any files.
 
+### 2.5d Details inside videos (`videotags`)
+
+- Movie and TV show rules (TMDB source) `videoTags`: after the rename
+  (renamed matched videos, and those already named right, counted on the
+  button), the app's `write_video_tags` fetches each movie's details, each
+  show's details and season once (and the movie's / season's, else
+  show's, poster at `w780`) and writes, into MKV/WebM and MP4/M4V/MOV
+  (told by their first bytes; anything else is reported
+  `videoUnsupported`): title, date, synopsis, genres, IMDb and TMDB ids;
+  for episodes also show, season, episode (several episodes: titles joined
+  by ` / `, the first's number, date and synopsis).
+- Never a rewrite. The plan is a set of same-length patches inside the
+  file plus a new tail from a cut point. Everything changed (patched
+  ranges, the part cut) is saved in one history file before any write;
+  the tail is written and synced first, then the patches, then synced;
+  a failure puts back what was written. `Backup.video` (`VideoEdit`:
+  old/new length, patches with the hash of the written bytes, cut) lets
+  undo restore them and cut back to the old length, only when the file
+  still has the new length and the written bytes (`videoChanged`
+  otherwise).
+- Matroska: needs a known segment size ending at the end of the file and
+  known element sizes; new Tags (Tags of tracks/chapters/attachments kept
+  as they are; whole-file Tags kept without the simple tags written anew:
+  movie level 50 TITLE, DATE_RELEASED, SYNOPSIS, GENRE, IMDB, TMDB;
+  episode level 70 TITLE (show), GENRE, IMDB, TMDB, 60 PART_NUMBER
+  (season), 50 TITLE, PART_NUMBER, DATE_RELEASED, SYNOPSIS) and, with a
+  cover, new Attachments (others kept, copied up to 64 MB; old `cover.*`,
+  `small_cover.*`, `cover_land.*` replaced by `cover.jpg`/`.png`) are
+  appended; the old elements become Void by rewriting only their header;
+  SeekHead entries of moved elements updated in each SeekHead holding
+  them, missing ones added to the first; a SeekHead is rebuilt in its
+  place plus the Voids right after it (padded with a Void; a 1-byte gap
+  absorbed by a longer size field), else `videoNoRoom`; the Info title
+  (`Show - S01E02 - Title` for episodes) is set when the new Info fits
+  there, else an old title is removed (players then show the tags'); the
+  segment size is rewritten in its own byte length. CRC-32 elements of
+  rebuilt elements are dropped.
+- MP4: the single `moov` (not fragmented: no `mvex`/`moof`; ≤ 256 MB) is
+  rebuilt with `udta/meta/ilst` items `©nam`, `©day`, `desc` (≤255
+  characters), `ldes`, `©gen`, `stik` (9 movie, 10 TV), `tvsh`, `tven`,
+  `tvsn`, `tves`, `covr` (13 JPEG / 14 PNG); other items kept; ISO
+  (version/flags) or QuickTime `meta` kept as found, created ISO with an
+  `mdir` handler. Placed in the old `moov` plus the `free`/`skip` boxes
+  after it when it fits exactly or leaves ≥ 8 bytes (a `free` pads);
+  rewritten from its start when it is the last box; else appended and
+  the old one's kind patched to `free` (a last box sized "to the end"
+  gets its 32-bit size, else `videoNoRoom`). Media data never moves, so
+  chunk offsets stay right.
+- Checked on copies of real files (MKV from mkvmerge and from FFmpeg,
+  1.4 GB; MP4 from FFmpeg): FFprobe reads every tag and the cover,
+  FFmpeg decodes without errors, undo gives byte-identical files;
+  partial downloads (zero-filled) are refused.
+
 ### 2.5c Subtitles (`subtext`, `mkvsubs`, offline)
 
 - Rule `subtitle` { toSrt, utf8 (default on), ads, hearing, shiftMs,

@@ -31,7 +31,7 @@
   import ShowPicker from "$lib/ShowPicker.svelte";
   import SubtitleReview from "$lib/SubtitleReview.svelte";
   import { LOCALES, MOD, t, tError, type Key } from "$lib/i18n";
-  import { RULE_TYPES, isLookup, oneLookup, isAudio, isBook, isComic, isScreen, isVideo, newRule, newStep } from "$lib/rules";
+  import { RULE_TYPES, isLookup, oneLookup, isAudio, isBook, isComic, isScreen, isTaggableVideo, isVideo, newRule, newStep } from "$lib/rules";
   import { loadSecrets, loadSettings, saveSecrets, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
     ApplyReport, Copies, MovieStatus, HistoryEntry, OpError, Preview, PreviewItem, Rule, RuleType, Step, View, ViewSort,
@@ -127,6 +127,30 @@
   /** Subtitles being fixed or taken out of videos (`part`: how far into
    *  the video being read). */
   let subToolsProgress = $state<{ done: number; total: number; part: number } | null>(null);
+  /** The movie or TV show rule writes details inside videos (TMDB only). */
+  const videoTagRule = $derived.by(() => {
+    const m = movies.rule?.rule;
+    if (m?.type === "movie" && m.videoTags) return "movie" as const;
+    const s = tv.rule?.rule;
+    if (s?.type === "series" && s.videoTags && s.source !== "anilist") return "series" as const;
+    return null;
+  });
+  /** What goes inside a video once renamed: `key` is its path before. */
+  function videoTagItem(key: string, path: string) {
+    if (videoTagRule === "movie") {
+      const c = movies.state[key]?.choice;
+      return c && isTaggableVideo(path) ? { path, movie: c.id } : null;
+    }
+    if (videoTagRule === "series") {
+      const m = tv.matches[key];
+      return m && m.id > 0 && isTaggableVideo(path) ? { path, show: m.id, season: m.season, episodes: m.episodes } : null;
+    }
+    return null;
+  }
+  /** Matched videos that keep their names but get their details inside. */
+  const videoTagOnly = $derived(
+    videoTagRule ? preview.items.filter((i) => i.status === "unchanged" && !i.isDir && videoTagItem(i.path, i.path)) : [],
+  );
   /** Subtitles and videos the subtitle rule works on that keep their names. */
   const subToolsOnly = $derived(
     preview.items.filter((i) => i.status === "unchanged" && ((i.subFix && !i.subFix.noFps) || i.subExtract)),
@@ -581,6 +605,7 @@
     const strule = steps.find((s) => s.enabled && s.rule.type === "subtitle")?.rule;
     // Taken now: the preview changes once files are renamed.
     const toolsOnly = subToolsOnly;
+    const tagOnly = videoTagOnly;
     const subJobs = new Map(
       preview.items
         .filter((i) => i.status !== "conflict" && ((i.subFix && !i.subFix.noFps) || i.subExtract))
@@ -591,7 +616,7 @@
       ...books.epubOnly.map((i) => books.insideItem(i.path, i.path)),
       ...books.convertOnly.map((i) => books.convertItem(i.path, i.path, i.bookTo!)),
     ];
-    if (!preview.changed && !meta.length && !tvMeta.length && !bookMeta.length && !music.coverOnly && !listOnly.length && !retagOnly.length && !insideOnly.length && !subsUnchanged.length && !toolsOnly.length) return;
+    if (!preview.changed && !meta.length && !tvMeta.length && !bookMeta.length && !music.coverOnly && !listOnly.length && !retagOnly.length && !insideOnly.length && !subsUnchanged.length && !toolsOnly.length && !tagOnly.length) return;
     // Files left behind in a show's old folder are always told first.
     const left = preview.leftFolders.map((f) => t("confirmLeftover", { n: f.files, from: basename(f.from), to: basename(f.to) }));
     if (settings.confirmApply || left.length) {
@@ -609,6 +634,7 @@
         retagOnly.length ? t("confirmTags", { n: retagOnly.length }) : "",
         insideOnly.length ? t("confirmInside", { n: insideOnly.length }) : "",
         toolsOnly.length ? t("confirmSubTools", { n: toolsOnly.length }) : "",
+        tagOnly.length ? t("confirmInside", { n: tagOnly.length }) : "",
         subsPlanned ? t("confirmSubs", { n: subsPlanned }) : "",
         preview.conflicts ? t("confirmConflicts", { n: preview.conflicts }) : "",
       ].filter(Boolean);
@@ -768,6 +794,30 @@
           saved += await writeMeta(() =>
             api.writeTvSidecars(settings.tmdbKey, tmdbLang(), r.historyId, items, srule.fanart, srule.folders),
           );
+        }
+      }
+      if (recorded && videoTagRule) {
+        const items = [
+          ...r.done.map((op) => videoTagItem(op.from, op.to)),
+          ...tagOnly.map((i) => videoTagItem(i.path, i.path)),
+        ].filter((i) => i !== null);
+        if (items.length) {
+          insideProgress = { done: 0, total: items.length };
+          try {
+            const res = await api.writeVideoTags(settings.tmdbKey, tmdbLang(), r.historyId, items, true);
+            inside += res.written;
+            if (res.errors.length) {
+              await notify({
+                title: t("insideTitle"),
+                text: t("insideN", { n: res.written }),
+                items: res.errors.map(([file, why]) => (file ? `${file} — ${tError(why)}` : tError(why))),
+              });
+            }
+          } catch (e) {
+            await notify({ title: t("insideTitle"), text: tError(e) });
+          } finally {
+            insideProgress = null;
+          }
         }
       }
       let subTools = { written: 0, created: 0 };
@@ -1383,8 +1433,8 @@
           <button onclick={() => pickSendTo(true)}>{t("sendCopyTo")}</button>
         </div>
       {/if}
-      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !movies.metaOnly.length && !tv.metaOnly.length && !books.metaOnly.length && !music.coverOnly && !music.playlistOnly.length && !music.tagsOnly.length && !comics.infoOnly.length && !books.epubOnly.length && !books.convertOnly.length && !subs.only.length && !subToolsOnly.length) || busy || !!working} onclick={applyAll}>
-        {t(sendTo ? (sendTo.copy ? "copyAction" : "moveAction") : "rename")} {preview.changed + movies.metaOnly.length + tv.metaOnly.length + books.metaOnly.length + music.coverOnly + music.playlistOnly.length + music.tagsOnly.length + comics.infoOnly.length + books.epubOnly.length + books.convertOnly.length + subs.only.length + subToolsOnly.length || ""}
+      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !movies.metaOnly.length && !tv.metaOnly.length && !books.metaOnly.length && !music.coverOnly && !music.playlistOnly.length && !music.tagsOnly.length && !comics.infoOnly.length && !books.epubOnly.length && !books.convertOnly.length && !subs.only.length && !subToolsOnly.length && !videoTagOnly.length) || busy || !!working} onclick={applyAll}>
+        {t(sendTo ? (sendTo.copy ? "copyAction" : "moveAction") : "rename")} {preview.changed + movies.metaOnly.length + tv.metaOnly.length + books.metaOnly.length + music.coverOnly + music.playlistOnly.length + music.tagsOnly.length + comics.infoOnly.length + books.epubOnly.length + books.convertOnly.length + subs.only.length + subToolsOnly.length + videoTagOnly.length || ""}
       </button>
     </div>
   </header>

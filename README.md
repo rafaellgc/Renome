@@ -69,6 +69,9 @@ A built-in manual (F1) explains every rule with examples.
   to each movie for Jellyfin, Kodi and Emby, and downloads subtitles in
   the languages you choose from OpenSubtitles.com and SubDL (your own
   free keys), preferring those made for that very file.
+- Movies and TV shows: can write title, date, synopsis, genres, show,
+  season, episode and poster inside MKV and MP4 videos, in seconds and
+  without rewriting the video; undo restores the file byte for byte.
 - TV shows: names episodes from TMDB (`Show (Year) - S01E02 - Title`),
   reading the number in many forms (`S01E02`, `1x02`, `T1 E2`,
   `Season 1 Episode 2`, absolute numbering) and checking it against the

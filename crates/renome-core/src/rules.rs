@@ -261,6 +261,10 @@ pub enum Rule {
         /// Their languages, in order: `pt-BR, en`.
         #[serde(default)]
         sub_langs: String,
+        /// Title, date and cover written inside MKV and MP4 videos (by
+        /// the app).
+        #[serde(default)]
+        video_tags: bool,
     },
     /// Names each file after the episode chosen for it on TMDB (files
     /// without one are left alone). The search happens outside the rules.
@@ -295,6 +299,10 @@ pub enum Rule {
         /// Their languages, in order: `pt-BR, en`.
         #[serde(default)]
         sub_langs: String,
+        /// Title, date and cover written inside MKV and MP4 videos (by
+        /// the app).
+        #[serde(default)]
+        video_tags: bool,
     },
     /// Names songs after their tags; files without them are left alone.
     Music {

@@ -19,6 +19,7 @@
 //! - [`tmdb`]: movie title guessing, ranking and `.nfo` files for TMDB.
 //! - [`tv`]: season and episode numbers, and matching files to a show.
 //! - [`video`]: a video's picture size and codec, from its headers.
+//! - [`videotags`]: title, date, show and cover written inside MKV and MP4.
 //! - [`inside`]: details written inside CBZ and EPUB files.
 //! - [`convert`]: comics converted to CBZ (from RAR, 7z, tar).
 //! - [`subtext`]: text subtitles read, cleaned, retimed, made SubRip.
@@ -58,6 +59,7 @@ pub mod subtitles;
 pub mod subtext;
 pub mod mkvsubs;
 pub mod repeated;
+pub mod videotags;
 pub mod tagwrite;
 pub mod text;
 pub mod tmdb;
