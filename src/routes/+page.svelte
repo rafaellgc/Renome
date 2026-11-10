@@ -2,6 +2,7 @@
   import { onMount, tick } from "svelte";
   import { listen } from "@tauri-apps/api/event";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open, save } from "@tauri-apps/plugin-dialog";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { api, type WorkGroup } from "$lib/api";
@@ -32,7 +33,7 @@
   import SubtitleReview from "$lib/SubtitleReview.svelte";
   import { LOCALES, MOD, t, tError, type Key } from "$lib/i18n";
   import { RULE_TYPES, isLookup, oneLookup, isAudio, isBook, isComic, isScreen, isTaggableVideo, isVideo, newRule, newStep } from "$lib/rules";
-  import { loadSecrets, loadSettings, saveSecrets, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
+  import { SECRET_FIELDS, loadSecrets, loadSettings, saveSecrets, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
     ApplyReport, Copies, MovieStatus, HistoryEntry, OpError, Preview, PreviewItem, Rule, RuleType, Step, View, ViewSort,
   } from "$lib/types";
@@ -414,11 +415,25 @@
   // The keys and the GCD account go to the system's password store, apart.
   let secretsTimer: ReturnType<typeof setTimeout> | undefined;
   $effect(() => {
-    const deps = [settings.tmdbKey, settings.comicVineKey, settings.discogsToken, settings.metronToken, settings.googleBooksKey, settings.gcdEmail, settings.gcdPassword];
+    // Every secret field, so none is left out when one is added.
+    const deps = SECRET_FIELDS.map((k) => settings[k]);
     if (!ready || !deps) return;
     clearTimeout(secretsTimer);
     secretsTimer = setTimeout(() => saveSecrets().catch(() => {}), 600);
   });
+  /** Saves the secrets now, without waiting for the pause after typing
+   *  (the Options window closed, the program closing). */
+  function flushSecrets() {
+    clearTimeout(secretsTimer);
+    return saveSecrets().catch(() => {});
+  }
+  $effect(() => {
+    if (!showOptions) flushSecrets();
+  });
+  // Closing the program right after typing a key still keeps it.
+  getCurrentWindow()
+    .onCloseRequested(() => flushSecrets())
+    .catch(() => {});
 
   $effect(() => {
     document.documentElement.lang = LOCALES[settings.lang];
