@@ -63,6 +63,11 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.29.0" date="2026-11-10">
+      <description>
+        <p>Books convert between formats, and details are written into AZW3, MOBI and FB2. A new rule cleans, converts and retimes subtitles and takes them out of MKV videos. The same movie, episode, comic or book in several files is found, with the best one marked. Movie and episode details and the cover can be written inside MKV and MP4 videos. Comics become e-books for readers. OpenSubtitles and SubDL keys are kept again.</p>
+      </description>
+    </release>
     <release version="0.28.0" date="2026-11-07">
       <description>
         <p>Subtitles can be downloaded for movies and TV shows from OpenSubtitles and SubDL. A catalogue link or id can be pasted in any search. Song tags, book details, comic details and photo dates can be typed by hand. Undo shows its progress and can be stopped.</p>
