@@ -553,14 +553,18 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
         });
         open.push((depth, points.len() - 1));
     }
-    // Each entry runs to the next one not inside it, or to the text's end.
+    // Each entry runs to the nearest place, further on in the text, of an
+    // entry not deeper than it (in the text's order, not the contents'
+    // own: entries can point back), or to the text's end.
     let lengths: Vec<u32> = (0..points.len())
         .map(|i| {
             let p = &points[i];
-            let end = points[i + 1..]
+            let end = points
                 .iter()
-                .find(|q| q.depth <= p.depth && q.pos > p.pos)
-                .map_or(flow0 as u32, |q| q.pos);
+                .filter(|q| q.depth <= p.depth && q.pos > p.pos)
+                .map(|q| q.pos)
+                .min()
+                .unwrap_or(flow0 as u32);
             end.saturating_sub(p.pos)
         })
         .collect();
