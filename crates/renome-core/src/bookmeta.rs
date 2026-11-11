@@ -72,7 +72,7 @@ fn write_file(to: &Path, bytes: &[u8]) -> Result<(), String> {
 }
 
 /// Keeps `path`'s file in `store` (copied) and puts `tmp` in its place.
-fn replace_keeping(path: &Path, tmp: &Path, store: &Path) -> Result<Backup, String> {
+pub(crate) fn replace_keeping(path: &Path, tmp: &Path, store: &Path) -> Result<Backup, String> {
     let fail = |e: String| {
         let _ = fs::remove_file(tmp);
         e

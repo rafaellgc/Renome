@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AlbumLookup, BookTarget, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, EpisodeLookup, MbCandidate, SongMatch, HistoryEntry, ListedTrack, Lookup, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
+import type { AlbumLookup, BookTarget, ComicFormat, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, EpisodeLookup, MbCandidate, SongMatch, HistoryEntry, ListedTrack, Lookup, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
 
 type Overrides = Record<string, string>;
 
@@ -149,7 +149,7 @@ export const api = {
           manga?: boolean;
           convert?: "keep" | "delete";
           pdf?: { draw: boolean; size: number; info: boolean };
-          comicTo?: BookTarget;
+          comicTo?: ComicFormat;
           ebook?: { device: string; crop: boolean; split: boolean };
         }
       | { path: string; book?: BookMatch; language?: string; polish?: { epub3: boolean; shrink: boolean } }

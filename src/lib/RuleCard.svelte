@@ -2,9 +2,20 @@
   import { t, type Key } from "./i18n";
   import { comicPreset, comicPresetOf, defaultSubLangs, FPS_PAIRS, PHOTO_TEMPLATES, splitExt, splitParts, type ComicPreset } from "./rules";
   import { settings } from "./settings.svelte";
-  import type { ComicDevice, Step } from "./types";
-  /** The readers a comic e-book can be made for, in the menu's order. */
-  const DEVICES: ComicDevice[] = ["kindle-pw", "kindle", "kindle-scribe", "kindle-color", "kobo", "kobo-color", "tablet", "original"];
+  import type { ComicDevice, ComicSpread, Step } from "./types";
+  /** The readers a comic e-book can be made for, by maker, in the menu's
+   *  order. */
+  const DEVICES: [Key, ComicDevice[]][] = [
+    ["comicDevices_kindle", ["kindle-pw2024", "kindle-pw", "kindle", "kindle-oasis", "kindle-pw-old", "kindle-basic", "kindle-dx", "kindle-color", "kindle-scribe2025", "kindle-scribe", "kindle-scribe-color"]],
+    ["comicDevices_kobo", ["kobo", "kobo-clara-color", "kobo-libra", "kobo-color", "kobo-h2o", "kobo-sage", "kobo-elipsa", "kobo-nia"]],
+    ["comicDevices_remarkable", ["remarkable", "remarkable-pro", "remarkable-move"]],
+    ["comicDevices_other", ["tablet", "custom", "original"]],
+  ];
+  const SPREADS: ComicSpread[] = ["split", "rotate", "both", "keep"];
+  /** Colour ink screens (fine dots shimmer) and grey ones (16 greys). */
+  const COLOUR_INK = ["kindle-color", "kindle-scribe-color", "kobo-clara-color", "kobo-color", "remarkable-pro", "remarkable-move"];
+  const NO_GREY = ["original", "tablet", "custom", ...COLOUR_INK];
+  const NO_PNG = ["kindle-scribe", "kindle-scribe2025", "kindle-scribe-color", "kindle-color"];
   import { api } from "./api";
 
   /** Whether this system can print books to PDF (asked once). */
@@ -526,19 +537,62 @@
         <label>{t("comicEbook")}
           <select bind:value={r.ebook}>
             <option value="">{t("comicEbookNone")}</option>
-            <option value="epub">{t("comicEbookEpub")}</option>
             <option value="azw3">{t("comicEbookAzw3")}</option>
+            <option value="epub">{t("comicEbookEpub")}</option>
+            <option value="kepub">{t("comicEbookKepub")}</option>
+            <option value="cbz">{t("comicEbookCbz")}</option>
+            <option value="pdf">{t("comicEbookPdf")}</option>
           </select>
         </label>
         <p class="hint">{t("comicEbookHint")}</p>
         {#if r.ebook}
           <label class="sub">{t("comicDevice")}
             <select value={r.device ?? "kindle-pw"} onchange={(e) => (r.device = (e.currentTarget as HTMLSelectElement).value as ComicDevice)}>
-              {#each DEVICES as d (d)}<option value={d}>{t(`comicDevice_${d}`)}</option>{/each}
+              {#each DEVICES as [group, list] (group)}
+                <optgroup label={t(group)}>
+                  {#each list as d (d)}<option value={d}>{t(`comicDevice_${d}` as Key)}</option>{/each}
+                </optgroup>
+              {/each}
             </select>
           </label>
+          {#if r.device === "custom"}
+            <div class="sub size">
+              <label>{t("comicWidth")} <input type="number" min="100" max="8000" value={r.width ?? 1264} onchange={(e) => (r.width = Number((e.currentTarget as HTMLInputElement).value) || 0)} /></label>
+              <label>{t("comicHeight")} <input type="number" min="100" max="8000" value={r.height ?? 1680} onchange={(e) => (r.height = Number((e.currentTarget as HTMLInputElement).value) || 0)} /></label>
+            </div>
+          {/if}
+          {@const dev = r.device ?? "kindle-pw"}
           <label class="check sub"><input type="checkbox" checked={r.crop ?? true} onchange={(e) => (r.crop = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicCrop")}<small>{t("comicCropHint")}</small></span></label>
-          <label class="check sub"><input type="checkbox" checked={r.split ?? true} onchange={(e) => (r.split = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicSplit")}<small>{t("comicSplitHint")}</small></span></label>
+          {#if r.crop ?? true}
+            <label class="check sub2"><input type="checkbox" checked={r.numbers ?? false} onchange={(e) => (r.numbers = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicNumbers")}<small>{t("comicNumbersHint")}</small></span></label>
+          {/if}
+          <label class="sub">{t("comicSpread")}
+            <select value={r.spread ?? (r.split === false ? "keep" : "split")} onchange={(e) => (r.spread = (e.currentTarget as HTMLSelectElement).value as ComicSpread)}>
+              {#each SPREADS as s (s)}<option value={s}>{t(`comicSpread_${s}` as Key)}</option>{/each}
+            </select>
+          </label>
+          <p class="hint sub">{t("comicSpreadHint")}</p>
+          <label class="check sub"><input type="checkbox" checked={r.contrast ?? true} onchange={(e) => (r.contrast = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicContrast")}<small>{t("comicContrastHint")}</small></span></label>
+          {#if dev !== "original"}
+            <label class="check sub"><input type="checkbox" checked={r.upscale ?? false} onchange={(e) => (r.upscale = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicUpscale")}<small>{t("comicUpscaleHint")}</small></span></label>
+          {/if}
+          {#if !NO_GREY.includes(dev) && !NO_PNG.includes(dev)}
+            <label class="check sub"><input type="checkbox" checked={r.greys16 ?? false} onchange={(e) => (r.greys16 = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicGreys16")}<small>{t("comicGreys16Hint")}</small></span></label>
+          {/if}
+          {#if COLOUR_INK.includes(dev)}
+            <label class="check sub"><input type="checkbox" checked={r.soften ?? false} onchange={(e) => (r.soften = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicSoften")}<small>{t("comicSoftenHint")}</small></span></label>
+          {/if}
+          <label class="check sub"><input type="checkbox" checked={r.webtoon ?? false} onchange={(e) => (r.webtoon = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicWebtoon")}<small>{t("comicWebtoonHint")}</small></span></label>
+          <label class="check sub"><input type="checkbox" checked={r.join ?? false} onchange={(e) => (r.join = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicJoin")}<small>{t("comicJoinHint")}</small></span></label>
+          <label class="sub">{t("comicMaxMb")}
+            <select value={r.maxMb ?? 0} onchange={(e) => (r.maxMb = Number((e.currentTarget as HTMLSelectElement).value))}>
+              <option value={0}>{t("comicMaxMbNone")}</option>
+              <option value={50}>{t("comicMaxMb50")}</option>
+              <option value={200}>{t("comicMaxMb200")}</option>
+              <option value={400}>400 MB</option>
+            </select>
+          </label>
+          {#if r.maxMb}<p class="hint sub">{t("comicMaxMbHint")}</p>{/if}
           {#if !r.convert}
             <label class="sub">{t("comicOriginal")}
               <select bind:value={r.original}>
@@ -706,6 +760,11 @@
   label.check span { display: flex; flex-direction: column; }
   label.check small { color: var(--muted); font-size: 11px; }
   label.sub { margin-left: 22px; }
+  label.sub2 { margin-left: 44px; }
+  .hint.sub { margin: -2px 0 0 22px; }
+  .size { display: flex; gap: 8px; margin-left: 22px; }
+  .size label { flex: 1; }
+  .size input { width: 100%; }
   label.shift { flex-direction: row; align-items: center; gap: 8px; }
   label.shift input { width: 70px; }
   .movie-actions { display: flex; gap: 8px; flex-wrap: wrap; }

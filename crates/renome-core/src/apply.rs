@@ -269,7 +269,7 @@ fn flush(paths: &[&Path]) -> std::io::Result<()> {
 /// Linux, `renamex_np` on macOS, `MoveFileExW` on Windows. Where the file
 /// system cannot do that (or a Windows path is too long for it), it checks
 /// first.
-fn rename_new(from: &Path, to: &Path) -> Result<(), (ErrorKind, String)> {
+pub(crate) fn rename_new(from: &Path, to: &Path) -> Result<(), (ErrorKind, String)> {
     #[cfg(target_os = "linux")]
     {
         use std::ffi::CString;

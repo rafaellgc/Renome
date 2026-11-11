@@ -1457,9 +1457,143 @@ struct InsideJob {
     /// when given), its original kept beside or sent to the trash
     /// (`convert`).
     #[serde(default)]
-    comic_to: Option<renome_core::bookconv::Target>,
+    comic_to: Option<renome_core::comicbook::Format>,
     #[serde(default)]
     ebook: renome_core::comicbook::EbookOptions,
+}
+
+/// The comics to join into volumes: those made e-books with "join", of
+/// one series (and volume) in one folder, two or more of them; the rest
+/// go on alone.
+fn volume_groups(items: Vec<InsideJob>) -> (Vec<InsideJob>, Vec<Vec<InsideJob>>) {
+    let mut alone = Vec::new();
+    let mut groups: Vec<((PathBuf, String, String), Vec<InsideJob>)> = Vec::new();
+    for mut j in items {
+        if j.comic_to.is_some() && j.ebook.join {
+            // Not looked up: what its name (and its ComicInfo.xml) says.
+            if j.comic.is_none() {
+                j.comic = renome_core::comics::from_path(&j.path, None, false);
+            }
+            let values = j
+                .comic
+                .as_ref()
+                .map(|c| renome_core::inside::comic_values(c, &j.web, j.manga))
+                .unwrap_or_default();
+            let get = |k: &str| {
+                values
+                    .iter()
+                    .find(|(n, _)| *n == k)
+                    .map(|(_, v)| v.clone())
+                    .unwrap_or_default()
+            };
+            let series = get("Series").to_lowercase();
+            if !series.is_empty() {
+                let key = (
+                    j.path.parent().map(Path::to_path_buf).unwrap_or_default(),
+                    series,
+                    get("Volume"),
+                );
+                match groups.iter_mut().find(|g| g.0 == key) {
+                    Some(g) => g.1.push(j),
+                    None => groups.push((key, vec![j])),
+                }
+                continue;
+            }
+        }
+        alone.push(j);
+    }
+    let mut volumes = Vec::new();
+    for (_, g) in groups {
+        if g.len() < 2 {
+            alone.extend(g);
+        } else {
+            volumes.push(g);
+        }
+    }
+    (alone, volumes)
+}
+
+/// Joins one group of comics into a volume named `Series #1-5`: each
+/// comic first takes back its own extension (renamed by the template, in
+/// its own format, as the history then says), then the volume is made
+/// beside them, a new file (with its parts, when too large) that undo
+/// deletes. Errors: the file and why.
+async fn join_volume(app: &AppHandle, id: &str, group: Vec<InsideJob>) -> Result<Vec<PathBuf>, (String, String)> {
+    use renome_core::{comicbook, convert};
+    let state = app.state::<AppState>();
+    let first = &group[0];
+    let (to, o, manga, pdf) = (
+        first.comic_to.unwrap_or(comicbook::Format::Epub),
+        first.ebook,
+        first.manga,
+        first.pdf,
+    );
+    let dir = first.path.parent().map(Path::to_path_buf).unwrap_or_default();
+    let mut issues: Vec<(String, comicbook::Issue)> = Vec::new();
+    for j in &group {
+        let fail = |e: &str| (j.path.display().to_string(), e.to_string());
+        let kind = convert::kind(&j.path).ok_or_else(|| fail("comicUnsupported"))?;
+        let back = comicbook::original_of(&j.path, kind);
+        if back == j.path || std::fs::symlink_metadata(&back).is_ok() {
+            return Err(fail("convertTaken"));
+        }
+        // The history's rename moves on to its own extension (renaming
+        // the file too), so undo finds it.
+        if state.history.retarget(id, &j.path, &back) != Ok(true) {
+            return Err(fail("convertTaken"));
+        }
+        let moved = renome_core::apply::ApplyReport {
+            done: vec![renome_core::apply::Operation {
+                from: j.path.clone(),
+                to: back.clone(),
+                copy: false,
+                within: None,
+            }],
+            ..Default::default()
+        };
+        refresh_renamed(&mut state.session.lock().unwrap().files, &moved);
+        let values = j
+            .comic
+            .as_ref()
+            .map(|c| renome_core::inside::comic_values(c, &j.web, j.manga))
+            .unwrap_or_default();
+        let number = values
+            .iter()
+            .find(|(k, _)| *k == "Number")
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default();
+        issues.push((number, comicbook::Issue { path: back, values }));
+    }
+    // In order of their numbers (`1`, `2`, `10`, `10.5`), else of names.
+    issues.sort_by(|a, b| match (a.0.parse::<f64>(), b.0.parse::<f64>()) {
+        (Ok(x), Ok(y)) => x.total_cmp(&y),
+        _ => a.1.path.cmp(&b.1.path),
+    });
+    let series = issues[0]
+        .1
+        .values
+        .iter()
+        .find(|(k, _)| *k == "Series")
+        .map(|(_, v)| v.clone())
+        .unwrap_or_default();
+    let (lo, hi) = (&issues[0].0, &issues[issues.len() - 1].0);
+    let title = if lo.is_empty() || hi.is_empty() {
+        series.clone()
+    } else {
+        format!("{series} #{lo}-{hi}")
+    };
+    let out = dir.join(format!(
+        "{}.{}",
+        renome_core::tmdb::safe_title(&title, " - "),
+        to.ext()
+    ));
+    let issues: Vec<comicbook::Issue> = issues.into_iter().map(|(_, i)| i).collect();
+    let shown = out.display().to_string();
+    tauri::async_runtime::spawn_blocking(move || comicbook::join(&issues, to, o, manga, pdf, &out, &title))
+        .await
+        .map_err(|e| (shown.clone(), e.to_string()))?
+        .map(|j| j.files)
+        .map_err(|e| (shown, e))
 }
 
 /// Makes the book of `job` (renamed `.pdf`) into a PDF: its page is
@@ -1674,15 +1808,35 @@ async fn write_inside(
     };
     let store = state.history.files_dir(&id)?;
     let mut note = state.history.tagging(&id)?;
-    let total = items.len();
+    let (items, volumes) = volume_groups(items);
+    let total = items.len() + volumes.len();
     let _ = app.emit(
         "inside-progress",
         serde_json::json!({ "done": 0, "total": total }),
     );
+    // Files made besides the renamed ones (a book's other parts, joined
+    // volumes): undo deletes them.
+    let made = std::sync::Arc::new(std::sync::Mutex::new(Vec::<PathBuf>::new()));
+    for (n, group) in volumes.into_iter().enumerate() {
+        match join_volume(&app, &id, group).await {
+            Ok(files) => {
+                report.written += 1;
+                made.lock().unwrap().extend(files);
+            }
+            Err((file, e)) => report.errors.push((file, e)),
+        }
+        let _ = app.emit(
+            "inside-progress",
+            serde_json::json!({ "done": n + 1, "total": total }),
+        );
+    }
+    let joined = total - items.len();
     let mut backups = Vec::new();
     let mut written = Vec::new();
     let pages = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     for (done, job) in items.into_iter().enumerate() {
+        let done = done + joined;
+        let made = made.clone();
         let (path, store) = (job.path.clone(), store.clone());
         let job_path = job.path.clone();
         let converting = job.convert.is_some() && job.book_to.is_none() && job.comic_to.is_none();
@@ -1711,8 +1865,12 @@ async fn write_inside(
                         job.manga,
                         original,
                         job.pdf,
+                        &store,
                     )
-                    .map(|d| (Some(d.backup), d.not_trashed));
+                    .map(|d| {
+                        made.lock().unwrap().extend(d.parts);
+                        (Some(d.backup), d.not_trashed)
+                    });
                 }
                 if let Some(p) = job.polish {
                     let values = job
@@ -1775,7 +1933,7 @@ async fn write_inside(
                 // Named `.cbz` (or `.epub`…) to be converted, it could not
                 // be: its own extension back.
                 let back = if comic_ebook {
-                    convert::kind(&job_path).map(|k| convert::beside(&job_path, k))
+                    convert::kind(&job_path).map(|k| renome_core::comicbook::original_of(&job_path, k))
                 } else if book_converting {
                     renome_core::bookconv::beside(&job_path).filter(|b| *b != job_path)
                 } else if converting {
@@ -1810,10 +1968,16 @@ async fn write_inside(
             serde_json::json!({ "done": done + 1, "total": total }),
         );
     }
-    report.written = backups.len();
+    report.written += backups.len();
     report.drawn = pages.load(std::sync::atomic::Ordering::Relaxed);
+    let made = std::mem::take(&mut *made.lock().unwrap());
+    if !made.is_empty()
+        && let Err(e) = state.history.add_created(&id, &made)
+    {
+        report.errors.push((String::new(), format!("err.history: {e}")));
+    }
     let saved = if backups.is_empty() {
-        if own_entry {
+        if own_entry && made.is_empty() {
             let _ = state.history.delete(&id);
         } else {
             // Comics that could not be converted may have taken back the

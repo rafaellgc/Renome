@@ -58,7 +58,14 @@ export type Rule =
       /** EPUB 2 brought to EPUB 3; large pictures made smaller. */
       epub3?: boolean; shrinkImages?: boolean;
     }
-  | { type: "comic"; template: string; colon: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; byFolder: boolean; writeInfo?: boolean; cleanInfo?: boolean; convert?: boolean; original?: "keep" | "delete"; drawPages?: boolean; pageSize?: number; missing: boolean; barcode?: boolean; skipPublishers?: string; ebook?: "" | "epub" | "azw3"; device?: ComicDevice; crop?: boolean; split?: boolean }
+  | { type: "comic"; template: string; colon: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; byFolder: boolean; writeInfo?: boolean; cleanInfo?: boolean; convert?: boolean; original?: "keep" | "delete"; drawPages?: boolean; pageSize?: number; missing: boolean; barcode?: boolean; skipPublishers?: string; ebook?: ComicFormat; device?: ComicDevice; crop?: boolean; split?: boolean;
+      /** Screen of a custom reader. */
+      width?: number; height?: number;
+      numbers?: boolean; spread?: ComicSpread; contrast?: boolean; upscale?: boolean; greys16?: boolean; soften?: boolean; webtoon?: boolean;
+      /** One series' comics in one folder joined into a volume. */
+      join?: boolean;
+      /** Books larger than this (MB) made in parts; 0: no limit. */
+      maxMb?: number }
   | {
       type: "photo"; template: string; fromName: boolean; modified: boolean; shiftHours: number;
       folders: boolean; folderTemplate: string; setModified: boolean;
@@ -87,7 +94,15 @@ export interface SubFix {
 }
 
 /** The reader a comic e-book is made for. */
-export type ComicDevice = "original" | "kindle" | "kindle-pw" | "kindle-scribe" | "kindle-color" | "kobo" | "kobo-color" | "tablet";
+export type ComicDevice =
+  | "original" | "kindle" | "kindle-pw" | "kindle-pw2024" | "kindle-oasis" | "kindle-pw-old" | "kindle-basic" | "kindle-dx"
+  | "kindle-scribe" | "kindle-scribe2025" | "kindle-color" | "kindle-scribe-color"
+  | "kobo" | "kobo-clara-color" | "kobo-libra" | "kobo-color" | "kobo-h2o" | "kobo-sage" | "kobo-elipsa" | "kobo-nia"
+  | "remarkable" | "remarkable-pro" | "remarkable-move" | "tablet" | "custom";
+/** What a comic is made into for a reader. */
+export type ComicFormat = "" | "epub" | "kepub" | "azw3" | "cbz" | "pdf";
+/** What a double page becomes. */
+export type ComicSpread = "keep" | "split" | "rotate" | "both";
 
 export type RuleType = Rule["type"];
 
@@ -131,7 +146,7 @@ export interface PreviewItem {
   /** A book locked by DRM: never converted. */
   drm?: boolean;
   /** A comic the comic rule makes an e-book, in this format. */
-  comicTo?: BookTarget;
+  comicTo?: ComicFormat;
   /** What the subtitle rule does to this subtitle. */
   subFix?: SubFix;
   /** Text subtitle tracks the subtitle rule takes out of this video. */

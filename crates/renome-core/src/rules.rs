@@ -427,8 +427,9 @@ pub enum Rule {
         /// taken out (without it). Done by the app; marks such files.
         #[serde(default)]
         clean_info: bool,
-        /// Comics made into an e-book for readers: `epub` or `azw3` (named
-        /// so here; the app converts them, see [`crate::comicbook`]).
+        /// Comics made into an e-book for readers: `epub`, `kepub`, `azw3`,
+        /// `cbz` or `pdf` (named so here; the app converts them, see
+        /// [`crate::comicbook`]).
         #[serde(default)]
         ebook: String,
         /// The reader the pages are fit to.
@@ -693,7 +694,7 @@ impl Pipeline {
 
     /// A comic rule makes comics e-books: the format, how, and whether it
     /// draws PDF pages.
-    pub fn comic_ebook(&self) -> Option<(crate::bookconv::Target, bool)> {
+    pub fn comic_ebook(&self) -> Option<(crate::comicbook::Format, bool)> {
         self.steps.iter().find_map(|s| match s {
             Compiled::Plain(Rule::Comic {
                 ebook, draw_pages, ..
@@ -1355,12 +1356,8 @@ pub fn converts(file: &crate::files::FileEntry, draw: bool) -> bool {
 }
 
 /// The e-book format a comic rule's `ebook` names.
-pub fn ebook_target(s: &str) -> Option<crate::bookconv::Target> {
-    match s {
-        "epub" => Some(crate::bookconv::Target::Epub),
-        "azw3" => Some(crate::bookconv::Target::Azw3),
-        _ => None,
-    }
+pub fn ebook_target(s: &str) -> Option<crate::comicbook::Format> {
+    crate::comicbook::Format::from_name(s)
 }
 
 /// A comic the comic rule can make an e-book: a CBZ, or anything it can

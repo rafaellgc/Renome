@@ -167,7 +167,7 @@ pub struct PreviewItem {
     /// A comic the comic rule makes an e-book, in this format (named with
     /// its extension here; see [`crate::comicbook`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub comic_to: Option<crate::bookconv::Target>,
+    pub comic_to: Option<crate::comicbook::Format>,
     /// A book locked by DRM: never converted.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub drm: bool,

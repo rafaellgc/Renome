@@ -138,9 +138,16 @@ A built-in manual (F1) explains every rule with examples.
   as well as EPUB and Kindle (MOBI/AZW3) comics whose pages are all
   pictures, and folders of pictures, keeping or deleting the original (undone like any
   rename). RAR files are read with libarchive, built into the app.
-  Can also make comics into fixed-page EPUB or Kindle AZW3 books fit to a
-  reader's screen (Kindle, Kobo, tablet), cutting empty margins and
-  splitting double pages, manga right to left.
+  Can also make comics into fixed-page books for readers — Kindle AZW3,
+  EPUB, Kobo KEPUB, a fitted CBZ (KOReader) or PDF (reMarkable, Kindle
+  Scribe) — fit to some 25 Kindle, Kobo and reMarkable screens or any
+  size: cutting empty margins and page numbers, splitting or turning
+  double pages, narrowing a wraparound cover to its front, cutting
+  webtoon strips between panels, enlarging small scans, stretching the
+  tones for ink screens, keeping only the 16 greys they show, softening
+  halftone dots on colour ink screens, joining a series' issues into one
+  volume with a table of contents, and making large books in parts;
+  manga right to left.
 - Movie, TV show, book and comic lookups read the name as the rules above
   them leave it, so a "Replace text" can fix an abbreviation first.
 - Edit any new name by hand right in the preview (double-click or F2).

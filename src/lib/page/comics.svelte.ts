@@ -7,7 +7,7 @@ import { confirm, notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
 import { byFit, isComic, seriesOnly, splitExt } from "$lib/rules";
 import { comicKey, settings } from "$lib/settings.svelte";
-import type { ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, EditField, Rule, BookTarget } from "$lib/types";
+import type { ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, EditField, Rule, ComicFormat } from "$lib/types";
 import { counts, extOf, moved, ruleOf, without, type PageCtx } from "./common";
 
 /** What a file's series has after the catalogue's (as the Rust core's `story`). */
@@ -159,7 +159,7 @@ export class Comics {
   }
   /** What making a comic an e-book needs: the format, the reader, the
    *  original's fate and, when it has some, its details. */
-  ebookItem(key: string, path: string, to: BookTarget) {
+  ebookItem(key: string, path: string, to: ComicFormat) {
     const r = this.rule?.rule;
     if (r?.type !== "comic") return { path };
     const base = this.insideItem(key, path, false, true);
@@ -167,7 +167,21 @@ export class Comics {
       ...base,
       fresh: false,
       comicTo: to,
-      ebook: { device: r.device ?? "kindle-pw", crop: r.crop ?? true, split: r.split ?? true },
+      ebook: {
+        device: r.device ?? "kindle-pw",
+        width: r.width ?? 0,
+        height: r.height ?? 0,
+        crop: r.crop ?? true,
+        numbers: r.numbers ?? false,
+        spread: r.spread ?? (r.split === false ? "keep" : "split"),
+        contrast: r.contrast ?? true,
+        upscale: r.upscale ?? false,
+        greys16: r.greys16 ?? false,
+        soften: r.soften ?? false,
+        webtoon: r.webtoon ?? false,
+        join: r.join ?? false,
+        maxMb: r.maxMb ?? 0,
+      },
       convert: r.original ?? "keep",
     };
   }
