@@ -293,6 +293,7 @@
           <label class="check sub"><input type="checkbox" bind:checked={r.fanart} /> {t("fanartLabel")}</label>
         {/if}
         <label class="check"><input type="checkbox" bind:checked={r.videoTags} /> <span>{t("videoTagsLabel")}<small>{t("videoTagsHint")}</small></span></label>
+        {#if r.videoTags}{@render videoOptions()}{/if}
         <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("movieMissingLabel")}<small>{t("movieMissingHint")}</small></span></label>
         {@render actions(t("tmdbSearch"), "movieSummary")}
         {@render subtitles()}
@@ -319,6 +320,7 @@
             <label class="check sub"><input type="checkbox" bind:checked={r.fanart} /> {t("fanartLabel")}</label>
           {/if}
           <label class="check"><input type="checkbox" bind:checked={r.videoTags} /> <span>{t("videoTagsLabel")}<small>{t("videoTagsHintTv")}</small></span></label>
+          {#if r.videoTags}{@render videoOptions()}{/if}
         {/if}
         <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("seriesMissingLabel")}<small>{t("seriesMissingHint")}</small></span></label>
 
@@ -574,6 +576,13 @@
     </fieldset>
   {/if}
 </article>
+
+{#snippet videoOptions()}
+  {#if r.type === "movie" || r.type === "series"}
+    <label class="check sub"><input type="checkbox" bind:checked={r.videoClean} /> <span>{t("videoCleanLabel")}<small>{t("videoCleanHint")}</small></span></label>
+    <label class="check sub"><input type="checkbox" bind:checked={r.videoTracks} /> <span>{t("videoTracksLabel")}<small>{t("videoTracksHint")}</small></span></label>
+  {/if}
+{/snippet}
 
 {#snippet subtitles()}
   {#if r.type === "movie" || r.type === "series"}

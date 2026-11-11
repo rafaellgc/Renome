@@ -824,7 +824,10 @@
         if (items.length) {
           insideProgress = { done: 0, total: items.length };
           try {
-            const res = await api.writeVideoTags(settings.tmdbKey, tmdbLang(), r.historyId, items, true);
+            const vr = videoTagRule === "movie" ? movies.rule?.rule : tv.rule?.rule;
+            const clean = (vr?.type === "movie" || vr?.type === "series") && !!vr.videoClean;
+            const tracks = (vr?.type === "movie" || vr?.type === "series") && !!vr.videoTracks;
+            const res = await api.writeVideoTags(settings.tmdbKey, tmdbLang(), r.historyId, items, { cover: true, clean, tracks });
             inside += res.written;
             if (res.errors.length) {
               await notify({

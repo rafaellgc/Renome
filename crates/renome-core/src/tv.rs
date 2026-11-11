@@ -1185,6 +1185,74 @@ pub struct SeasonFull {
     pub episodes: Vec<EpisodeDetails>,
 }
 
+/// What goes inside an episode's video (or one holding several):
+/// the show's details, and the first episode's with every one's title.
+pub fn video_meta(show: &ShowDetails, season: u16, eps: &[&EpisodeDetails], lang: &str) -> Option<crate::videotags::VideoMeta> {
+    use crate::videotags::{Person, VideoMeta};
+    let (lang2, region) = lang.split_once('-').unwrap_or((lang, "US"));
+    let first = eps.first()?;
+    let title = eps.iter().filter_map(|e| e.name.clone()).collect::<Vec<_>>().join(" / ");
+    let mut directors: Vec<String> = Vec::new();
+    let mut writers: Vec<String> = Vec::new();
+    for e in eps {
+        for c in &e.crew {
+            let list = match (c.job.as_str(), c.department.as_str()) {
+                ("Director", _) => &mut directors,
+                (_, "Writing") => &mut writers,
+                _ => continue,
+            };
+            if !list.contains(&c.name) {
+                list.push(c.name.clone());
+            }
+        }
+    }
+    let cert = show
+        .content_ratings
+        .results
+        .iter()
+        .find(|c| c.iso_3166_1.eq_ignore_ascii_case(region))
+        .map(|c| rating_for(region, &c.rating))
+        .unwrap_or_default();
+    Some(VideoMeta {
+        title,
+        date: first.air_date.clone().unwrap_or_default(),
+        description: first.overview.clone().unwrap_or_default(),
+        genres: show.genres.iter().map(|g| g.name.clone()).collect(),
+        show: show.name.clone(),
+        season: Some(u32::from(season)),
+        episode: Some(u32::from(first.episode_number)),
+        imdb: show.external_ids.imdb_id.clone().unwrap_or_default(),
+        tmdb: format!("tv/{}", show.id),
+        original_title: show.original_name.clone(),
+        tagline: show.tagline.clone().unwrap_or_default(),
+        certification: cert,
+        rating: crate::tmdb::average(first.vote_average),
+        keywords: show.keywords.results.iter().map(|k| k.name.clone()).collect(),
+        studios: show.production_companies.iter().map(|c| c.name.clone()).collect(),
+        network: show.networks.first().map(|n| n.name.clone()).unwrap_or_default(),
+        directors,
+        writers,
+        cast: show
+            .aggregate_credits
+            .cast
+            .iter()
+            .take(20)
+            .map(|a| Person {
+                name: a.name.clone(),
+                character: a.roles.first().map(|r| r.character.clone()).unwrap_or_default(),
+            })
+            .collect(),
+        guests: first
+            .guest_stars
+            .iter()
+            .take(20)
+            .map(|a| Person { name: a.name.clone(), character: a.character.clone() })
+            .collect(),
+        trailer: show.videos.trailer(lang2).map(crate::tmdb::youtube).unwrap_or_default(),
+        ..Default::default()
+    })
+}
+
 const XML_HEAD: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n";
 
 /// `tvshow.nfo` (Kodi format, read by Jellyfin, Kodi and Emby), with the
@@ -1794,6 +1862,14 @@ mod tests {
                 "guest_stars":[{"name":"X","character":"Y"}]}"#,
         )
         .unwrap();
+        // For inside the video: the show's details and the episode's.
+        let m = video_meta(&d, 1, &[&e], "pt-BR").unwrap();
+        assert_eq!((m.show.as_str(), m.original_title.as_str(), m.title.as_str()), ("Breaking Bad & Co", "Breaking Bad", "Episódio 1"));
+        assert_eq!((m.season, m.episode, m.certification.as_str()), (Some(1), Some(1), "BR-16"));
+        assert_eq!((m.network.as_str(), m.tmdb.as_str()), ("AMC", "tv/1396"));
+        assert_eq!(m.directors, ["Vince Gilligan"]);
+        assert_eq!((m.cast[0].character.as_str(), m.guests[0].name.as_str()), ("Walter White", "X"));
+        assert!(video_meta(&d, 1, &[], "pt-BR").is_none());
         let x = episode_nfo("Breaking Bad", &[&e, &e], &["Piloto".into()]);
         assert_eq!(x.matches("<episodedetails>").count(), 2);
         assert!(x.contains("<title>Piloto</title>"));

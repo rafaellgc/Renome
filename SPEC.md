@@ -1663,9 +1663,40 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   show's details and season once (and the movie's / season's, else
   show's, poster at `w780`) and writes, into MKV/WebM and MP4/M4V/MOV
   (told by their first bytes; anything else is reported
-  `videoUnsupported`): title, date, synopsis, genres, IMDb and TMDB ids;
-  for episodes also show, season, episode (several episodes: titles joined
+  `videoUnsupported`) what the `.nfo` holds (`tmdb::video_meta`,
+  `tv::video_meta`): title, original title (when different), tagline,
+  date, synopsis, genres, keywords, countries, studios, age rating in
+  Jellyfin's form (`PG-13`, `BR-14`, from the options' country), TMDB
+  average, directors, writers (Writing department), producers (5),
+  composers, cast (20, with characters), collection with the movie's
+  place in it (`/collection/{id}` parts by release date, undated last),
+  YouTube trailer (`https://www.youtube.com/watch?v=`), IMDb and TMDB ids,
+  the poster (`w780`) and the background (`w1280`); for episodes the show's
+  original title, tagline, genres, keywords, age rating, studios, first
+  network, main cast (aggregate credits, first role) and trailer, plus
+  season, episode, the episodes' directors and writers, the first
+  episode's guest stars (20) and score (several episodes: titles joined
   by ` / `, the first's number, date and synopsis).
+- Options (rule fields `videoClean`, `videoTracks`; `videotags::Options`):
+  `clean` drops, in Matroska, every Tag without a track/chapter/
+  attachment UID and every attachment that is not a font (by MIME
+  `font/*`, `application/x-font*`, `application/font-*`, TrueType/
+  OpenType/EOT, or extension ttf/otf/ttc/woff/woff2/pfb/fon); in MP4,
+  every old `ilst` item and the loose `udta` texts (`©…`, 3GPP `titl`,
+  `dscp`, `perf`…, `name`, `Xtra`); chapters and track statistics stay.
+  `tracks` renames audio and subtitle tracks (`tracknames`): the
+  language's own name (table of 47) plus a region where it matters
+  (pt BR/PT, es 419/ES, zh Hans/Hant, fr CA; from the tag, `pob`, or the
+  old name), then details in that language (forced, signs & songs, SDH,
+  commentary, audio description; from flags or old-name words, which
+  also set the Matroska flags); an undetermined track takes the language
+  its old name says (`Language` and `LanguageBCP47`, MP4 `mdhd`/`elng`).
+  Tracks still sharing a name are told apart, step by step, by the rest
+  of their old names (addresses, @handles, plain words: codec, channels,
+  "subtitle", language and detail words dropped; joiners trimmed), then
+  audio channels + codec / subtitle format, then a number. Video tracks
+  lose their names. MP4: `udta/name` set and `hdlr` name set (default
+  handler names when none; C or counted string kept).
 - Never a rewrite. The plan is a set of same-length patches inside the
   file plus a new tail from a cut point. Everything changed (patched
   ranges, the part cut) is saved in one history file before any write;
@@ -1677,25 +1708,44 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   otherwise).
 - Matroska: needs a known segment size ending at the end of the file and
   known element sizes; new Tags (Tags of tracks/chapters/attachments kept
-  as they are; whole-file Tags kept without the simple tags written anew:
-  movie level 50 TITLE, DATE_RELEASED, SYNOPSIS, GENRE, IMDB, TMDB;
-  episode level 70 TITLE (show), GENRE, IMDB, TMDB, 60 PART_NUMBER
-  (season), 50 TITLE, PART_NUMBER, DATE_RELEASED, SYNOPSIS) and, with a
-  cover, new Attachments (others kept, copied up to 64 MB; old `cover.*`,
-  `small_cover.*`, `cover_land.*` replaced by `cover.jpg`/`.png`) are
-  appended; the old elements become Void by rewriting only their header;
-  SeekHead entries of moved elements updated in each SeekHead holding
-  them, missing ones added to the first; a SeekHead is rebuilt in its
-  place plus the Voids right after it (padded with a Void; a 1-byte gap
-  absorbed by a longer size field), else `videoNoRoom`; the Info title
-  (`Show - S01E02 - Title` for episodes) is set when the new Info fits
-  there, else an old title is removed (players then show the tags'); the
-  segment size is rewritten in its own byte length. CRC-32 elements of
-  rebuilt elements are dropped.
+  as they are; whole-file Tags kept without the simple tags written anew,
+  or dropped with `clean`: movie level 70 COLLECTION TITLE, level 50
+  TITLE, ORIGINAL_TITLE, TAGLINE, DATE_RELEASED, SYNOPSIS, GENRE,
+  KEYWORDS, LAW_RATING, RATING (0–5: TMDB's / 2), PART_NUMBER (in the
+  collection), COUNTRY, PRODUCTION_STUDIO, DIRECTOR, WRITTEN_BY, PRODUCER,
+  COMPOSER (one simple tag each), ACTOR with a nested CHARACTER, TRAILER,
+  IMDB, TMDB; episode level 70 the show's TITLE, ORIGINAL_TITLE, TAGLINE,
+  GENRE, KEYWORDS, LAW_RATING, PRODUCTION_STUDIO (network first), ACTOR,
+  TRAILER, IMDB, TMDB, 60 PART_NUMBER (season), 50 TITLE, PART_NUMBER,
+  DATE_RELEASED, SYNOPSIS, RATING, DIRECTOR, WRITTEN_BY, ACTOR (guests))
+  and, with a cover or `clean` finding a non-font, new Attachments
+  (others kept, copied up to 64 MB; old `cover.*`, `small_cover.*`,
+  `cover_land.*` replaced by `cover.jpg`/`.png` and the background as
+  `cover_land.jpg`; none left: the element and its SeekHead entries go)
+  are appended; the old elements become Void by rewriting only their
+  header; SeekHead entries of moved elements updated in each SeekHead
+  holding them, missing ones added to the first; a SeekHead is rebuilt in
+  its place plus the Voids right after it (padded with a Void; a 1-byte
+  gap absorbed by a longer size field), else `videoNoRoom`. Info (title:
+  `Show - S01E02 - Title` for episodes) and, with `tracks`, Tracks are
+  rewritten in a run from their own start over the following elements
+  that are Void, old Tags/Attachments made Void, or each other (laid out
+  one after another, Info and Tracks moving up within the run and their
+  SeekHead entries following, the rest a Void header): choices tried
+  fewest-compromises first (Info with the new title, without the old
+  title, as it was; Tracks named, as they were); nothing fits → both
+  left as they were. The segment size is rewritten in its own byte
+  length. CRC-32 elements of rebuilt elements are dropped.
 - MP4: the single `moov` (not fragmented: no `mvex`/`moof`; ≤ 256 MB) is
   rebuilt with `udta/meta/ilst` items `©nam`, `©day`, `desc` (≤255
-  characters), `ldes`, `©gen`, `stik` (9 movie, 10 TV), `tvsh`, `tven`,
-  `tvsn`, `tves`, `covr` (13 JPEG / 14 PNG); other items kept; ISO
+  characters), `ldes`, `©gen`, `stik` (9 movie, 10 TV), `tvsh`, `tvnn`,
+  `tven`, `tvsn`, `tves`, `covr` (13 JPEG / 14 PNG), free-form
+  `----:com.apple.iTunes:` `iTunMOVI` (plist: cast incl. guests,
+  directors, screenwriters, producers, studio), `iTunEXTC` (US only:
+  `mpaa|PG-13|300|`, `us-tv|TV-14|500|`), ORIGINAL_TITLE, TAGLINE,
+  LAW_RATING, RATING (0–10), KEYWORDS, COUNTRY, PRODUCTION_STUDIO,
+  COLLECTION, COLLECTION_PART, TRAILER, IMDB, TMDB (free-form items told
+  apart by name; ours replaced on a later write); other items kept; ISO
   (version/flags) or QuickTime `meta` kept as found, created ISO with an
   `mdir` handler. Placed in the old `moov` plus the `free`/`skip` boxes
   after it when it fits exactly or leaves ≥ 8 bytes (a `free` pads);
@@ -1706,7 +1756,16 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
 - Checked on copies of real files (MKV from mkvmerge and from FFmpeg,
   1.4 GB; MP4 from FFmpeg): FFprobe reads every tag and the cover,
   FFmpeg decodes without errors, undo gives byte-identical files;
-  partial downloads (zero-filled) are refused.
+  partial downloads (zero-filled) are refused. Cleaning and track names
+  checked on FFmpeg- and mkvmerge-made MKVs (named tracks, font and junk
+  attachments, site tags) and FFmpeg MP4s (index first and last):
+  mkvmerge reads them without errors or warnings, names and forced flag
+  as expected, font kept, junk gone; FFprobe reads the tags, handler
+  names and `iTunMOVI`; undo byte-identical. On copies of 8 real
+  episodes (5 MKV up to 2 GB, one with 41 subtitle tracks and one with an
+  attached font; 3 MP4): written in 0.16 s in all, every track renamed
+  in place, mkvmerge without errors, every packet read as before, undo
+  byte-identical.
 
 ### 2.5c Subtitles (`subtext`, `mkvsubs`, offline)
 

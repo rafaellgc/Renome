@@ -66,6 +66,7 @@ pub mod videotags;
 pub mod tagwrite;
 pub mod text;
 pub mod tmdb;
+pub mod tracknames;
 pub mod tv;
 pub mod video;
 
@@ -76,3 +77,10 @@ pub use identical::{HashCache, find_identical};
 pub use plan::{Preview, PreviewItem, Problem, Status, View, preview};
 pub use rules::{Pipeline, Rule, Step};
 pub use scan::{ScanOptions, ScanResult, scan};
+
+/// Makes sure a file just written is on the disk. Windows only flushes a
+/// file opened for writing (a read-only handle is "access denied"), so it
+/// is opened that way; nothing is truncated or changed.
+pub(crate) fn sync_file(path: &std::path::Path) -> std::io::Result<()> {
+    std::fs::File::options().write(true).open(path)?.sync_all()
+}

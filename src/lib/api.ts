@@ -160,8 +160,8 @@ export const api = {
     lang: string,
     historyId: string | null,
     items: { path: string; movie?: number; show?: number; season?: number; episodes?: number[] }[],
-    cover: boolean,
-  ) => invoke<{ written: number; drawn: number; errors: [string, string][] }>("write_video_tags", { key, lang, historyId, items, cover }),
+    options: { cover: boolean; clean: boolean; tracks: boolean },
+  ) => invoke<{ written: number; drawn: number; errors: [string, string][] }>("write_video_tags", { key, lang, historyId, items, options }),
   subtitleTools: (
     historyId: string | null,
     items: { path: string; fix: boolean; extract: boolean }[],

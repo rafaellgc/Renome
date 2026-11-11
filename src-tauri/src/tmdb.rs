@@ -1022,10 +1022,11 @@ pub struct VideoTagItem {
 }
 
 impl Client {
-    /// A poster at a size fit to go inside a video (780 px wide).
-    async fn poster(&self, path: &str) -> Result<Vec<u8>, String> {
+    /// A picture at a size fit to go inside a video: a poster 780 px
+    /// wide, a background 1280.
+    async fn picture(&self, path: &str, width: u32) -> Result<Vec<u8>, String> {
         let base = image_base();
-        let base = base.strip_suffix("/original").map_or(base.clone(), |b| format!("{b}/w780"));
+        let base = base.strip_suffix("/original").map_or(base.clone(), |b| format!("{b}/w{width}"));
         let res = self
             .http
             .get(format!("{base}{path}"))
@@ -1037,14 +1038,14 @@ impl Client {
     }
 }
 
-/// The details of each video, from TMDB (each movie, show and season
-/// fetched once; the poster too, when `cover`).
+/// The details of each video, from TMDB (each movie, show, season and
+/// collection fetched once; the poster and the background too, when
+/// `cover`).
 pub async fn video_meta(
     client: &Client,
     items: &[VideoTagItem],
     cover: bool,
 ) -> Vec<Result<renome_core::videotags::VideoMeta, String>> {
-    use renome_core::videotags::VideoMeta;
     let mut movies: Vec<u64> = items.iter().filter_map(|i| i.movie).collect();
     movies.sort_unstable();
     movies.dedup();
@@ -1072,47 +1073,71 @@ pub async fn video_meta(
         .buffer_unordered(4)
         .collect()
         .await;
-    // Posters: a movie's, a season's (else the show's).
-    let mut posters: Vec<String> = Vec::new();
+    // The collections, for each movie's place in its own.
+    let mut sets: Vec<u64> = movies
+        .values()
+        .flatten()
+        .filter_map(|d| d.belongs_to_collection.as_ref().map(|c| c.id))
+        .collect();
+    sets.sort_unstable();
+    sets.dedup();
+    let sets: HashMap<u64, Vec<(u64, String)>> = stream::iter(sets)
+        .map(|id| async move {
+            let r: Result<RawSet, String> = client.get(&format!("/collection/{id}"), &[]).await;
+            r.ok().map(|s| {
+                let parts = s.parts.into_iter().map(|p| (p.id, p.release_date.unwrap_or_default())).collect();
+                (id, parts)
+            })
+        })
+        .buffer_unordered(4)
+        .filter_map(|x| async move { x })
+        .collect()
+        .await;
+    // Pictures: a movie's poster, a season's (else the show's), and the
+    // movie's or show's background.
+    let mut wanted: Vec<(String, u32)> = Vec::new();
     if cover {
         for d in movies.values().flatten() {
-            posters.extend(d.poster_path.clone());
+            wanted.extend(d.poster_path.clone().map(|p| (p, 780)));
+            wanted.extend(d.backdrop_path.clone().map(|p| (p, 1280)));
         }
         for ((id, _), s) in &seasons {
+            let show = shows.get(id).and_then(|d| d.as_ref().ok());
             let p = s
                 .as_ref()
                 .ok()
                 .and_then(|s| s.poster_path.clone())
-                .or_else(|| shows.get(id).and_then(|d| d.as_ref().ok()?.poster_path.clone()));
-            posters.extend(p);
+                .or_else(|| show?.poster_path.clone());
+            wanted.extend(p.map(|p| (p, 780)));
+            wanted.extend(show.and_then(|d| d.backdrop_path.clone()).map(|p| (p, 1280)));
         }
-        posters.sort();
-        posters.dedup();
+        wanted.sort();
+        wanted.dedup();
     }
-    let images: HashMap<String, Vec<u8>> = stream::iter(posters)
-        .map(|p| async move {
-            let b = client.poster(&p).await;
+    let images: HashMap<String, Vec<u8>> = stream::iter(wanted)
+        .map(|(p, w)| async move {
+            let b = client.picture(&p, w).await;
             (p, b)
         })
         .buffer_unordered(4)
         .filter_map(|(p, b)| async move { b.ok().map(|b| (p, b)) })
         .collect()
         .await;
+    let picture = |p: &Option<String>| p.as_ref().and_then(|p| images.get(p).cloned());
     items
         .iter()
         .map(|item| {
             if let Some(id) = item.movie {
                 let d = movies.get(&id).ok_or("tmdbNotFound")?.as_ref().map_err(Clone::clone)?;
-                return Ok(VideoMeta {
-                    title: d.title.clone(),
-                    date: d.release_date.clone().unwrap_or_default(),
-                    description: d.overview.clone().unwrap_or_default(),
-                    genres: d.genres.iter().map(|g| g.name.clone()).collect(),
-                    imdb: d.imdb_id.clone().unwrap_or_default(),
-                    tmdb: format!("movie/{}", d.id),
-                    cover: d.poster_path.as_ref().and_then(|p| images.get(p).cloned()),
-                    ..Default::default()
-                });
+                let mut m = tmdb::video_meta(d, &client.lang);
+                m.collection_part = d
+                    .belongs_to_collection
+                    .as_ref()
+                    .and_then(|c| sets.get(&c.id))
+                    .and_then(|parts| tmdb::collection_part(d.id, parts));
+                m.cover = picture(&d.poster_path);
+                m.backdrop = picture(&d.backdrop_path);
+                return Ok(m);
             }
             let id = item.show.ok_or("tmdbNotFound")?;
             let show = shows.get(&id).ok_or("tmdbNotFound")?.as_ref().map_err(Clone::clone)?;
@@ -1126,25 +1151,10 @@ pub async fn video_meta(
                 .iter()
                 .filter_map(|&n| season.episodes.iter().find(|e| e.episode_number == n))
                 .collect();
-            let first = eps.first().ok_or("tmdbNotFound")?;
-            let title = eps
-                .iter()
-                .filter_map(|e| e.name.clone())
-                .collect::<Vec<_>>()
-                .join(" / ");
-            let poster = season.poster_path.as_ref().or(show.poster_path.as_ref());
-            Ok(VideoMeta {
-                title,
-                date: first.air_date.clone().unwrap_or_default(),
-                description: first.overview.clone().unwrap_or_default(),
-                genres: show.genres.iter().map(|g| g.name.clone()).collect(),
-                show: show.name.clone(),
-                season: Some(u32::from(item.season)),
-                episode: Some(u32::from(first.episode_number)),
-                imdb: show.external_ids.imdb_id.clone().unwrap_or_default(),
-                tmdb: format!("tv/{}", show.id),
-                cover: poster.and_then(|p| images.get(p).cloned()),
-            })
+            let mut m = renome_core::tv::video_meta(show, item.season, &eps, &client.lang).ok_or("tmdbNotFound")?;
+            m.cover = picture(&season.poster_path.clone().or_else(|| show.poster_path.clone()));
+            m.backdrop = picture(&show.backdrop_path);
+            Ok(m)
         })
         .collect()
 }

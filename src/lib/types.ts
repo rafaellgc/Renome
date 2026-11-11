@@ -36,12 +36,16 @@ export type Rule =
       subtitles?: boolean; subLangs?: string;
       /** Title, date and cover written inside MKV and MP4 videos. */
       videoTags?: boolean;
+      /** What came inside the video taken out first. */
+      videoClean?: boolean;
+      /** The audio and subtitle tracks named by language. */
+      videoTracks?: boolean;
     }
   | {
       type: "series"; template: string; colon: string; show: string;
       folders: boolean; folderTemplate: string; sidecar: boolean; fanart: boolean; missing: boolean;
       subtitles?: boolean; subLangs?: string;
-      videoTags?: boolean;
+      videoTags?: boolean; videoClean?: boolean; videoTracks?: boolean;
       /** Where shows are looked up (TMDB when not set). */
       source?: "tmdb" | "anilist";
     }

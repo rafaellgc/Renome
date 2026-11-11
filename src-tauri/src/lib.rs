@@ -1839,10 +1839,25 @@ async fn write_inside(
     Ok(report)
 }
 
+/// How details go inside videos: with the pictures, what came in the
+/// video taken out first, the tracks named.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VideoTagOptions {
+    #[serde(default)]
+    cover: bool,
+    #[serde(default)]
+    clean: bool,
+    #[serde(default)]
+    tracks: bool,
+}
+
 /// Writes each renamed movie's or episode's details (title, date,
-/// description, genres, show, season, episode and, with `cover`, the
-/// poster) inside its video, MKV or MP4, keeping what changed in the
-/// rename's history entry (or one of its own) for undo.
+/// description, genres, cast and crew, show, season, episode and, with
+/// `options.cover`, the poster and the background) inside its video, MKV or MP4,
+/// keeping what changed in the rename's history entry (or one of its
+/// own) for undo. `clean` takes out what came in the video first;
+/// `tracks` names its audio and subtitle tracks.
 #[tauri::command]
 async fn write_video_tags(
     app: AppHandle,
@@ -1850,9 +1865,11 @@ async fn write_video_tags(
     lang: String,
     history_id: Option<String>,
     items: Vec<tmdb::VideoTagItem>,
-    cover: bool,
+    options: VideoTagOptions,
 ) -> Result<TagReport, String> {
     use renome_core::videotags;
+    let VideoTagOptions { cover, clean, tracks } = options;
+    let opt = videotags::Options { clean, tracks };
     let state = app.state::<AppState>();
     let mut report = TagReport::default();
     let name = |p: &Path| {
@@ -1899,7 +1916,7 @@ async fn write_video_tags(
         };
         note.start(&item.path);
         let (path, store) = (item.path.clone(), store.clone());
-        let r = tauri::async_runtime::spawn_blocking(move || videotags::write(&path, &meta, &store))
+        let r = tauri::async_runtime::spawn_blocking(move || videotags::write(&path, &meta, &opt, &store))
             .await
             .map_err(|e| e.to_string())
             .and_then(|r| r);
