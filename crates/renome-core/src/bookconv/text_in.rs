@@ -14,7 +14,7 @@ use super::{Book, Chapter, Toc};
 
 /// Text from bytes: a byte order mark, else the encoding the document
 /// declares (`<?xml encoding>`, `<meta charset>`), else UTF-8 when valid,
-/// else a Windows code page (Cyrillic when most letters need it).
+/// else the old encoding it most likely is ([`crate::text::guess_encoding`]).
 pub fn decode_bytes(b: &[u8], markup: bool) -> String {
     if let Some((enc, skip)) = encoding_rs::Encoding::for_bom(b) {
         return enc.decode_without_bom_handling(&b[skip..]).0.into_owned();
@@ -34,15 +34,7 @@ pub fn decode_bytes(b: &[u8], markup: bool) -> String {
     if let Ok(s) = std::str::from_utf8(b) {
         return s.to_string();
     }
-    // Cyrillic text in Windows-1251 is almost all high bytes in
-    // 0xC0–0xFF; Western text has high bytes only for accents.
-    let high = b.iter().filter(|c| **c >= 0xc0).count();
-    let letters = b.iter().filter(|c| c.is_ascii_alphabetic()).count();
-    let enc = if high > letters {
-        encoding_rs::WINDOWS_1251
-    } else {
-        encoding_rs::WINDOWS_1252
-    };
+    let enc = crate::text::guess_encoding(b).unwrap_or(encoding_rs::WINDOWS_1252);
     enc.decode_without_bom_handling(b).0.into_owned()
 }
 

@@ -386,6 +386,19 @@ pub fn title_case(s: &str, keep_connectives: bool) -> String {
     out
 }
 
+/// The old (pre-UTF-8) encoding an unmarked text most likely is, as
+/// browsers guess it (chardetng, Firefox's detector): Western, Central
+/// European, Cyrillic, Greek, Japanese and the rest. `None` when the text
+/// is plain ASCII or valid UTF-8.
+pub fn guess_encoding(bytes: &[u8]) -> Option<&'static encoding_rs::Encoding> {
+    if bytes.is_ascii() || std::str::from_utf8(bytes).is_ok() {
+        return None;
+    }
+    let mut d = chardetng::EncodingDetector::new(chardetng::Iso2022JpDetection::Deny);
+    d.feed(bytes, true);
+    Some(d.guess(None, chardetng::Utf8Detection::Deny))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -461,5 +474,19 @@ mod tests {
     #[test]
     fn spaces() {
         assert_eq!(collapse_spaces("  a   b \t c "), "a b c");
+    }
+
+    #[test]
+    fn old_encodings_guessed() {
+        assert_eq!(guess_encoding(b"plain"), None);
+        assert_eq!(guess_encoding("já é UTF-8".as_bytes()), None);
+        let el = encoding_rs::WINDOWS_1253
+            .encode("Μια φορά κι έναν καιρό ήταν ένα σπίτι χωρίς πόρτα.")
+            .0;
+        assert_eq!(guess_encoding(&el), Some(encoding_rs::WINDOWS_1253));
+        let ja = encoding_rs::SHIFT_JIS
+            .encode("むかしむかし、ドアのない家がありました。")
+            .0;
+        assert_eq!(guess_encoding(&ja), Some(encoding_rs::SHIFT_JIS));
     }
 }

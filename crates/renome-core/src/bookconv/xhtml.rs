@@ -167,30 +167,26 @@ pub fn is_block(name: &str) -> bool {
 }
 
 /// Elements whose content is raw text, not markup.
-fn is_raw(name: &str) -> bool {
-    matches!(
-        name,
-        "script" | "style" | "textarea" | "title" | "xmp" | "noscript"
-    )
-}
-
-/// Reads HTML (or XHTML) into a tree; never fails. The result is the
-/// document's top nodes (usually one `html`).
+/// Reads HTML (or XHTML) into a tree; never fails. The tree is built the
+/// way browsers build it (html5ever follows the HTML standard): a `<p>`
+/// left open is closed by the next block, a table's stray text is moved
+/// out of it, and so on. The result is the document's top nodes (one
+/// `html`, with its `head` and `body`).
+///
+/// XHTML's `<a id="x"/>` means an empty element, but HTML would read it
+/// as an opening tag holding the rest of the page; such tags are closed
+/// first.
 pub fn parse(src: &str) -> Vec<Node> {
-    parse_as(src, false)
+    use html5ever::tendril::TendrilSink;
+    let src = close_empty_tags(src);
+    html5ever::parse_document(Arena::default(), Default::default())
+        .one(html5ever::tendril::StrTendril::from_slice(&src))
 }
 
-/// Reads XML (FB2, Office documents) the same forgiving way, without
-/// HTML's rules: no raw-text elements, no tags closed by others.
+/// Reads XML (FB2, Office documents) in the same forgiving way, but
+/// without HTML's rules: no raw-text elements, no tags closed by others.
 pub fn parse_xml(src: &str) -> Vec<Node> {
-    parse_as(src, true)
-}
-
-fn parse_as(src: &str, xml: bool) -> Vec<Node> {
-    let mut b = Builder {
-        xml,
-        ..Default::default()
-    };
+    let mut b = Builder::default();
     let s = src.as_bytes();
     let mut i = 0;
     let mut text_start = 0;
@@ -231,29 +227,12 @@ fn parse_as(src: &str, xml: bool) -> Vec<Node> {
                     .unwrap_or(inner.len())..],
             );
             i = (end + 1).min(s.len());
-            if !xml && is_raw(&name) && !self_closing {
-                // Up to its end tag, as is.
-                let close = format!("</{name}");
-                let lower = src[i..].to_ascii_lowercase();
-                let stop = lower.find(&close).map(|e| i + e).unwrap_or(s.len());
-                let mut e = Elem::new(&name);
-                e.attrs = attrs;
-                if stop > i {
-                    let raw = &src[i..stop];
-                    e.kids
-                        .push(Node::Text(if name == "title" || name == "textarea" {
-                            decode(raw)
-                        } else {
-                            raw.to_string()
-                        }));
-                }
+            let mut e = Elem::new(&name);
+            e.attrs = attrs;
+            if self_closing {
                 b.leaf(e);
-                i = src[stop..]
-                    .find('>')
-                    .map(|e| stop + e + 1)
-                    .unwrap_or(s.len());
             } else {
-                b.open(&name, attrs, self_closing);
+                b.stack.push(e);
             }
         } else {
             // A lone `<`.
@@ -266,6 +245,327 @@ fn parse_as(src: &str, xml: bool) -> Vec<Node> {
         b.text(&decode(&src[text_start..]));
     }
     b.finish()
+}
+
+/// `<x .../>` written as `<x ...></x>` for every element that is not
+/// void (and `<mbp:pagebreak>` always closed), outside comments, CDATA and
+/// the raw text of scripts and styles.
+fn close_empty_tags(src: &str) -> std::borrow::Cow<'_, str> {
+    if !src.contains("/>") && !src.contains("mbp:") {
+        return src.into();
+    }
+    let s = src.as_bytes();
+    let mut out = String::with_capacity(src.len() + 64);
+    let (mut i, mut copied) = (0, 0);
+    while let Some(at) = src[i..].find('<').map(|p| p + i) {
+        let rest = &src[at..];
+        let skip_to = |end: &str, from: usize| src[from..].find(end).map(|e| from + e + end.len());
+        if rest.starts_with("<!--") {
+            i = skip_to("-->", at + 4).unwrap_or(s.len());
+            continue;
+        }
+        if rest.starts_with("<![CDATA[") {
+            i = skip_to("]]>", at + 9).unwrap_or(s.len());
+            continue;
+        }
+        if !s.get(at + 1).is_some_and(|c| c.is_ascii_alphabetic()) {
+            i = at + 1;
+            continue;
+        }
+        let end = tag_end(s, at + 1);
+        if end >= s.len() {
+            break;
+        }
+        let inner = src[at + 1..end].trim_end();
+        let name: String = inner
+            .chars()
+            .take_while(|c| !c.is_whitespace() && *c != '/')
+            .collect::<String>()
+            .to_ascii_lowercase();
+        i = end + 1;
+        // Old Kindle books' page break is void too, but HTML does not
+        // know it; it is closed with or without its `/`.
+        let pagebreak = name == "mbp:pagebreak";
+        if (inner.ends_with('/') && !is_void(&name)) || pagebreak {
+            out.push_str(&src[copied..at + 1]);
+            out.push_str(inner.trim_end_matches('/').trim_end());
+            out.push_str("></");
+            out.push_str(&src[at + 1..at + 1 + name.len()]);
+            out.push('>');
+            copied = i;
+        } else if matches!(name.as_str(), "script" | "style" | "textarea" | "title") {
+            // Up to its end tag, as is.
+            let lower = src[i..].to_ascii_lowercase();
+            i = lower
+                .find(&format!("</{name}"))
+                .map(|e| i + e)
+                .unwrap_or(s.len());
+        }
+    }
+    if copied == 0 {
+        return src.into();
+    }
+    out.push_str(&src[copied..]);
+    out.into()
+}
+
+/// The nodes html5ever builds, kept by number; made into [`Node`]s at the
+/// end.
+#[derive(Default)]
+struct Arena {
+    nodes: std::cell::RefCell<Vec<ANode>>,
+}
+
+struct ANode {
+    /// `None` for the document, text, comments and template contents.
+    name: Option<html5ever::QualName>,
+    attrs: Vec<(String, String)>,
+    text: String,
+    kids: Vec<usize>,
+    parent: Option<usize>,
+    /// A template's contents (never shown).
+    contents: Option<usize>,
+}
+
+impl ANode {
+    fn new(name: Option<html5ever::QualName>) -> Self {
+        ANode {
+            name,
+            attrs: Vec::new(),
+            text: String::new(),
+            kids: Vec::new(),
+            parent: None,
+            contents: None,
+        }
+    }
+}
+
+impl Arena {
+    fn add(&self, n: ANode) -> usize {
+        let mut nodes = self.nodes.borrow_mut();
+        nodes.push(n);
+        nodes.len() - 1
+    }
+
+    fn text_node(&self, t: &str) -> usize {
+        let mut n = ANode::new(None);
+        n.text = t.to_string();
+        self.add(n)
+    }
+
+    fn is_text(nodes: &[ANode], i: usize) -> bool {
+        nodes[i].name.is_none() && !nodes[i].text.is_empty()
+    }
+
+    /// Puts `child` in `parent` at `at` (the end when `None`); text joins
+    /// the text before it.
+    fn insert(
+        &self,
+        parent: usize,
+        at: Option<usize>,
+        child: html5ever::tree_builder::NodeOrText<usize>,
+    ) {
+        use html5ever::tree_builder::NodeOrText;
+        let at = at.unwrap_or(self.nodes.borrow()[parent].kids.len());
+        let id = match child {
+            NodeOrText::AppendText(t) => {
+                let mut nodes = self.nodes.borrow_mut();
+                if at > 0 {
+                    let prev = nodes[parent].kids[at - 1];
+                    if Self::is_text(&nodes, prev) {
+                        nodes[prev].text.push_str(&t);
+                        return;
+                    }
+                }
+                drop(nodes);
+                self.text_node(&t)
+            }
+            NodeOrText::AppendNode(h) => h,
+        };
+        let mut nodes = self.nodes.borrow_mut();
+        nodes[id].parent = Some(parent);
+        nodes[parent].kids.insert(at, id);
+    }
+
+    fn detach(&self, id: usize) {
+        let mut nodes = self.nodes.borrow_mut();
+        if let Some(p) = nodes[id].parent.take() {
+            nodes[p].kids.retain(|k| *k != id);
+        }
+    }
+
+    fn build(nodes: &[ANode], id: usize, out: &mut Vec<Node>) {
+        let n = &nodes[id];
+        let Some(q) = &n.name else {
+            if !n.text.is_empty() {
+                match out.last_mut() {
+                    Some(Node::Text(last)) => last.push_str(&n.text),
+                    _ => out.push(Node::Text(n.text.clone())),
+                }
+            }
+            return;
+        };
+        let mut e = Elem::new(&tag_name(&q.local));
+        e.attrs = n.attrs.clone();
+        for &k in &n.kids {
+            Self::build(nodes, k, &mut e.kids);
+        }
+        // A stray `</p>` makes an empty paragraph (old HTML's paragraph
+        // break); it adds nothing.
+        if e.name == "p" && e.attrs.is_empty() && e.kids.is_empty() {
+            return;
+        }
+        out.push(Node::Elem(e));
+    }
+}
+
+fn attr_pairs(attrs: Vec<html5ever::Attribute>) -> Vec<(String, String)> {
+    attrs
+        .into_iter()
+        .map(|a| {
+            let local = a.name.local.to_ascii_lowercase().to_string();
+            let name = match &a.name.prefix {
+                Some(p) => format!("{p}:{local}"),
+                None => local,
+            };
+            (name, a.value.to_string())
+        })
+        .collect()
+}
+
+impl html5ever::tree_builder::TreeSink for Arena {
+    type Handle = usize;
+    type Output = Vec<Node>;
+    type ElemName<'a> = std::cell::Ref<'a, html5ever::QualName>;
+
+    fn finish(self) -> Vec<Node> {
+        let nodes = self.nodes.into_inner();
+        let mut out = Vec::new();
+        if let Some(doc) = nodes.first() {
+            for &k in &doc.kids {
+                Self::build(&nodes, k, &mut out);
+            }
+        }
+        out
+    }
+
+    fn parse_error(&self, _msg: std::borrow::Cow<'static, str>) {}
+
+    fn get_document(&self) -> usize {
+        if self.nodes.borrow().is_empty() {
+            self.add(ANode::new(None));
+        }
+        0
+    }
+
+    fn elem_name<'a>(&'a self, target: &'a usize) -> Self::ElemName<'a> {
+        std::cell::Ref::map(self.nodes.borrow(), |n| {
+            n[*target].name.as_ref().expect("an element")
+        })
+    }
+
+    fn create_element(
+        &self,
+        name: html5ever::QualName,
+        attrs: Vec<html5ever::Attribute>,
+        flags: html5ever::tree_builder::ElementFlags,
+    ) -> usize {
+        let mut n = ANode::new(Some(name));
+        n.attrs = attr_pairs(attrs);
+        if flags.template {
+            n.contents = Some(self.add(ANode::new(None)));
+        }
+        self.add(n)
+    }
+
+    fn create_comment(&self, _text: html5ever::tendril::StrTendril) -> usize {
+        self.add(ANode::new(None))
+    }
+
+    fn create_pi(
+        &self,
+        _target: html5ever::tendril::StrTendril,
+        _data: html5ever::tendril::StrTendril,
+    ) -> usize {
+        self.add(ANode::new(None))
+    }
+
+    fn append(&self, parent: &usize, child: html5ever::tree_builder::NodeOrText<usize>) {
+        self.insert(*parent, None, child);
+    }
+
+    fn append_based_on_parent_node(
+        &self,
+        element: &usize,
+        prev_element: &usize,
+        child: html5ever::tree_builder::NodeOrText<usize>,
+    ) {
+        if self.nodes.borrow()[*element].parent.is_some() {
+            self.append_before_sibling(element, child);
+        } else {
+            self.append(prev_element, child);
+        }
+    }
+
+    fn append_doctype_to_document(
+        &self,
+        _name: html5ever::tendril::StrTendril,
+        _public_id: html5ever::tendril::StrTendril,
+        _system_id: html5ever::tendril::StrTendril,
+    ) {
+    }
+
+    fn get_template_contents(&self, target: &usize) -> usize {
+        self.nodes.borrow()[*target].contents.unwrap_or(*target)
+    }
+
+    fn same_node(&self, x: &usize, y: &usize) -> bool {
+        x == y
+    }
+
+    fn set_quirks_mode(&self, _mode: html5ever::tree_builder::QuirksMode) {}
+
+    fn append_before_sibling(
+        &self,
+        sibling: &usize,
+        new_node: html5ever::tree_builder::NodeOrText<usize>,
+    ) {
+        let (parent, at) = {
+            let nodes = self.nodes.borrow();
+            let Some(p) = nodes[*sibling].parent else {
+                return;
+            };
+            let at = nodes[p].kids.iter().position(|k| k == sibling);
+            (p, at)
+        };
+        if let html5ever::tree_builder::NodeOrText::AppendNode(h) = &new_node {
+            self.detach(*h);
+        }
+        self.insert(parent, at, new_node);
+    }
+
+    fn add_attrs_if_missing(&self, target: &usize, attrs: Vec<html5ever::Attribute>) {
+        let mut nodes = self.nodes.borrow_mut();
+        let n = &mut nodes[*target];
+        for (k, v) in attr_pairs(attrs) {
+            if !n.attrs.iter().any(|(a, _)| *a == k) {
+                n.attrs.push((k, v));
+            }
+        }
+    }
+
+    fn remove_from_parent(&self, target: &usize) {
+        self.detach(*target);
+    }
+
+    fn reparent_children(&self, node: &usize, new_parent: &usize) {
+        let mut nodes = self.nodes.borrow_mut();
+        let kids = std::mem::take(&mut nodes[*node].kids);
+        for &k in &kids {
+            nodes[k].parent = Some(*new_parent);
+        }
+        nodes[*new_parent].kids.extend(kids);
+    }
 }
 
 /// Where a tag ends (its `>`), quotes respected.
@@ -351,8 +651,7 @@ fn attrs_of(s: &str) -> Vec<(String, String)> {
 
 #[derive(Default)]
 struct Builder {
-    xml: bool,
-    /// The open elements; the root is a pseudo element.
+    /// The open elements.
     stack: Vec<Elem>,
     top: Vec<Node>,
 }
@@ -381,97 +680,10 @@ impl Builder {
         self.cur().push(Node::Elem(e));
     }
 
-    fn open_names(&self) -> impl Iterator<Item = &str> {
-        self.stack.iter().rev().map(|e| e.name.as_str())
-    }
-
-    fn has_open(&self, name: &str, until: &[&str]) -> bool {
-        for n in self.open_names() {
-            if n == name {
-                return true;
-            }
-            if until.contains(&n) {
-                return false;
-            }
-        }
-        false
-    }
-
-    fn open(&mut self, name: &str, attrs: Vec<(String, String)>, self_closing: bool) {
-        if self.xml {
-            let mut e = Elem::new(name);
-            e.attrs = attrs;
-            if self_closing {
-                self.leaf(e);
-            } else {
-                self.stack.push(e);
-            }
-            return;
-        }
-        // Ends the elements this one cannot be inside of.
-        let scope = [
-            "table",
-            "ul",
-            "ol",
-            "dl",
-            "div",
-            "blockquote",
-            "td",
-            "th",
-            "body",
-            "html",
-            "section",
-        ];
-        if is_block(name) && self.has_open("p", &scope) {
-            self.close("p");
-        }
-        match name {
-            "li" if self.has_open("li", &["ul", "ol", "menu", "dir"]) => self.close("li"),
-            "dt" | "dd" => {
-                for n in ["dt", "dd"] {
-                    if self.has_open(n, &["dl"]) {
-                        self.close(n);
-                    }
-                }
-            }
-            "tr" if self.has_open("tr", &["table"]) => self.close("tr"),
-            "td" | "th" => {
-                for n in ["td", "th"] {
-                    if self.has_open(n, &["tr", "table"]) {
-                        self.close(n);
-                    }
-                }
-            }
-            "option" if self.has_open("option", &["select"]) => self.close("option"),
-            "a" if self.has_open("a", &[]) => self.close("a"),
-            _ => {}
-        }
-        // A second `<html>` or `<body>`: its attributes join the first.
-        if (name == "html" || name == "body" || name == "head")
-            && let Some(e) = self.stack.iter_mut().find(|e| e.name == name)
-        {
-            for (k, v) in attrs {
-                if e.attr(&k).is_none() {
-                    e.attrs.push((k, v));
-                }
-            }
-            return;
-        }
-        let mut e = Elem::new(name);
-        e.attrs = attrs;
-        if self_closing || is_void(name) {
-            self.leaf(e);
-        } else {
-            self.stack.push(e);
-        }
-    }
-
     fn close(&mut self, name: &str) {
         let Some(at) = self.stack.iter().rposition(|e| e.name == name) else {
             return;
         };
-        // A stray `</p>` with no `<p>` open is a paragraph break in old
-        // HTML; ignored here (an empty paragraph adds nothing).
         while self.stack.len() > at {
             let e = self.stack.pop().unwrap();
             self.cur().push(Node::Elem(e));
@@ -1464,6 +1676,39 @@ mod tests {
             "ééé–&bogus;&"
         );
         assert_eq!(esc("a<b & c\u{1}"), "a&lt;b &amp; c");
+    }
+
+    #[test]
+    fn xhtml_empty_tags_stay_empty() {
+        assert_eq!(
+            clean("<p><a id=\"n1\"/>One <span class=\"x\"/>two</p><p>Three</p>"),
+            "<p><a id=\"n1\"></a>One two</p><p>Three</p>"
+        );
+        // A script written as an empty tag does not swallow the page.
+        assert_eq!(
+            clean("<head><script src=\"a.js\"/></head><body><p>Text</p></body>"),
+            "<p>Text</p>"
+        );
+        assert_eq!(
+            close_empty_tags("<!-- <x/> --><br/><div/>"),
+            "<!-- <x/> --><br/><div></div>"
+        );
+        assert_eq!(
+            close_empty_tags("<p>a</p><mbp:pagebreak/><p>b</p><mbp:pagebreak>"),
+            "<p>a</p><mbp:pagebreak></mbp:pagebreak><p>b</p><mbp:pagebreak></mbp:pagebreak>"
+        );
+    }
+
+    #[test]
+    fn misnested_markup_is_mended() {
+        assert_eq!(
+            clean("<p><b>bold <i>both</b> italic</i></p>"),
+            "<p><b>bold <i>both</i></b><i> italic</i></p>"
+        );
+        assert_eq!(
+            clean("<table><tr><td>1</td></tr>stray</table>"),
+            "<p>stray</p><table><tbody><tr><td>1</td></tr></tbody></table>"
+        );
     }
 
     #[test]

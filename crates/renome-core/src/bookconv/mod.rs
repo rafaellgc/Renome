@@ -861,81 +861,93 @@ pub fn xml_ids(book: &mut Book) {
     toc(&mut book.toc, &new_of);
 }
 
-/// The language a book's text is most likely in, from its commonest
-/// words (`None` when too little text or no clear winner). Readers such as
-/// the Kindle refuse a book with no language.
+/// The language a book's text is most likely in (`None` when too little
+/// text or no clear answer), as the two-letter code books carry. Readers
+/// such as the Kindle refuse a book with no language.
 pub fn guess_language(text: &str) -> Option<&'static str> {
-    const WORDS: &[(&str, &[&str])] = &[
-        (
-            "en",
-            &[
-                "the", "and", "of", "to", "is", "that", "it", "was", "he", "with", "for", "his",
-                "you", "this", "but", "not",
-            ],
-        ),
-        (
-            "pt",
-            &[
-                "o", "de", "que", "e", "do", "da", "em", "um", "uma", "não", "com", "para", "os",
-                "as", "se", "mas", "ele", "ela", "foi", "como",
-            ],
-        ),
-        (
-            "es",
-            &[
-                "el", "la", "de", "que", "y", "en", "los", "las", "un", "una", "no", "con", "por",
-                "para", "se", "pero", "él", "ella", "fue", "como",
-            ],
-        ),
-        (
-            "fr",
-            &[
-                "le", "la", "les", "de", "et", "des", "un", "une", "est", "que", "pas", "il",
-                "elle", "dans", "pour", "qui", "avec", "mais",
-            ],
-        ),
-        (
-            "de",
-            &[
-                "der", "die", "und", "das", "ist", "nicht", "ein", "eine", "zu", "mit", "sich",
-                "den", "es", "auf", "ich", "er", "sie", "aber",
-            ],
-        ),
-        (
-            "it",
-            &[
-                "il", "la", "di", "che", "e", "è", "un", "una", "non", "per", "con", "gli", "le",
-                "del", "della", "ma", "lui", "lei",
-            ],
-        ),
-        (
-            "nl",
-            &[
-                "de", "het", "een", "en", "van", "is", "niet", "dat", "op", "te", "met", "zijn",
-                "ik", "hij", "zij", "maar",
-            ],
-        ),
-    ];
-    let mut counts = vec![0usize; WORDS.len()];
-    let mut total = 0usize;
-    for w in text
-        .split(|c: char| !c.is_alphabetic())
-        .filter(|w| !w.is_empty())
-        .take(20_000)
-    {
-        total += 1;
-        let w = w.to_lowercase();
-        for (i, (_, list)) in WORDS.iter().enumerate() {
-            if list.contains(&w.as_str()) {
-                counts[i] += 1;
-            }
-        }
+    // Enough for a sure answer; the whole book would only be slower.
+    let mut end = text.len().min(60_000);
+    while !text.is_char_boundary(end) {
+        end -= 1;
     }
-    let mut order: Vec<usize> = (0..WORDS.len()).collect();
-    order.sort_by_key(|&i| std::cmp::Reverse(counts[i]));
-    let (best, second) = (counts[order[0]], counts[order[1]]);
-    // Common words are a good share of any text; a clear lead is wanted.
-    (total >= 30 && best * 8 >= total && best * 10 >= second * 13).then(|| WORDS[order[0]].0)
+    let info = whatlang::detect(&text[..end])?;
+    if !info.is_reliable() {
+        return None;
+    }
+    // whatlang's codes are ISO 639-3; books use the two-letter ones.
+    Some(match info.lang().code() {
+        "afr" => "af",
+        "aka" => "ak",
+        "amh" => "am",
+        "ara" => "ar",
+        "aze" => "az",
+        "bel" => "be",
+        "ben" => "bn",
+        "bul" => "bg",
+        "cat" => "ca",
+        "ces" => "cs",
+        "cmn" => "zh",
+        "cym" => "cy",
+        "dan" => "da",
+        "deu" => "de",
+        "ell" => "el",
+        "eng" => "en",
+        "epo" => "eo",
+        "est" => "et",
+        "fin" => "fi",
+        "fra" => "fr",
+        "guj" => "gu",
+        "heb" => "he",
+        "hin" => "hi",
+        "hrv" => "hr",
+        "hun" => "hu",
+        "hye" => "hy",
+        "ind" => "id",
+        "ita" => "it",
+        "jav" => "jv",
+        "jpn" => "ja",
+        "kan" => "kn",
+        "kat" => "ka",
+        "khm" => "km",
+        "kor" => "ko",
+        "lat" => "la",
+        "lav" => "lv",
+        "lit" => "lt",
+        "mal" => "ml",
+        "mar" => "mr",
+        "mkd" => "mk",
+        "mya" => "my",
+        "nep" => "ne",
+        "nld" => "nl",
+        "nob" => "nb",
+        "ori" => "or",
+        "pan" => "pa",
+        "pes" => "fa",
+        "pol" => "pl",
+        "por" => "pt",
+        "ron" => "ro",
+        "rus" => "ru",
+        "sin" => "si",
+        "slk" => "sk",
+        "slv" => "sl",
+        "sna" => "sn",
+        "spa" => "es",
+        "srp" => "sr",
+        "swe" => "sv",
+        "tam" => "ta",
+        "tel" => "te",
+        "tgl" => "tl",
+        "tha" => "th",
+        "tuk" => "tk",
+        "tur" => "tr",
+        "ukr" => "uk",
+        "urd" => "ur",
+        "uzb" => "uz",
+        "vie" => "vi",
+        "yid" => "yi",
+        "zul" => "zu",
+        _ => return None,
+    })
 }
 
 /// The book's text (without markup), as much as a guess needs.
@@ -1023,6 +1035,10 @@ mod tests {
         assert_eq!(guess_language(pt), Some("pt"));
         assert_eq!(guess_language(en), Some("en"));
         assert_eq!(guess_language(es), Some("es"));
+        let fr = "Il était une fois une maison qui n'avait pas de porte, et il y alla avec le chien pour voir si la maison était comme le disaient les voisins de la rue.";
+        let ru = "Жил-был дом, у которого не было двери, и он пошёл к нему с собакой, чтобы посмотреть, такой ли это дом, как говорили соседи.";
+        assert_eq!(guess_language(fr), Some("fr"));
+        assert_eq!(guess_language(ru), Some("ru"));
         assert_eq!(guess_language("Capítulo um"), None);
     }
 

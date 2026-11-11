@@ -169,44 +169,10 @@ fn legacy_for(lang: &str) -> Option<&'static Encoding> {
     })
 }
 
-/// Of the Western, Central European and Cyrillic encodings, the one an
-/// unmarked text most likely is. Cyrillic text is mostly bytes above 127
-/// in runs (whole words); Western text has them alone among plain
-/// letters; Central European text has some that Western text hardly ever
-/// uses (`ł` is `³` there, `ą` is `¹`) or that it leaves undefined.
-fn guess_legacy(bytes: &[u8]) -> &'static Encoding {
-    let high = bytes.iter().filter(|&&b| b >= 0x80).count();
-    if high == 0 {
-        return encoding_rs::WINDOWS_1252;
-    }
-    let paired = bytes
-        .windows(2)
-        .filter(|w| w[0] >= 0xc0 && w[1] >= 0xc0)
-        .count();
-    let letters = bytes.iter().filter(|b| b.is_ascii_alphabetic()).count();
-    if paired * 2 > high && high * 2 > letters {
-        return encoding_rs::WINDOWS_1251;
-    }
-    let central = bytes
-        .iter()
-        .filter(|&&b| {
-            matches!(
-                b,
-                0x81 | 0x8c | 0x8d | 0x8f | 0x90 | 0x9c | 0x9d | 0x9f | 0xa3 | 0xa5 | 0xb3 | 0xb9
-            )
-        })
-        .count();
-    if central >= 3 && central * 20 >= high {
-        encoding_rs::WINDOWS_1250
-    } else {
-        encoding_rs::WINDOWS_1252
-    }
-}
-
 /// A subtitle's text and how it was written: UTF-8 or UTF-16 when it is
 /// (by its mark, or valid as UTF-8), else the old encoding of its
-/// language (`lang`, from its name), else a guess between the Western,
-/// Central European and Cyrillic ones.
+/// language (`lang`, from its name), else the one it most likely is
+/// ([`crate::text::guess_encoding`]).
 pub fn decode(bytes: &[u8], lang: Option<&str>) -> (String, Enc) {
     if let Some(rest) = bytes.strip_prefix(b"\xEF\xBB\xBF") {
         return (
@@ -232,7 +198,8 @@ pub fn decode(bytes: &[u8], lang: Option<&str>) -> (String, Enc) {
     }
     let e = lang
         .and_then(legacy_for)
-        .unwrap_or_else(|| guess_legacy(bytes));
+        .or_else(|| crate::text::guess_encoding(bytes))
+        .unwrap_or(encoding_rs::WINDOWS_1252);
     (
         e.decode_without_bom_handling(bytes).0.into_owned(),
         Enc::Legacy(e),

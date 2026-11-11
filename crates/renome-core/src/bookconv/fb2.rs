@@ -1171,12 +1171,61 @@ fn valid_sections(body: &str) -> String {
             for k in kids.iter_mut() {
                 fix(k);
             }
+            lift_images(kids);
             if name == "section" {
                 fix_section(kids);
             }
         }
     }
+    /// Quotes and epigraphs cannot hold pictures: they follow the quote
+    /// (which goes when nothing else was in it). A table with no rows
+    /// goes too.
+    fn lift_images(kids: &mut Vec<Piece>) {
+        let mut out = Vec::with_capacity(kids.len());
+        for k in std::mem::take(kids) {
+            match k {
+                Piece::Elem { name, open, kids: inner } if name == "cite" || name == "epigraph" => {
+                    let (pics, rest): (Vec<Piece>, Vec<Piece>) =
+                        inner.into_iter().partition(|k| k.name() == Some("image"));
+                    if rest.iter().any(|k| !k.blank()) || pics.is_empty() {
+                        out.push(Piece::Elem { name, open, kids: rest });
+                    }
+                    out.extend(pics);
+                }
+                Piece::Leaf { name: Some(n), raw } if n == "table" && raw.ends_with("/>") => {}
+                Piece::Elem { name, .. } if name == "table" && !has_rows(&k) => {}
+                k => out.push(k),
+            }
+        }
+        *kids = out;
+    }
+    fn has_rows(p: &Piece) -> bool {
+        matches!(p, Piece::Elem { kids, .. } if kids.iter().any(|k| k.name() == Some("tr")))
+    }
     fn fix_section(kids: &mut Vec<Piece>) {
+        // Headings one after another make one title.
+        let mut i = 0;
+        let mut last_title: Option<usize> = None;
+        while i < kids.len() {
+            if kids[i].blank() {
+                i += 1;
+                continue;
+            }
+            if kids[i].name() == Some("title") {
+                if let Some(t) = last_title {
+                    if let Piece::Elem { kids: more, .. } = kids.remove(i)
+                        && let Piece::Elem { kids: first, .. } = &mut kids[t]
+                    {
+                        first.extend(more);
+                    }
+                    continue;
+                }
+                last_title = Some(i);
+            } else {
+                break;
+            }
+            i += 1;
+        }
         let mut i = 0;
         let mut stage = 0;
         while i < kids.len() {
@@ -1191,7 +1240,19 @@ fn valid_sections(body: &str) -> String {
             stage = next;
             i += 1;
         }
-        let rest = kids.split_off(i);
+        let mut rest = kids.split_off(i);
+        // Text may not start with a picture (only the heading's one).
+        fn lead(run: &mut Vec<Piece>) {
+            if run.iter().find(|k| !k.blank()).and_then(|k| k.name()) == Some("image") {
+                run.insert(
+                    0,
+                    Piece::Leaf {
+                        name: Some("empty-line".into()),
+                        raw: "<empty-line/>".into(),
+                    },
+                );
+            }
+        }
         let sections = rest.iter().any(|k| k.name() == Some("section"));
         let other = rest
             .iter()
@@ -1205,12 +1266,16 @@ fn valid_sections(body: &str) -> String {
             return;
         }
         if !(sections && other) {
+            if other {
+                lead(&mut rest);
+            }
             kids.extend(rest);
             return;
         }
         let mut run: Vec<Piece> = Vec::new();
         let flush = |run: &mut Vec<Piece>, kids: &mut Vec<Piece>| {
             if run.iter().any(|k| !k.blank()) {
+                lead(run);
                 kids.push(Piece::Elem {
                     name: "section".into(),
                     open: "<section>".into(),
@@ -1633,6 +1698,20 @@ mod tests {
         );
         // Not nesting: left as it is.
         assert_eq!(valid_sections("<body><p>x</body>"), "<body><p>x</body>");
+    }
+
+    #[test]
+    fn pictures_titles_and_tables_made_valid() {
+        let body = "<body><section><title><p>A</p></title><title><p>B</p></title><cite><p>q</p><image l:href=\"#i\"/></cite><cite><image l:href=\"#j\"/></cite><table></table><p>x</p></section></body>";
+        assert_eq!(
+            valid_sections(body),
+            "<body><section><title><p>A</p><p>B</p></title><cite><p>q</p></cite><image l:href=\"#i\"/><image l:href=\"#j\"/><p>x</p></section></body>"
+        );
+        let two = "<body><section><image l:href=\"#a\"/><image l:href=\"#b\"/><p>x</p></section></body>";
+        assert_eq!(
+            valid_sections(two),
+            "<body><section><image l:href=\"#a\"/><empty-line/><image l:href=\"#b\"/><p>x</p></section></body>"
+        );
     }
 
     #[test]

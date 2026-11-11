@@ -1059,8 +1059,11 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   `bookconv::convert` reads the file into a `Book` (chapters of clean
   XHTML, resources, CSS, table of contents, cover, details, fixed-layout
   flag), applies the chosen/typed details (`with_values`), fills an empty
-  title from the name, drops links to missing ids, takes chapter titles
-  from the table of contents, writes `.name.renome-tags`, then the
+  title from the name, drops links to missing ids, makes ids valid XML
+  names (`id_…`, links and contents updated), guesses an empty language
+  from the text (whatlang, reliable answers only; readers such as the
+  Kindle refuse a book without one), takes chapter titles from the table
+  of contents, writes `.name.renome-tags`, then the
   original steps aside with its real extension (`source_ext`) and the new
   file takes the name (`finish`, the comic converter's pattern; undo via
   `Backup.converted`; a trashed original makes undo give the old name the
@@ -1073,8 +1076,10 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   are left out); Kindle record 0 encryption type ≠ 0; KFX `\xeaDRMION`;
   PDF with `/Encrypt` anywhere in a file up to 4 MB, else its first and
   last megabyte.
-- Readers: `xhtml.rs` (forgiving HTML/XML tree builder with implied end
-  tags, HTML 4 entities, Windows-1252 numeric refs; writer keeps a fixed
+- Readers: `xhtml.rs` (HTML read by html5ever's standard tree builder
+  into our own tree, after XHTML's empty tags `<x/>` and MOBI's
+  `<mbp:pagebreak>` are closed and stray-`</p>` empty paragraphs
+  dropped; XML (FB2, Office) by our own forgiving builder; writer keeps a fixed
   element set, safe attributes, `epub:type`, styles limited to alignment,
   emphasis, indents in em/%, breaks; old `<font size>`, `<center>`,
   `<tt>`, MOBI `<p width|height>`, SVG-wrapped pictures; drops `hidden`
@@ -1090,8 +1095,8 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   gridSpan/vMerge, page breaks, text boxes, content controls; ODT:
   automatic and common styles with parents, `text:h`, lists by list
   style, notes, frames, tables with spans; empty paragraphs as spacing);
-  `text_in.rs` (encoding by BOM, declaration, UTF-8, else Windows-1251 vs
-  1252; TXT paragraphs by blank lines, wrap width, indents; chapter
+  `text_in.rs` (encoding by BOM, declaration, UTF-8, else chardetng's
+  guess; TXT paragraphs by blank lines, wrap width, indents; chapter
   headings by common names; `_italic_`/`*bold*`; HTML/HTMLZ with pictures;
   `add_document` cuts chapters at the highest heading level used twice,
   at page breaks when told, and at ~150 KB); `mobi.rs` (MOBI 6: text
@@ -1851,9 +1856,8 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   of the language in the name (`.ru` 1251, `.pl` 1250, `.el` 1253, `.tr`
   1254, `.he` 1255, `.ar` 1256, Baltic 1257, `.vi` 1258, `.th` 874, `.ja`
   Shift_JIS, `.ko` EUC-KR, `.zh` GBK / Big5 for TW/HK/MO, Western 1252),
-  else a guess: Cyrillic when most high bytes come in runs and outnumber
-  ASCII letters, Central European when ≥3 bytes rare in 1252 (³ ¹ œ £ ¥,
-  undefined ones) make ≥5% of the high bytes, else 1252. Output keeps
+  else chardetng's guess (`text::guess_encoding`, the detector Firefox
+  uses), else 1252. Output keeps
   the encoding unless `utf8`; a character the old encoding cannot hold
   makes it UTF-8. Invalid UTF-8 with no other reading: refused
   (`subEncoding`). Downloaded subtitles are decoded the same way, with
