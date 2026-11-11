@@ -60,6 +60,18 @@ fn aid_of(n: u32) -> String {
     base32(n, digits)
 }
 
+/// A small JPEG of the cover (330 pixels high at most), as Kindles show
+/// in their library.
+fn thumbnail(data: &[u8]) -> Option<Vec<u8>> {
+    let img = image::load_from_memory(data).ok()?;
+    let small = img.thumbnail(330 * img.width() / img.height().max(1) + 1, 330);
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 85)
+        .encode_image(&small.to_rgb8())
+        .ok()?;
+    Some(out.into_inner())
+}
+
 /// A number in 7-bit groups, the last byte marked (as indexes have them).
 fn varlen(mut n: u32, out: &mut Vec<u8>) {
     let mut groups = vec![(n & 0x7f) as u8 | 0x80];
@@ -309,8 +321,10 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
     // Every element gets its `aid` (the Kindle finds places, and turns
     // pages, by them), numbered through the book.
     let mut bodies: Vec<String> = Vec::new();
-    let mut aid = 1u32;
-    for c in &book.chapters {
+    // Numbered as Kindle's own tools do: a file's body is its number
+    // times a million, its elements the numbers after it.
+    for (i, c) in book.chapters.iter().enumerate() {
+        let mut aid = i as u32 * 1_000_000 + 1;
         let mut body = c.body.clone();
         for (name, n) in &pic_no {
             body = body.replace(
@@ -388,13 +402,12 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
     } else {
         book.meta.language.clone()
     };
-    // Each file's body has its own `aid` (after the elements' ones): its
+    // Each file's body has its own `aid` (its number times a million): its
     // fragment is put in by it, so two files must never share one.
     let mut selectors = Vec::new();
     let mut files = Vec::new();
-    for (c, body) in book.chapters.iter().zip(&bodies) {
-        let body_aid = aid_of(aid);
-        aid += 1;
+    for (i, (c, body)) in book.chapters.iter().zip(&bodies).enumerate() {
+        let body_aid = aid_of(i as u32 * 1_000_000);
         selectors.push(format!("P-//*[@aid='{body_aid}']"));
         let title = if c.title.is_empty() {
             &book.meta.title
@@ -407,7 +420,7 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
             .map(|(w, h)| format!("<meta name=\"viewport\" content=\"width={w}, height={h}\"/>\n"))
             .unwrap_or_default();
         let head = format!(
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"{l}\" lang=\"{l}\">\n<head>\n{viewport}<title>{t}</title>\n<link href=\"kindle:flow:0001?mime=text/css\" rel=\"stylesheet\" type=\"text/css\"/>\n</head>\n<body aid=\"{body_aid}\">",
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"{l}\" lang=\"{l}\">\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\"/>\n{viewport}<title>{t}</title>\n<link href=\"kindle:flow:0001?mime=text/css\" rel=\"stylesheet\" type=\"text/css\"/>\n</head>\n<body aid=\"{body_aid}\">",
             l = esc_attr(if c.lang.is_empty() { &lang } else { &c.lang }),
             t = esc(title)
         );
@@ -667,16 +680,38 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
     // the pictures, then the flows' table and the closing records.
     let mut records: Vec<Vec<u8>> = vec![Vec::new()];
     records.extend(text_recs.iter().cloned());
+    // The guide: where reading starts (the first file's start).
+    let (guide_strings, _) = strings_of(&["Start".to_string()]);
+    let guide_idx = index(
+        &[(1, 1, 0x01, 0), (6, 2, 0x02, 0), (0, 0, 0, 1)],
+        1,
+        &[("text".to_string(), vec![(1, vec![0]), (6, vec![0, 0])])],
+        Some(&guide_strings),
+    );
+    // In the order Kindle's own files have them: fragments, skeletons,
+    // guide, contents.
     let first_nonbook = records.len();
-    let skel_at = records.len();
-    records.extend(skel_idx);
     let frag_at = records.len();
     records.extend(frag_idx);
+    let skel_at = records.len();
+    records.extend(skel_idx);
+    let guide_at = records.len();
+    records.extend(guide_idx);
     let ncx_at = records.len();
     records.extend(ncx_idx);
     let first_res = records.len();
     for p in &pics {
         records.push(p.data.clone());
+    }
+    // The cover small, as the library shows it, after the pictures.
+    let cover_no = book
+        .cover
+        .as_ref()
+        .and_then(|c| pic_no.get(c.as_str()))
+        .copied();
+    let thumb = cover_no.and_then(|n| thumbnail(&pics[n as usize - 1].data));
+    if let Some(t) = &thumb {
+        records.push(t.clone());
     }
     let fdst_at = records.len();
     let mut fdst = b"FDST".to_vec();
@@ -732,7 +767,8 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
     }
     exth.push((503, m.title.as_bytes().to_vec()));
     // How many resources (pictures) the book has, and none of another kind.
-    exth.push((125, (pics.len() as u32).to_be_bytes().to_vec()));
+    let resources = pics.len() as u32 + u32::from(thumb.is_some());
+    exth.push((125, resources.to_be_bytes().to_vec()));
     exth.push((131, 0u32.to_be_bytes().to_vec()));
     exth.push((524, lang.as_bytes().to_vec()));
     // A comic is a personal document (as those copied to a Kindle are);
@@ -755,12 +791,20 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
             exth.push((525, b"horizontal-lr".to_vec()));
         }
     }
-    if let Some(c) = &book.cover
-        && let Some(n) = pic_no.get(c.as_str())
-    {
+    if let Some(n) = cover_no {
         exth.push((201, (n - 1).to_be_bytes().to_vec()));
-        exth.push((129, format!("kindle:embed:{}", base32(*n, 4)).into_bytes()));
+        if thumb.is_some() {
+            exth.push((202, (pics.len() as u32).to_be_bytes().to_vec()));
+        }
+        exth.push((203, 0u32.to_be_bytes().to_vec()));
+        exth.push((129, format!("kindle:embed:{}", base32(n, 4)).into_bytes()));
     }
+    // The maker, as Kindle's own converter (version 2.9) says it: Kindles
+    // read the newer format (KF8) only from files that say so.
+    exth.push((204, 201u32.to_be_bytes().to_vec()));
+    exth.push((205, 2u32.to_be_bytes().to_vec()));
+    exth.push((206, 9u32.to_be_bytes().to_vec()));
+    exth.push((207, 0u32.to_be_bytes().to_vec()));
     let mut ex = Vec::new();
     for (k, v) in &exth {
         put32(&mut ex, *k);
@@ -821,7 +865,7 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
     set32(&mut r0, 0xF8, frag_at as u32);
     set32(&mut r0, 0xFC, skel_at as u32);
     set32(&mut r0, 0x100, u32::MAX);
-    set32(&mut r0, 0x104, u32::MAX);
+    set32(&mut r0, 0x104, guide_at as u32);
     for o in (0x108..16 + header_len).step_by(4) {
         set32(&mut r0, o, u32::MAX);
     }
