@@ -211,6 +211,10 @@ fn index(
     let mut meta = vec![0u8; 192];
     meta[..4].copy_from_slice(b"INDX");
     set32(&mut meta, 4, 192);
+    // The index kind Kindles expect, and where the tag table starts: a
+    // reader that finds neither cannot use the index (a blank page).
+    set32(&mut meta, 16, 2);
+    set32(&mut meta, 180, 192);
     set32(&mut meta, 24, 1);
     set32(&mut meta, 28, 65001);
     set32(&mut meta, 32, u32::MAX);
@@ -821,6 +825,12 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
     for o in (0x108..16 + header_len).step_by(4) {
         set32(&mut r0, o, u32::MAX);
     }
+    // Two words Kindle books have as zero.
+    for o in [0x10Cusize, 0x114] {
+        if o + 4 <= 16 + header_len {
+            set32(&mut r0, o, 0);
+        }
+    }
     r0.extend_from_slice(&exth_rec);
     r0.extend_from_slice(m.title.as_bytes());
     // Room after the title, as Kindle books leave it.
@@ -876,6 +886,17 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::super::*;
+
+    #[test]
+    fn index_header_tells_its_kind_and_tag_table() {
+        let tags = [(1u8, 1u8, 1u8, 0u8), (0, 0, 0, 1)];
+        let entries = vec![("A".to_string(), vec![(1u8, vec![5u32])])];
+        let recs = super::index(&tags, 1, &entries, None);
+        let be = |r: &[u8], at: usize| u32::from_be_bytes(r[at..at + 4].try_into().unwrap());
+        assert_eq!(be(&recs[0], 16), 2);
+        assert_eq!(be(&recs[0], 180), 192);
+        assert_eq!(&recs[0][192..196], b"TAGX");
+    }
 
     #[test]
     fn palmdoc_both_ways() {

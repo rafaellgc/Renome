@@ -1613,7 +1613,7 @@ mod tests {
             fs::copy(dir.join("src.cbz"), &p).unwrap();
             let label = match to {
                 Format::Pdf => "Teste 3 - PDF",
-                _ => "Teste 1B - AZW3 corrigido",
+                _ => "Teste 1C - AZW3 indices corrigidos",
             };
             // As the app gives it.
             let values = vec![
