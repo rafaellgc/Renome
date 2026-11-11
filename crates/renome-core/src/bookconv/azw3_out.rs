@@ -37,6 +37,24 @@ fn base32(mut n: u32, width: usize) -> String {
     String::from_utf8(s).unwrap()
 }
 
+/// `body` with an `aid` on each element that has none (not on empty ones
+/// such as `img` and `br`), numbered from `next` in base 32.
+fn with_aids(body: &str, next: &mut u32) -> String {
+    const EMPTY: &[&str] = &["img", "br", "hr", "meta", "link", "input", "col", "area", "wbr", "source", "embed", "param"];
+    let tag = regex::Regex::new(r"<([A-Za-z][A-Za-z0-9:-]*)([^<>]*?)(/?)>").unwrap();
+    tag.replace_all(body, |c: &regex::Captures| {
+        let name = c[1].to_ascii_lowercase();
+        if EMPTY.contains(&name.as_str()) || c[2].contains(" aid=") || !c[3].is_empty() {
+            return c[0].to_string();
+        }
+        let n = *next;
+        *next += 1;
+        let digits = if n < 32 { 1 } else { ((32 - n.leading_zeros()) as usize).div_ceil(5) };
+        format!("<{}{} aid=\"{}\">", &c[1], &c[2], base32(n, digits))
+    })
+    .into_owned()
+}
+
 /// A number in 7-bit groups, the last byte marked (as indexes have them).
 fn varlen(mut n: u32, out: &mut Vec<u8>) {
     let mut groups = vec![(n & 0x7f) as u8 | 0x80];
@@ -284,7 +302,10 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
         .collect();
 
     // Each chapter's body, with `kindle:` addresses; where its ids are.
+    // Every element gets its `aid` (the Kindle finds places, and turns
+    // pages, by them), numbered through the book.
     let mut bodies: Vec<String> = Vec::new();
+    let mut aid = 1u32;
     for c in &book.chapters {
         let mut body = c.body.clone();
         for (name, n) in &pic_no {
@@ -293,7 +314,16 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
                 &format!("src=\"kindle:embed:{}?mime={}\"", base32(*n, 4), mime[name]),
             );
         }
-        bodies.push(body);
+        // A fixed page's picture at the page's own size, in pixels.
+        if book.fixed
+            && let Some((w, h)) = c.page
+        {
+            body = body.replace(
+                "style=\"width: 100%; height: 100%\"",
+                &format!("style=\"width: {w}px; height: {h}px\""),
+            );
+        }
+        bodies.push(with_aids(&body, &mut aid));
     }
     // Ids: (chapter, id) → offset of their element in the fragment.
     let id_re = regex::Regex::new(r#"<[^<>]*\sid="([^"]+)""#).unwrap();
@@ -408,6 +438,10 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
     }
     let flow0 = text.len();
     let mut css = book.css.clone();
+    // Fixed pages fill the screen: no margin around the picture.
+    if book.fixed {
+        css.push_str("\nbody { margin: 0; padding: 0; }\n.page { margin: 0; padding: 0; }\n.page img { display: block; margin: 0; padding: 0; }\n");
+    }
     // Pictures in the style sheet.
     for (name, n) in &pic_no {
         css = css.replace(
@@ -521,10 +555,17 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
         Some(&ncx_strings),
     );
 
-    // Records in order.
+    // Records in the order Kindle books have them: the text, its indexes,
+    // the pictures, then the flows' table and the closing records.
     let mut records: Vec<Vec<u8>> = vec![Vec::new()];
     records.extend(text_recs.iter().cloned());
     let first_nonbook = records.len();
+    let skel_at = records.len();
+    records.extend(skel_idx);
+    let frag_at = records.len();
+    records.extend(frag_idx);
+    let ncx_at = records.len();
+    records.extend(ncx_idx);
     let first_res = records.len();
     for p in &pics {
         records.push(p.data.clone());
@@ -538,12 +579,6 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
         put32(&mut fdst, *b as u32);
     }
     records.push(fdst);
-    let skel_at = records.len();
-    records.extend(skel_idx);
-    let frag_at = records.len();
-    records.extend(frag_idx);
-    let ncx_at = records.len();
-    records.extend(ncx_idx);
     let flis_at = records.len();
     let mut flis = b"FLIS".to_vec();
     for v in [8u32, 0x41, 0, 0, u32::MAX] {
@@ -588,8 +623,13 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
         exth.push((106, m.date.as_bytes().to_vec()));
     }
     exth.push((503, m.title.as_bytes().to_vec()));
+    // How many resources (pictures) the book has, and none of another kind.
+    exth.push((125, (pics.len() as u32).to_be_bytes().to_vec()));
+    exth.push((131, 0u32.to_be_bytes().to_vec()));
     exth.push((524, lang.as_bytes().to_vec()));
-    exth.push((501, b"EBOK".to_vec()));
+    // A comic is a personal document (as those copied to a Kindle are);
+    // other books are books.
+    exth.push((501, if book.fixed { b"PDOC".to_vec() } else { b"EBOK".to_vec() }));
     // Pages of pictures (a comic): laid out as they are, at their size,
     // turning right to left when the book does.
     if book.fixed {
@@ -675,7 +715,8 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
     }
     r0.extend_from_slice(&exth_rec);
     r0.extend_from_slice(m.title.as_bytes());
-    r0.extend_from_slice(&[0, 0]);
+    // Room after the title, as Kindle books leave it.
+    r0.extend(std::iter::repeat_n(0u8, 8192));
     while !r0.len().is_multiple_of(4) {
         r0.push(0);
     }
