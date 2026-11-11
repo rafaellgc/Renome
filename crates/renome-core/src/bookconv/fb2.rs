@@ -231,6 +231,7 @@ fn details(desc: &Elem, book: &mut Book, pics: &HashMap<String, String>) {
     };
     let m = &mut book.meta;
     if let Some(ti) = child(desc, "title-info") {
+        let mut codes = Vec::new();
         for k in &ti.kids {
             let Node::Elem(e) = k else { continue };
             match e.name.as_str() {
@@ -259,7 +260,13 @@ fn details(desc: &Elem, book: &mut Book, pics: &HashMap<String, String>) {
                 }
                 "genre" => {
                     let g = clean_line(&e.plain());
-                    if !g.is_empty() {
+                    if g.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
+                        // A code of the format's list: only when the book
+                        // gives no words of its own.
+                        if !g.is_empty() {
+                            codes.push(g);
+                        }
+                    } else if !g.is_empty() {
                         m.subjects.push(g);
                     }
                 }
@@ -287,6 +294,9 @@ fn details(desc: &Elem, book: &mut Book, pics: &HashMap<String, String>) {
                 }
                 _ => {}
             }
+        }
+        if m.subjects.is_empty() {
+            m.subjects = codes.into_iter().filter(|c| c != "unrecognised").collect();
         }
     }
     if let Some(pi) = child(desc, "publish-info") {
@@ -735,11 +745,19 @@ pub fn to_fb2(book: &Book) -> String {
         depth: 0,
     };
     let mut ti = String::new();
-    for g in m.subjects.iter().take(3) {
-        ti.push_str(&format!("<genre>{}</genre>", esc(g)));
+    // Genres come from the format's own list; the book's words go in its
+    // keywords.
+    let mut genres: Vec<&str> = Vec::new();
+    for g in m.subjects.iter().filter_map(|s| genre_of(s)) {
+        if !genres.contains(&g) && genres.len() < 3 {
+            genres.push(g);
+        }
     }
-    if m.subjects.is_empty() {
-        ti.push_str("<genre>prose</genre>");
+    if genres.is_empty() {
+        genres.push("unrecognised");
+    }
+    for g in genres {
+        ti.push_str(&format!("<genre>{g}</genre>"));
     }
     for a in &m.authors {
         ti.push_str(&person_xml("author", a));
@@ -753,6 +771,15 @@ pub fn to_fb2(book: &Book) -> String {
             "<annotation><p>{}</p></annotation>",
             esc(&m.description)
         ));
+    }
+    let words: Vec<&str> = m
+        .subjects
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if !words.is_empty() {
+        ti.push_str(&format!("<keywords>{}</keywords>", esc(&words.join(", "))));
     }
     if !m.date.is_empty() {
         ti.push_str(&format!("<date>{}</date>", esc(&m.date)));
@@ -835,6 +862,7 @@ pub fn to_fb2(book: &Book) -> String {
             "<body name=\"notes\"><title><p>Notes</p></title>{notes}</body>"
         ));
     }
+    w.out = valid_sections(&w.out);
     let mut bins = String::new();
     let mut seen = std::collections::HashSet::new();
     for p in &w.pics {
@@ -859,6 +887,358 @@ pub fn to_fb2(book: &Book) -> String {
         },
         w.out
     )
+}
+
+/// The genre of the format's list a subject stands for (in English,
+/// Portuguese or Spanish words), if any.
+fn genre_of(subject: &str) -> Option<&'static str> {
+    const GENRES: &[(&str, &[&str])] = &[
+        (
+            "nonfiction",
+            &[
+                "nao-ficcao",
+                "nao ficcao",
+                "non-fiction",
+                "nonfiction",
+                "no ficcion",
+                "no-ficcion",
+            ],
+        ),
+        (
+            "prose_history",
+            &[
+                "ficcao historica",
+                "romance historico",
+                "historical fiction",
+                "novela historica",
+            ],
+        ),
+        ("sf_cyberpunk", &["cyberpunk"]),
+        ("sf_space", &["space opera", "opera espacial"]),
+        ("sf_horror", &["horror", "terror"]),
+        (
+            "sf",
+            &[
+                "ficcao cientifica",
+                "science fiction",
+                "ciencia ficcion",
+                "ficcion cientifica",
+                "sci-fi",
+                "scifi",
+            ],
+        ),
+        ("sf_fantasy", &["fantasia", "fantasy"]),
+        (
+            "detective",
+            &[
+                "detective",
+                "detetive",
+                "policial",
+                "mystery",
+                "misterio",
+                "crime",
+                "noir",
+            ],
+        ),
+        ("thriller", &["thriller", "suspense"]),
+        (
+            "love_contemporary",
+            &[
+                "romantic",
+                "romantico",
+                "romantica",
+                "love stor",
+                "historia de amor",
+            ],
+        ),
+        ("adventure", &["aventura", "adventure"]),
+        ("humor", &["humor", "comedia", "comedy"]),
+        ("poetry", &["poesia", "poetry", "poema", "poem"]),
+        (
+            "dramaturgy",
+            &["teatro", "theatre", "theater", "dramaturgia"],
+        ),
+        (
+            "children",
+            &["infantil", "children", "juvenil", "kids", "young adult"],
+        ),
+        (
+            "nonf_biography",
+            &["biografia", "biography", "memoir", "memoria", "autobiograf"],
+        ),
+        (
+            "religion_self",
+            &[
+                "autoajuda",
+                "auto-ajuda",
+                "autoayuda",
+                "self-help",
+                "self help",
+                "desenvolvimento pessoal",
+                "personal development",
+            ],
+        ),
+        (
+            "religion",
+            &[
+                "religiao",
+                "religion",
+                "teologia",
+                "theology",
+                "cristianismo",
+                "christian",
+                "espiritualidade",
+                "spiritual",
+                "biblia",
+                "bible",
+            ],
+        ),
+        ("sci_philosophy", &["filosofia", "philosophy"]),
+        ("psy_generic", &["psicologia", "psychology"]),
+        ("sci_politics", &["politica", "politics"]),
+        ("sci_history", &["historia", "history"]),
+        ("antique_myths", &["mitologia", "mythology"]),
+        (
+            "home_cooking",
+            &["culinaria", "cooking", "receita", "cookbook", "cocina"],
+        ),
+        (
+            "computers",
+            &[
+                "computacao",
+                "informatica",
+                "programacao",
+                "programming",
+                "computer",
+            ],
+        ),
+        (
+            "personal_finance",
+            &[
+                "financas pessoais",
+                "personal finance",
+                "finanzas personales",
+            ],
+        ),
+        (
+            "popular_business",
+            &[
+                "negocio",
+                "business",
+                "empreendedor",
+                "administracao",
+                "management",
+                "empresa",
+            ],
+        ),
+        ("economics", &["economia", "economics"]),
+        ("ref_dict", &["dicionario", "dictionary", "diccionario"]),
+        (
+            "reference",
+            &["referencia", "reference", "guia", "guide", "manual"],
+        ),
+        ("essays", &["ensaio", "essay", "ensayo"]),
+        (
+            "short_story",
+            &["contos", "short stor", "cuentos", "relatos"],
+        ),
+        ("prose_classic", &["classico", "classic", "clasico"]),
+        ("science", &["ciencia", "science"]),
+    ];
+    let s = crate::text::strip_accents(subject).to_lowercase();
+    if s.chars().all(|c| c.is_ascii_lowercase() || c == '_') && GENRES.iter().any(|(g, _)| *g == s)
+    {
+        return GENRES.iter().find(|(g, _)| *g == s).map(|(g, _)| *g);
+    }
+    GENRES
+        .iter()
+        .find(|(_, words)| words.iter().any(|w| s.contains(w)))
+        .map(|(g, _)| *g)
+}
+
+/// A piece of the written body: an element with its pieces, or a leaf
+/// (text, or an element with nothing inside) as written.
+enum Piece {
+    Elem {
+        name: String,
+        open: String,
+        kids: Vec<Piece>,
+    },
+    Leaf {
+        name: Option<String>,
+        raw: String,
+    },
+}
+
+impl Piece {
+    fn name(&self) -> Option<&str> {
+        match self {
+            Piece::Elem { name, .. } => Some(name),
+            Piece::Leaf { name, .. } => name.as_deref(),
+        }
+    }
+
+    fn blank(&self) -> bool {
+        matches!(self, Piece::Leaf { name: None, raw } if raw.trim().is_empty())
+    }
+
+    fn write(&self, out: &mut String) {
+        match self {
+            Piece::Elem { name, open, kids } => {
+                out.push_str(open);
+                for k in kids {
+                    k.write(out);
+                }
+                out.push_str("</");
+                out.push_str(name);
+                out.push('>');
+            }
+            Piece::Leaf { raw, .. } => out.push_str(raw),
+        }
+    }
+}
+
+/// The written body read back into pieces (`None` if it does not nest).
+fn pieces(s: &str) -> Option<Vec<Piece>> {
+    let b = s.as_bytes();
+    let mut stack: Vec<(String, String, Vec<Piece>)> =
+        vec![(String::new(), String::new(), Vec::new())];
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] != b'<' {
+            let j = s[i..].find('<').map_or(b.len(), |k| i + k);
+            stack.last_mut()?.2.push(Piece::Leaf {
+                name: None,
+                raw: s[i..j].to_string(),
+            });
+            i = j;
+            continue;
+        }
+        let mut j = i + 1;
+        let mut quote = 0u8;
+        while j < b.len() {
+            let c = b[j];
+            if quote != 0 {
+                if c == quote {
+                    quote = 0;
+                }
+            } else if c == b'"' || c == b'\'' {
+                quote = c;
+            } else if c == b'>' {
+                break;
+            }
+            j += 1;
+        }
+        if j >= b.len() {
+            return None;
+        }
+        let tag = &s[i..=j];
+        i = j + 1;
+        let name: String = tag
+            .trim_start_matches("</")
+            .trim_start_matches('<')
+            .chars()
+            .take_while(|c| !c.is_whitespace() && *c != '/' && *c != '>')
+            .collect();
+        if tag.starts_with("</") {
+            let (open_name, open, kids) = stack.pop()?;
+            if open_name != name || stack.is_empty() {
+                return None;
+            }
+            stack.last_mut()?.2.push(Piece::Elem { name, open, kids });
+        } else if tag.ends_with("/>") || tag.starts_with("<?") || tag.starts_with("<!") {
+            stack.last_mut()?.2.push(Piece::Leaf {
+                name: Some(name),
+                raw: tag.to_string(),
+            });
+        } else {
+            stack.push((name, tag.to_string(), Vec::new()));
+        }
+    }
+    if stack.len() != 1 {
+        return None;
+    }
+    stack.pop().map(|(_, _, k)| k)
+}
+
+/// Makes every section what the format allows: its heading (title,
+/// epigraphs, picture, annotation), then either sections or text, never
+/// both (text beside sections goes into a section of its own) and never
+/// nothing (an empty line then).
+fn valid_sections(body: &str) -> String {
+    fn fix(p: &mut Piece) {
+        if let Piece::Elem { name, kids, .. } = p {
+            for k in kids.iter_mut() {
+                fix(k);
+            }
+            if name == "section" {
+                fix_section(kids);
+            }
+        }
+    }
+    fn fix_section(kids: &mut Vec<Piece>) {
+        let mut i = 0;
+        let mut stage = 0;
+        while i < kids.len() {
+            let next = match kids[i].name() {
+                _ if kids[i].blank() => stage,
+                Some("title") if stage < 1 => 1,
+                Some("epigraph") if stage <= 2 => 2,
+                Some("image") if stage < 3 => 3,
+                Some("annotation") if stage < 4 => 4,
+                _ => break,
+            };
+            stage = next;
+            i += 1;
+        }
+        let rest = kids.split_off(i);
+        let sections = rest.iter().any(|k| k.name() == Some("section"));
+        let other = rest
+            .iter()
+            .any(|k| !k.blank() && k.name() != Some("section"));
+        if !other && !sections {
+            kids.extend(rest);
+            kids.push(Piece::Leaf {
+                name: Some("empty-line".into()),
+                raw: "<empty-line/>".into(),
+            });
+            return;
+        }
+        if !(sections && other) {
+            kids.extend(rest);
+            return;
+        }
+        let mut run: Vec<Piece> = Vec::new();
+        let flush = |run: &mut Vec<Piece>, kids: &mut Vec<Piece>| {
+            if run.iter().any(|k| !k.blank()) {
+                kids.push(Piece::Elem {
+                    name: "section".into(),
+                    open: "<section>".into(),
+                    kids: std::mem::take(run),
+                });
+            } else {
+                kids.append(run);
+            }
+        };
+        for k in rest {
+            if k.name() == Some("section") {
+                flush(&mut run, kids);
+                kids.push(k);
+            } else {
+                run.push(k);
+            }
+        }
+        flush(&mut run, kids);
+    }
+    let Some(mut all) = pieces(body) else {
+        return body.to_string();
+    };
+    let mut out = String::with_capacity(body.len() + 64);
+    for p in &mut all {
+        fix(p);
+        p.write(&mut out);
+    }
+    out
 }
 
 /// Notes (`<aside>` footnotes, `epub:type` note elements) taken out of a
@@ -1243,6 +1623,27 @@ mod tests {
 <body name="notes"><title><p>Notas</p></title><section id="n1"><title><p>1</p></title><p>Texto da nota.</p></section></body>
 <binary id="c.png" content-type="image/png">iVBORw0KGgo=</binary>
 </FictionBook>"##;
+
+    #[test]
+    fn sections_made_valid() {
+        let body = "<body><section><title><p>A</p></title></section><section><p>x</p><section><title><p>B</p></title><p>y</p></section><p>z</p></section></body>";
+        assert_eq!(
+            valid_sections(body),
+            "<body><section><title><p>A</p></title><empty-line/></section><section><section><p>x</p></section><section><title><p>B</p></title><p>y</p></section><section><p>z</p></section></section></body>"
+        );
+        // Not nesting: left as it is.
+        assert_eq!(valid_sections("<body><p>x</body>"), "<body><p>x</body>");
+    }
+
+    #[test]
+    fn genres_from_the_list() {
+        assert_eq!(genre_of("Ficção Científica"), Some("sf"));
+        assert_eq!(genre_of("Não-ficção"), Some("nonfiction"));
+        assert_eq!(genre_of("Teologia"), Some("religion"));
+        assert_eq!(genre_of("Poesia"), Some("poetry"));
+        assert_eq!(genre_of("sf_fantasy"), Some("sf_fantasy"));
+        assert_eq!(genre_of("Xyz"), None);
+    }
 
     #[test]
     fn reads_fb2() {

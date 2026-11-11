@@ -535,13 +535,24 @@ fn part_pages(r: &Records, p: &Part) -> Result<Vec<KindlePage>, String> {
 /// The pages of the Kindle book at `path` (MOBI or AZW3), when it is a
 /// comic: the newer part's pictures (sharper) when it has one. Errors as
 /// for [`epub`].
+/// The header record of a file's newer (KF8) part, from where its older
+/// part's header says that part starts: the header itself, or the
+/// `BOUN` record just before it (tools differ).
+pub(crate) fn kf8_header(r: &Records, boundary: usize) -> usize {
+    if r.read(boundary, 4).as_deref() == Some(b"BOUN") {
+        boundary + 1
+    } else {
+        boundary
+    }
+}
+
 pub(crate) fn kindle(path: &Path) -> Result<Vec<KindlePage>, String> {
     let r = Records::open(path)?;
     let first = part(&r, 0).ok_or("comicUnsupported")?;
     if first.encrypted {
         return Err("archiveLocked".into());
     }
-    if let Some(newer) = first.boundary.and_then(|b| part(&r, b))
+    if let Some(newer) = first.boundary.and_then(|b| part(&r, kf8_header(&r, b)))
         && let Ok(pages) = part_pages(&r, &newer)
     {
         return Ok(pages);

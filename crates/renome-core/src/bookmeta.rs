@@ -426,7 +426,10 @@ fn kindle_write(b: &[u8], v: &BookValues) -> Result<Option<Vec<u8>>, String> {
     // The KF8 part of a combined book: EXTH 121 says where it starts.
     let boundary = exth_value(&records[0], 121)
         .and_then(|d| d.get(..4).map(|x| u32::from_be_bytes(x.try_into().unwrap()) as usize))
-        .filter(|&i| i > 0 && i < n);
+        .filter(|&i| i > 0 && i < n)
+        // The header itself, or the `BOUN` record just before it.
+        .map(|i| if records[i].starts_with(b"BOUN") { i + 1 } else { i })
+        .filter(|&i| i < n);
     records[0] = first;
     if let Some(i) = boundary
         && let Some(h) = kindle_header(&records[i], v)

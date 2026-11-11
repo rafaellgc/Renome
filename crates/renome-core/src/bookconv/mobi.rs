@@ -44,7 +44,8 @@ fn text_bytes(
 
 /// The details of a Kindle book.
 fn details(path: &Path, book: &mut Book) {
-    let own = crate::ebook::read(path);
+    // Converting, it has the new format's extension already.
+    let own = crate::ebook::read_as(path, "mobi");
     let m = &mut book.meta;
     m.title = own.title;
     m.authors = own.authors;
@@ -93,16 +94,17 @@ pub fn read(path: &Path) -> Result<Book, String> {
     let kf8_at = if p0.kf8 {
         Some(0)
     } else {
-        p0.boundary.map(|b| b + 1)
+        p0.boundary.map(|b| crate::pages::kf8_header(&r, b))
     };
     if let Some(at) = kf8_at
         && let Some(p) = part(&r, at)
     {
         // Pages of pictures laid out as they are (a comic), and their
         // direction.
-        if let Some(h) = r.read(at, 64 << 10) {
-            book.fixed = exth(&h, 122).is_some_and(|v| v == b"true");
-            book.rtl = exth(&h, 527).is_some_and(|v| v == b"rtl");
+        // (a file with both parts may say it in the older one's header).
+        for h in [r.read(at, 64 << 10), r.read(0, 64 << 10)].into_iter().flatten() {
+            book.fixed |= exth(&h, 122).is_some_and(|v| v == b"true");
+            book.rtl |= exth(&h, 527).is_some_and(|v| v == b"rtl");
         }
         match kf8(&r, &p, at, &mut book) {
             Ok(()) => return finish(&r, book, &p),
@@ -712,7 +714,17 @@ fn kf8(r: &Records, p: &crate::pages::Part, at: usize, book: &mut Book) -> Resul
     // The table of contents.
     if let Some(ncx) = ncx {
         let mut flat: Vec<(usize, Toc)> = Vec::new();
+        // Entries by number, with their first and last child's: books
+        // made by Kindle's own tools list them level by level, the
+        // children found by these, not by the order.
+        let mut by_no: Vec<Option<Toc>> = Vec::new();
+        let mut kids_of: Vec<Option<(usize, usize)>> = Vec::new();
+        let mut is_kid: Vec<bool> = Vec::new();
         for (_, t) in &ncx.entries {
+            let first = |tag: u8| t.get(&tag).and_then(|v| v.first()).map(|v| *v as usize);
+            kids_of.push(first(22).zip(first(23)));
+            is_kid.push(first(21).is_some());
+            by_no.push(None);
             let label = t
                 .get(&3)
                 .and_then(|v| v.first())
@@ -736,17 +748,42 @@ fn kf8(r: &Records, p: &crate::pages::Part, at: usize, book: &mut Book) -> Resul
                         && c.body
                             .contains(&format!("id=\"{}\"", href.split('#').nth(1).unwrap_or("")))
                 });
-                flat.push((
-                    depth,
-                    Toc {
-                        title: label.trim().to_string(),
-                        href: if marked { href } else { file },
-                        kids: vec![],
-                    },
-                ));
+                let toc = Toc {
+                    title: label.trim().to_string(),
+                    href: if marked { href } else { file },
+                    kids: vec![],
+                };
+                *by_no.last_mut().unwrap() = Some(toc.clone());
+                flat.push((depth, toc));
             }
         }
-        book.toc = nest(flat);
+        book.toc = if kids_of.iter().any(Option::is_some) {
+            fn tree(
+                i: usize,
+                by_no: &[Option<Toc>],
+                kids_of: &[Option<(usize, usize)>],
+                seen: &mut Vec<bool>,
+            ) -> Option<Toc> {
+                if seen.get(i).copied().unwrap_or(true) {
+                    return None;
+                }
+                seen[i] = true;
+                let mut t = by_no[i].clone()?;
+                if let Some((a, b)) = kids_of[i] {
+                    t.kids = (a..=b.min(by_no.len().saturating_sub(1)))
+                        .filter_map(|k| tree(k, by_no, kids_of, seen))
+                        .collect();
+                }
+                Some(t)
+            }
+            let mut seen = vec![false; by_no.len()];
+            (0..by_no.len())
+                .filter(|&i| !is_kid[i])
+                .filter_map(|i| tree(i, &by_no, &kids_of, &mut seen))
+                .collect()
+        } else {
+            nest(flat)
+        };
     }
     Ok(())
 }

@@ -44,6 +44,13 @@ pub fn read(path: &Path) -> BookMeta {
         .extension()
         .map(|e| e.to_string_lossy().to_lowercase())
         .unwrap_or_default();
+    read_as(path, &ext)
+}
+
+/// [`read`] for a book in the format of extension `ext`, whatever its
+/// own (a book being converted already has the new one).
+pub fn read_as(path: &Path, ext: &str) -> BookMeta {
+    let ext = ext.to_ascii_lowercase();
     let own_path = path.to_path_buf();
     let path = path.to_path_buf();
     let m = std::panic::catch_unwind(move || match ext.as_str() {
@@ -588,6 +595,14 @@ fn parse_mobi(rec: &[u8]) -> Option<BookMeta> {
     if let Some(name) = rec.get(name_at..name_at + name_len) {
         m.title = decode(name);
     }
+    // The header's language, when the details below do not say it.
+    if let Some(id) = be32(rec, 92).map(|l| l & 0xff)
+        && let Some((code, _)) = crate::bookconv::azw3_out::LANG_IDS
+            .iter()
+            .find(|(_, n)| *n == id)
+    {
+        m.language = code.to_string();
+    }
     let has_exth = be32(rec, 128).is_some_and(|f| f & 0x40 != 0);
     let exth = 16 + header_len;
     if has_exth && rec.get(exth..exth + 4) == Some(b"EXTH") {
@@ -612,7 +627,7 @@ fn parse_mobi(rec: &[u8]) -> Option<BookMeta> {
                 }
                 106 => m.year = value.get(..4).and_then(|y| y.parse().ok()),
                 503 if !value.is_empty() => m.title = value,
-                524 => m.language = value,
+                524 if !value.is_empty() => m.language = value,
                 _ => {}
             }
             at += len;

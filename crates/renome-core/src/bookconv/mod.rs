@@ -578,6 +578,12 @@ pub fn convert(
     }
     fill_from_name(&mut book.meta, path);
     drop_dead_fragments(&mut book);
+    xml_ids(&mut book);
+    if book.meta.language.is_empty()
+        && let Some(l) = guess_language(&sample_text(&book))
+    {
+        book.meta.language = l.into();
+    }
     titles_from_toc(&mut book);
     let tmp = temp_of(path);
     let written = match target {
@@ -755,6 +761,199 @@ pub fn drop_dead_fragments(book: &mut Book) {
     toc(&mut book.toc, &has);
 }
 
+/// Whether `v` is an XML name (what an XHTML id must be): a letter or `_`
+/// first, then letters, digits, `-`, `.` or `_`.
+fn xml_name(v: &str) -> bool {
+    let mut c = v.chars();
+    c.next().is_some_and(|f| f.is_alphabetic() || f == '_')
+        && c.all(|x| x.is_alphanumeric() || matches!(x, '-' | '.' | '_'))
+}
+
+/// Makes every id an XML name (HTML allows `1_2`, XHTML does not; strict
+/// readers and checkers refuse the book), the links to it changed too.
+pub fn xml_ids(book: &mut Book) {
+    use regex::Regex;
+    use std::collections::{HashMap, HashSet};
+    use std::sync::LazyLock;
+    static ID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(\sid=")([^"]+)""#).unwrap());
+    static HREF: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r##"(\shref=")([^"#]*)#([^"]*)""##).unwrap());
+    // Per file: old id -> new.
+    let mut moved: HashMap<String, HashMap<String, String>> = HashMap::new();
+    for c in &book.chapters {
+        let all: Vec<String> = ID
+            .captures_iter(&c.body)
+            .map(|x| x[2].to_string())
+            .collect();
+        if all.iter().all(|v| xml_name(v)) {
+            continue;
+        }
+        let mut taken: HashSet<String> = all.iter().filter(|v| xml_name(v)).cloned().collect();
+        let mut map = HashMap::new();
+        for v in all.iter().filter(|v| !xml_name(v)) {
+            if map.contains_key(v) {
+                continue;
+            }
+            let clean: String = v
+                .chars()
+                .map(|x| {
+                    if x.is_alphanumeric() || matches!(x, '-' | '.' | '_') {
+                        x
+                    } else {
+                        '_'
+                    }
+                })
+                .collect();
+            let base = if xml_name(&clean) {
+                clean
+            } else {
+                format!("id_{clean}")
+            };
+            let mut new = base.clone();
+            let mut n = 2;
+            while taken.contains(&new) {
+                new = format!("{base}_{n}");
+                n += 1;
+            }
+            taken.insert(new.clone());
+            map.insert(v.clone(), new);
+        }
+        moved.insert(c.name.clone(), map);
+    }
+    if moved.is_empty() {
+        return;
+    }
+    let new_of = |file: &str, id: &str| moved.get(file).and_then(|m| m.get(id)).cloned();
+    for c in &mut book.chapters {
+        let name = c.name.clone();
+        if let Some(map) = moved.get(&name) {
+            c.body = ID
+                .replace_all(&c.body, |cap: &regex::Captures| match map.get(&cap[2]) {
+                    Some(n) => format!("{}{n}\"", &cap[1]),
+                    None => cap[0].to_string(),
+                })
+                .into_owned();
+        }
+        c.body = HREF
+            .replace_all(&c.body, |cap: &regex::Captures| {
+                let file = if cap[2].is_empty() {
+                    name.as_str()
+                } else {
+                    &cap[2]
+                };
+                match new_of(file, &cap[3]) {
+                    Some(n) => format!("{}{}#{n}\"", &cap[1], &cap[2]),
+                    None => cap[0].to_string(),
+                }
+            })
+            .into_owned();
+    }
+    fn toc(t: &mut [Toc], new_of: &dyn Fn(&str, &str) -> Option<String>) {
+        for e in t {
+            if let Some((f, id)) = e.href.split_once('#')
+                && let Some(n) = new_of(f, id)
+            {
+                e.href = format!("{f}#{n}");
+            }
+            toc(&mut e.kids, new_of);
+        }
+    }
+    toc(&mut book.toc, &new_of);
+}
+
+/// The language a book's text is most likely in, from its commonest
+/// words (`None` when too little text or no clear winner). Readers such as
+/// the Kindle refuse a book with no language.
+pub fn guess_language(text: &str) -> Option<&'static str> {
+    const WORDS: &[(&str, &[&str])] = &[
+        (
+            "en",
+            &[
+                "the", "and", "of", "to", "is", "that", "it", "was", "he", "with", "for", "his",
+                "you", "this", "but", "not",
+            ],
+        ),
+        (
+            "pt",
+            &[
+                "o", "de", "que", "e", "do", "da", "em", "um", "uma", "não", "com", "para", "os",
+                "as", "se", "mas", "ele", "ela", "foi", "como",
+            ],
+        ),
+        (
+            "es",
+            &[
+                "el", "la", "de", "que", "y", "en", "los", "las", "un", "una", "no", "con", "por",
+                "para", "se", "pero", "él", "ella", "fue", "como",
+            ],
+        ),
+        (
+            "fr",
+            &[
+                "le", "la", "les", "de", "et", "des", "un", "une", "est", "que", "pas", "il",
+                "elle", "dans", "pour", "qui", "avec", "mais",
+            ],
+        ),
+        (
+            "de",
+            &[
+                "der", "die", "und", "das", "ist", "nicht", "ein", "eine", "zu", "mit", "sich",
+                "den", "es", "auf", "ich", "er", "sie", "aber",
+            ],
+        ),
+        (
+            "it",
+            &[
+                "il", "la", "di", "che", "e", "è", "un", "una", "non", "per", "con", "gli", "le",
+                "del", "della", "ma", "lui", "lei",
+            ],
+        ),
+        (
+            "nl",
+            &[
+                "de", "het", "een", "en", "van", "is", "niet", "dat", "op", "te", "met", "zijn",
+                "ik", "hij", "zij", "maar",
+            ],
+        ),
+    ];
+    let mut counts = vec![0usize; WORDS.len()];
+    let mut total = 0usize;
+    for w in text
+        .split(|c: char| !c.is_alphabetic())
+        .filter(|w| !w.is_empty())
+        .take(20_000)
+    {
+        total += 1;
+        let w = w.to_lowercase();
+        for (i, (_, list)) in WORDS.iter().enumerate() {
+            if list.contains(&w.as_str()) {
+                counts[i] += 1;
+            }
+        }
+    }
+    let mut order: Vec<usize> = (0..WORDS.len()).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(counts[i]));
+    let (best, second) = (counts[order[0]], counts[order[1]]);
+    // Common words are a good share of any text; a clear lead is wanted.
+    (total >= 30 && best * 8 >= total && best * 10 >= second * 13).then(|| WORDS[order[0]].0)
+}
+
+/// The book's text (without markup), as much as a guess needs.
+fn sample_text(book: &Book) -> String {
+    use regex::Regex;
+    use std::sync::LazyLock;
+    static TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]*>").unwrap());
+    let mut s = String::new();
+    for c in &book.chapters {
+        s.push_str(&TAG.replace_all(&c.body, " "));
+        s.push(' ');
+        if s.len() > 200_000 {
+            break;
+        }
+    }
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -814,5 +1013,85 @@ mod tests {
             convert(&path, Target::Fb2, Original::Keep, None).unwrap_err(),
             "bookDrm"
         );
+    }
+
+    #[test]
+    fn guesses_language() {
+        let pt = "Era uma vez uma casa que não tinha porta, e ele foi até ela com o cão para ver se a casa era mesmo como diziam os vizinhos da rua.";
+        let en = "Once upon a time there was a house that had no door, and he went to it with the dog to see if it was as the neighbours of the street said.";
+        let es = "Había una vez una casa que no tenía puerta, y él fue a ella con el perro para ver si la casa era como decían los vecinos de la calle.";
+        assert_eq!(guess_language(pt), Some("pt"));
+        assert_eq!(guess_language(en), Some("en"));
+        assert_eq!(guess_language(es), Some("es"));
+        assert_eq!(guess_language("Capítulo um"), None);
+    }
+
+    #[test]
+    fn ids_made_xml_names() {
+        let mut book = Book::default();
+        book.chapters.push(Chapter {
+            name: "c1.xhtml".into(),
+            body: r##"<p id="1_1">a</p><p id="id_1_1">b</p><a href="#1_1">x</a><a href="c2.xhtml#ok">y</a>"##.into(),
+            ..Default::default()
+        });
+        book.chapters.push(Chapter {
+            name: "c2.xhtml".into(),
+            body: r##"<p id="ok">c</p><a href="c1.xhtml#1_1">z</a>"##.into(),
+            ..Default::default()
+        });
+        book.toc.push(Toc {
+            title: "T".into(),
+            href: "c1.xhtml#1_1".into(),
+            kids: vec![],
+        });
+        xml_ids(&mut book);
+        assert_eq!(
+            book.chapters[0].body,
+            r##"<p id="id_1_1_2">a</p><p id="id_1_1">b</p><a href="#id_1_1_2">x</a><a href="c2.xhtml#ok">y</a>"##
+        );
+        assert_eq!(
+            book.chapters[1].body,
+            r##"<p id="ok">c</p><a href="c1.xhtml#id_1_1_2">z</a>"##
+        );
+        assert_eq!(book.toc[0].href, "c1.xhtml#id_1_1_2");
+    }
+
+    /// Makes each book in `RENOME_BOOK_PROBE/src` into EPUB, AZW3 and FB2
+    /// in `RENOME_BOOK_PROBE/out`, for checking with other tools.
+    #[test]
+    #[ignore]
+    fn probe_books() {
+        let Ok(dir) = std::env::var("RENOME_BOOK_PROBE") else {
+            return;
+        };
+        let dir = Path::new(&dir);
+        let out = dir.join("out");
+        fs::create_dir_all(&out).unwrap();
+        for e in fs::read_dir(dir.join("src")).unwrap() {
+            let src = e.unwrap().path();
+            let stem = src.file_stem().unwrap().to_string_lossy().to_string();
+            for t in [Target::Epub, Target::Azw3, Target::Fb2] {
+                let p = out.join(format!("{stem}.{}", t.ext()));
+                if p.extension() == src.extension() {
+                    continue;
+                }
+                let work = out.join(format!(
+                    "{stem}.work.{}",
+                    src.extension().unwrap().to_string_lossy()
+                ));
+                fs::copy(&src, &work).unwrap();
+                fs::rename(&work, &p).unwrap();
+                // Renamed with the new extension first, as the plan does.
+                match convert(&p, t, Original::Keep, None) {
+                    Ok(d) => {
+                        println!("ok {}", p.display());
+                        if let Some(left) = d.backup.converted.and_then(|c| c.original) {
+                            let _ = fs::remove_file(left);
+                        }
+                    }
+                    Err(e) => println!("ERR {}: {e}", p.display()),
+                }
+            }
+        }
     }
 }

@@ -691,6 +691,10 @@ fn field(values: &[(&'static str, String)], info: &str, key: &str) -> String {
         .unwrap_or_default()
 }
 
+/// The key of `values` for the language a book gets when the comic does
+/// not say its own (an e-book needs one; a Kindle refuses it without).
+pub const FALLBACK_LANGUAGE: &str = "FallbackLanguage";
+
 /// What [`convert`] did.
 #[derive(Debug)]
 pub struct Done {
@@ -1047,7 +1051,14 @@ fn make(
             .filter(|a| !a.is_empty())
             .collect(),
         publisher: field(values, info, "Publisher"),
-        language: field(values, info, "LanguageISO"),
+        language: {
+            let l = field(values, info, "LanguageISO");
+            if l.is_empty() {
+                field(values, "", FALLBACK_LANGUAGE)
+            } else {
+                l
+            }
+        },
         series,
         number,
         year: field(values, info, "Year"),
@@ -1112,6 +1123,9 @@ fn write_cbz(m: &Made, info: &str, values: &[(&'static str, String)], to: &Path)
         z.write_all(&p.data).map_err(|e| e.to_string())?;
     }
     let old = (!info.is_empty()).then_some(info);
+    let values: Vec<(&'static str, String)> =
+        values.iter().filter(|(k, _)| *k != FALLBACK_LANGUAGE).cloned().collect();
+    let values = values.as_slice();
     let xml = if values.is_empty() {
         old.map(str::to_string)
     } else {
@@ -1588,14 +1602,25 @@ mod tests {
         let dir = Path::new(&dir);
         let store = dir.join("store");
         let o = EbookOptions { device: Device::KindlePw2024, crop: true, spread: Spread::Split, contrast: true, ..Default::default() };
-        for (to, name) in [(Format::Azw3, "ours.azw3"), (Format::Epub, "ours.epub"), (Format::Pdf, "ours.pdf")] {
+        for (to, name) in [
+            (Format::Azw3, "ours.azw3"),
+            (Format::Epub, "ours.epub"),
+            (Format::Kepub, "ours.kepub.epub"),
+            (Format::Pdf, "ours.pdf"),
+            (Format::Cbz, "ours-made.cbz"),
+        ] {
             let p = dir.join(name);
             fs::copy(dir.join("src.cbz"), &p).unwrap();
             let label = match to {
                 Format::Pdf => "Teste 3 - PDF",
-                _ => "Teste 1 - AZW3 paginas fixas",
+                _ => "Teste 1B - AZW3 corrigido",
             };
-            let values = vec![("Series", label.to_string()), ("Writer", "Autor".to_string())];
+            // As the app gives it.
+            let values = vec![
+                ("Series", label.to_string()),
+                ("Writer", "Autor".to_string()),
+                (FALLBACK_LANGUAGE, "pt".to_string()),
+            ];
             convert(&p, to, o, &values, false, Original::Delete, PdfOptions::default(), &store).unwrap();
         }
     }

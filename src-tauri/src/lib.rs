@@ -1857,11 +1857,23 @@ async fn write_inside(
                 };
                 if let Some(to) = job.comic_to {
                     let original = job.convert.unwrap_or(convert::Original::Keep);
+                    // An e-book needs a language (a Kindle refuses one
+                    // without); pictures have none: the system's, unless
+                    // the comic says its own.
+                    let mut v = values();
+                    if matches!(
+                        to,
+                        renome_core::comicbook::Format::Epub
+                            | renome_core::comicbook::Format::Kepub
+                            | renome_core::comicbook::Format::Azw3
+                    ) {
+                        v.push((renome_core::comicbook::FALLBACK_LANGUAGE, system_language()));
+                    }
                     return renome_core::comicbook::convert(
                         &path,
                         to,
                         job.ebook,
-                        &values(),
+                        &v,
                         job.manga,
                         original,
                         job.pdf,

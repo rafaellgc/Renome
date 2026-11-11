@@ -1053,7 +1053,7 @@ pub fn read(path: &Path) -> Result<Book, String> {
     let data = Arc::new(std::fs::read(path).map_err(|e| e.to_string())?);
     let mut book = Book::new();
     book.css.push_str(PDF_CSS);
-    let own = crate::ebook::read(path);
+    let own = crate::ebook::read_as(path, "pdf");
     book.meta.title = own.title.clone();
     book.meta.authors = own.authors.clone();
     book.meta.language = own.language.clone();
