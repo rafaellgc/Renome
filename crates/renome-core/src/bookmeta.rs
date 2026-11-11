@@ -91,7 +91,7 @@ fn replace_keeping(path: &Path, tmp: &Path, store: &Path) -> Result<Backup, Stri
         n += 1;
     };
     let kept = store.join(&name);
-    let copied = fs::copy(path, &kept).and_then(|_| File::open(&kept)?.sync_all());
+    let copied = fs::copy(path, &kept).and_then(|_| crate::sync_file(&kept));
     if let Err(e) = copied {
         let _ = fs::remove_file(&kept);
         return Err(fail(e.to_string()));

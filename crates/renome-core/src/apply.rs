@@ -243,11 +243,14 @@ fn flush(paths: &[&Path]) -> std::io::Result<()> {
             for e in walkdir::WalkDir::new(p) {
                 let e = e.map_err(std::io::Error::other)?;
                 if e.file_type().is_file() {
-                    File::options()
-                        .write(true)
-                        .open(e.path())
-                        .or_else(|_| File::open(e.path()))?
-                        .sync_all()?;
+                    // A read-only file: macOS flushes it opened for
+                    // reading; Windows refuses ("access denied"), and its
+                    // own cache writes it out.
+                    match File::options().write(true).open(e.path()) {
+                        Ok(f) => f.sync_all()?,
+                        Err(_) if cfg!(windows) => {}
+                        Err(_) => File::open(e.path())?.sync_all()?,
+                    }
                 }
             }
             if let Some(d) = p.parent()

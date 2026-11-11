@@ -8,7 +8,7 @@
 //! are written again. A file whose format is not recognised is not
 //! touched. Picture subtitles (VobSub, PGS) cannot be read as text.
 
-use std::fs::{self, File};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -1961,7 +1961,7 @@ pub fn fix_file(path: &Path, tools: &Tools, original: Original, store: &Path) ->
             return Err("convertTaken".into());
         }
         let tmp = crate::tagwrite::temp_of(path);
-        if let Err(e) = fs::write(&tmp, &out).and_then(|_| fs::File::open(&tmp)?.sync_all()) {
+        if let Err(e) = fs::write(&tmp, &out).and_then(|_| crate::sync_file(&tmp)) {
             let _ = fs::remove_file(&tmp);
             return Err(e.to_string());
         }
@@ -1975,7 +1975,7 @@ pub fn fix_file(path: &Path, tools: &Tools, original: Original, store: &Path) ->
     let name = store_name(store, path);
     let saved = store.join(&name);
     fs::write(&saved, bytes)
-        .and_then(|_| fs::File::open(&saved)?.sync_all())
+        .and_then(|_| crate::sync_file(&saved))
         .map_err(|e| e.to_string())?;
     if let Err(e) = replace_with(path, &out) {
         let _ = fs::remove_file(&saved);
@@ -1995,7 +1995,7 @@ pub fn fix_file(path: &Path, tools: &Tools, original: Original, store: &Path) ->
 /// copied beside it, then taking its place.
 pub fn restore(path: &Path, saved: &str, store: &Path) -> Result<(), String> {
     let tmp = crate::tagwrite::temp_of(path);
-    let copied = fs::copy(store.join(saved), &tmp).and_then(|_| File::open(&tmp)?.sync_all());
+    let copied = fs::copy(store.join(saved), &tmp).and_then(|_| crate::sync_file(&tmp));
     if let Err(e) = copied {
         let _ = fs::remove_file(&tmp);
         return Err(e.to_string());
