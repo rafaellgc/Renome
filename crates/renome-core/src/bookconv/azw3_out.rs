@@ -447,9 +447,13 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
         text.extend_from_slice(&f.skeleton);
         frag_starts.push(text.len());
         text.extend_from_slice(&f.fragment);
+        // As Kindle's own files have it: a ten-digit key and every value
+        // given twice (the count in the control byte is 2); a skeleton
+        // index written the plain way leaves Kindles on a blank page.
+        let len = f.skeleton.len() as u32;
         skel_entries.push((
-            format!("SKEL{i:07}"),
-            vec![(1u8, vec![1u32]), (6, vec![start, f.skeleton.len() as u32])],
+            format!("SKEL{i:010}"),
+            vec![(1u8, vec![1u32, 1]), (6, vec![start, len, start, len])],
         ));
         frag_entries.push((
             format!("{:010}", start as usize + f.insert),
@@ -943,6 +947,24 @@ mod tests {
         assert_eq!(be(&recs[0], 16), 2);
         assert_eq!(be(&recs[0], 180), 192);
         assert_eq!(&recs[0][192..196], b"TAGX");
+    }
+
+    #[test]
+    fn skeleton_entries_as_kindles_read_them() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("s.azw3");
+        azw3_out::write(&epub_out::tests::sample(), &p).unwrap();
+        let f = std::fs::read(&p).unwrap();
+        let be = |at: usize| u32::from_be_bytes(f[at..at + 4].try_into().unwrap()) as usize;
+        let skel = be(be(78) + 0xFC);
+        let rec = &f[be(78 + 8 * (skel + 1))..];
+        // First entry: key, control byte (count 2 of tag 1, 1 pair of
+        // pairs of tag 6), values.
+        let at = 192;
+        assert_eq!(rec[at] as usize, 14);
+        assert_eq!(&rec[at + 1..at + 15], b"SKEL0000000000");
+        assert_eq!(rec[at + 15], 0x02 | (2 << 2));
+        assert_eq!(&rec[at + 16..at + 18], &[0x81, 0x81]);
     }
 
     #[test]
