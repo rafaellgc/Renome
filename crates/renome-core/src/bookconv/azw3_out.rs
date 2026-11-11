@@ -724,9 +724,12 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
     records.push(fdst);
     let flis_at = records.len();
     let mut flis = b"FLIS".to_vec();
-    for v in [8u32, 0x41, 0, 0, u32::MAX] {
-        put32(&mut flis, v);
-    }
+    // 36 bytes: the two fields after the length are 16-bit.
+    put32(&mut flis, 8);
+    put16(&mut flis, 0x41);
+    put16(&mut flis, 0);
+    put32(&mut flis, 0);
+    put32(&mut flis, u32::MAX);
     put16(&mut flis, 1);
     put16(&mut flis, 3);
     put32(&mut flis, 3);
@@ -940,6 +943,24 @@ mod tests {
         assert_eq!(be(&recs[0], 16), 2);
         assert_eq!(be(&recs[0], 180), 192);
         assert_eq!(&recs[0][192..196], b"TAGX");
+    }
+
+    #[test]
+    fn flis_record_has_its_fixed_size() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("f.azw3");
+        azw3_out::write(&epub_out::tests::sample(), &p).unwrap();
+        let f = std::fs::read(&p).unwrap();
+        let be = |at: usize| u32::from_be_bytes(f[at..at + 4].try_into().unwrap()) as usize;
+        let n = u16::from_be_bytes([f[76], f[77]]) as usize;
+        let rec = |i: usize| {
+            let end = if i + 1 < n { be(78 + 8 * (i + 1)) } else { f.len() };
+            &f[be(78 + 8 * i)..end]
+        };
+        let flis = rec(be(be(78) + 0xD0));
+        assert_eq!(&flis[..4], b"FLIS");
+        assert_eq!(flis.len(), 36);
+        assert_eq!(&flis[8..12], &[0, 0x41, 0, 0]);
     }
 
     #[test]
