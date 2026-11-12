@@ -311,8 +311,9 @@ fn group(name: &str) -> Option<String> {
 
 /// How well a subtitle fits a video file named `video`; higher is
 /// better. An exact one (same fingerprint) first; then the same release
-/// group, the same kind of source, resolution, codec and edition; then
-/// how many downloaded it. One for the hard of hearing is a little behind.
+/// group, the same kind of source, resolution, codec and edition. One for
+/// the hard of hearing is a little behind. How many downloaded it is left
+/// to [`rank`], which weighs it within each service.
 pub fn score(video: &str, c: &Candidate) -> f64 {
     let v = words(video);
     let r = words(&c.release);
@@ -353,8 +354,9 @@ pub fn score(video: &str, c: &Candidate) -> f64 {
             && set.len() == 1
             && ["extended", "unrated", "remastered", "imax"].contains(&set[0])
         {
-            // Another cut: other scenes, other times.
-            s -= 40.0;
+            // Another cut: other scenes, other times. Worse than another
+            // kind of source of the same cut, whatever else matches.
+            s -= 60.0;
         }
     }
     // Words in common, as a share of the subtitle's.
@@ -362,7 +364,6 @@ pub fn score(video: &str, c: &Candidate) -> f64 {
         let common = r.iter().filter(|w| v.contains(w)).count();
         s += 20.0 * common as f64 / r.len() as f64;
     }
-    s += 2.0 * (1.0 + c.downloads as f64).ln();
     if c.trusted {
         s += 3.0;
     }
@@ -372,9 +373,41 @@ pub fn score(video: &str, c: &Candidate) -> f64 {
     s
 }
 
-/// The candidates best first (see [`score`]).
+/// The candidates best first: [`score`], plus up to 10 for downloads,
+/// counted against the most downloaded of the same service and language
+/// (their counts are not alike: OpenSubtitles' run far higher, SubDL
+/// gives none, which counts as halfway). On a tie, OpenSubtitles comes
+/// last unless made for this very file: its downloads are few a day.
 pub fn rank(video: &str, cands: &mut [Candidate]) {
-    cands.sort_by(|a, b| score(video, b).total_cmp(&score(video, a)));
+    let most = |c: &Candidate| {
+        cands
+            .iter()
+            .filter(|o| o.source == c.source && o.lang == c.lang)
+            .map(|o| o.downloads)
+            .max()
+            .unwrap_or(0)
+    };
+    let mut keyed: Vec<(f64, Candidate)> = cands
+        .iter()
+        .map(|c| {
+            let top = most(c);
+            let liked = if top == 0 {
+                0.5
+            } else {
+                (1.0 + c.downloads as f64).ln() / (1.0 + top as f64).ln()
+            };
+            let saved = if c.source == Source::OpenSubtitles && !c.exact {
+                -0.5
+            } else {
+                0.0
+            };
+            (score(video, c) + 10.0 * liked + saved, c.clone())
+        })
+        .collect();
+    keyed.sort_by(|a, b| b.0.total_cmp(&a.0));
+    for (slot, (_, c)) in cands.iter_mut().zip(keyed) {
+        *slot = c;
+    }
 }
 
 /// Which of an archive's subtitles (index, name, extension, size) is the
@@ -599,6 +632,44 @@ mod tests {
         assert_eq!(order[0], "whatever");
         assert_eq!(order[1], "Movie.2010.1080p.WEB-DL.H264-GRP");
         assert_eq!(order[3], "Movie.2010.EXTENDED.1080p.WEB-DL-NOPE");
+    }
+
+    #[test]
+    fn downloads_weighed_within_each_service() {
+        let video = "Movie.2010.1080p.WEB-DL.H264-GRP.mkv";
+        let from = |source, release: &str, downloads| Candidate {
+            source,
+            release: release.into(),
+            downloads,
+            lang: "pt-BR".into(),
+            ..Candidate::default()
+        };
+        // The same release on both: the one that spares the quota.
+        let mut c = vec![
+            from(Source::OpenSubtitles, "Movie.2010.1080p.WEB-DL.H264-GRP", 90000),
+            from(Source::OpenSubtitles, "Movie.2010.720p.HDTV", 300),
+            from(Source::Subsource, "Movie.2010.1080p.WEB-DL.H264-GRP", 800),
+        ];
+        rank(video, &mut c);
+        assert_eq!(c[0].source, Source::Subsource);
+        assert_eq!(c[1].source, Source::OpenSubtitles);
+        // A better fit still wins, whatever the service.
+        let mut c = vec![
+            from(Source::Subdl, "Movie.2010.720p.HDTV", 0),
+            from(Source::OpenSubtitles, "Movie.2010.1080p.WEB-DL.H264-GRP", 10),
+        ];
+        rank(video, &mut c);
+        assert_eq!(c[0].source, Source::OpenSubtitles);
+        // Made for this very file: first.
+        let mut c = vec![
+            from(Source::Subsource, "Movie.2010.1080p.WEB-DL.H264-GRP", 800),
+            Candidate {
+                exact: true,
+                ..from(Source::OpenSubtitles, "whatever", 1)
+            },
+        ];
+        rank(video, &mut c);
+        assert!(c[0].exact);
     }
 
     #[test]

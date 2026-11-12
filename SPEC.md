@@ -347,9 +347,12 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
     file"); then the release group (`-GRP` at the end) +40, the same kind
     of source (Blu-ray, WEB, HDTV, DVD families) +30 or another −10, each
     resolution/codec/edition word in common +8, an extended, unrated,
-    remastered or IMAX cut on one side only −40, words in common (share
-    of the subtitle's) up to +20, 2·ln(1+downloads), trusted uploader +3,
-    hearing impaired −12. The best of each language is chosen; the review
+    remastered or IMAX cut on one side only −60, words in common (share
+    of the subtitle's) up to +20, trusted uploader +3, hearing impaired
+    −12; then downloads up to +10 as ln(1+n)/ln(1+most), against the most
+    downloaded of the same service and language (none known, as SubDL:
+    +5), and an OpenSubtitles one not exact −0.5, so a tie goes to a
+    service without its daily download cap. The best of each language is chosen; the review
     window lists every video with a select per language, labelled with
     the language's name in the interface's language (`Intl.DisplayNames`;
     the code as tooltip, and alone when it has no name), saying that a
