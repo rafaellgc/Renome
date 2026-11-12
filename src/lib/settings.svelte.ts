@@ -1,13 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { DetailColumn, Step } from "./types";
 
 export type Lang = "pt" | "en" | "es";
 export type Theme = "light" | "dark" | "system";
+/** How big the window's text (and all else, in proportion) is. */
+export type TextSize = "normal" | "large" | "larger";
+export const TEXT_SCALE: Record<TextSize, number> = { normal: 1, large: 1.15, larger: 1.3 };
 
 export interface Settings {
   lang: Lang;
   theme: Theme;
+  textSize: TextSize;
   includeHidden: boolean;
   confirmApply: boolean;
   disableRulesAfterApply: boolean;
@@ -48,6 +53,7 @@ export interface Settings {
 const DEFAULTS: Settings = {
   lang: "en",
   theme: "system",
+  textSize: "normal",
   includeHidden: false,
   confirmApply: true,
   disableRulesAfterApply: true,
@@ -114,6 +120,14 @@ export async function loadSettings() {
     await saveSettings();
   }
   applyTheme();
+  applyTextSize();
+}
+
+/** The window zoomed by the text size chosen. */
+export function applyTextSize() {
+  getCurrentWebview()
+    .setZoom(TEXT_SCALE[settings.textSize] ?? 1)
+    .catch(() => {});
 }
 
 /** Language for TMDB titles and overviews. */

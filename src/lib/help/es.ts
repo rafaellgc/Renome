@@ -945,6 +945,7 @@ ${ex("Serie.S01E02.720p.WEB.mkv", "Serie S01E02.mkv")}
 <p>El engranaje abre las opciones:</p>
 <ul>
   <li><b>Idioma</b> y <b>Tema</b> (claro, oscuro o del sistema).</li>
+  <li><b>Tamaño del texto</b>: <b>Normal</b>, <b>Grande</b> (15% mayor) o <b>Mayor</b> (30% mayor). Toda la ventana crece en la misma proporción, como el zoom de un navegador; en una pantalla pequeña, agrande también la ventana.</li>
   <li><b>Recordar las reglas al cerrar el programa</b>.</li>
   <li><b>Incluir archivos ocultos al añadir carpetas</b>.</li>
   <li><b>Pedir confirmación antes de renombrar</b>.</li>

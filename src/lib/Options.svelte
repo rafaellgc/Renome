@@ -2,7 +2,7 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { api } from "./api";
   import { LANG_NAMES, MOD, t, tError, type Key } from "./i18n";
-  import { applyTheme, loadSecrets, secrets, settings, type Lang } from "./settings.svelte";
+  import { applyTextSize, applyTheme, loadSecrets, secrets, settings, type Lang } from "./settings.svelte";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -202,6 +202,13 @@
         <div class="seg">
           {#each [["light", "themeLight"], ["dark", "themeDark"], ["system", "themeSystem"]] as const as [value, label] (value)}
             <button class:on={settings.theme === value} onclick={() => { settings.theme = value; applyTheme(); }}>{t(label)}</button>
+          {/each}
+        </div>
+
+        <span>{t("textSize")}</span>
+        <div class="seg">
+          {#each [["normal", "textSizeNormal"], ["large", "textSizeLarge"], ["larger", "textSizeLarger"]] as const as [value, label] (value)}
+            <button class:on={(settings.textSize ?? "normal") === value} onclick={() => { settings.textSize = value; applyTextSize(); }}>{t(label)}</button>
           {/each}
         </div>
       </div>

@@ -2311,6 +2311,7 @@ may be asked about the Keychain again with each version.
 
 - Language: English, Portuguese, Spanish. On first run, the system's.
 - Theme: light, dark or system (default).
+- Text size (`textSize`): normal (default), large or larger: the webview zoomed by 1, 1.15 or 1.3 (`setZoom`, permission `core:webview:allow-set-webview-zoom`), so everything grows in proportion.
 - Remember the rules between sessions (on).
 - Include hidden files when adding folders (off).
 - Ask for confirmation before renaming (on).

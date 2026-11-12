@@ -945,6 +945,7 @@ ${ex("Show.S01E02.720p.WEB.mkv", "Show S01E02.mkv")}
 <p>The gear opens the options:</p>
 <ul>
   <li><b>Language</b> and <b>Theme</b> (light, dark or system).</li>
+  <li><b>Text size</b>: <b>Normal</b>, <b>Large</b> (15% bigger) or <b>Larger</b> (30% bigger). The whole window grows in proportion, like a browser's zoom; on a small screen, make the window bigger too.</li>
   <li><b>Remember rules when closing the app</b>.</li>
   <li><b>Include hidden files when adding folders</b>.</li>
   <li><b>Ask for confirmation before renaming</b>.</li>
