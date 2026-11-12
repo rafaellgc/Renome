@@ -63,6 +63,11 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.31.0" date="2026-11-11">
+      <description>
+        <p>Comics and books made into AZW3 now open on Kindles: they show their cover in the library and go back to it after the last page. Comic e-books can be KEPUB, fitted CBZ or PDF, for about 25 reader screens, with contrast, enlarging, 16 greys, split or turned double pages, webtoon strips, joined volumes and books in parts. Converted books are checked against other tools: FB2 is always valid, the language is guessed from the text when missing, and old encodings of text and subtitles are recognised better.</p>
+      </description>
+    </release>
     <release version="0.30.0" date="2026-11-10">
       <description>
         <p>Movies and episodes get everything their .nfo holds written inside MKV and MP4 videos: cast with characters, directors, writers, age rating, collection, trailer and the background picture. The details that came with a video can be removed first, and audio and subtitle tracks can be named by language, telling apart two dubs or subtitles of the same language. On Windows, subtitle tools, book polish and video details work again.</p>
