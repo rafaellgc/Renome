@@ -1563,7 +1563,14 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   1080×1430, `kobo-sage` 1440×1920, `kobo-elipsa` 1404×1872, `kobo-nia`
   758×1024; `remarkable` 1404×1872, `remarkable-pro` 1620×2160 colour,
   `remarkable-move` 954×1696 colour; `tablet` 1600×2560; `custom` with
-  `width`/`height` ≥ 100; others grey; UI default `kindle-pw`), `crop`
+  `width`/`height` ≥ 100; others grey; UI default `kindle-pw`). The
+  window lists models instead (`src/lib/readers.ts`: 44, by brand in
+  alphabetical order, then line in alphabetical order, newest first, with
+  their screen and "colour"; tablet, custom and original last), each
+  pointing at the `device` with its screen; the chosen one is kept as
+  `model` (window only; a rule without one shows its device's first
+  model). Presets are saved and loaded as the window sends them (checked
+  against `Step`), so options only the window reads stay. `crop`
   (default on), `numbers`, `spread` (`keep`|`split`|`rotate`|`both`;
   older presets' `split: false` = keep, else split), `contrast` (UI
   default on), `upscale`, `greys16`, `soften`, `webtoon`, `join`,

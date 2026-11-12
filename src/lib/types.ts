@@ -58,7 +58,7 @@ export type Rule =
       /** EPUB 2 brought to EPUB 3; large pictures made smaller. */
       epub3?: boolean; shrinkImages?: boolean;
     }
-  | { type: "comic"; template: string; colon: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; byFolder: boolean; writeInfo?: boolean; cleanInfo?: boolean; convert?: boolean; original?: "keep" | "delete"; drawPages?: boolean; pageSize?: number; missing: boolean; barcode?: boolean; skipPublishers?: string; ebook?: ComicFormat; device?: ComicDevice; crop?: boolean; split?: boolean;
+  | { type: "comic"; template: string; colon: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; byFolder: boolean; writeInfo?: boolean; cleanInfo?: boolean; convert?: boolean; original?: "keep" | "delete"; drawPages?: boolean; pageSize?: number; missing: boolean; barcode?: boolean; skipPublishers?: string; ebook?: ComicFormat; device?: ComicDevice; model?: string; crop?: boolean; split?: boolean;
       /** Screen of a custom reader. */
       width?: number; height?: number;
       numbers?: boolean; spread?: ComicSpread; contrast?: boolean; upscale?: boolean; greys16?: boolean; soften?: boolean; webtoon?: boolean;

@@ -2721,7 +2721,11 @@ fn clear_history(state: State<AppState>) -> Result<usize, String> {
 }
 
 #[tauri::command]
-fn save_preset(path: PathBuf, steps: Vec<Step>) -> Result<(), String> {
+fn save_preset(path: PathBuf, steps: Vec<serde_json::Value>) -> Result<(), String> {
+    // As the window sends them: options only the window reads (a reader
+    // model, comic options the core takes elsewhere) are kept.
+    serde_json::from_value::<Vec<Step>>(serde_json::Value::Array(steps.clone()))
+        .map_err(|e| e.to_string())?;
     let text = serde_json::to_string_pretty(&steps).map_err(|e| e.to_string())?;
     std::fs::write(path, text).map_err(|e| e.to_string())
 }
@@ -2733,9 +2737,13 @@ fn save_text(path: PathBuf, text: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn load_preset(path: PathBuf) -> Result<Vec<Step>, String> {
+fn load_preset(path: PathBuf) -> Result<Vec<serde_json::Value>, String> {
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&text).map_err(|e| format!("invalidPreset: {e}"))
+    let steps: Vec<serde_json::Value> =
+        serde_json::from_str(&text).map_err(|e| format!("invalidPreset: {e}"))?;
+    serde_json::from_value::<Vec<Step>>(serde_json::Value::Array(steps.clone()))
+        .map_err(|e| format!("invalidPreset: {e}"))?;
+    Ok(steps)
 }
 
 fn settings_path() -> PathBuf {

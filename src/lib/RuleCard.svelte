@@ -5,18 +5,18 @@
   import type { ComicDevice, ComicSpread, Step } from "./types";
   /** The readers a comic e-book can be made for, by maker, in the menu's
    *  order. */
-  const DEVICES: [Key, ComicDevice[]][] = [
-    ["comicDevices_kindle", ["kindle-pw2024", "kindle-pw", "kindle", "kindle-oasis", "kindle-pw-old", "kindle-basic", "kindle-dx", "kindle-color", "kindle-scribe2025", "kindle-scribe", "kindle-scribe-color"]],
-    ["comicDevices_kobo", ["kobo", "kobo-clara-color", "kobo-libra", "kobo-color", "kobo-h2o", "kobo-sage", "kobo-elipsa", "kobo-nia"]],
-    ["comicDevices_remarkable", ["remarkable", "remarkable-pro", "remarkable-move"]],
-    ["comicDevices_other", ["tablet", "custom", "original"]],
-  ];
+  /** A reader model's label: name, screen and whether it is colour. */
+  const readerLabel = (m: Reader) => {
+    const [w, h] = SIZES[m.device] ?? [0, 0];
+    return `${m.name} · ${w} × ${h}${COLOUR_INK.includes(m.device) ? ` · ${t("comicColour")}` : ""}`;
+  };
   const SPREADS: ComicSpread[] = ["split", "rotate", "both", "keep"];
   /** Colour ink screens (fine dots shimmer) and grey ones (16 greys). */
   const COLOUR_INK = ["kindle-color", "kindle-scribe-color", "kobo-clara-color", "kobo-color", "remarkable-pro", "remarkable-move"];
   const NO_GREY = ["original", "tablet", "custom", ...COLOUR_INK];
   const NO_PNG = ["kindle-scribe", "kindle-scribe2025", "kindle-scribe-color", "kindle-color"];
   import { api } from "./api";
+  import { OTHER_DEVICES, READERS, SIZES, chooseReader, readerOf, type Reader } from "./readers";
 
   /** Whether this system can print books to PDF (asked once). */
   let canPrint = $state(false);
@@ -547,12 +547,22 @@
         <p class="hint">{t("comicEbookHint")}</p>
         {#if r.ebook}
           <label class="sub">{t("comicDevice")}
-            <select value={r.device ?? "kindle-pw"} onchange={(e) => (r.device = (e.currentTarget as HTMLSelectElement).value as ComicDevice)}>
-              {#each DEVICES as [group, list] (group)}
-                <optgroup label={t(group)}>
-                  {#each list as d (d)}<option value={d}>{t(`comicDevice_${d}` as Key)}</option>{/each}
+            <select
+              value={readerOf(r.device ?? "kindle-pw", r.model)}
+              onchange={(e) => {
+                const c = chooseReader((e.currentTarget as HTMLSelectElement).value);
+                r.device = c.device;
+                r.model = c.model;
+              }}
+            >
+              {#each READERS as [group, list] (group)}
+                <optgroup label={t(group as Key)}>
+                  {#each list as m (m.id)}<option value={m.id}>{readerLabel(m)}</option>{/each}
                 </optgroup>
               {/each}
+              <optgroup label={t("comicDevices_other")}>
+                {#each OTHER_DEVICES as d (d)}<option value={d}>{t(`comicDevice_${d}` as Key)}</option>{/each}
+              </optgroup>
             </select>
           </label>
           {#if r.device === "custom"}
