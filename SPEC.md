@@ -2258,6 +2258,35 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
 
 On macOS, ⌘ replaces Ctrl. The list is also shown in Options.
 
+### Interface conventions
+
+- Icons are inline SVG from one set (`src/lib/Icon.svelte`, shapes from
+  Lucide, ISC licence, notice kept in the file); no emoji or text glyphs
+  as icons.
+- Theme tokens in `src/app.css`: colours (accent, accent fill for filled
+  buttons, success, warn, danger and their soft backgrounds, per theme),
+  type scale (`--fs-xs` 11 … `--fs-xl` 20 px), radii, easing.
+- Counts in texts are written with their plural ending in brackets
+  (`{n} arquivo(s)`); `t()` resolves them by the number before them
+  (`1 arquivo`, `3 arquivos`), with the irregular words listed in
+  `i18n.ts`.
+- Every window (`.modal`) uses the `dialog` action (`src/lib/modal.ts`):
+  role dialog, focus on open (autofocus or default button, else first
+  field, else first button other than close), Tab kept inside, focus
+  given back on close; Esc closes it. Title bar with a close button;
+  short fade/scale-in, off with reduced motion. Sizes: default 520, `md`
+  720, `lg` 980 px.
+- Buttons show a focus ring for the keyboard (`:focus-visible`).
+- The "+ Rule" menu has two groups (by kind of file, with the services
+  below each name; name text), and says once why lookup rules are off.
+- Rule cards: long rules split into titled blocks (Name, Lookup, Files
+  beside, Inside the file, Convert, E-book, In the list, Subtitles; photo:
+  Date, Folders; subtitle: Format, Clean-up, Timing, Take out of videos),
+  the lookup button right after the name block (music: after "listen");
+  hints clamped to two lines, a click opens them; a closed card shows a
+  one-line summary; the card opens with a short slide.
+- The empty list shows buttons to add files or folders and the shortcut.
+
 ## 6. Help
 
 A "?" button (or F1) opens a window with three tabs:
@@ -2284,6 +2313,9 @@ A "?" button (or F1) opens a window with three tabs:
 ## 7. Options
 
 Saved in the user's config folder (e.g. `~/.config/renome/settings.json`).
+The window has a side menu: General, Renaming, Online searches, Accounts
+and keys (each service with a key or account typed in marked "set up";
+the menu shows how many of the 7 are) and Shortcuts.
 
 The secrets (TMDB, Google Books, Comic Vine, Discogs, Metron, OpenSubtitles and SubDL keys, GCD and OpenSubtitles user names and passwords)
 are not in that file: they go, as one JSON entry (service

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { dialog } from "./modal";
+  import Icon from "./Icon.svelte";
   import { t } from "./i18n";
   import type { EditField } from "./types";
 
@@ -43,10 +45,10 @@
 </script>
 
 <div class="overlay">
-  <form class="modal edit" onsubmit={save}>
+  <form class="modal edit" use:dialog onsubmit={save}>
     <header>
       <h2>{heading}</h2>
-      <button type="button" class="icon" title={t("close")} aria-label={t("close")} onclick={onclose}>✕</button>
+      <button type="button" class="icon close" title={t("close")} aria-label={t("close")} onclick={onclose}><Icon name="x" size={18} /></button>
     </header>
     <p class="muted hint">{hint}{rows.length > 1 ? ` ${t("editHintMany")}` : ""}</p>
     <div class="grid">
@@ -80,10 +82,10 @@
 <style>
   .edit { width: min(640px, 95vw); gap: 10px; }
   header { display: flex; align-items: center; gap: 12px; }
-  h2 { margin: 0; font-size: 16px; flex: 1; }
-  .hint { margin: 0; font-size: 13px; }
+  h2 { margin: 0; font-size: var(--fs-lg); flex: 1; }
+  .hint { margin: 0; font-size: var(--fs-md); }
   .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 12px; }
-  .grid label { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; min-width: 0; }
+  .grid label { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-md); min-width: 0; }
   .grid label.wide { grid-column: span 3; }
   .grid input { width: 100%; box-sizing: border-box; }
   .spacer { flex: 1; }

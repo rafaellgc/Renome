@@ -59,7 +59,8 @@ export const en: Section[] = [
 <p>Rules are applied <b>from top to bottom</b>, each on the result of the previous one. Order matters: numbering and then changing case is not the same as the other way round.</p>
 <ul>
   <li>The <b>checkbox</b> in the title turns the rule on and off without deleting it. While off, it is locked: turn it on to change its options or search.</li>
-  <li><b>↑ ↓</b> change the order; <b>✕</b> removes the rule; clicking the title collapses the card.</li>
+  <li>The up and down arrows change the order; the <b>×</b> removes the rule; clicking the title collapses the card, which then shows a summary of what the rule does (the text replaced, the template, how many were found).</li>
+  <li>Long rules (movie, TV show, music, book, comic, photo, subtitle) are split into titled blocks (<b>Name</b>, <b>Lookup</b>, <b>Files beside</b>, <b>Inside the file</b>…). A long explanation shows two lines; click it to read the rest.</li>
   <li>A rule with an error (an invalid expression, say) gets a red border and is skipped until it is fixed.</li>
   <li><b>One lookup rule at a time</b>: movie, TV show, music, book and comic do not go together. With one of them in the list, the others are off in <b>+ Rule</b> until it is removed (turning it off is not enough). The other rules (replace, number, insert…) go with any of them. A rule set saved before with more than one opens with the first only, and a notice says which were left out. For a folder of movies and shows mixed, rename in two passes.</li>
   <li>An online search (movie, TV show, music, book, comic) can be stopped with <b>Stop</b>, in the progress box. What was found stays, and searching again goes on with the rest. The request under way finishes first, which can take a few seconds.</li>
@@ -74,7 +75,7 @@ export const en: Section[] = [
 </ul>
 <p>Folders have no extension: in <code>Show.2020</code>, the <code>.2020</code> is part of the name.</p>
 <h4>Saving and opening rules</h4>
-<p>📂 opens and 💾 saves the rule set to a <code>.json</code> file, to reuse later. By default the program also remembers the rules when it is closed.</p>
+<p>The folder and floppy-disk buttons beside <b>+ Rule</b> open and save the rule set to a <code>.json</code> file, to reuse later. By default the program also remembers the rules when it is closed.</p>
 <h4>Positions</h4>
 <p>Where a rule asks for a position, it counts visible characters starting at 1. Accented letters and emoji count as one character.</p>`,
   },
@@ -942,7 +943,7 @@ ${ex("Show.S01E02.720p.WEB.mkv", "Show S01E02.mkv")}
     id: "options",
     title: "Options",
     html: `
-<p>The gear opens the options:</p>
+<p>The gear opens the options, split into <b>General</b>, <b>Renaming</b>, <b>Online searches</b>, <b>Accounts and keys</b> (each service with a key shows <b>set up</b>, and the menu counts how many are ready) and <b>Shortcuts</b>:</p>
 <ul>
   <li><b>Language</b> and <b>Theme</b> (light, dark or system).</li>
   <li><b>Text size</b>: <b>Normal</b>, <b>Large</b> (15% bigger) or <b>Larger</b> (30% bigger). The whole window grows in proportion, like a browser's zoom; on a small screen, make the window bigger too.</li>

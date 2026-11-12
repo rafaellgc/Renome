@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { dialog } from "./modal";
+  import Icon from "./Icon.svelte";
   import { api, SAME_COVER, type OwnCover } from "./api";
   import { t, tError } from "./i18n";
   import { tmdbLang } from "./settings.svelte";
@@ -117,7 +119,7 @@
 
 <div class="overlay">
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="modal review" onclick={(e) => e.stopPropagation()}>
+  <div class="modal review" use:dialog onclick={(e) => e.stopPropagation()}>
     <header>
       {#if own}<img class="own" src={own.image} alt={t("ownCover")} title={t("ownCover")} />{/if}
       <div>
@@ -125,7 +127,7 @@
         <p class="file" title={path}>{names[path] ?? path}</p>
       </div>
       <span class="muted">{t("reviewOf", { i: index + 1, n: queue.length })}</span>
-      <button class="icon" title={t("close")} aria-label={t("close")} onclick={onclose}>✕</button>
+      <button class="icon close" title={t("close")} aria-label={t("close")} onclick={onclose}><Icon name="x" size={18} /></button>
     </header>
 
     <form class="search" onsubmit={search}>
@@ -184,13 +186,13 @@
   .review { width: min(980px, 94vw); height: 86vh; max-height: 86vh; gap: 12px; }
   header { display: flex; align-items: flex-start; gap: 12px; }
   header > div { flex: 1; min-width: 0; }
-  h2 { margin: 0; font-size: 16px; }
-  .file { margin: 2px 0 0; font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  h2 { margin: 0; font-size: var(--fs-lg); }
+  .file { margin: 2px 0 0; font-size: var(--fs-md); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .search { display: flex; align-items: center; gap: 8px; }
   .search .title { flex: 2; }
   .search .author { flex: 1; }
-  .hint { margin: 0; font-size: 12px; }
-  .error { margin: 0; color: var(--danger); font-size: 13px; }
+  .hint { margin: 0; font-size: var(--fs-sm); }
+  .error { margin: 0; color: var(--danger); font-size: var(--fs-md); }
   .empty { margin: 20px 0; text-align: center; }
   .grid {
     flex: 1;
@@ -213,13 +215,13 @@
   .cand:hover:not(:disabled) { border-color: var(--accent); }
   .cand.current { border-color: var(--accent); background: var(--accent-soft); }
   .cand img, .nocover { flex: none; width: 70px; height: 105px; border-radius: 4px; object-fit: cover; background: var(--surface-2); }
-  .nocover { display: grid; place-items: center; text-align: center; font-size: 11px; color: var(--muted); }
-  .info { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; }
-  .info i { color: var(--muted); font-size: 12px; }
-  .exact { color: var(--accent); font-size: 12px; }
+  .nocover { display: grid; place-items: center; text-align: center; font-size: var(--fs-xs); color: var(--muted); }
+  .info { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: var(--fs-md); }
+  .info i { color: var(--muted); font-size: var(--fs-sm); }
+  .exact { color: var(--accent); font-size: var(--fs-sm); }
   .own { flex: none; width: 48px; height: 72px; object-fit: cover; border-radius: 3px; background: var(--surface-2); }
-  .same { align-self: flex-start; font-size: 11px; padding: 1px 6px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-  .small { font-size: 12px; }
+  .same { align-self: flex-start; font-size: var(--fs-xs); padding: 1px 6px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .small { font-size: var(--fs-sm); }
   kbd {
     position: absolute;
     right: 6px;

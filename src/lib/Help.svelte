@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { dialog } from "./modal";
+  import Icon from "./Icon.svelte";
   import { onMount } from "svelte";
   import { getVersion } from "@tauri-apps/api/app";
   import { openUrl } from "@tauri-apps/plugin-opener";
@@ -125,14 +127,14 @@
 
 <div class="overlay">
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="modal help" onclick={(e) => e.stopPropagation()}>
+  <div class="modal help" use:dialog onclick={(e) => e.stopPropagation()}>
     <header>
       <div class="tabs" role="tablist">
         <button role="tab" aria-selected={tab === "manual"} class:on={tab === "manual"} onclick={() => (tab = "manual")}>{t("helpManual")}</button>
         <button role="tab" aria-selected={tab === "about"} class:on={tab === "about"} onclick={() => (tab = "about")}>{t("helpAbout")}</button>
         <button role="tab" aria-selected={tab === "licenses"} class:on={tab === "licenses"} onclick={() => (tab = "licenses")}>{t("helpLicenses")}</button>
       </div>
-      <button class="icon" title={t("close")} aria-label={t("close")} onclick={onclose}>✕</button>
+      <button class="icon close" title={t("close")} aria-label={t("close")} onclick={onclose}><Icon name="x" size={18} /></button>
     </header>
 
     {#if tab === "manual"}
@@ -205,7 +207,7 @@
         </p>
         <div class="about-links">
           <button class="primary-soft" onclick={() => openUrl(REPO)}>{t("aboutRepo")}</button>
-          <button class="primary-soft" title={t("donateHint")} onclick={() => openUrl(DONATE)}>♥ {t("donate")}</button>
+          <button class="primary-soft with-icon" title={t("donateHint")} onclick={() => openUrl(DONATE)}><Icon name="heart" size={14} /> {t("donate")}</button>
         </div>
         <div class="tmdb">
           <button class="logo" title="themoviedb.org" onclick={() => openUrl("https://www.themoviedb.org")}>
@@ -264,7 +266,7 @@
     height: auto;
     min-height: 28px;
     padding: 4px 8px;
-    font-size: 13px;
+    font-size: var(--fs-md);
     white-space: normal;
   }
   nav button.sub { padding-left: 22px; color: var(--muted); }
@@ -278,8 +280,8 @@
   }
   section { padding-top: 14px; }
   section + section { border-top: 1px solid var(--row-line); margin-top: 14px; }
-  .content h3 { margin: 0 0 6px; font-size: 17px; }
-  .content :global(h4) { margin: 14px 0 4px; font-size: 14px; }
+  .content h3 { margin: 0 0 6px; font-size: var(--fs-lg); }
+  .content :global(h4) { margin: 14px 0 4px; font-size: var(--fs-base); }
   .content :global(p) { margin: 6px 0; }
   .content :global(ul), .content :global(ol) { margin: 6px 0; padding-left: 22px; }
   .content :global(li) { margin: 3px 0; }
@@ -300,7 +302,7 @@
     border-radius: 4px;
     background: var(--surface-2);
   }
-  .content :global(table) { border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+  .content :global(table) { border-collapse: collapse; margin: 8px 0; font-size: var(--fs-md); }
   .content :global(td) { padding: 4px 12px 4px 0; border-bottom: 1px solid var(--row-line); vertical-align: top; }
   .content :global(td:first-child) { white-space: nowrap; }
   .content :global(.ex) {
@@ -348,7 +350,7 @@
   .about h2 { margin: 8px 0 0; font-size: 24px; }
   .about p { margin: 6px 0; line-height: 1.5; }
   .about .primary-soft { margin-top: 10px; }
-  .sources { margin-top: 8px; font-size: 13px; }
+  .sources { margin-top: 8px; font-size: var(--fs-md); }
   .sources p { margin: 2px 0; }
   .link { border: none; background: none; height: auto; padding: 0; color: var(--accent); }
   .link:hover:not(:disabled) { background: none; text-decoration: underline; }
@@ -356,7 +358,7 @@
   .about-links { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
   .tmdb { margin-top: 18px; display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: 420px; }
   .tmdb .logo { border: none; background: none; height: auto; padding: 4px; }
-  .tmdb p { font-size: 12px; margin: 0; }
+  .tmdb p { font-size: var(--fs-sm); margin: 0; }
   .licenses {
     flex: 1;
     overflow-y: auto;
@@ -364,7 +366,7 @@
     user-select: text;
     line-height: 1.5;
   }
-  .licenses h3 { margin: 16px 0 6px; font-size: 17px; }
+  .licenses h3 { margin: 16px 0 6px; font-size: var(--fs-lg); }
   .licenses p { margin: 6px 0; }
   .licenses pre {
     margin: 8px 0;
@@ -389,21 +391,21 @@
     border: none;
     background: none;
     text-align: left;
-    font-size: 13px;
+    font-size: var(--fs-md);
   }
   .pkg .chev { color: var(--muted); transition: transform 0.15s; }
   .pkg .chev.open { transform: rotate(90deg); }
   .pkg .spacer { flex: 1; }
-  .pkg .lic { color: var(--muted); font-size: 12px; text-align: right; }
+  .pkg .lic { color: var(--muted); font-size: var(--fs-sm); text-align: right; }
   .pkg .kind {
     flex: none;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     padding: 0 6px;
     border-radius: 8px;
     background: var(--surface-2);
     color: var(--muted);
   }
-  .detail { padding: 0 6px 8px 26px; font-size: 13px; }
+  .detail { padding: 0 6px 8px 26px; font-size: var(--fs-md); }
   @media (max-width: 640px) {
     nav { display: none; }
   }

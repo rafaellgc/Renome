@@ -59,7 +59,8 @@ export const es: Section[] = [
 <p>Las reglas se aplican <b>de arriba abajo</b>, cada una sobre el resultado de la anterior. El orden importa: numerar y luego cambiar mayúsculas no da lo mismo que al revés.</p>
 <ul>
   <li>La <b>casilla</b> del título activa y desactiva la regla sin borrarla. Desactivada, queda bloqueada: para cambiar sus opciones o buscar, actívela antes.</li>
-  <li><b>↑ ↓</b> cambian el orden; <b>✕</b> quita la regla; un clic en el título pliega la tarjeta.</li>
+  <li>Las flechas arriba y abajo cambian el orden; la <b>×</b> quita la regla; un clic en el título pliega la tarjeta, que entonces muestra un resumen de lo que hace la regla (el texto reemplazado, la plantilla, cuántos se encontraron).</li>
+  <li>Las reglas largas (película, serie, música, libro, cómic, foto, subtítulo) se dividen en bloques con títulos (<b>Nombre</b>, <b>Búsqueda</b>, <b>Archivos al lado</b>, <b>Dentro del archivo</b>…). Una explicación larga muestra dos líneas; haga clic en ella para leer el resto.</li>
   <li>Una regla con error (una expresión inválida, por ejemplo) queda con borde rojo y se ignora hasta que se corrija.</li>
   <li><b>Una regla de búsqueda a la vez</b>: película, serie, música, libro y cómic no van juntas. Con una de ellas en la lista, las demás quedan desactivadas en <b>+ Regla</b> hasta que se quite (desactivarla no basta). Las demás reglas (reemplazar, numerar, insertar…) combinan con cualquiera. Un conjunto de reglas guardado antes con más de una se abre solo con la primera, y un aviso dice cuáles quedaron fuera. Para una carpeta con películas y series mezcladas, renombre en dos pasadas.</li>
   <li>Una búsqueda en internet (película, serie, música, libro, cómic) se puede detener con <b>Detener</b>, en el cuadro de progreso. Lo encontrado se queda, y buscar de nuevo sigue con el resto. La consulta en curso termina antes, lo que puede tardar unos segundos.</li>
@@ -74,7 +75,7 @@ export const es: Section[] = [
 </ul>
 <p>Las carpetas no tienen extensión: en <code>Serie.2020</code>, el <code>.2020</code> es parte del nombre.</p>
 <h4>Guardar y abrir reglas</h4>
-<p>📂 abre y 💾 guarda el conjunto de reglas en un archivo <code>.json</code>, para reutilizarlo. Por defecto, el programa también recuerda las reglas al cerrarse.</p>
+<p>Los botones de carpeta y de disquete, junto a <b>+ Regla</b>, abren y guardan el conjunto de reglas en un archivo <code>.json</code>, para reutilizarlo. Por defecto, el programa también recuerda las reglas al cerrarse.</p>
 <h4>Posiciones</h4>
 <p>Cuando una regla pide una posición, cuenta caracteres visibles desde 1. Las letras con tilde y los emojis cuentan como un carácter.</p>`,
   },
@@ -942,7 +943,7 @@ ${ex("Serie.S01E02.720p.WEB.mkv", "Serie S01E02.mkv")}
     id: "options",
     title: "Opciones",
     html: `
-<p>El engranaje abre las opciones:</p>
+<p>El engranaje abre las opciones, divididas en <b>General</b>, <b>Renombrado</b>, <b>Búsquedas en línea</b>, <b>Cuentas y claves</b> (cada servicio con clave muestra <b>configurado</b>, y el menú cuenta cuántos están listos) y <b>Atajos</b>:</p>
 <ul>
   <li><b>Idioma</b> y <b>Tema</b> (claro, oscuro o del sistema).</li>
   <li><b>Tamaño del texto</b>: <b>Normal</b>, <b>Grande</b> (15% mayor) o <b>Mayor</b> (30% mayor). Toda la ventana crece en la misma proporción, como el zoom de un navegador; en una pantalla pequeña, agrande también la ventana.</li>

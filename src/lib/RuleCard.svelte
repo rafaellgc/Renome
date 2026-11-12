@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { slide } from "svelte/transition";
+  import Icon from "./Icon.svelte";
   import { t, type Key } from "./i18n";
   import { comicPreset, comicPresetOf, defaultSubLangs, FPS_PAIRS, PHOTO_TEMPLATES, splitExt, splitParts, type ComicPreset } from "./rules";
   import { settings } from "./settings.svelte";
@@ -86,6 +88,51 @@
   let open = $state(true);
   const r = $derived(step.rule);
 
+  /** What a closed card does, in a few words. */
+  const brief = $derived.by(() => {
+    const q = (x: string) => `“${x}”`;
+    switch (r.type) {
+      case "replace":
+        return r.find ? `${q(r.find)} → ${q(r.replace)}` : "";
+      case "regex":
+        return r.pattern ? `/${r.pattern}/ → ${r.replace}` : "";
+      case "rearrange":
+        return r.order;
+      case "case":
+        return t(({ lower: "caseLower", upper: "caseUpper", sentence: "caseSentence", title: "caseTitle", titleSmart: "caseTitleSmart" } as const)[r.mode]);
+      case "insert":
+        return r.source === "text" ? (r.text ? q(r.text) : "") : t(({ now: "srcNow", modified: "srcModified", taken: "srcTaken", folder: "srcFolder" } as const)[r.source]);
+      case "number":
+        return r.template;
+      case "remove":
+        return r.chars ? q(r.chars) : "";
+      case "movie":
+      case "series":
+      case "music":
+      case "book":
+      case "comic":
+      case "photo": {
+        const found = lookup && (lookup.found || lookup.choose || lookup.none) ? ` · ${lookup.found + lookup.choose}/${lookup.found + lookup.choose + lookup.none}` : "";
+        return r.template + found;
+      }
+      default:
+        return "";
+    }
+  });
+
+  /** A clamped hint (two lines) opens on a click, without ticking its box. */
+  function hintClick(e: MouseEvent) {
+    const hint = (e.target as HTMLElement).closest("label.check small");
+    if (!(hint instanceof HTMLElement) || !(hint.classList.contains("more") || hint.classList.contains("open"))) return;
+    e.preventDefault();
+    hint.classList.toggle("open");
+  }
+  /** Marks a hint that has more than shows, to be opened. */
+  function hintOver(e: PointerEvent) {
+    const hint = (e.target as HTMLElement).closest("label.check small");
+    if (hint instanceof HTMLElement && !hint.classList.contains("open")) hint.classList.toggle("more", hint.scrollHeight > hint.clientHeight + 1);
+  }
+
   const parts = $derived.by(() => {
     if (r.type !== "rearrange" || !sample) return [];
     const [stem, ext] = splitExt(sample);
@@ -105,19 +152,21 @@
   <header>
     <input type="checkbox" bind:checked={step.enabled} title={t("toggleRule")} />
     <button class="title" onclick={() => (open = !open)} aria-expanded={open}>
-      <span class="chev" class:closed={!open}>▾</span>
+      <span class="chev" class:closed={!open}><Icon name="chevron-down" size={14} /></span>
       {t(`rule.${r.type}`)}
     </button>
     <div class="actions">
-      <button class="icon" disabled={first} onclick={() => onmove(-1)} title={t("up")}>↑</button>
-      <button class="icon" disabled={last} onclick={() => onmove(1)} title={t("down")}>↓</button>
-      <button class="icon danger" onclick={onremove} title={t("removeRule")}>✕</button>
+      <button class="icon" disabled={first} onclick={() => onmove(-1)} title={t("up")} aria-label={t("up")}><Icon name="arrow-up" size={15} /></button>
+      <button class="icon" disabled={last} onclick={() => onmove(1)} title={t("down")} aria-label={t("down")}><Icon name="arrow-down" size={15} /></button>
+      <button class="icon danger" onclick={onremove} title={t("removeRule")} aria-label={t("removeRule")}><Icon name="x" size={15} /></button>
     </div>
   </header>
 
+  {#if !open && brief}<p class="brief" title={brief}>{brief}</p>{/if}
   {#if open}
     <!-- A rule turned off is left as it is: no edits, no searches. -->
-    <fieldset class="body" disabled={!step.enabled}>
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+    <fieldset class="body" disabled={!step.enabled} onclick={hintClick} onpointerover={hintOver} transition:slide={{ duration: 160 }}>
       {#if r.type === "replace"}
         <label>{t("find")} <input bind:value={r.find} spellcheck="false" /></label>
         <label>{t("replaceWith")} <input bind:value={r.replace} spellcheck="false" /></label>
@@ -295,18 +344,24 @@
         {/if}
       {:else if r.type === "movie"}
         <p class="hint top">{t("movieHint")}</p>
+        <h4 class="sect">{t("sectName")}</h4>
         <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
         <p class="hint mono">{t("movieTemplateHint")}</p>
         <label class="colon">{t("colonLabel")} <input class="mono sep" bind:value={r.colon} spellcheck="false" /></label>
         <label class="check"><input type="checkbox" bind:checked={r.folder} /> <span>{t("folderLabel")}<small>{t("folderHint")}</small></span></label>
+        <h4 class="sect">{t("sectSearch")}</h4>
+        {@render actions(t("tmdbSearch"), "movieSummary")}
+        <h4 class="sect">{t("sectBeside")}</h4>
         <label class="check"><input type="checkbox" bind:checked={r.sidecar} /> <span>{t("sidecarLabel")}<small>{t("sidecarHint")}</small></span></label>
         {#if r.sidecar}
           <label class="check sub"><input type="checkbox" bind:checked={r.fanart} /> {t("fanartLabel")}</label>
         {/if}
+        <h4 class="sect">{t("sectInside")}</h4>
         <label class="check"><input type="checkbox" bind:checked={r.videoTags} /> <span>{t("videoTagsLabel")}<small>{t("videoTagsHint")}</small></span></label>
         {#if r.videoTags}{@render videoOptions()}{/if}
+        <h4 class="sect">{t("sectList")}</h4>
         <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("movieMissingLabel")}<small>{t("movieMissingHint")}</small></span></label>
-        {@render actions(t("tmdbSearch"), "movieSummary")}
+        <h4 class="sect">{t("sectSubs")}</h4>
         {@render subtitles()}
       {:else if r.type === "series"}
         <p class="hint top">{t("seriesHint")}</p>
@@ -318,6 +373,7 @@
         </label>
         {#if r.source === "anilist"}<p class="hint">{t("animeHint")}</p>{/if}
         <label>{t("seriesShow")} <input bind:value={r.show} placeholder={t(r.source === "anilist" ? "seriesShowPlaceholderAnilist" : "seriesShowPlaceholder")} spellcheck="false" /></label>
+        <h4 class="sect">{t("sectName")}</h4>
         <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
         <p class="hint mono">{t("seriesTemplateHint")}</p>
         <label class="colon">{t("colonLabel")} <input class="mono sep" bind:value={r.colon} spellcheck="false" /></label>
@@ -325,22 +381,29 @@
         {#if r.folders}
           <label class="sub">{t("seriesFolderName")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
         {/if}
+        <h4 class="sect">{t("sectSearch")}</h4>
+        {#if lookup?.show}<p class="hint">{t("seriesCurrent", { show: lookup.show })}</p>{/if}
+        {@render actions(t("tvSearch"), "seriesSummary")}
         {#if r.source !== "anilist"}
+          <h4 class="sect">{t("sectBeside")}</h4>
           <label class="check"><input type="checkbox" bind:checked={r.sidecar} /> <span>{t("seriesSidecarLabel")}<small>{t("seriesSidecarHint")}</small></span></label>
           {#if r.sidecar}
             <label class="check sub"><input type="checkbox" bind:checked={r.fanart} /> {t("fanartLabel")}</label>
           {/if}
+          <h4 class="sect">{t("sectInside")}</h4>
           <label class="check"><input type="checkbox" bind:checked={r.videoTags} /> <span>{t("videoTagsLabel")}<small>{t("videoTagsHintTv")}</small></span></label>
           {#if r.videoTags}{@render videoOptions()}{/if}
         {/if}
+        <h4 class="sect">{t("sectList")}</h4>
         <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("seriesMissingLabel")}<small>{t("seriesMissingHint")}</small></span></label>
-
-        {#if lookup?.show}<p class="hint">{t("seriesCurrent", { show: lookup.show })}</p>{/if}
-        {@render actions(t("tvSearch"), "seriesSummary")}
-        {#if r.source !== "anilist"}{@render subtitles()}{/if}
+        {#if r.source !== "anilist"}
+          <h4 class="sect">{t("sectSubs")}</h4>
+          {@render subtitles()}
+        {/if}
       {:else if r.type === "photo"}
         {@const ready = PHOTO_TEMPLATES[settings.lang]}
         <p class="hint top">{t("photoHint")}</p>
+        <h4 class="sect">{t("sectName")}</h4>
         <label>{t("photoReady")}
           <select value={ready.names.includes(r.template as never) ? r.template : ""} onchange={(e) => { const v = (e.currentTarget as HTMLSelectElement).value; if (v) r.template = v; }}>
             <option value="" disabled>{t("comicPresetCustom")}</option>
@@ -349,6 +412,7 @@
         </label>
         <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
         <p class="hint mono">{t("photoTemplateHint")}</p>
+        <h4 class="sect">{t("sectDate")}</h4>
         <label class="check"><input type="checkbox" bind:checked={r.fromName} /> <span>{t("photoFromName")}<small>{t("photoFromNameHint")}</small></span></label>
         <label class="check"><input type="checkbox" bind:checked={r.modified} /> <span>{t("photoModified")}<small>{t("photoModifiedHint")}</small></span></label>
         <label class="shift">{t("photoShift")}
@@ -361,6 +425,7 @@
           </div>
           <p class="hint">{edit.hint}{edit.typed ? ` ${t("photoEditTypedN", { n: edit.typed })}` : ""}</p>
         {/if}
+        <h4 class="sect">{t("sectFolders")}</h4>
         <label class="check"><input type="checkbox" bind:checked={r.folders} /> <span>{t("photoFolders")}<small>{t("photoFoldersHint")}</small></span></label>
         {#if r.folders}
           <label class="sub">{t("photoFolderReady")}
@@ -371,11 +436,13 @@
           </label>
           <label class="sub">{t("musicFolderName")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
         {/if}
+        <h4 class="sect">{t("sectInside")}</h4>
         <label class="check"><input type="checkbox" bind:checked={r.setModified} /> <span>{t("photoSetModified")}<small>{t("photoSetModifiedHint")}</small></span></label>
         <p class="hint">{t("photoCopiesHint")}</p>
       {:else if r.type === "subtitle"}
         {@const fps = (n: number) => n.toLocaleString(settings.lang === "en" ? "en-US" : "pt-BR")}
         <p class="hint top">{t("subToolsHint")}</p>
+        <h4 class="sect">{t("sectFormat")}</h4>
         <label class="check"><input type="checkbox" bind:checked={r.toSrt} /> <span>{t("subToSrt")}<small>{t("subToSrtHint")}</small></span></label>
         {#if r.toSrt}
           <label class="sub">{t("comicOriginal")}
@@ -386,8 +453,10 @@
           </label>
         {/if}
         <label class="check"><input type="checkbox" bind:checked={r.utf8} /> <span>{t("subUtf8")}<small>{t("subUtf8Hint")}</small></span></label>
+        <h4 class="sect">{t("sectClean")}</h4>
         <label class="check"><input type="checkbox" bind:checked={r.ads} /> <span>{t("subAds")}<small>{t("subAdsHint")}</small></span></label>
         <label class="check"><input type="checkbox" bind:checked={r.hearing} /> <span>{t("subHearing")}<small>{t("subHearingHint")}</small></span></label>
+        <h4 class="sect">{t("sectTime")}</h4>
         <label class="shift">{t("subShift")}
           <input
             type="number"
@@ -416,12 +485,14 @@
           </select>
         </label>
         <p class="hint">{t("subFpsHint")}</p>
+        <h4 class="sect">{t("sectExtract")}</h4>
         <label class="check"><input type="checkbox" bind:checked={r.extract} /> <span>{t("subExtract")}<small>{t("subExtractHint")}</small></span></label>
         {#if r.extract}
           <label class="sub">{t("subExtractLangs")} <input class="mono" bind:value={r.extractLangs} placeholder={t("subExtractAll")} spellcheck="false" /></label>
         {/if}
       {:else if r.type === "music"}
         <p class="hint top">{t("musicHint")}</p>
+        <h4 class="sect">{t("sectName")}</h4>
         <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
         <p class="hint mono">{t("musicTemplateHint")}</p>
         <label class="colon">{t("colonLabel")} <input class="mono sep" bind:value={r.colon} spellcheck="false" /></label>
@@ -431,10 +502,14 @@
         {#if r.folders}
           <label class="sub">{t("musicFolderName")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
         {/if}
+        <h4 class="sect">{t("sectBeside")}</h4>
         <label class="check"><input type="checkbox" bind:checked={r.playlist} /> <span>{t("musicPlaylist")}<small>{t("musicPlaylistHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.cover} /> <span>{t("musicCover")}<small>{t("musicCoverHint")}</small></span></label>
+        <h4 class="sect">{t("sectSearch")}</h4>
         <p class="hint top">{t("mbHint")}</p>
         <label class="check"><input type="checkbox" bind:checked={r.listen} /> <span>{t("musicListen")}<small>{t("musicListenHint")}</small></span></label>
-        <label class="check"><input type="checkbox" bind:checked={r.cover} /> <span>{t("musicCover")}<small>{t("musicCoverHint")}</small></span></label>
+        {@render actions(t("mbSearch"), "albumSummary")}
+        <h4 class="sect">{t("sectInside")}</h4>
         <label class="check"><input type="checkbox" bind:checked={r.writeTags} /> <span>{t("musicWriteTags")}<small>{t("musicWriteTagsHint")}</small></span></label>
         {#if r.writeTags}
           <label class="check sub"><input type="checkbox" bind:checked={r.embedCover} /> <span>{t("musicEmbedCover")}<small>{t("musicEmbedCoverHint")}</small></span></label>
@@ -449,10 +524,11 @@
           {/if}
           <label class="check sub"><input type="checkbox" bind:checked={r.cleanTags} /> <span>{t("musicCleanTags")}<small>{t("musicCleanTagsHint")}</small></span></label>
         {/if}
+        <h4 class="sect">{t("sectList")}</h4>
         <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("musicMissingLabel")}<small>{t("musicMissingHint")}</small></span></label>
-        {@render actions(t("mbSearch"), "albumSummary")}
       {:else if r.type === "book"}
         <p class="hint top">{t("bookHint")}</p>
+        <h4 class="sect">{t("sectName")}</h4>
         <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
         <p class="hint mono">{t("bookTemplateHint")}</p>
         <label class="colon">{t("colonLabel")} <input class="mono sep" bind:value={r.colon} spellcheck="false" /></label>
@@ -460,12 +536,17 @@
         {#if r.folders}
           <label class="sub">{t("musicFolderName")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
         {/if}
+        <h4 class="sect">{t("sectSearch")}</h4>
+        {@render actions(t("olSearch"), "bookSummary")}
+        <h4 class="sect">{t("sectBeside")}</h4>
         <label class="check"><input type="checkbox" bind:checked={r.cover} /> <span>{t("bookCover")}<small>{t("bookCoverHint")}</small></span></label>
         <label class="check"><input type="checkbox" bind:checked={r.opf} /> <span>{t("bookOpf")}<small>{t("bookOpfHint")}</small></span></label>
+        <h4 class="sect">{t("sectInside")}</h4>
         <label class="check"><input type="checkbox" bind:checked={r.writeEpub} /> <span>{t("bookWriteEpub")}<small>{t("bookWriteEpubHint")}</small></span></label>
         <label class="check"><input type="checkbox" bind:checked={r.epub3} /> <span>{t("bookEpub3")}<small>{t("bookEpub3Hint")}</small></span></label>
         <label class="check"><input type="checkbox" bind:checked={r.shrinkImages} /> <span>{t("bookShrink")}<small>{t("bookShrinkHint")}</small></span></label>
-        <label title={t("bookConvertHint")}>{t("bookConvert")}
+        <h4 class="sect">{t("sectConvert")}</h4>
+        <label>{t("bookConvert")}
           <select bind:value={r.convertTo}>
             <option value="">{t("bookConvertNone")}</option>
             <option value="epub">EPUB</option>
@@ -483,8 +564,8 @@
             </select>
           </label>
         {/if}
+        <h4 class="sect">{t("sectList")}</h4>
         <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("bookMissingLabel")}<small>{t("bookMissingHint")}</small></span></label>
-        {@render actions(t("olSearch"), "bookSummary")}
       {:else if r.type === "comic"}
         <p class="hint top">{t("comicHint")}</p>
         <label>{t("comicPreset")}
@@ -501,15 +582,39 @@
           </select>
         </label>
         <p class="hint">{t("comicPresetHint")}</p>
+        <h4 class="sect">{t("sectName")}</h4>
         <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
         <p class="hint mono">{t("comicTemplateHint")}</p>
         <label class="colon">{t("colonLabel")} <input class="mono sep" bind:value={r.colon} spellcheck="false" /></label>
         <label class="check"><input type="checkbox" bind:checked={r.byFolder} /> <span>{t("comicByFolder")}<small>{t("comicByFolderHint")}</small></span></label>
         <label class="check"><input type="checkbox" bind:checked={r.folders} /> <span>{t("comicFolders")}<small>{t("comicFoldersHint")}</small></span></label>
+        {#if r.folders}
+          <label class="sub">{t("musicFolderName")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
+        {/if}
+        <h4 class="sect">{t("sectSearch")}</h4>
+        <label>{t("comicSource")}
+          <select bind:value={r.source}>
+            <option value="gcd">{t("comicSourceGcd")}</option>
+            <option value="metron">{t("comicSourceMetron")}</option>
+            <option value="comicvine">{t("comicSourceCv")}</option>
+            <option value="mangadex">{t("comicSourceMangadex")}</option>
+            <option value="anilist">{t("comicSourceAnilist")}</option>
+            <option value="mangaupdates">{t("comicSourceMangaupdates")}</option>
+          </select>
+        </label>
+        <p class="hint">{t(SOURCE_HINT[r.source] ?? "gcdHint")}</p>
+        {#if r.source === "metron"}
+          <label class="check"><input type="checkbox" bind:checked={r.barcode} /> <span>{t("comicBarcodeLabel")}<small>{t("comicBarcodeHint")}</small></span></label>
+        {/if}
+        <label>{t("comicSeries")} <input bind:value={r.series} placeholder={t("comicSeriesPlaceholder")} spellcheck="false" /></label>
+        {#if lookup?.show}<p class="hint">{t("seriesCurrent", { show: lookup.show })}</p>{/if}
         <label>{t("comicSkipPublishers")} <input bind:value={r.skipPublishers} placeholder={t("comicSkipPublishersPlaceholder")} spellcheck="false" /></label>
         <p class="hint">{t("comicSkipPublishersHint")}</p>
+        {@render actions(t("comicSearch"), "comicSummary")}
+        <h4 class="sect">{t("sectInside")}</h4>
         <label class="check"><input type="checkbox" bind:checked={r.writeInfo} /> <span>{t("comicWriteInfo")}<small>{t("comicWriteInfoHint")}</small></span></label>
         <label class="check"><input type="checkbox" bind:checked={r.cleanInfo} /> <span>{t(r.writeInfo ? "comicCleanInfoWrite" : "comicCleanInfo")}<small>{t(r.writeInfo ? "comicCleanInfoWriteHint" : "comicCleanInfoHint")}</small></span></label>
+        <h4 class="sect">{t("sectConvert")}</h4>
         <label class="check"><input type="checkbox" bind:checked={r.convert} /> <span>{t("comicConvert")}<small>{t("comicConvertHint")}</small></span></label>
         {#if r.convert}
           <label class="sub">{t("comicOriginal")}
@@ -534,6 +639,7 @@
             </label>
           {/if}
         {/if}
+        <h4 class="sect">{t("sectEbook")}</h4>
         <label>{t("comicEbook")}
           <select bind:value={r.ebook}>
             <option value="">{t("comicEbookNone")}</option>
@@ -612,27 +718,8 @@
             </label>
           {/if}
         {/if}
+        <h4 class="sect">{t("sectList")}</h4>
         <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("comicMissingLabel")}<small>{t("comicMissingHint")}</small></span></label>
-        {#if r.folders}
-          <label class="sub">{t("musicFolderName")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
-        {/if}
-        <label>{t("comicSource")}
-          <select bind:value={r.source}>
-            <option value="gcd">{t("comicSourceGcd")}</option>
-            <option value="metron">{t("comicSourceMetron")}</option>
-            <option value="comicvine">{t("comicSourceCv")}</option>
-            <option value="mangadex">{t("comicSourceMangadex")}</option>
-            <option value="anilist">{t("comicSourceAnilist")}</option>
-            <option value="mangaupdates">{t("comicSourceMangaupdates")}</option>
-          </select>
-        </label>
-        <p class="hint">{t(SOURCE_HINT[r.source] ?? "gcdHint")}</p>
-        {#if r.source === "metron"}
-          <label class="check"><input type="checkbox" bind:checked={r.barcode} /> <span>{t("comicBarcodeLabel")}<small>{t("comicBarcodeHint")}</small></span></label>
-        {/if}
-        <label>{t("comicSeries")} <input bind:value={r.series} placeholder={t("comicSeriesPlaceholder")} spellcheck="false" /></label>
-        {#if lookup?.show}<p class="hint">{t("seriesCurrent", { show: lookup.show })}</p>{/if}
-        {@render actions(t("comicSearch"), "comicSummary")}
       {/if}
 
       {#if summary}<p class="hint">{summary}</p>{/if}
@@ -730,9 +817,22 @@
     white-space: nowrap;
   }
   .title:hover:not(:disabled) { background: none; }
-  .chev { display: inline-block; transition: transform 0.15s; color: var(--muted); }
+  .brief {
+    margin: -4px 0 0;
+    padding: 0 12px 8px 46px;
+    font-size: var(--fs-sm);
+    color: var(--muted);
+    font-family: ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .chev { display: inline-flex; vertical-align: -2px; transition: transform 0.15s var(--ease); color: var(--muted); }
   .chev.closed { transform: rotate(-90deg); }
-  .actions { display: flex; gap: 2px; }
+  .actions { display: flex; gap: 2px; opacity: 0.45; transition: opacity 0.12s; }
+  .card:hover .actions, .card:focus-within .actions { opacity: 1; }
+  .actions button { border-color: transparent; background: transparent; color: var(--muted); }
+  .actions button:hover:not(:disabled) { color: var(--text); background: var(--hover); }
   .body {
     display: flex;
     flex-direction: column;
@@ -746,7 +846,7 @@
     display: flex;
     flex-direction: column;
     gap: 3px;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--muted);
     flex: 1;
     min-width: 0;
@@ -761,14 +861,42 @@
   }
   .row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
   .checks { display: flex; flex-direction: column; gap: 4px; }
-  .hint { margin: -4px 0 0; font-size: 11px; color: var(--muted); }
-  .error { margin: 0; font-size: 12px; color: var(--danger); }
+  .hint { margin: -4px 0 0; font-size: var(--fs-xs); color: var(--muted); }
+  /* A block of a long rule: a quiet title with a line. */
+  .sect {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0 -2px;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .sect::after { content: ""; flex: 1; height: 1px; background: var(--row-line); }
+  .error { margin: 0; font-size: var(--fs-sm); color: var(--danger); }
   .sep { white-space: pre; }
   .hint.top { margin: 0; }
   label.colon { flex: none; align-self: flex-start; }
   label.colon input { width: 90px; }
   label.check span { display: flex; flex-direction: column; }
-  label.check small { color: var(--muted); font-size: 11px; }
+  /* With a hint under it, the box lines up with the first line. */
+  label.check:has(small) { align-items: flex-start; }
+  label.check:has(small) > input { margin-top: 2px; }
+  /* Long hints: two lines, the rest on a click. */
+  label.check small {
+    color: var(--muted);
+    font-size: var(--fs-xs);
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
+  label.check small:global(.more) { cursor: pointer; }
+  label.check small:global(.more):hover { color: var(--text); }
+  label.check small:global(.open) { -webkit-line-clamp: unset; line-clamp: unset; }
   label.sub { margin-left: 22px; }
   label.sub2 { margin-left: 44px; }
   .hint.sub { margin: -2px 0 0 22px; }
@@ -788,7 +916,7 @@
     min-height: 26px;
     padding: 2px 8px 2px 4px;
     text-align: left;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     white-space: normal;
   }
   .part b {
@@ -800,7 +928,7 @@
     border-radius: 4px;
     background: var(--accent-soft);
     color: var(--accent);
-    font-size: 11px;
+    font-size: var(--fs-xs);
   }
   .part span { overflow-wrap: anywhere; }
 </style>

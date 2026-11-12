@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { dialog } from "./modal";
+  import Icon from "./Icon.svelte";
   import { untrack } from "svelte";
   import { api, SAME_COVER, type OwnCover } from "./api";
   import CoverZoom from "./CoverZoom.svelte";
@@ -151,7 +153,7 @@
 
 <div class="overlay">
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="modal review" onclick={(e) => e.stopPropagation()}>
+  <div class="modal review" use:dialog onclick={(e) => e.stopPropagation()}>
     <header>
       <div>
         <h2>{t("comicPickTitle")}</h2>
@@ -160,7 +162,7 @@
       {#if own}
         <button class="own" title={t("coverZoomOwn")} aria-label={t("ownCover")} onclick={() => (zoom = { own: true })}><img src={own.image} alt={t("ownCover")} /></button>
       {/if}
-      <button class="icon" title={t("close")} aria-label={t("close")} onclick={() => onpick(null)}>✕</button>
+      <button class="icon close" title={t("close")} aria-label={t("close")} onclick={() => onpick(null)}><Icon name="x" size={18} /></button>
     </header>
 
     <form class="search" onsubmit={search}>
@@ -232,20 +234,20 @@
   .review { position: relative; width: min(980px, 94vw); height: 86vh; max-height: 86vh; gap: 12px; }
   header { display: flex; align-items: flex-start; gap: 12px; }
   header > div { flex: 1; min-width: 0; }
-  h2 { margin: 0; font-size: 16px; }
-  .sub { margin: 2px 0 0; font-size: 13px; }
+  h2 { margin: 0; font-size: var(--fs-lg); }
+  .sub { margin: 2px 0 0; font-size: var(--fs-md); }
   .search { display: flex; gap: 8px; }
   .search input { flex: 1; min-width: 0; }
   .search .year { flex: none; width: 70px; }
   .search .publisher { flex: none; width: 170px; }
-  .hint { margin: 0; font-size: 12px; }
+  .hint { margin: 0; font-size: var(--fs-sm); }
   .covers:empty { display: none; }
   .own { all: unset; flex: none; cursor: zoom-in; }
   .own img { display: block; width: 48px; height: 72px; object-fit: cover; border-radius: 3px; background: var(--surface-2); }
-  .same { align-self: flex-start; font-size: 11px; padding: 1px 6px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-  .error { margin: 0; color: var(--danger); font-size: 13px; }
+  .same { align-self: flex-start; font-size: var(--fs-xs); padding: 1px 6px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .error { margin: 0; color: var(--danger); font-size: var(--fs-md); }
   .empty { margin: 20px 0; text-align: center; }
-  .searching { display: flex; flex-direction: column; gap: 8px; align-items: center; margin: 40px auto; width: min(360px, 80%); font-size: 13px; }
+  .searching { display: flex; flex-direction: column; gap: 8px; align-items: center; margin: 40px auto; width: min(360px, 80%); font-size: var(--fs-md); }
   .searching progress { width: 100%; accent-color: var(--accent); }
   .grid {
     flex: 1;
@@ -267,11 +269,11 @@
   .cand:hover { border-color: var(--accent); }
   .cand .pic { all: unset; flex: none; cursor: zoom-in; border-radius: 4px; }
   .cand .pic:focus-visible { outline: 2px solid var(--accent); }
-  .cand .info { all: unset; flex: 1; align-self: stretch; cursor: pointer; display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; }
+  .cand .info { all: unset; flex: 1; align-self: stretch; cursor: pointer; display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: var(--fs-md); }
   .cand .info:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .cand img, .noposter { flex: none; width: 70px; height: 105px; border-radius: 4px; object-fit: cover; background: var(--surface-2); display: block; }
-  .noposter { display: grid; place-items: center; text-align: center; font-size: 11px; color: var(--muted); }
-  .small { font-size: 12px; }
+  .noposter { display: grid; place-items: center; text-align: center; font-size: var(--fs-xs); color: var(--muted); }
+  .small { font-size: var(--fs-sm); }
   kbd {
     position: absolute;
     right: 6px;

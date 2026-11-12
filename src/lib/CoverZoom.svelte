@@ -70,5 +70,5 @@
   }
   figure { margin: 0; height: 100%; min-width: 0; flex: 1 1 0; max-width: 50%; display: flex; flex-direction: column; align-items: center; gap: 8px; }
   img { flex: 1; min-height: 0; width: 100%; object-fit: contain; }
-  figcaption { color: #fff; font-size: 13px; text-align: center; }
+  figcaption { color: #fff; font-size: var(--fs-md); text-align: center; }
 </style>

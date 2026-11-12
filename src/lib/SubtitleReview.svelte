@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { dialog } from "./modal";
+  import Icon from "./Icon.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { t } from "./i18n";
   import { settings } from "./settings.svelte";
@@ -67,10 +69,10 @@
 
 <div class="overlay">
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="modal subs" onclick={(e) => e.stopPropagation()}>
+  <div class="modal subs" use:dialog onclick={(e) => e.stopPropagation()}>
     <header>
       <h2>{t("subsReviewTitle")}</h2>
-      <button class="icon" title={t("close")} aria-label={t("close")} onclick={onclose}>✕</button>
+      <button class="icon close" title={t("close")} aria-label={t("close")} onclick={onclose}><Icon name="x" size={18} /></button>
     </header>
     <p class="muted hint">{t("subsReviewHint")}</p>
     <div class="list">
@@ -114,15 +116,15 @@
 <style>
   .subs { width: min(980px, 95vw); max-height: 88vh; gap: 10px; }
   header { display: flex; align-items: center; gap: 12px; }
-  h2 { margin: 0; font-size: 16px; flex: 1; }
-  .hint { margin: 0; font-size: 13px; }
+  h2 { margin: 0; font-size: var(--fs-lg); flex: 1; }
+  .hint { margin: 0; font-size: var(--fs-md); }
   .list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
   .video { display: flex; flex-direction: column; gap: 4px; }
-  .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-  .lang { display: flex; align-items: center; gap: 8px; font-size: 12.5px; min-width: 0; }
+  .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-md); }
+  .lang { display: flex; align-items: center; gap: 8px; font-size: var(--fs-md); min-width: 0; }
   .lang select { flex: 1; min-width: 0; }
   .code { width: 150px; flex-shrink: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .link { border: none; background: none; height: auto; padding: 0; color: var(--accent); font-size: 12px; }
+  .link { border: none; background: none; height: auto; padding: 0; color: var(--accent); font-size: var(--fs-sm); }
   .bad { color: var(--danger); }
   .spacer { flex: 1; }
   .modal-foot { display: flex; align-items: center; gap: 8px; }

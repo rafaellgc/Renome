@@ -13,6 +13,25 @@
   --hover: #f1f4f9;
   --selected: #dce8fd;
   --shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.06);
+  /* A filled button: white text on it reads well in both themes. */
+  --accent-fill: #2f6fde;
+  --success: #138a4e;
+  --success-soft: #e3f4ea;
+  --danger-soft: #fbe7e7;
+  --warn-soft: #fdf3d7;
+  --warn-text: #7a5600;
+  /* Type scale: hint, label, body, base, title, display. */
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-base: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --r-sm: 4px;
+  --r: 6px;
+  --r-lg: 10px;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
   color-scheme: light;
 }
 
@@ -31,6 +50,13 @@
   --hover: #282c33;
   --selected: #2c3d5c;
   --shadow: 0 8px 24px rgb(0 0 0 / 0.5);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
+  --accent-fill: #2f6fde;
+  --success: #4cc38a;
+  --success-soft: #1d3a2c;
+  --danger-soft: #45242a;
+  --warn-soft: #3d3420;
+  --warn-text: #f2c14e;
   color-scheme: dark;
 }
 
@@ -41,7 +67,7 @@ html, body {
   height: 100%;
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.4 system-ui, "Cantarell", "Noto Sans", sans-serif;
+  font: var(--fs-base)/1.4 system-ui, "Cantarell", "Noto Sans", sans-serif;
   -webkit-font-smoothing: antialiased;
   user-select: none;
 }
@@ -59,27 +85,35 @@ input:not([type="checkbox"]), select {
 }
 input[type="number"] { width: 100%; }
 input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+/* Where the keyboard is, on every button (not on a mouse click). */
+button:focus-visible, [role="row"]:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
 /* The macOS WebKit does not draw a checked box with accent-color: the
    system's own color there. */
 :root.mac input[type="checkbox"] { accent-color: auto; }
-.mono { font-family: ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace; font-size: 13px; }
+.mono { font-family: ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace; font-size: var(--fs-md); }
 
 button {
   height: 30px;
   padding: 0 12px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--r);
   background: var(--surface);
   cursor: pointer;
   white-space: nowrap;
+  transition: background-color 0.12s, border-color 0.12s, color 0.12s, filter 0.12s;
 }
 button:hover:not(:disabled) { background: var(--hover); }
 button:disabled { opacity: 0.45; cursor: default; }
 button.icon { width: 30px; padding: 0; display: inline-grid; place-items: center; }
 button.icon.danger:hover:not(:disabled) { color: var(--danger); }
-button.primary { background: var(--accent); border-color: var(--accent); color: white; font-weight: 600; }
-button.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
+button.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: white; font-weight: 600; }
+button.primary:hover:not(:disabled) { background: var(--accent-fill); filter: brightness(1.1); }
+button.icon svg { display: block; }
+button.with-icon { display: inline-flex; align-items: center; gap: 6px; }
+/* A count inside a button ("Rename [12]"). */
+.count { display: inline-block; min-width: 20px; margin-left: 6px; padding: 0 6px; border-radius: 9px; font-size: var(--fs-sm); line-height: 18px; font-variant-numeric: tabular-nums; text-align: center; background: rgb(255 255 255 / 0.22); }
 button.primary-soft { background: var(--accent-soft); border-color: transparent; color: var(--accent); font-weight: 600; }
 button.primary-soft:hover:not(:disabled) { background: var(--accent-soft); filter: brightness(0.97); }
 
@@ -88,11 +122,26 @@ code { font-family: ui-monospace, monospace; font-size: 0.95em; background: var(
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 5px; border: 2px solid transparent; background-clip: content-box; }
 
-.overlay { position: fixed; inset: 0; background: rgb(0 0 0 / 0.35); display: grid; place-items: center; z-index: 10; }
+.overlay { position: fixed; inset: 0; background: rgb(0 0 0 / 0.35); display: grid; place-items: center; z-index: 10; animation: fade-in 0.15s var(--ease); }
+.overlay > .modal, .overlay > div > .modal { animation: modal-in 0.18s var(--ease); }
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes modal-in { from { opacity: 0; transform: translateY(6px) scale(0.985); } }
+@media (prefers-reduced-motion: reduce) {
+  .overlay, .overlay > .modal, .overlay > div > .modal { animation: none; }
+}
+/* Sizes of windows: small (questions, options), medium (editing), large
+   (reviews, the manual). */
+.modal.md { width: min(720px, 94vw); }
+.modal.lg { width: min(980px, 94vw); }
+/* A window's title bar: title, then the close button at the right. */
+.modal-head { display: flex; align-items: center; gap: 8px; }
+.modal-head h2 { flex: 1; }
+button.icon.close { border-color: transparent; background: transparent; color: var(--muted); }
+button.icon.close:hover:not(:disabled) { color: var(--text); background: var(--hover); }
 .modal {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--r-lg);
   padding: 18px;
   width: min(520px, 90vw);
   max-height: 80vh;
@@ -102,8 +151,8 @@ code { font-family: ui-monospace, monospace; font-size: 0.95em; background: var(
   gap: 16px;
   box-shadow: var(--shadow);
 }
-.modal h2 { margin: 0; font-size: 16px; }
+.modal h2 { margin: 0; font-size: var(--fs-lg); }
 .modal-foot { display: flex; justify-content: flex-end; gap: 8px; }
-button.danger-fill { background: var(--danger); border-color: var(--danger); color: white; font-weight: 600; }
-button.danger-fill:hover:not(:disabled) { background: var(--danger); filter: brightness(1.08); }
+button.danger-fill { background: #c62f2f; border-color: #c62f2f; color: white; font-weight: 600; }
+button.danger-fill:hover:not(:disabled) { background: #c62f2f; filter: brightness(1.08); }
 input[type="search"]::-webkit-search-cancel-button { cursor: pointer; }

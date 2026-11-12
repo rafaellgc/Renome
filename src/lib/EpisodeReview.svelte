@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { dialog } from "./modal";
+  import Icon from "./Icon.svelte";
   import { tmdbImage } from "./tmdbImages.svelte";
   import { t } from "./i18n";
   import type { EpKey, Episode, EpisodeState, Show } from "./types";
@@ -120,14 +122,14 @@
 
 <div class="overlay">
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="modal review" onclick={(e) => e.stopPropagation()}>
+  <div class="modal review" use:dialog onclick={(e) => e.stopPropagation()}>
     <header>
       <div>
         <h2>{t("epReviewTitle")}{show ? ` — ${show.name}${show.year ? ` (${show.year})` : ""}` : ""}</h2>
         <p class="file" title={path}>{names[path] ?? path}</p>
       </div>
       <span class="muted">{t("reviewOf", { i: index + 1, n: queue.length })}</span>
-      <button class="icon" title={t("close")} aria-label={t("close")} onclick={onclose}>✕</button>
+      <button class="icon close" title={t("close")} aria-label={t("close")} onclick={onclose}><Icon name="x" size={18} /></button>
     </header>
 
     <p class="read"><span class="muted">{t("epRead")}</span> {read}</p>
@@ -193,11 +195,11 @@
   .review { width: min(980px, 94vw); height: 86vh; max-height: 86vh; gap: 10px; }
   header { display: flex; align-items: flex-start; gap: 12px; }
   header > div { flex: 1; min-width: 0; }
-  h2 { margin: 0; font-size: 16px; }
-  .file { margin: 2px 0 0; font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .read { margin: 0; font-size: 13px; }
-  .warn { margin: 0; padding: 6px 10px; border-radius: 6px; background: var(--warn); color: black; font-size: 13px; }
-  .hint { margin: 0; font-size: 12px; }
+  h2 { margin: 0; font-size: var(--fs-lg); }
+  .file { margin: 2px 0 0; font-size: var(--fs-md); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .read { margin: 0; font-size: var(--fs-md); }
+  .warn { margin: 0; padding: 6px 10px; border-radius: var(--r); background: var(--warn-soft); color: var(--warn-text); font-size: var(--fs-md); }
+  .hint { margin: 0; font-size: var(--fs-sm); }
   .body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
   .cand {
@@ -213,12 +215,12 @@
   .cand:hover, .ep:hover { border-color: var(--accent); }
   .cand.current, .ep.current { border-color: var(--accent); background: var(--accent-soft); }
   .cand img, .nostill { flex: none; width: 120px; height: 68px; border-radius: 4px; object-fit: cover; background: var(--surface-2); }
-  .nostill { display: grid; place-items: center; font-size: 11px; color: var(--muted); }
-  .info { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; }
-  .info i { color: var(--muted); font-size: 12px; }
+  .nostill { display: grid; place-items: center; font-size: var(--fs-xs); color: var(--muted); }
+  .info { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: var(--fs-md); }
+  .info i { color: var(--muted); font-size: var(--fs-sm); }
   .overview {
     color: var(--muted);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     display: -webkit-box;
     -webkit-line-clamp: 3;
     line-clamp: 3;
@@ -240,7 +242,7 @@
   .all-head p { flex: 1; }
   .all-head input { width: min(280px, 50%); }
   .list { display: flex; flex-direction: column; gap: 3px; }
-  h3 { margin: 8px 0 2px; font-size: 13px; }
+  h3 { margin: 8px 0 2px; font-size: var(--fs-md); }
   .ep {
     display: flex;
     align-items: center;
@@ -252,7 +254,7 @@
     white-space: normal;
   }
   .ep .name { flex: 1; min-width: 0; }
-  .ep .muted { font-size: 12px; }
+  .ep .muted { font-size: var(--fs-sm); }
   .ep.marked { box-shadow: inset 3px 0 var(--accent); background: var(--hover); }
   .spacer { flex: 1; }
   .modal-foot { margin-top: auto; }

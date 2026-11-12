@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Icon from "./Icon.svelte";
   import { tick } from "svelte";
   import { api, type WorkGroup } from "./api";
   import { COL_LABEL, detailText } from "./details";
@@ -332,7 +333,7 @@
     <span class="c-status">
       {#if available.length}
       <button class="icon cols" class:on={extra.length > 0} title={t("columnsMenu")} aria-label={t("columnsMenu")} aria-expanded={columnsMenu} onclick={() => (columnsMenu = !columnsMenu)}>
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M2 3h12v1.5H2zm0 4.25h12v1.5H2zM2 11.5h12V13H2z" /></svg>
+        <Icon name="columns" size={14} />
       </button>
       {/if}
     </span>
@@ -416,7 +417,7 @@
               {#if item.folder}<span class="into" title={t("intoFolder", { folder: item.folder })}><svg class="folder" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M1.5 3.5A1 1 0 0 1 2.5 2.5h3.6l1.5 1.5h5.9a1 1 0 0 1 1 1v7.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" /></svg>/</span>{/if}
               <span class="name" class:same={item.status === "unchanged"}>{#if d}{@render segs(d[1], "ins")}{:else}{item.newName}{/if}</span>
               {#if item.manual}
-                <button class="icon reset" title={t("resetManual")} onclick={(e) => { e.stopPropagation(); onoverride(item.path, null); }}>↺</button>
+                <button class="icon reset" title={t("resetManual")} onclick={(e) => { e.stopPropagation(); onoverride(item.path, null); }}><Icon name="undo" size={13} /></button>
               {/if}
             {/if}
           </span>
@@ -467,7 +468,7 @@
     margin: 0 -4px;
     border: none;
     background: none;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     font-weight: 600;
     color: var(--muted);
     text-align: left;
@@ -501,10 +502,10 @@
     background: var(--surface);
     box-shadow: 0 6px 24px rgb(0 0 0 / 0.18);
   }
-  .cols-title { margin: 2px 6px 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
-  .cols-item { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 5px; font-size: 13px; }
+  .cols-title { margin: 2px 6px 6px; font-size: var(--fs-sm); font-weight: 600; color: var(--muted); }
+  .cols-item { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 5px; font-size: var(--fs-md); }
   .cols-item:hover { background: var(--hover); }
-  .cols-hint { max-width: 220px; margin: 6px 6px 2px; font-size: 11px; color: var(--muted); }
+  .cols-hint { max-width: 220px; margin: 6px 6px 2px; font-size: var(--fs-xs); color: var(--muted); }
   .arrow { font-size: 9px; margin-left: 2px; }
   .viewport { flex: 1; overflow: auto; position: relative; }
   .viewport:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -514,7 +515,7 @@
     left: 0;
     right: 0;
     height: 30px;
-    font-size: 13px;
+    font-size: var(--fs-md);
     cursor: default;
     border-bottom: 1px solid var(--row-line);
   }
@@ -528,7 +529,7 @@
     padding: 0 6px;
     border: 1px dashed currentColor;
     border-radius: 9px;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-style: normal;
   }
   /* Left alone by the lookup rules: the row stays as it is. */
@@ -538,7 +539,7 @@
     border: 1px solid var(--border);
     border-radius: 9px;
     color: var(--muted);
-    font-size: 11px;
+    font-size: var(--fs-xs);
   }
   .dot.hole { color: var(--muted); }
   .row span { overflow: hidden; text-overflow: ellipsis; white-space: pre; }
@@ -566,7 +567,7 @@
     margin-right: 6px;
     padding: 0 5px 0 4px;
     border-radius: 9px;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-weight: 700;
     line-height: 17px;
     vertical-align: 1px;
@@ -582,12 +583,17 @@
   .g3 { --g: #8a4fd6; }
   .g4 { --g: #c0397a; }
   .g5 { --g: #0e8aa3; }
-  :global(:root[data-theme="dark"]) .copy { filter: brightness(1.45); }
+  :global(:root[data-theme="dark"]) .g0 { --g: #7aa7ff; }
+  :global(:root[data-theme="dark"]) .g1 { --g: #4cc38a; }
+  :global(:root[data-theme="dark"]) .g2 { --g: #f0a050; }
+  :global(:root[data-theme="dark"]) .g3 { --g: #b48cf2; }
+  :global(:root[data-theme="dark"]) .g4 { --g: #ec7fb0; }
+  :global(:root[data-theme="dark"]) .g5 { --g: #4fc3d9; }
   .row.twin { background: color-mix(in srgb, var(--accent) 9%, transparent); box-shadow: inset 3px 0 var(--accent); }
   .folder { width: 14px; height: 14px; margin-right: 5px; vertical-align: -2px; color: var(--muted); }
   .name.same { color: var(--muted); }
   .edit { width: 100%; height: 24px; padding: 0 6px; }
-  .reset { height: 20px; width: 20px; font-size: 13px; }
+  .reset { height: 20px; width: 20px; font-size: var(--fs-md); }
   .into { flex: none; display: inline-flex; align-items: center; color: var(--accent); font-weight: 600; }
   .into .folder { margin-right: 1px; color: var(--accent); }
   .movie {
@@ -597,11 +603,11 @@
     padding: 0;
     border: none;
     border-radius: 50%;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-weight: 700;
     line-height: 18px;
   }
-  .movie.auto, .movie.chosen { background: color-mix(in srgb, #1a9a5c 18%, transparent); color: #138a4e; }
+  .movie.auto, .movie.chosen { background: var(--success-soft); color: var(--success); }
   .movie.choose { background: var(--warn); color: black; }
   .movie.none { background: var(--hover); color: var(--muted); }
   .dot { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; font-size: 10px; font-weight: 700; }

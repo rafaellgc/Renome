@@ -1,10 +1,25 @@
 <script lang="ts">
+  import Icon from "./Icon.svelte";
+  import { dialog } from "./modal";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { api } from "./api";
   import { LANG_NAMES, MOD, t, tError, type Key } from "./i18n";
   import { applyTextSize, applyTheme, loadSecrets, secrets, settings, type Lang } from "./settings.svelte";
 
   let { onclose }: { onclose: () => void } = $props();
+
+  const TABS = [
+    ["general", "sectionGeneral"],
+    ["rename", "sectionRename"],
+    ["online", "sectionOnline"],
+    ["accounts", "optTabAccounts"],
+    ["shortcuts", "sectionShortcuts"],
+  ] as const;
+  let tab = $state<(typeof TABS)[number][0]>("general");
+  /** Services with a key or account typed in. */
+  const accountsSet = $derived(
+    [settings.tmdbKey, settings.osKey || settings.subdlKey || settings.subsourceKey, settings.googleBooksKey, settings.comicVineKey, settings.metronToken, settings.gcdEmail, settings.discogsToken].filter((v) => v.trim()).length,
+  );
 
   const TMDB_LANGS = ["pt-BR", "pt-PT", "en-US", "en-GB", "es-ES", "es-MX", "fr-FR", "it-IT", "de-DE", "ja-JP"];
   let showKey = $state(false);
@@ -185,9 +200,20 @@
 
 <div class="overlay">
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="modal" onclick={(e) => e.stopPropagation()}>
-    <h2>{t("optionsTitle")}</h2>
+  <div class="modal options" use:dialog onclick={(e) => e.stopPropagation()}>
+    <header class="modal-head">
+      <h2>{t("optionsTitle")}</h2>
+      <button class="icon close" title={t("close")} aria-label={t("close")} onclick={onclose}><Icon name="x" size={18} /></button>
+    </header>
 
+    <div class="opt-body">
+      <nav class="opt-nav" aria-label={t("optionsTitle")}>
+        {#each TABS as [id, label] (id)}
+          <button class:on={tab === id} aria-current={tab === id ? "page" : undefined} onclick={() => (tab = id)}>{t(label)}{#if id === "accounts"}<span class="n">{accountsSet}/7</span>{/if}</button>
+        {/each}
+      </nav>
+      <div class="opt-pane">
+      {#if tab === "general"}
     <section>
       <h3>{t("sectionGeneral")}</h3>
       <div class="grid">
@@ -221,7 +247,8 @@
         <span>{t("includeHidden")}<small>{t("includeHiddenHint")}</small></span>
       </label>
     </section>
-
+      {/if}
+      {#if tab === "rename"}
     <section>
       <h3>{t("sectionRename")}</h3>
       <label class="check">
@@ -237,7 +264,8 @@
         <span>{t("warnWindows")}</span>
       </label>
     </section>
-
+      {/if}
+      {#if tab === "online"}
     <section>
       <h3>{t("sectionOnline")}</h3>
       <div class="grid">
@@ -256,9 +284,10 @@
         <button onclick={clearCache} disabled={!cacheBytes}>{t("cacheClear")}</button>
       </div>
     </section>
-
+      {/if}
+      {#if tab === "accounts"}
     <section>
-      <h3>{t("sectionTmdb")}</h3>
+      <h3>{t("sectionTmdb")}{#if settings.tmdbKey.trim()}<span class="set"><Icon name="check" size={12} />{t("keySet")}</span>{/if}</h3>
       <div class="grid">
         <label for="opt-tmdb-key">{t("tmdbKey")}</label>
         <div class="key">
@@ -290,7 +319,7 @@
     </section>
 
     <section>
-      <h3>{t("sectionSubs")}</h3>
+      <h3>{t("sectionSubs")}{#if settings.osKey.trim() || settings.subdlKey.trim() || settings.subsourceKey.trim()}<span class="set"><Icon name="check" size={12} />{t("keySet")}</span>{/if}</h3>
       <p class="hint-top"><small>{t("subsOptionsHint")}</small></p>
       <h4>OpenSubtitles.com</h4>
       <div class="grid">
@@ -384,7 +413,7 @@
     </section>
 
     <section>
-      <h3>{t("sectionGoogleBooks")}</h3>
+      <h3>{t("sectionGoogleBooks")}{#if settings.googleBooksKey.trim()}<span class="set"><Icon name="check" size={12} />{t("keySet")}</span>{/if}</h3>
       <div class="grid">
         <label for="opt-gb-key">{t("tmdbKey")}</label>
         <div class="key">
@@ -410,7 +439,7 @@
     </section>
 
     <section>
-      <h3>{t("sectionComicVine")}</h3>
+      <h3>{t("sectionComicVine")}{#if settings.comicVineKey.trim()}<span class="set"><Icon name="check" size={12} />{t("keySet")}</span>{/if}</h3>
       <div class="grid">
         <label for="opt-cv-key">{t("tmdbKey")}</label>
         <div class="key">
@@ -436,7 +465,7 @@
     </section>
 
     <section>
-      <h3>{t("sectionMetron")}</h3>
+      <h3>{t("sectionMetron")}{#if settings.metronToken.trim()}<span class="set"><Icon name="check" size={12} />{t("keySet")}</span>{/if}</h3>
       <div class="grid">
         <label for="opt-mt-key">{t("mtToken")}</label>
         <div class="key">
@@ -462,7 +491,7 @@
     </section>
 
     <section>
-      <h3>Grand Comics Database</h3>
+      <h3>Grand Comics Database{#if settings.gcdEmail.trim()}<span class="set"><Icon name="check" size={12} />{t("keySet")}</span>{/if}</h3>
       <div class="grid">
         <label for="opt-gcd-email">{t("gcdEmail")}</label>
         <input
@@ -497,7 +526,7 @@
     </section>
 
     <section>
-      <h3>Discogs</h3>
+      <h3>Discogs{#if settings.discogsToken.trim()}<span class="set"><Icon name="check" size={12} />{t("keySet")}</span>{/if}</h3>
       <div class="grid">
         <label for="opt-dg-key">{t("dgToken")}</label>
         <div class="key">
@@ -534,7 +563,8 @@
         {t("secretsInFile")}
       {/if}
     </p>
-
+      {/if}
+      {#if tab === "shortcuts"}
     <section>
       <h3>{t("sectionShortcuts")}</h3>
       <dl class="keys">
@@ -544,18 +574,32 @@
         {/each}
       </dl>
     </section>
+      {/if}
+      </div>
+    </div>
 
     <div class="foot"><button class="primary" onclick={onclose}>{t("close")}</button></div>
   </div>
 </div>
 
 <style>
-  h2 { margin: 0; font-size: 16px; }
-  h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+  .options { width: min(820px, 94vw); height: min(640px, 88vh); max-height: none; overflow: hidden; }
+  .opt-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 180px 1fr; gap: 18px; }
+  .opt-nav { display: flex; flex-direction: column; gap: 2px; padding-right: 12px; border-right: 1px solid var(--row-line); }
+  .opt-nav button { display: flex; align-items: center; justify-content: space-between; border: none; background: none; text-align: left; color: var(--muted); }
+  .opt-nav button:hover:not(:disabled) { color: var(--text); }
+  .opt-nav button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .opt-nav .n { font-size: var(--fs-xs); font-variant-numeric: tabular-nums; opacity: 0.8; }
+  /* A pane of one section: the menu already names it. */
+  .opt-pane > section:only-of-type > h3:first-child { display: none; }
+  .opt-pane { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 22px; padding-right: 6px; }
+  .set { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; padding: 0 6px; border-radius: 9px; background: var(--success-soft); color: var(--success); font-size: var(--fs-xs); letter-spacing: 0; text-transform: none; vertical-align: 1px; }
+  h2 { margin: 0; font-size: var(--fs-lg); }
+  h3 { margin: 0 0 8px; font-size: var(--fs-sm); text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
   section { display: flex; flex-direction: column; gap: 10px; }
-  h4 { margin: 4px 0 0; font-size: 13px; }
+  h4 { margin: 4px 0 0; font-size: var(--fs-md); }
   .hint-top { margin: 0; }
-  .grid { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 10px; }
+  .grid { display: grid; grid-template-columns: 140px 1fr; align-items: center; gap: 10px; }
   .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; width: fit-content; }
   .seg button { border: none; border-radius: 0; height: 28px; }
   .seg button + button { border-left: 1px solid var(--border); }
@@ -563,15 +607,15 @@
   .check { display: flex; align-items: flex-start; gap: 8px; }
   .check input { margin-top: 2px; }
   .check span { display: flex; flex-direction: column; }
-  small { color: var(--muted); font-size: 12px; }
-  .stored { margin: 0 0 16px; font-size: 12px; color: var(--muted); }
+  small { color: var(--muted); font-size: var(--fs-sm); }
+  .stored { margin: 0 0 16px; font-size: var(--fs-sm); color: var(--muted); }
   .foot { display: flex; justify-content: flex-end; }
   .cache { display: flex; align-items: center; gap: 10px; }
   .key { display: flex; gap: 6px; }
   .key input { flex: 1; }
-  .good { color: #138a4e; }
+  .good { color: var(--success); }
   .bad { color: var(--danger); }
-  .link { border: none; background: none; height: auto; padding: 0; color: var(--accent); font-size: 12px; }
+  .link { border: none; background: none; height: auto; padding: 0; color: var(--accent); font-size: var(--fs-sm); }
   .link:hover:not(:disabled) { background: none; text-decoration: underline; }
   .keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; align-items: center; }
   dd { margin: 0; }

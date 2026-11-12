@@ -15,6 +15,8 @@
   import { Photos } from "$lib/page/photos.svelte";
   import { asText, counts, extOf, isEpub, moved, without, type PageCtx } from "$lib/page/common";
   import Dialog from "$lib/Dialog.svelte";
+  import Icon from "$lib/Icon.svelte";
+  import { dialog as dialogBox } from "$lib/modal";
   import { closeDialog, confirm, dialog, notify } from "$lib/dialogs.svelte";
   import FileTable from "$lib/FileTable.svelte";
   import Help from "$lib/Help.svelte";
@@ -348,6 +350,14 @@
   const ruleTypes = $derived(
     [...RULE_TYPES].sort((a, b) => t(`rule.${a}`).localeCompare(t(`rule.${b}`), LOCALES[settings.lang])),
   );
+  /** The kinds of file a rule is made for, then those that edit text. */
+  const MEDIA_RULES: RuleType[] = ["movie", "series", "music", "book", "comic", "photo", "subtitle"];
+  const ruleGroups = $derived([
+    { label: "ruleGroupMedia", types: ruleTypes.filter((r) => MEDIA_RULES.includes(r)) },
+    { label: "ruleGroupText", types: ruleTypes.filter((r) => !MEDIA_RULES.includes(r)) },
+  ] as const);
+  /** What the Rename button does: names and the files that only get data. */
+  const applyCount = $derived(preview.changed + movies.metaOnly.length + tv.metaOnly.length + books.metaOnly.length + music.coverOnly + music.playlistOnly.length + music.tagsOnly.length + comics.infoOnly.length + books.epubOnly.length + books.convertOnly.length + subs.only.length + subToolsOnly.length + videoTagOnly.length);
   const sample = $derived(
     preview.items.reduce<string>((min, i) => (!min || collator.compare(i.original, min) < 0 ? i.original : min), ""),
   );
@@ -1269,6 +1279,11 @@
       music.review = null;
       books.review = null;
       comics.review = null;
+      subs.review = false;
+      comics.edit = null;
+      photos.edit = null;
+      books.edit = null;
+      music.edit = null;
       tv.pick?.resolve(null);
       comics.pick?.resolve(null);
     }
@@ -1277,7 +1292,7 @@
       help ??= "manual";
       return;
     }
-    if (history || showOptions || help || movies.review || tv.review || music.review || books.review || comics.review || comics.pick || tv.pick || compare || busy || working) return;
+    if (history || showOptions || help || movies.review || tv.review || music.review || books.review || comics.review || comics.pick || tv.pick || compare || subs.review || comics.edit || photos.edit || books.edit || music.edit || busy || working) return;
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
     // These work even while typing in a rule.
@@ -1409,12 +1424,12 @@
 <div class="app" class:busy>
   <header class="toolbar">
     <div class="group menu-host">
-      <button class="primary-soft" disabled={!!working} onclick={() => (addMenu = !addMenu)}>{t("add")} ▾</button>
+      <button class="primary-soft with-icon" disabled={!!working} aria-haspopup="menu" aria-expanded={addMenu} onclick={() => (addMenu = !addMenu)}><Icon name="plus" size={15} />{t("add")}<Icon name="chevron-down" size={14} /></button>
       {#if addMenu}
-        <div class="menu">
-          <button onclick={pickFiles}>{t("addFiles")}</button>
-          <button onclick={() => pickFolders()}>{t("addFolders")}</button>
-          <button onclick={() => pickFolders(true)}>{t("addFolderItems")}</button>
+        <div class="menu" role="menu">
+          <button role="menuitem" onclick={pickFiles}><Icon name="file-plus" />{t("addFiles")}</button>
+          <button role="menuitem" onclick={() => pickFolders()}><Icon name="folder-plus" />{t("addFolders")}</button>
+          <button role="menuitem" onclick={() => pickFolders(true)}><Icon name="folder" />{t("addFolderItems")}</button>
         </div>
       {/if}
     </div>
@@ -1430,34 +1445,30 @@
       />
     </div>
     <div class="group">
-      <button class="icon" title={canMove || !selected.size ? t("moveUp") : t("moveDisabled")} disabled={!canMove || !!working} onclick={() => move(-1)}>⤒</button>
-      <button class="icon" title={canMove || !selected.size ? t("moveDown") : t("moveDisabled")} disabled={!canMove || !!working} onclick={() => move(1)}>⤓</button>
+      <button class="icon" title={canMove || !selected.size ? t("moveUp") : t("moveDisabled")} disabled={!canMove || !!working} onclick={() => move(-1)}><Icon name="to-top" /></button>
+      <button class="icon" title={canMove || !selected.size ? t("moveDown") : t("moveDisabled")} disabled={!canMove || !!working} onclick={() => move(1)}><Icon name="to-bottom" /></button>
       <button disabled={!selected.size || !!working} onclick={removeSelected}>{t("remove")}</button>
       <button disabled={!preview.total || !!working} onclick={clearAll}>{t("clear")}</button>
     </div>
     <div class="spacer"></div>
     <div class="group">
-      <button onclick={openHistory}>{t("history")}</button>
-      <button class="icon help-btn" title="{t("help")} (F1)" aria-label={t("help")} onclick={() => (help = "manual")}>?</button>
-      <button class="icon" title={t("options")} aria-label={t("options")} onclick={() => (showOptions = true)}>
-        <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
-          <path fill="currentColor" fill-rule="evenodd" stroke="currentColor" stroke-width="1" stroke-linejoin="round" d="M12.15 3.76L11.96 1.50L8.04 1.50L7.85 3.76L5.67 5.02L3.62 4.05L1.66 7.45L3.52 8.74L3.52 11.26L1.66 12.55L3.62 15.95L5.67 14.98L7.85 16.24L8.04 18.50L11.96 18.50L12.15 16.24L14.33 14.98L16.38 15.95L18.34 12.55L16.48 11.26L16.48 8.74L18.34 7.45L16.38 4.05L14.33 5.02ZM13 10a3 3 0 1 0-6 0a3 3 0 1 0 6 0Z" />
-        </svg>
-      </button>
+      <button class="icon" title={t("history")} aria-label={t("history")} onclick={openHistory}><Icon name="history" size={18} /></button>
+      <button class="icon" title="{t("help")} (F1)" aria-label={t("help")} onclick={() => (help = "manual")}><Icon name="help" size={18} /></button>
+      <button class="icon" title={t("options")} aria-label={t("options")} onclick={() => (showOptions = true)}><Icon name="settings" size={18} /></button>
     </div>
     <div class="group menu-host">
-      <button class="send" class:on={!!sendTo} title={sendTo ? sendTo.dir : t("sendHint")} disabled={!!working} onclick={() => (sendMenu = !sendMenu)}>
-        {sendTo ? t(sendTo.copy ? "sendCopyShort" : "sendMoveShort", { dir: basename(sendTo.dir) }) : t("sendHere")} ▾
+      <button class="send with-icon" class:on={!!sendTo} title={sendTo ? sendTo.dir : t("sendHint")} disabled={!!working} aria-haspopup="menu" aria-expanded={sendMenu} onclick={() => (sendMenu = !sendMenu)}>
+        <span class="send-label">{sendTo ? t(sendTo.copy ? "sendCopyShort" : "sendMoveShort", { dir: basename(sendTo.dir) }) : t("sendHere")}</span><Icon name="chevron-down" size={14} />
       </button>
       {#if sendMenu}
-        <div class="menu right">
-          <button onclick={() => ((sendTo = null), (sendMenu = false))}>{t("sendHere")}</button>
-          <button onclick={() => pickSendTo(false)}>{t("sendMoveTo")}</button>
-          <button onclick={() => pickSendTo(true)}>{t("sendCopyTo")}</button>
+        <div class="menu right" role="menu">
+          <button role="menuitemradio" aria-checked={!sendTo} onclick={() => ((sendTo = null), (sendMenu = false))}><span class="tick">{#if !sendTo}<Icon name="check" size={14} />{/if}</span>{t("sendHere")}</button>
+          <button role="menuitemradio" aria-checked={!!sendTo && !sendTo.copy} onclick={() => pickSendTo(false)}><span class="tick">{#if sendTo && !sendTo.copy}<Icon name="check" size={14} />{/if}</span>{t("sendMoveTo")}</button>
+          <button role="menuitemradio" aria-checked={!!sendTo?.copy} onclick={() => pickSendTo(true)}><span class="tick">{#if sendTo?.copy}<Icon name="check" size={14} />{/if}</span>{t("sendCopyTo")}</button>
         </div>
       {/if}
       <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !movies.metaOnly.length && !tv.metaOnly.length && !books.metaOnly.length && !music.coverOnly && !music.playlistOnly.length && !music.tagsOnly.length && !comics.infoOnly.length && !books.epubOnly.length && !books.convertOnly.length && !subs.only.length && !subToolsOnly.length && !videoTagOnly.length) || busy || !!working} onclick={applyAll}>
-        {t(sendTo ? (sendTo.copy ? "copyAction" : "moveAction") : "rename")} {preview.changed + movies.metaOnly.length + tv.metaOnly.length + books.metaOnly.length + music.coverOnly + music.playlistOnly.length + music.tagsOnly.length + comics.infoOnly.length + books.epubOnly.length + books.convertOnly.length + subs.only.length + subToolsOnly.length + videoTagOnly.length || ""}
+        {t(sendTo ? (sendTo.copy ? "copyAction" : "moveAction") : "rename")}{#if applyCount}<span class="count">{applyCount.toLocaleString(LOCALES[settings.lang])}</span>{/if}
       </button>
     </div>
   </header>
@@ -1468,17 +1479,24 @@
       <div class="rules-head">
         <h2>{t("rules")}</h2>
         <div class="group menu-host">
-          <button class="primary-soft" onclick={() => (ruleMenu = !ruleMenu)}>{t("addRule")}</button>
+          <button class="primary-soft with-icon" aria-haspopup="menu" aria-expanded={ruleMenu} onclick={() => (ruleMenu = !ruleMenu)}><Icon name="plus" size={15} />{t("addRule")}</button>
           {#if ruleMenu}
-            <div class="menu">
-              {#each ruleTypes as type (type)}
-                {@const locked = !!lookupType && isLookup(type)}
-                <button disabled={locked} title={locked ? t("oneLookup", { rule: t(`rule.${lookupType}`) }) : undefined} onclick={() => addRule(type)}>{t(`rule.${type}`)}</button>
+            <div class="menu rules-menu" role="menu">
+              {#each ruleGroups as g (g.label)}
+                <p class="menu-group">{t(g.label)}</p>
+                {#if lookupType && g.label === "ruleGroupMedia"}<p class="menu-note">{t("oneLookup", { rule: t(`rule.${lookupType}`) })}</p>{/if}
+                {#each g.types as type (type)}
+                  {@const locked = !!lookupType && isLookup(type)}
+                  {@const sub = MEDIA_RULES.includes(type) ? t(`ruleSub.${type}` as Key) : ""}
+                  <button role="menuitem" disabled={locked} onclick={() => addRule(type)}>
+                    <span class="item-text">{t(`rule.${type}`)}{#if sub}<small>{sub}</small>{/if}</span>
+                  </button>
+                {/each}
               {/each}
             </div>
           {/if}
-          <button class="icon" title={t("openRules")} onclick={loadPreset}>📂</button>
-          <button class="icon" title={t("saveRules")} disabled={!steps.length} onclick={savePreset}>💾</button>
+          <button class="icon" title="{t("openRules")}…" aria-label={t("openRules")} onclick={loadPreset}><Icon name="folder-open" /></button>
+          <button class="icon" title="{t("saveRules")}…" aria-label={t("saveRules")} disabled={!steps.length} onclick={savePreset}><Icon name="save" /></button>
         </div>
       </div>
       <div class="rule-list">
@@ -1632,8 +1650,14 @@
         {#if !preview.items.length}<p class="no-match">{t("noMatch")}</p>{/if}
       {:else}
         <div class="drop">
+          <span class="drop-icon"><Icon name="folder-open" size={40} /></span>
           <p class="big">{t("dropTitle")}</p>
           <p>{t("dropHint")}</p>
+          <div class="drop-actions">
+            <button class="primary with-icon" onclick={pickFiles}><Icon name="file-plus" />{t("addFiles")}</button>
+            <button class="with-icon" onclick={() => pickFolders()}><Icon name="folder-plus" />{t("addFolders")}</button>
+          </div>
+          <p class="drop-keys"><kbd>{MOD}+O</kbd></p>
         </div>
       {/if}
     </section>
@@ -1706,23 +1730,26 @@
     {/if}
     <span class="spacer"></span>
     <span class="notice">{notice}</span>
-    <button class="link" title={t("donateHint")} onclick={() => openUrl("https://ko-fi.com/rafaellgc")}>♥ {t("donate")}</button>
+    <button class="link" title={t("donateHint")} onclick={() => openUrl("https://ko-fi.com/rafaellgc")}><Icon name="heart" size={13} />{t("donate")}</button>
   </footer>
 </div>
 {/if}
 
 {#if toast}
   <div class="toast" role="status" aria-live="polite">
-    <span class="tick" aria-hidden="true">✓</span>{toast}
-    <button class="icon" title={t("close")} aria-label={t("close")} onclick={() => (toast = null)}>✕</button>
+    <span class="tick" aria-hidden="true"><Icon name="check" size={15} /></span>{toast}
+    <button class="icon" title={t("close")} aria-label={t("close")} onclick={() => (toast = null)}><Icon name="x" size={14} /></button>
   </div>
 {/if}
 
 {#if history}
   <div class="overlay">
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h2>{t("historyTitle")}</h2>
+    <div class="modal md" use:dialogBox onclick={(e) => e.stopPropagation()}>
+      <header class="modal-head">
+        <h2>{t("historyTitle")}</h2>
+        <button class="icon close" title={t("close")} aria-label={t("close")} onclick={() => (history = null)}><Icon name="x" size={18} /></button>
+      </header>
       {#if history.length}
         <ul>
           {#each history as h (h.id)}
@@ -1745,7 +1772,7 @@
               {:else}
                 <button onclick={() => undo(h.id)} disabled={busy}>{t("undo")}</button>
               {/if}
-              <button class="icon danger" title={t("deleteEntry")} aria-label={t("deleteEntry")} onclick={() => deleteEntry(h.id)} disabled={busy}>✕</button>
+              <button class="icon danger" title={t("deleteEntry")} aria-label={t("deleteEntry")} onclick={() => deleteEntry(h.id)} disabled={busy}><Icon name="trash" size={15} /></button>
             </li>
           {/each}
         </ul>
@@ -1892,7 +1919,7 @@
   .toolbar {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 10px;
     padding: 8px 12px;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
@@ -1901,16 +1928,16 @@
   .group { display: flex; align-items: center; gap: 6px; }
   .menu-host { position: relative; }
   .spacer { flex: 1; }
-  .filter-box { flex: 0 1 280px; }
+  .filter-box { flex: 0 1 280px; min-width: 140px; }
   .filter { width: 100%; }
   .filter.invalid { border-color: var(--danger); outline-color: var(--danger); }
   main { flex: 1; display: flex; min-height: 0; gap: 10px; padding: 10px; }
   .rules { width: clamp(280px, 30vw, 340px); flex: none; display: flex; flex-direction: column; min-height: 0; transition: opacity 0.15s; }
   .rules.waiting { opacity: 0.55; cursor: progress; }
   .rules-head { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 8px; }
-  h2 { margin: 0; font-size: 15px; }
+  h2 { margin: 0; font-size: var(--fs-lg); }
   .rule-list { flex: 1; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 8px; padding-right: 2px; }
-  .empty { color: var(--muted); font-size: 13px; margin: 4px 2px; }
+  .empty { color: var(--muted); font-size: var(--fs-md); margin: 4px 2px; }
   .menu {
     position: absolute;
     left: 0;
@@ -1925,9 +1952,19 @@
     padding: 4px;
     z-index: 5;
   }
-  .menu button { border: none; background: none; text-align: left; }
+  .menu button { display: flex; align-items: center; gap: 8px; border: none; background: none; text-align: left; border-radius: var(--r-sm); }
+  .menu button :global(.icon-svg) { color: var(--muted); }
+  .menu .tick { width: 14px; display: inline-flex; color: var(--accent); }
+  .menu-group { margin: 6px 10px 2px; font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+  .menu-group:first-child { margin-top: 4px; }
+  .rules-menu { min-width: 260px; max-height: calc(100vh - 140px); overflow-y: auto; }
+  .rules-menu button { flex: none; height: auto; min-height: 30px; padding: 4px 10px; }
+  .menu-note { margin: 0 10px 4px; font-size: var(--fs-xs); color: var(--warn-text); max-width: 260px; }
+  .item-text { display: flex; flex-direction: column; }
+  .item-text small { font-size: var(--fs-xs); color: var(--muted); white-space: normal; }
+  .send-label { overflow: hidden; text-overflow: ellipsis; }
   .menu.right { left: auto; right: 0; }
-  .send { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .send { max-width: 240px; white-space: nowrap; }
   .send.on { border-color: var(--accent); color: var(--accent); }
   .menu button:hover { background: var(--hover); }
   .files { flex: 1; display: flex; min-width: 0; border-radius: 8px; position: relative; }
@@ -1953,7 +1990,7 @@
     border-radius: 10px;
     background: var(--surface);
     box-shadow: 0 6px 24px rgb(0 0 0 / 0.15);
-    font-size: 14px;
+    font-size: var(--fs-base);
   }
   .working progress { width: 100%; accent-color: var(--accent); }
   .working.above { position: fixed; z-index: 15; border-radius: 0; }
@@ -1980,7 +2017,12 @@
     border-radius: 8px;
     color: var(--muted);
   }
-  .drop .big { font-size: 18px; color: var(--text); margin: 0 0 4px; }
+  .drop .big { font-size: var(--fs-xl); font-weight: 600; color: var(--text); margin: 0 0 4px; }
+  .drop p { margin: 0; }
+  .drop-icon { display: inline-flex; justify-content: center; margin-bottom: 12px; color: var(--accent); opacity: 0.85; }
+  .drop-actions { display: flex; gap: 8px; justify-content: center; margin-top: 18px; }
+  .drop-keys { margin-top: 10px !important; font-size: var(--fs-xs); }
+  .drop-keys kbd { font: var(--fs-xs) ui-monospace, monospace; padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: var(--r-sm); background: var(--surface-2); }
   .toast {
     position: fixed;
     right: 16px;
@@ -1991,7 +2033,7 @@
     gap: 8px;
     max-width: min(480px, calc(100vw - 32px));
     padding: 8px 14px;
-    font-size: 13px;
+    font-size: var(--fs-md);
     color: var(--text);
     background: var(--surface);
     border: 1px solid var(--border);
@@ -2000,8 +2042,8 @@
     box-shadow: var(--shadow);
     animation: toast-in 0.18s ease-out;
   }
-  .toast .tick { color: var(--accent); font-weight: 700; }
-  .toast button.icon { margin: -4px -8px -4px 4px; font-size: 11px; border-color: transparent; background: transparent; }
+  .toast .tick { display: inline-flex; color: var(--success); }
+  .toast button.icon { margin: -4px -8px -4px 4px; font-size: var(--fs-xs); border-color: transparent; background: transparent; }
   @keyframes toast-in {
     from { opacity: 0; transform: translateY(6px); }
   }
@@ -2012,9 +2054,11 @@
   button.danger-text { color: var(--danger); }
   footer {
     display: flex;
+    align-items: center;
     gap: 16px;
+    font-variant-numeric: tabular-nums;
     padding: 6px 12px;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     border-top: 1px solid var(--border);
     background: var(--surface);
     color: var(--muted);
@@ -2023,9 +2067,10 @@
   footer .faint { color: var(--muted); font-style: italic; }
   footer .missing { display: inline-flex; align-items: center; gap: 5px; }
   footer .bad { color: var(--danger); }
-  footer .warn { padding: 0 6px; border-radius: 4px; background: var(--warn); color: black; cursor: help; }
+  footer .warn { padding: 0 6px; border-radius: var(--r-sm); background: var(--warn-soft); color: var(--warn-text); cursor: help; }
   footer .link {
     display: inline-flex;
+    transition: background-color 0.12s;
     align-items: center;
     gap: 4px;
     height: auto;
@@ -2033,7 +2078,7 @@
     border: none;
     border-radius: 4px;
     background: none;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     color: var(--accent);
   }
   footer .link:hover:not(:disabled) { background: var(--hover); }
@@ -2045,6 +2090,5 @@
   /* The date on one line; a long summary beside it wraps instead. */
   .modal li > .when { white-space: nowrap; }
   .muted { color: var(--muted); }
-  .help-btn { font-size: 16px; font-weight: 700; }
-  .failed { color: var(--danger); font-size: 13px; }
+  .failed { color: var(--danger); font-size: var(--fs-md); }
 </style>

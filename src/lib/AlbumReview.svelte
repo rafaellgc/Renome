@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { dialog } from "./modal";
+  import Icon from "./Icon.svelte";
   import { api } from "./api";
   import { t, tError } from "./i18n";
   import { settings } from "./settings.svelte";
@@ -98,14 +100,14 @@
 
 <div class="overlay">
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="modal review" onclick={(e) => e.stopPropagation()}>
+  <div class="modal review" use:dialog onclick={(e) => e.stopPropagation()}>
     <header>
       <div>
         <h2>{t("albumReviewTitle")}</h2>
         <p class="file" title={a?.dir}>{a ? `${folder(a.dir)} · ${t("albumFiles", { n: a.files.length })}` : ""}</p>
       </div>
       <span class="muted">{t("reviewOf", { i: index + 1, n: queue.length })}</span>
-      <button class="icon" title={t("close")} aria-label={t("close")} onclick={onclose}>✕</button>
+      <button class="icon close" title={t("close")} aria-label={t("close")} onclick={onclose}><Icon name="x" size={18} /></button>
     </header>
 
     {#if a}
@@ -170,14 +172,14 @@
   .review { width: min(980px, 94vw); height: 86vh; max-height: 86vh; gap: 10px; }
   header { display: flex; align-items: flex-start; gap: 12px; }
   header > div { flex: 1; min-width: 0; }
-  h2 { margin: 0; font-size: 16px; }
-  .file { margin: 2px 0 0; font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .read { margin: 0; font-size: 13px; }
+  h2 { margin: 0; font-size: var(--fs-lg); }
+  .file { margin: 2px 0 0; font-size: var(--fs-md); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .read { margin: 0; font-size: var(--fs-md); }
   .search { display: flex; gap: 8px; }
   .search .artist { flex: 2; }
   .search .album { flex: 3; }
-  .hint { margin: 0; font-size: 12px; }
-  .error { margin: 0; color: var(--danger); font-size: 13px; }
+  .hint { margin: 0; font-size: var(--fs-sm); }
+  .error { margin: 0; color: var(--danger); font-size: var(--fs-md); }
   .empty { margin: 20px 0; text-align: center; }
   .grid {
     flex: 1;
@@ -201,11 +203,11 @@
   .cand.current { border-color: var(--accent); background: var(--accent-soft); }
   .cand img, .nocover { flex: none; width: 84px; height: 84px; border-radius: 4px; object-fit: cover; background: var(--surface-2); }
   .nocover { display: grid; place-items: center; font-size: 28px; color: var(--muted); }
-  .info { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; }
-  .info .muted { font-size: 12px; }
-  .tracks { font-size: 12px; color: var(--muted); }
-  .tracks.same { color: #138a4e; font-weight: 600; }
-  .source { align-self: flex-start; padding: 0 6px; border: 1px solid var(--border); border-radius: 9px; font-size: 11px; color: var(--muted); }
+  .info { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: var(--fs-md); }
+  .info .muted { font-size: var(--fs-sm); }
+  .tracks { font-size: var(--fs-sm); color: var(--muted); }
+  .tracks.same { color: var(--success); font-weight: 600; }
+  .source { align-self: flex-start; padding: 0 6px; border: 1px solid var(--border); border-radius: 9px; font-size: var(--fs-xs); color: var(--muted); }
   kbd {
     position: absolute;
     right: 6px;

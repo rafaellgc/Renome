@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { dialog as dialogBox } from "./modal";
+  import Icon from "./Icon.svelte";
   import { api, type PictureCard } from "./api";
   import { confirm, dialog, notify } from "./dialogs.svelte";
   import { LOCALES, t, tError } from "./i18n";
@@ -180,11 +182,11 @@
 
 <div class="overlay">
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="modal compare" onclick={(e) => e.stopPropagation()}>
+  <div class="modal compare" use:dialogBox onclick={(e) => e.stopPropagation()}>
     <header>
       <h2>{t(kind === "similar" ? "compareSimilarTitle" : "compareIdenticalTitle")}</h2>
       <span class="muted">{t("compareGroupOf", { i: index + 1, n: groups.length })}</span>
-      <button class="icon" title={t("close")} aria-label={t("close")} disabled={busy} onclick={() => onclose([])}>✕</button>
+      <button class="icon close" title={t("close")} aria-label={t("close")} disabled={busy} onclick={() => onclose([])}><Icon name="x" size={18} /></button>
     </header>
 
     {#if zoom}
@@ -246,8 +248,8 @@
 <style>
   .compare { width: min(1100px, 95vw); height: 88vh; max-height: 88vh; gap: 10px; }
   header { display: flex; align-items: center; gap: 12px; }
-  h2 { margin: 0; font-size: 16px; flex: 1; }
-  .hint { margin: 0; font-size: 13px; }
+  h2 { margin: 0; font-size: var(--fs-lg); flex: 1; }
+  .hint { margin: 0; font-size: var(--fs-md); }
   .grid {
     flex: 1;
     overflow-y: auto;
@@ -278,20 +280,20 @@
   .pic:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .pic img { max-width: 100%; max-height: 200px; object-fit: contain; display: block; }
   .noimg { font-size: 22px; font-weight: 600; color: var(--muted); }
-  .info { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; min-width: 0; }
+  .info { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-md); min-width: 0; }
   .name, .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* Cut at the start: the end tells two folders apart. */
   .path { direction: rtl; text-align: left; }
   .zoom-bar .name { flex-shrink: 0; max-width: 40%; }
   .zoom-bar .path { min-width: 0; flex: 0 1 auto; }
   .badges { display: flex; gap: 6px; min-height: 18px; margin-top: 2px; }
-  .badge { font-size: 11px; padding: 1px 6px; border-radius: 8px; background: var(--accent-soft, rgb(37 99 235 / 0.12)); color: var(--accent); }
+  .badge { font-size: var(--fs-xs); padding: 1px 6px; border-radius: 8px; background: var(--accent-soft, rgb(37 99 235 / 0.12)); color: var(--accent); }
   .mark { display: flex; align-items: center; gap: 6px; margin-top: 4px; cursor: pointer; }
   .tools { display: flex; gap: 8px; }
   .zoom { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
   .zoom-pic { all: unset; cursor: zoom-out; flex: 1; min-height: 0; position: relative; background: rgb(0 0 0 / 0.06); border-radius: 6px; }
   .zoom-pic img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
   .modal-foot .count { align-self: center; }
-  .zoom-bar { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+  .zoom-bar { display: flex; align-items: center; gap: 10px; font-size: var(--fs-md); }
   .spacer { flex: 1; }
 </style>

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { dialog } from "./modal";
+  import Icon from "./Icon.svelte";
   import { api, SAME_COVER, type OwnCover } from "./api";
   import CoverZoom from "./CoverZoom.svelte";
   import { t } from "./i18n";
@@ -123,7 +125,7 @@
 
 <div class="overlay">
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="modal review" onclick={(e) => e.stopPropagation()}>
+  <div class="modal review" use:dialog onclick={(e) => e.stopPropagation()}>
     <header>
       {#if own}
         <button class="own" title={t("coverZoomOwn")} aria-label={t("ownCover")} onclick={() => (zoom = { url: "", name: "" })}><img src={own.image} alt={t("ownCover")} /></button>
@@ -134,7 +136,7 @@
         <p class="muted small">{t("comicRead", { read })} · {vol ? `${vol.volume.name}${vol.volume.startYear ? ` (${vol.volume.startYear})` : ""}` : ""}</p>
       </div>
       <span class="muted">{t("reviewOf", { i: index + 1, n: queue.length })}</span>
-      <button class="icon" title={t("close")} aria-label={t("close")} onclick={onclose}>✕</button>
+      <button class="icon close" title={t("close")} aria-label={t("close")} onclick={onclose}><Icon name="x" size={18} /></button>
     </header>
 
     <div class="tools">
@@ -184,15 +186,15 @@
   .review { position: relative; width: min(820px, 94vw); height: 86vh; max-height: 86vh; gap: 10px; }
   header { display: flex; align-items: flex-start; gap: 12px; }
   header > div { flex: 1; min-width: 0; }
-  h2 { margin: 0; font-size: 16px; }
-  .file { margin: 2px 0 0; font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  h2 { margin: 0; font-size: var(--fs-lg); }
+  .file { margin: 2px 0 0; font-size: var(--fs-md); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   header p { margin: 2px 0 0; }
   .tools { display: flex; gap: 8px; }
   .filter { flex: 1; }
   .own { all: unset; flex: none; cursor: zoom-in; }
   .own img { display: block; width: 48px; height: 72px; object-fit: cover; border-radius: 3px; background: var(--surface-2); }
   .gcdnote { align-self: center; }
-  .same { font-size: 11px; padding: 1px 6px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .same { font-size: var(--fs-xs); padding: 1px 6px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
   .empty { margin: 20px 0; text-align: center; }
   .list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
   .issue {
@@ -220,7 +222,7 @@
   .issue.current { border-color: var(--accent); background: var(--accent-soft); }
   .issue img, .nocover { display: block; width: 36px; height: 54px; border-radius: 3px; object-fit: cover; background: var(--surface-2); }
   .name { min-width: 0; }
-  .small { font-size: 12px; }
+  .small { font-size: var(--fs-sm); }
   .spacer { flex: 1; }
   .modal-foot { margin-top: auto; }
   .muted { color: var(--muted); }

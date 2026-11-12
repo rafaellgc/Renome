@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { dialog } from "./modal";
+  import Icon from "./Icon.svelte";
   import { tmdbImage } from "./tmdbImages.svelte";
   import { api } from "./api";
   import { t, tError } from "./i18n";
@@ -54,10 +56,10 @@
 
 <div class="overlay">
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="modal review" onclick={(e) => e.stopPropagation()}>
+  <div class="modal review" use:dialog onclick={(e) => e.stopPropagation()}>
     <header>
       <h2>{t("showPickTitle")}</h2>
-      <button class="icon" title={t("close")} aria-label={t("close")} onclick={() => onpick(null)}>✕</button>
+      <button class="icon close" title={t("close")} aria-label={t("close")} onclick={() => onpick(null)}><Icon name="x" size={18} /></button>
     </header>
 
     <form class="search" onsubmit={search}>
@@ -94,11 +96,11 @@
 <style>
   .review { width: min(980px, 94vw); height: 86vh; max-height: 86vh; gap: 12px; }
   header { display: flex; align-items: center; gap: 12px; }
-  h2 { flex: 1; margin: 0; font-size: 16px; }
+  h2 { flex: 1; margin: 0; font-size: var(--fs-lg); }
   .search { display: flex; gap: 8px; }
   .search input { flex: 1; }
-  .hint { margin: 0; font-size: 12px; }
-  .error { margin: 0; color: var(--danger); font-size: 13px; }
+  .hint { margin: 0; font-size: var(--fs-sm); }
+  .error { margin: 0; color: var(--danger); font-size: var(--fs-md); }
   .empty { margin: 20px 0; text-align: center; }
   .grid {
     flex: 1;
@@ -120,12 +122,12 @@
   }
   .cand:hover { border-color: var(--accent); }
   .cand img, .noposter { flex: none; width: 70px; height: 105px; border-radius: 4px; object-fit: cover; background: var(--surface-2); }
-  .noposter { display: grid; place-items: center; font-size: 11px; color: var(--muted); }
-  .info { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; }
-  .info i { color: var(--muted); font-size: 12px; }
+  .noposter { display: grid; place-items: center; font-size: var(--fs-xs); color: var(--muted); }
+  .info { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: var(--fs-md); }
+  .info i { color: var(--muted); font-size: var(--fs-sm); }
   .overview {
     color: var(--muted);
-    font-size: 12px;
+    font-size: var(--fs-sm);
     display: -webkit-box;
     -webkit-line-clamp: 4;
     line-clamp: 4;

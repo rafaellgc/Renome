@@ -59,7 +59,8 @@ export const pt: Section[] = [
 <p>As regras são aplicadas <b>de cima para baixo</b>, cada uma sobre o resultado da anterior. A ordem importa: numerar e depois trocar maiúsculas não dá o mesmo resultado que o contrário.</p>
 <ul>
   <li>A <b>caixa de seleção</b> no título liga e desliga a regra sem apagá-la. Desligada, ela fica travada: para mudar as opções ou buscar, ligue-a antes.</li>
-  <li><b>↑ ↓</b> mudam a ordem; <b>✕</b> remove a regra; clicar no título recolhe o card.</li>
+  <li>As setas para cima e para baixo mudam a ordem; o <b>×</b> remove a regra; clicar no título recolhe o card, que passa a mostrar um resumo do que a regra faz (o texto trocado, o modelo, quantos foram achados).</li>
+  <li>As regras longas (filme, série, música, livro, quadrinho, foto, legenda) são divididas em blocos com títulos (<b>Nome</b>, <b>Busca</b>, <b>Arquivos ao lado</b>, <b>Dentro do arquivo</b>…). Uma explicação comprida mostra duas linhas; clique nela para ler o resto.</li>
   <li>Uma regra com erro (expressão inválida, por exemplo) fica com borda vermelha e é ignorada até ser corrigida.</li>
   <li><b>Uma regra de busca por vez</b>: filme, série, música, livro e quadrinho não andam juntas. Com uma delas na lista, as outras ficam desativadas no <b>+ Regra</b> até ela ser removida (desligar não basta). As demais regras (substituir, numerar, inserir…) combinam com qualquer uma. Um conjunto de regras salvo antes, com mais de uma, abre só com a primeira, e um aviso diz quais ficaram de fora. Para uma pasta com filmes e séries misturados, renomeie em duas passadas.</li>
   <li>Uma busca na internet (filme, série, música, livro, quadrinho) pode ser interrompida com <b>Parar</b>, no quadro de progresso. O que já foi encontrado fica, e buscar de novo continua com o resto. A consulta em andamento termina antes, o que pode levar alguns segundos.</li>
@@ -74,7 +75,7 @@ export const pt: Section[] = [
 </ul>
 <p>Pastas não têm extensão: em <code>Série.2020</code>, o <code>.2020</code> faz parte do nome.</p>
 <h4>Salvar e abrir regras</h4>
-<p>📂 abre e 💾 salva o conjunto de regras num arquivo <code>.json</code>, para reaproveitar depois. Por padrão, o programa também lembra as regras ao ser fechado.</p>
+<p>Os botões de pasta e de disquete, ao lado de <b>+ Regra</b>, abrem e salvam o conjunto de regras num arquivo <code>.json</code>, para reaproveitar depois. Por padrão, o programa também lembra as regras ao ser fechado.</p>
 <h4>Posições</h4>
 <p>Onde uma regra pede uma posição, a contagem é de caracteres visíveis a partir de 1. Letras acentuadas e emojis contam como um caractere.</p>`,
   },
@@ -942,7 +943,7 @@ ${ex("Serie.S01E02.720p.WEB.mkv", "Serie S01E02.mkv")}
     id: "options",
     title: "Opções",
     html: `
-<p>A engrenagem abre as opções:</p>
+<p>A engrenagem abre as opções, divididas em <b>Geral</b>, <b>Renomeação</b>, <b>Buscas online</b>, <b>Contas e chaves</b> (cada serviço com chave mostra <b>configurado</b>, e o menu conta quantos estão prontos) e <b>Atalhos</b>:</p>
 <ul>
   <li><b>Idioma</b> e <b>Tema</b> (claro, escuro ou do sistema).</li>
   <li><b>Tamanho do texto</b>: <b>Normal</b>, <b>Grande</b> (15% maior) ou <b>Maior</b> (30% maior). A janela inteira cresce na mesma proporção, como o zoom de um navegador; numa tela pequena, aumente também a janela.</li>

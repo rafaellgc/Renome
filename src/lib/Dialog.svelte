@@ -49,7 +49,7 @@
     border: 1px solid var(--border);
     border-radius: 6px;
     background: var(--surface-2);
-    font-size: 13px;
+    font-size: var(--fs-md);
     line-height: 1.5;
   }
   .items li { overflow-wrap: anywhere; }
