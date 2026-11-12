@@ -83,7 +83,7 @@ fn depth(toc: &[Toc]) -> usize {
 
 /// A new identifier for a book without one: from its title, authors and
 /// content, so the same book converted twice gets the same.
-fn uuid_of(book: &Book) -> String {
+pub(super) fn uuid_of(book: &Book) -> String {
     let mut h = xxhash_rust::xxh3::Xxh3::new();
     h.update(book.meta.title.as_bytes());
     for a in &book.meta.authors {

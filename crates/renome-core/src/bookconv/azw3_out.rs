@@ -12,7 +12,7 @@ use std::io::Write;
 use std::path::Path;
 
 use super::xhtml::{esc, esc_attr};
-use super::{Book, Toc};
+use super::{epub_out, Book, Toc};
 
 fn put16(v: &mut Vec<u8>, x: u16) {
     v.extend_from_slice(&x.to_be_bytes());
@@ -782,19 +782,17 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
     exth.push((125, resources.to_be_bytes().to_vec()));
     exth.push((131, 0u32.to_be_bytes().to_vec()));
     exth.push((524, lang.as_bytes().to_vec()));
-    // A comic is a personal document (as those copied to a Kindle are);
-    // other books are books.
-    exth.push((501, if book.fixed { b"PDOC".to_vec() } else { b"EBOK".to_vec() }));
-    // Pages of pictures (a comic): laid out as they are, at their size,
-    // turning right to left when the book does.
+    // A personal document (Kindles show the cover of only those in the
+    // library) with an identifier of its own: without one, Kindles freeze
+    // on the menu after the last page.
+    exth.push((501, b"PDOC".to_vec()));
+    let id = epub_out::uuid_of(book);
+    exth.push((113, id.trim_start_matches("urn:uuid:").as_bytes().to_vec()));
+    // Pages of pictures (a comic): laid out as they are, turning right to
+    // left when the book does; only what Kindle's own files say (more
+    // details about the pages were of no use to Kindles).
     if book.fixed {
         exth.push((122, b"true".to_vec()));
-        exth.push((123, b"comic".to_vec()));
-        exth.push((124, b"none".to_vec()));
-        if let Some((w, h)) = book.chapters.iter().find_map(|c| c.page) {
-            exth.push((126, format!("{w}x{h}").into_bytes()));
-        }
-        exth.push((132, b"false".to_vec()));
         if book.rtl {
             exth.push((525, b"horizontal-rl".to_vec()));
             exth.push((527, b"rtl".to_vec()));
@@ -810,8 +808,7 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
         exth.push((203, 0u32.to_be_bytes().to_vec()));
         exth.push((129, format!("kindle:embed:{}", base32(n, 4)).into_bytes()));
     }
-    // The maker, as Kindle's own converter (version 2.9) says it: Kindles
-    // read the newer format (KF8) only from files that say so.
+    // The maker, as Kindle's own converter (version 2.9) says it.
     exth.push((204, 201u32.to_be_bytes().to_vec()));
     exth.push((205, 2u32.to_be_bytes().to_vec()));
     exth.push((206, 9u32.to_be_bytes().to_vec()));
@@ -969,6 +966,24 @@ mod tests {
         assert_eq!(&rec[at + 1..at + 15], b"SKEL0000000000");
         assert_eq!(rec[at + 15], 0x02 | (2 << 2));
         assert_eq!(&rec[at + 16..at + 18], &[0x81, 0x81]);
+    }
+
+    #[test]
+    fn personal_document_with_its_own_identifier() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("i.azw3");
+        let b = epub_out::tests::sample();
+        azw3_out::write(&b, &p).unwrap();
+        let f = std::fs::read(&p).unwrap();
+        let has = |t: u32, v: &[u8]| {
+            let mut rec = t.to_be_bytes().to_vec();
+            rec.extend_from_slice(&(v.len() as u32 + 8).to_be_bytes());
+            rec.extend_from_slice(v);
+            f.windows(rec.len()).any(|w| w == rec.as_slice())
+        };
+        assert!(has(501, b"PDOC"));
+        let id = epub_out::uuid_of(&b);
+        assert!(has(113, id.trim_start_matches("urn:uuid:").as_bytes()));
     }
 
     #[test]

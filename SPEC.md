@@ -1139,7 +1139,7 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   one fragment per chapter, CSS as flow 1, `kindle:` addresses, text in
   4096-byte PalmDOC records with multibyte overlap, FDST, SKEL/FRAG/NCX
   INDX with TAGX and CNCX, FLIS/FCIS/EOF, EXTH 100/101/103–106/503/524/
-  501 EBOK/201/129); `print.rs` (EPUB→PDF: one HTML page in a temp folder,
+  501 PDOC/113/201/129); `print.rs` (EPUB→PDF: one HTML page in a temp folder,
   ids prefixed per chapter, A5 print CSS, pictures over 1400 px shrunk;
   the app loads it in a hidden web view and prints with WebKitGTK's print
   operation to the file printer, named by GTK's own translation of "Print
@@ -1589,16 +1589,21 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   #Number - Title` (else the series, the title, the file name), authors
   from Writer, one table-of-contents entry (one per issue in a joined
   volume). EPUB 3 pre-paginated (and `page-progression-direction="rtl"`);
-  KEPUB the same file; AZW3 with EXTH 122 `true`, 123 `comic`, 124
-  `none`, 126 the first page's `WxH`, 132 `false`, and for right to left
-  525 `horizontal-rl`, 527 `rtl`, 501 `PDOC` (other books `EBOK`);
+  KEPUB the same file; AZW3 with EXTH 122 `true`, 525 `horizontal-lr`
+  (right to left: `horizontal-rl` and 527 `rtl`) and nothing more about
+  the pages (as Kindle's own files);
   each KF8 page has its viewport, its picture sized in pixels, no body
   margin, and every element an `aid` (base 32, through the book). Every
-  AZW3 has EXTH 125 (resource count) and 131 (0), records ordered text,
-  SKEL/FRAG/NCX indexes, pictures, FDST, FLIS, FCIS, EOF, and 8192 bytes
-  after the full name. The first fixed AZW3 showed a blank page on a
-  Kindle Paperwhite (2024); the corrected one awaits a device test (the
-  program's reader and calibre's read every page). The
+  AZW3 has EXTH 125 (resource count), 131 (0), 501 `PDOC` (Kindles
+  show the library cover only of personal documents) and 113 an
+  identifier of its own (`uuid_of`: without one, Kindles freeze on the
+  menu after the last page); records ordered text, FRAG/SKEL/guide/NCX
+  indexes, pictures, thumbnail, FDST, FLIS (36 bytes), FCIS, EOF, and
+  8192 bytes after the full name. SKEL entries as Kindles read them: key
+  `SKEL` + 10 digits and each value twice (control byte 0x0A) — written
+  once, other readers read the book but Kindles show a blank page.
+  Contents entries run to the nearest later place of an entry not deeper.
+  Tested on a Kindle Paperwhite (2024), comic and text book. The
   MOBI reader reads 122/527 back. CBZ: pages `001.jpg`… stored, the
   `ComicInfo.xml` kept (merged with the values when given). PDF 1.5: one
   page per picture sized at 300 dpi, JPEG as DCTDecode (grey or RGB),
