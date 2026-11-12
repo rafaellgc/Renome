@@ -208,14 +208,6 @@ pub fn beside(video: &Path) -> Vec<String> {
     out
 }
 
-/// The languages a video has: subtitles beside it and, for Matroska, the
-/// subtitle tracks inside it.
-pub fn present(video: &Path) -> Vec<String> {
-    let mut out = beside(video);
-    out.extend(crate::video::subtitle_tracks(video));
-    out
-}
-
 /// The OpenSubtitles fingerprint of a video: its size plus the sum of its
 /// first and last 64 KiB read as little-endian 64-bit numbers, in hex. A
 /// subtitle with the same one was timed for this very file.

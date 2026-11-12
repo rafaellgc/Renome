@@ -801,10 +801,10 @@ mod tests {
     fn probe_length() {
         let Ok(dir) = std::env::var("RENOME_LENGTH_PROBE") else { return };
         for e in walkdir::WalkDir::new(dir).into_iter().flatten() {
-            if e.file_type().is_file() {
-                if let Some(l) = length(e.path()) {
-                    println!("{l:.2}\t{}", e.path().display());
-                }
+            if e.file_type().is_file()
+                && let Some(l) = length(e.path())
+            {
+                println!("{l:.2}\t{}", e.path().display());
             }
         }
     }

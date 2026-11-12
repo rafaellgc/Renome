@@ -12,11 +12,12 @@ import { moved, without, type PageCtx } from "./common";
 import type { Movies } from "./movies.svelte";
 import type { Series } from "./series.svelte";
 
-/** Subtitles found for a video: the languages asked for it has already,
- *  the candidates best first, and the one chosen per language (an index
+/** Subtitles found for a video: the languages asked for it has already
+ *  beside it, those it has only inside it (looked up, not chosen until
+ *  asked), the candidates best first, and the one chosen per language (an index
  *  in `candidates`; -1: none). `key` tells what was searched (movie or
  *  episode, languages), to search again on a change. */
-export type SubsState = { key: string; have: string[]; candidates: SubCandidate[]; pick: Record<string, number> };
+export type SubsState = { key: string; have: string[]; inside: string[]; candidates: SubCandidate[]; pick: Record<string, number> };
 
 const subsKey = (it: { tmdb: number; season?: number; episode?: number }, langs: string) => `${it.tmdb}:${it.season ?? ""}:${it.episode ?? ""}:${langs}`;
 /** Subtitles chosen for a video, not there yet. */
@@ -60,7 +61,7 @@ export class Subtitles {
       const n = chosen(s);
       subs += n;
       if (n) videos++;
-      if (this.langs.some((l) => !s.have.includes(l) && !(s.pick[l] >= 0))) missing++;
+      if (this.langs.some((l) => !s.have.includes(l) && !s.inside.includes(l) && !(s.pick[l] >= 0))) missing++;
     }
     return { subs, videos, missing };
   });
@@ -125,12 +126,13 @@ export class Subtitles {
       for (const f of r.found) {
         const pick: Record<string, number> = {};
         f.candidates.forEach((c, i) => {
-          if (!(c.lang in pick)) pick[c.lang] = i;
+          if (!(c.lang in pick)) pick[c.lang] = f.inside.includes(c.lang) ? -1 : i;
         });
-        this.found[f.path] = { key: subsKey(asked.get(f.path)!, langs), have: f.have, candidates: f.candidates, pick };
+        this.found[f.path] = { key: subsKey(asked.get(f.path)!, langs), have: f.have, inside: f.inside, candidates: f.candidates, pick };
       }
       if (r.errors.length) await notify({ title: t("subsTitle"), text: r.errors.map(tError).join("\n") });
-      else if (r.found.some((f) => f.candidates.length)) this.review = true;
+      // Shown even with nothing found, to tell why.
+      else if (r.found.length) this.review = true;
     } catch (e) {
       await notify({ title: t("subsTitle"), text: tError(e) });
     } finally {

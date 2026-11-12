@@ -1769,7 +1769,7 @@
       .filter((i) => subs.found[i.path])
       .map((i) => {
         const s = subs.found[i.path];
-        return { path: i.path, name: i.original, candidates: s.candidates, langs: subs.langs.map((l) => ({ lang: l, have: s.have.includes(l), pick: s.pick[l] ?? -1 })) };
+        return { path: i.path, name: i.original, candidates: s.candidates, langs: subs.langs.map((l) => ({ lang: l, have: s.have.includes(l), inside: s.inside.includes(l), pick: s.pick[l] ?? -1 })) };
       })}
     remaining={subs.remaining}
     onpick={(path, lang, index) => (subs.found[path].pick[lang] = index)}

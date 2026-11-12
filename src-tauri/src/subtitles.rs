@@ -694,8 +694,10 @@ pub struct Item {
 #[serde(rename_all = "camelCase")]
 pub struct Found {
     pub path: PathBuf,
-    /// The languages asked for that it has already (beside or inside).
+    /// The languages asked for that it has already beside it.
     pub have: Vec<String>,
+    /// Those it has only as a track inside it (a Matroska video).
+    pub inside: Vec<String>,
     /// Best first, every language.
     pub candidates: Vec<Candidate>,
 }
@@ -750,13 +752,26 @@ pub async fn search(
             break;
         }
         let video = item.path.clone();
-        let (present, hash) =
-            tokio::task::spawn_blocking(move || (subs::present(&video), subs::hash(&video)))
-                .await
-                .unwrap_or_default();
+        let (beside, tracks, hash) = tokio::task::spawn_blocking(move || {
+            (
+                subs::beside(&video),
+                renome_core::video::subtitle_tracks(&video),
+                subs::hash(&video),
+            )
+        })
+        .await
+        .unwrap_or_default();
+        let has = |found: &[String], l: &Lang| found.iter().any(|p| subs::same_lang(p, l));
         let have: Vec<String> = langs
             .iter()
-            .filter(|l| present.iter().any(|p| subs::same_lang(p, l)))
+            .filter(|l| has(&beside, l))
+            .map(|l| l.tag.clone())
+            .collect();
+        // Inside the video only: still looked up, in case one beside it
+        // is wanted all the same (not chosen until asked).
+        let inside: Vec<String> = langs
+            .iter()
+            .filter(|l| !have.contains(&l.tag) && has(&tracks, l))
             .map(|l| l.tag.clone())
             .collect();
         let missing: Vec<Lang> = langs
@@ -812,6 +827,7 @@ pub async fn search(
         out.found.push(Found {
             path: item.path,
             have,
+            inside,
             candidates,
         });
         let _ = app.emit("subs-progress", Progress { done: i + 1, total });

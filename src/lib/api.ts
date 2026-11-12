@@ -92,7 +92,7 @@ export const api = {
   /** The Discogs token from the options (empty: Discogs is not used). */
   discogsToken: (token: string) => invoke<void>("discogs_token", { token }),
   subsSearch: (auth: SubsAuth, langs: string, items: { path: string; tmdb: number; season?: number; episode?: number }[]) =>
-    invoke<{ langs: string[]; found: { path: string; have: string[]; candidates: SubCandidate[] }[]; errors: string[]; remaining: number | null }>("subs_search", { auth, langs, items }),
+    invoke<{ langs: string[]; found: { path: string; have: string[]; inside: string[]; candidates: SubCandidate[] }[]; errors: string[]; remaining: number | null }>("subs_search", { auth, langs, items }),
   writeSubtitles: (auth: SubsAuth, historyId: string | null, items: { path: string; season?: number; episode?: number; langs: SubCandidate[][] }[]) =>
     invoke<{ created: string[]; errors: [string, string][]; remaining: number | null }>("write_subtitles", { auth, historyId, items }),
   osCheck: (auth: SubsAuth) => invoke<number | null>("os_check", { auth }),

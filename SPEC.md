@@ -330,9 +330,12 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
     episode (`parent_tmdb_id`, `season_number`, `episode_number`; SubDL
     `type=tv`), for the languages it does not have: subtitles beside it
     named after it with a language (`Movie.pt-BR.srt`, `Movie.por.srt`;
-    `Movie.srt` without one does not count) and, in Matroska files, the
-    subtitle tracks (`Language`/`LanguageBCP47`, `eng` when missing;
-    forced tracks left out). A language without region counts for every
+    `Movie.srt` without one does not count). Languages found only as
+    Matroska subtitle tracks (`Language`/`LanguageBCP47`, `eng` when
+    missing; forced tracks left out) are still looked up but come
+    unchosen ("has it inside the video", Don't download), to pick one
+    for a file beside it all the same. The review opens even when
+    nothing was found, to say why. A language without region counts for every
     region; `pob`/`ptb` are `pt-BR`. OpenSubtitles also gets the video's
     hash (size plus the 64-bit little-endian sums of its first and last
     64 KiB; files under 128 KiB have none) and excludes AI- and

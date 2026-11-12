@@ -7,9 +7,10 @@
   type Row = {
     path: string;
     name: string;
-    /** Per language asked for: whether the video has it, and the one
-     *  chosen (an index in `candidates`; -1: none). */
-    langs: { lang: string; have: boolean; pick: number }[];
+    /** Per language asked for: whether the video has it beside it or
+     *  only inside it, and the one chosen (an index in `candidates`; -1:
+     *  none). */
+    langs: { lang: string; have: boolean; inside: boolean; pick: number }[];
     candidates: SubCandidate[];
   };
 
@@ -84,8 +85,9 @@
               {#if l.have}
                 <span class="muted">{t("subsHave")}</span>
               {:else if !options.length}
-                <span class="muted">{t("subsNoneFound")}</span>
+                <span class="muted">{l.inside ? t("subsInside") : t("subsNoneFound")}</span>
               {:else}
+                {#if l.inside}<span class="muted">{t("subsInside")}</span>{/if}
                 <select value={l.pick} onchange={(e) => onpick(r.path, l.lang, Number(e.currentTarget.value))}>
                   <option value={-1}>{t("subsSkip")}</option>
                   {#each options as o (o.i)}<option value={o.i}>{label(o.c)}</option>{/each}
