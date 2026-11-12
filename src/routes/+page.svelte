@@ -546,12 +546,15 @@
     await api.removeFiles([...selected]);
     forget(selected);
     selected = new Set();
+    notice = "";
     await refresh();
     checkIdentical();
   }
 
   async function clearAll() {
     await remember(found());
+    // "N files added" and the like no longer say anything.
+    notice = "";
     await api.clearFiles();
     forget(null);
     selected = new Set();
@@ -1494,7 +1497,7 @@
                 {#each g.types as type (type)}
                   {@const block = blockedBy(steps, type)}
                   {@const locked = !!block}
-                  {@const sub = block && "twice" in block ? t("ruleOnce") : MEDIA_RULES.includes(type) ? t(`ruleSub.${type}` as Key) : ""}
+                  {@const sub = block && "twice" in block ? t("ruleOnce") : block && "clash" in block ? t("ruleClash", { rule: t(`rule.${block.clash}`) }) : MEDIA_RULES.includes(type) ? t(`ruleSub.${type}` as Key) : ""}
                   <button role="menuitem" disabled={locked} onclick={() => addRule(type)}>
                     <span class="item-text">{t(`rule.${type}`)}{#if sub}<small>{sub}</small>{/if}</span>
                   </button>
@@ -1675,12 +1678,14 @@
   </main>
 
   <footer>
-    <span>
-      {preview.items.length === preview.total
-        ? t("files", { n: preview.total })
-        : t("shownOf", { shown: preview.items.length, total: preview.total })}
-    </span>
-    <span class="ok">{t("changed", { n: preview.changed })}</span>
+    {#if preview.total}
+      <span>
+        {preview.items.length === preview.total
+          ? t("files", { n: preview.total })
+          : t("shownOf", { shown: preview.items.length, total: preview.total })}
+      </span>
+      <span class="ok">{t("changed", { n: preview.changed })}</span>
+    {/if}
     {#if preview.conflicts}<span class="bad">{t("conflicts", { n: preview.conflicts })}</span>{/if}
     {#if preview.leftFolders.length}
       <span

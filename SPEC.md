@@ -71,7 +71,8 @@ rule by kind of file (movie, TV show, music, book, comic, photo: each makes
 the whole name, and the photo one also names videos) may be in the stack:
 with one there, on or off, the others are disabled in the "+ Rule" menu
 until it is removed; the subtitle rule goes in once ("already in the
-list"); a preset or remembered set with more keeps the first and says
+list") and not with music, book, comic or photo, either way ("does not go
+with …"); a preset or remembered set with more keeps the first and says
 which were left out (`blockedBy`/`oneLookup` in `rules.ts`).
 Each rule can be turned on/off, reordered and removed; a rule turned off
 is locked (no option changes, no searches) until turned on. The preview updates

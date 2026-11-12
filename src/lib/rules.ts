@@ -194,12 +194,19 @@ const ONCE: RuleType[] = ["subtitle"];
 
 export const isKindRule = (type: RuleType) => KIND_TYPES.includes(type);
 
+/** Kind rules whose files are not videos: the subtitle rule has nothing
+ *  to do beside them (and they nothing beside it). */
+const NOT_VIDEO: RuleType[] = ["music", "book", "comic", "photo"];
+
 /** Why a rule cannot be added to these steps: another kind rule (named),
- *  the same rule already there, or nothing. */
-export function blockedBy(steps: Step[], type: RuleType): { kind: RuleType } | { twice: true } | null {
+ *  the same rule already there, a rule it does not go with (named), or
+ *  nothing. */
+export function blockedBy(steps: Step[], type: RuleType): { kind: RuleType } | { twice: true } | { clash: RuleType } | null {
   const kind = steps.find((s) => isKindRule(s.rule.type))?.rule.type;
   if (kind && isKindRule(type)) return { kind };
   if (ONCE.includes(type) && steps.some((s) => s.rule.type === type)) return { twice: true };
+  if (type === "subtitle" && kind && NOT_VIDEO.includes(kind)) return { clash: kind };
+  if (NOT_VIDEO.includes(type) && steps.some((s) => s.rule.type === "subtitle")) return { clash: "subtitle" };
   return null;
 }
 

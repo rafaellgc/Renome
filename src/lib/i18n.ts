@@ -392,6 +392,7 @@ const pt = {
   "ruleSub.subtitle": "Nome do vídeo, ajustes",
   oneLookup: "Uma regra por tipo de arquivo de cada vez: tire a de {rule} da lista para usar outra",
   ruleOnce: "Já está na lista",
+  ruleClash: "Não combina com {rule}",
   lookupsDropped: "Uma regra por tipo de arquivo de cada vez: {rules} ficou de fora",
   error: "Erro",
   // dialogs
@@ -1522,6 +1523,7 @@ const en: Dict = {
   "ruleSub.subtitle": "Video's name, fixes",
   oneLookup: "One rule by kind of file at a time: remove the {rule} one to use another",
   ruleOnce: "Already in the list",
+  ruleClash: "Does not go with {rule}",
   lookupsDropped: "One rule by kind of file at a time: {rules} left out",
   error: "Error",
   confirmTitle: "Rename files",
@@ -2647,6 +2649,7 @@ const es: Dict = {
   "ruleSub.subtitle": "Nombre del vídeo, ajustes",
   oneLookup: "Una regla por tipo de archivo a la vez: quite la de {rule} para usar otra",
   ruleOnce: "Ya está en la lista",
+  ruleClash: "No combina con {rule}",
   lookupsDropped: "Una regla por tipo de archivo a la vez: {rules} quedó fuera",
   error: "Error",
   confirmTitle: "Renombrar archivos",
