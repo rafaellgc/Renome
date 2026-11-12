@@ -260,6 +260,7 @@
     gap: 1px;
   }
   nav button {
+    flex: none;
     border: none;
     background: none;
     text-align: left;

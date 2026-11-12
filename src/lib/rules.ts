@@ -185,25 +185,34 @@ export function splitExt(name: string): [string, string] {
 
 let counter = 0;
 /** Options added in later versions take their defaults in saved rules. */
-/** The rules that look the files up in a catalogue: one at a time. */
-export const LOOKUP_TYPES: RuleType[] = ["movie", "series", "music", "book", "comic"];
+/** The rules that make the whole name for a kind of file (looked up in a
+ *  catalogue, or from the photo's date): one at a time, since each would
+ *  undo the other's names (a photo rule also names videos). */
+export const KIND_TYPES: RuleType[] = ["movie", "series", "music", "book", "comic", "photo"];
+/** Rules that make sense once in the list. */
+const ONCE: RuleType[] = ["subtitle"];
 
-export const isLookup = (type: RuleType) => LOOKUP_TYPES.includes(type);
+export const isKindRule = (type: RuleType) => KIND_TYPES.includes(type);
 
-/** Steps with only their first lookup rule; the others are left out and
- *  returned apart (saved before they were one at a time). */
+/** Why a rule cannot be added to these steps: another kind rule (named),
+ *  the same rule already there, or nothing. */
+export function blockedBy(steps: Step[], type: RuleType): { kind: RuleType } | { twice: true } | null {
+  const kind = steps.find((s) => isKindRule(s.rule.type))?.rule.type;
+  if (kind && isKindRule(type)) return { kind };
+  if (ONCE.includes(type) && steps.some((s) => s.rule.type === type)) return { twice: true };
+  return null;
+}
+
+/** Steps with only their first kind rule (and one of each rule allowed
+ *  once); the others are left out and returned apart (saved before they
+ *  were one at a time). */
 export function oneLookup(steps: Step[]): { steps: Step[]; dropped: RuleType[] } {
-  let seen = false;
+  const kept: Step[] = [];
   const dropped: RuleType[] = [];
-  const kept = steps.filter((s) => {
-    if (!isLookup(s.rule.type)) return true;
-    if (seen) {
-      dropped.push(s.rule.type);
-      return false;
-    }
-    seen = true;
-    return true;
-  });
+  for (const s of steps) {
+    if (blockedBy(kept, s.rule.type)) dropped.push(s.rule.type);
+    else kept.push(s);
+  }
   return { steps: kept, dropped };
 }
 

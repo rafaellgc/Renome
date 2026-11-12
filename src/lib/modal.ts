@@ -59,3 +59,34 @@ export function dialog(node: HTMLElement) {
     },
   };
 }
+
+/** A drop-down menu: its first item takes the focus when it opens, the
+ *  arrows (and Home/End) move between the items that can be used, and
+ *  focus goes back to the button that opened it when it closes. */
+export function menu(node: HTMLElement) {
+  const before = document.activeElement as HTMLElement | null;
+  const items = () => [...node.querySelectorAll<HTMLButtonElement>("button:not([disabled])")];
+  const timer = setTimeout(() => items()[0]?.focus({ preventScroll: true }), 0);
+  function onkeydown(e: KeyboardEvent) {
+    const all = items();
+    if (!all.length) return;
+    const at = all.indexOf(document.activeElement as HTMLButtonElement);
+    let next = -1;
+    if (e.key === "ArrowDown") next = (at + 1) % all.length;
+    else if (e.key === "ArrowUp") next = (at - 1 + all.length) % all.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = all.length - 1;
+    if (next < 0) return;
+    e.preventDefault();
+    all[next].focus();
+  }
+  node.addEventListener("keydown", onkeydown);
+  return {
+    destroy() {
+      clearTimeout(timer);
+      node.removeEventListener("keydown", onkeydown);
+      if (before && document.contains(before) && (!document.activeElement || document.activeElement === document.body || node.contains(document.activeElement)))
+        before.focus({ preventScroll: true });
+    },
+  };
+}

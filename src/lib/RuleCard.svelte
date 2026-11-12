@@ -120,16 +120,18 @@
     }
   });
 
+  /** The explanations that are cut short (not the template variables). */
+  const HINTS = "label.check small, p.hint:not(.mono)";
   /** A clamped hint (two lines) opens on a click, without ticking its box. */
   function hintClick(e: MouseEvent) {
-    const hint = (e.target as HTMLElement).closest("label.check small");
+    const hint = (e.target as HTMLElement).closest(HINTS);
     if (!(hint instanceof HTMLElement) || !(hint.classList.contains("more") || hint.classList.contains("open"))) return;
     e.preventDefault();
     hint.classList.toggle("open");
   }
   /** Marks a hint that has more than shows, to be opened. */
   function hintOver(e: PointerEvent) {
-    const hint = (e.target as HTMLElement).closest("label.check small");
+    const hint = (e.target as HTMLElement).closest(HINTS);
     if (hint instanceof HTMLElement && !hint.classList.contains("open")) hint.classList.toggle("more", hint.scrollHeight > hint.clientHeight + 1);
   }
 
@@ -365,14 +367,6 @@
         {@render subtitles()}
       {:else if r.type === "series"}
         <p class="hint top">{t("seriesHint")}</p>
-        <label>{t("seriesSource")}
-          <select bind:value={r.source}>
-            <option value="tmdb">{t("seriesSourceTmdb")}</option>
-            <option value="anilist">{t("seriesSourceAnilist")}</option>
-          </select>
-        </label>
-        {#if r.source === "anilist"}<p class="hint">{t("animeHint")}</p>{/if}
-        <label>{t("seriesShow")} <input bind:value={r.show} placeholder={t(r.source === "anilist" ? "seriesShowPlaceholderAnilist" : "seriesShowPlaceholder")} spellcheck="false" /></label>
         <h4 class="sect">{t("sectName")}</h4>
         <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
         <p class="hint mono">{t("seriesTemplateHint")}</p>
@@ -382,6 +376,14 @@
           <label class="sub">{t("seriesFolderName")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
         {/if}
         <h4 class="sect">{t("sectSearch")}</h4>
+        <label>{t("seriesSource")}
+          <select bind:value={r.source}>
+            <option value="tmdb">{t("seriesSourceTmdb")}</option>
+            <option value="anilist">{t("seriesSourceAnilist")}</option>
+          </select>
+        </label>
+        {#if r.source === "anilist"}<p class="hint">{t("animeHint")}</p>{/if}
+        <label>{t("seriesShow")} <input bind:value={r.show} placeholder={t(r.source === "anilist" ? "seriesShowPlaceholderAnilist" : "seriesShowPlaceholder")} spellcheck="false" /></label>
         {#if lookup?.show}<p class="hint">{t("seriesCurrent", { show: lookup.show })}</p>{/if}
         {@render actions(t("tvSearch"), "seriesSummary")}
         {#if r.source !== "anilist"}
@@ -894,9 +896,17 @@
     line-clamp: 2;
     overflow: hidden;
   }
-  label.check small:global(.more) { cursor: pointer; }
-  label.check small:global(.more):hover { color: var(--text); }
-  label.check small:global(.open) { -webkit-line-clamp: unset; line-clamp: unset; }
+  p.hint:not(.mono) {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
+  p.hint.top { -webkit-line-clamp: 3; line-clamp: 3; }
+  label.check small:global(.more), p.hint:global(.more) { cursor: pointer; }
+  label.check small:global(.more):hover, p.hint:global(.more):hover { color: var(--text); }
+  label.check small:global(.open), p.hint:global(.open) { -webkit-line-clamp: unset; line-clamp: unset; }
   label.sub { margin-left: 22px; }
   label.sub2 { margin-left: 44px; }
   .hint.sub { margin: -2px 0 0 22px; }

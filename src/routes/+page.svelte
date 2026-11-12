@@ -16,7 +16,7 @@
   import { asText, counts, extOf, isEpub, moved, without, type PageCtx } from "$lib/page/common";
   import Dialog from "$lib/Dialog.svelte";
   import Icon from "$lib/Icon.svelte";
-  import { dialog as dialogBox } from "$lib/modal";
+  import { dialog as dialogBox, menu as menuNav } from "$lib/modal";
   import { closeDialog, confirm, dialog, notify } from "$lib/dialogs.svelte";
   import FileTable from "$lib/FileTable.svelte";
   import Help from "$lib/Help.svelte";
@@ -34,7 +34,7 @@
   import ShowPicker from "$lib/ShowPicker.svelte";
   import SubtitleReview from "$lib/SubtitleReview.svelte";
   import { LOCALES, MOD, t, tError, type Key } from "$lib/i18n";
-  import { RULE_TYPES, isLookup, oneLookup, isAudio, isBook, isComic, isScreen, isTaggableVideo, isVideo, newRule, newStep } from "$lib/rules";
+  import { RULE_TYPES, blockedBy, isKindRule, oneLookup, isAudio, isBook, isComic, isScreen, isTaggableVideo, isVideo, newRule, newStep } from "$lib/rules";
   import { SECRET_FIELDS, loadSecrets, loadSettings, saveSecrets, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
     ApplyReport, Copies, MovieStatus, HistoryEntry, OpError, Preview, PreviewItem, Rule, RuleType, Step, View, ViewSort,
@@ -332,7 +332,7 @@
   /** "+ Rule" menu in alphabetical order of the current language. */
   /** The lookup rule in the stack (on or off): the others wait until it
    *  is removed. */
-  const lookupType = $derived(steps.find((s) => isLookup(s.rule.type))?.rule.type ?? null);
+  const lookupType = $derived(steps.find((s) => isKindRule(s.rule.type))?.rule.type ?? null);
   /** The optional columns that make sense with the rules in the stack. */
   const availableColumns = $derived.by<DetailColumn[]>(() => {
     const cols: DetailColumn[] = [];
@@ -564,7 +564,7 @@
   }
 
   function addRule(type: RuleType) {
-    if (lookupType && isLookup(type)) return;
+    if (blockedBy(steps, type)) return;
     steps.push(newStep(newRule(type)));
     ruleMenu = false;
   }
@@ -573,7 +573,7 @@
    *  were left out, else `done` (when given). */
   function loadSteps(loaded: Step[], done = ""): Step[] {
     const { steps: kept, dropped } = oneLookup(loaded);
-    if (dropped.length) notice = t("lookupsDropped", { rules: dropped.map((r) => t(`rule.${r}`)).join(", ") });
+    if (dropped.length) notice = t("lookupsDropped", { rules: [...new Set(dropped)].map((r) => t(`rule.${r}`)).join(", ") });
     else if (done) notice = done;
     return kept.map((s) => newStep(s.rule, s.enabled));
   }
@@ -1426,7 +1426,7 @@
     <div class="group menu-host">
       <button class="primary-soft with-icon" disabled={!!working} aria-haspopup="menu" aria-expanded={addMenu} onclick={() => (addMenu = !addMenu)}><Icon name="plus" size={15} />{t("add")}<Icon name="chevron-down" size={14} /></button>
       {#if addMenu}
-        <div class="menu" role="menu">
+        <div class="menu" role="menu" use:menuNav>
           <button role="menuitem" onclick={pickFiles}><Icon name="file-plus" />{t("addFiles")}</button>
           <button role="menuitem" onclick={() => pickFolders()}><Icon name="folder-plus" />{t("addFolders")}</button>
           <button role="menuitem" onclick={() => pickFolders(true)}><Icon name="folder" />{t("addFolderItems")}</button>
@@ -1447,21 +1447,17 @@
     <div class="group">
       <button class="icon" title={canMove || !selected.size ? t("moveUp") : t("moveDisabled")} disabled={!canMove || !!working} onclick={() => move(-1)}><Icon name="to-top" /></button>
       <button class="icon" title={canMove || !selected.size ? t("moveDown") : t("moveDisabled")} disabled={!canMove || !!working} onclick={() => move(1)}><Icon name="to-bottom" /></button>
-      <button disabled={!selected.size || !!working} onclick={removeSelected}>{t("remove")}</button>
-      <button disabled={!preview.total || !!working} onclick={clearAll}>{t("clear")}</button>
+      <button class="with-icon squeeze" title={t("remove")} disabled={!selected.size || !!working} onclick={removeSelected}><Icon name="list-minus" /><span>{t("remove")}</span></button>
+      <button class="with-icon squeeze" title={t("clear")} disabled={!preview.total || !!working} onclick={clearAll}><Icon name="list-x" /><span>{t("clear")}</span></button>
     </div>
     <div class="spacer"></div>
-    <div class="group">
-      <button class="icon" title={t("history")} aria-label={t("history")} onclick={openHistory}><Icon name="history" size={18} /></button>
-      <button class="icon" title="{t("help")} (F1)" aria-label={t("help")} onclick={() => (help = "manual")}><Icon name="help" size={18} /></button>
-      <button class="icon" title={t("options")} aria-label={t("options")} onclick={() => (showOptions = true)}><Icon name="settings" size={18} /></button>
-    </div>
     <div class="group menu-host">
+      <button class="icon" title={t("history")} aria-label={t("history")} onclick={openHistory}><Icon name="history" size={18} /></button>
       <button class="send with-icon" class:on={!!sendTo} title={sendTo ? sendTo.dir : t("sendHint")} disabled={!!working} aria-haspopup="menu" aria-expanded={sendMenu} onclick={() => (sendMenu = !sendMenu)}>
         <span class="send-label">{sendTo ? t(sendTo.copy ? "sendCopyShort" : "sendMoveShort", { dir: basename(sendTo.dir) }) : t("sendHere")}</span><Icon name="chevron-down" size={14} />
       </button>
       {#if sendMenu}
-        <div class="menu right" role="menu">
+        <div class="menu right" role="menu" use:menuNav>
           <button role="menuitemradio" aria-checked={!sendTo} onclick={() => ((sendTo = null), (sendMenu = false))}><span class="tick">{#if !sendTo}<Icon name="check" size={14} />{/if}</span>{t("sendHere")}</button>
           <button role="menuitemradio" aria-checked={!!sendTo && !sendTo.copy} onclick={() => pickSendTo(false)}><span class="tick">{#if sendTo && !sendTo.copy}<Icon name="check" size={14} />{/if}</span>{t("sendMoveTo")}</button>
           <button role="menuitemradio" aria-checked={!!sendTo?.copy} onclick={() => pickSendTo(true)}><span class="tick">{#if sendTo?.copy}<Icon name="check" size={14} />{/if}</span>{t("sendCopyTo")}</button>
@@ -1470,6 +1466,11 @@
       <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !movies.metaOnly.length && !tv.metaOnly.length && !books.metaOnly.length && !music.coverOnly && !music.playlistOnly.length && !music.tagsOnly.length && !comics.infoOnly.length && !books.epubOnly.length && !books.convertOnly.length && !subs.only.length && !subToolsOnly.length && !videoTagOnly.length) || busy || !!working} onclick={applyAll}>
         {t(sendTo ? (sendTo.copy ? "copyAction" : "moveAction") : "rename")}{#if applyCount}<span class="count">{applyCount.toLocaleString(LOCALES[settings.lang])}</span>{/if}
       </button>
+    </div>
+    <span class="divider" aria-hidden="true"></span>
+    <div class="group">
+      <button class="icon" title={t("options")} aria-label={t("options")} onclick={() => (showOptions = true)}><Icon name="settings" size={18} /></button>
+      <button class="icon" title="{t("help")} (F1)" aria-label={t("help")} onclick={() => (help = "manual")}><Icon name="help" size={18} /></button>
     </div>
   </header>
 
@@ -1481,13 +1482,14 @@
         <div class="group menu-host">
           <button class="primary-soft with-icon" aria-haspopup="menu" aria-expanded={ruleMenu} onclick={() => (ruleMenu = !ruleMenu)}><Icon name="plus" size={15} />{t("addRule")}</button>
           {#if ruleMenu}
-            <div class="menu rules-menu" role="menu">
+            <div class="menu rules-menu" role="menu" use:menuNav>
               {#each ruleGroups as g (g.label)}
                 <p class="menu-group">{t(g.label)}</p>
                 {#if lookupType && g.label === "ruleGroupMedia"}<p class="menu-note">{t("oneLookup", { rule: t(`rule.${lookupType}`) })}</p>{/if}
                 {#each g.types as type (type)}
-                  {@const locked = !!lookupType && isLookup(type)}
-                  {@const sub = MEDIA_RULES.includes(type) ? t(`ruleSub.${type}` as Key) : ""}
+                  {@const block = blockedBy(steps, type)}
+                  {@const locked = !!block}
+                  {@const sub = block && "twice" in block ? t("ruleOnce") : MEDIA_RULES.includes(type) ? t(`ruleSub.${type}` as Key) : ""}
                   <button role="menuitem" disabled={locked} onclick={() => addRule(type)}>
                     <span class="item-text">{t(`rule.${type}`)}{#if sub}<small>{sub}</small>{/if}</span>
                   </button>
@@ -1926,6 +1928,16 @@
     flex-wrap: wrap;
   }
   .group { display: flex; align-items: center; gap: 6px; }
+  /* Narrow windows (or large text): these keep only their icons. */
+  @media (max-width: 1080px) {
+    .squeeze { width: 30px; padding: 0; justify-content: center; }
+    .squeeze span { display: none; }
+    .filter-box { flex-basis: 140px; min-width: 110px; }
+    .toolbar { gap: 8px; flex-wrap: nowrap; }
+    .filter-box { flex: 1 1 140px; }
+    .send { max-width: 160px; }
+  }
+  .divider { width: 1px; align-self: stretch; margin: 2px 0; background: var(--border); }
   .menu-host { position: relative; }
   .spacer { flex: 1; }
   .filter-box { flex: 0 1 280px; min-width: 140px; }
@@ -1966,7 +1978,8 @@
   .menu.right { left: auto; right: 0; }
   .send { max-width: 240px; white-space: nowrap; }
   .send.on { border-color: var(--accent); color: var(--accent); }
-  .menu button:hover { background: var(--hover); }
+  .menu button:hover, .menu button:focus-visible { background: var(--hover); outline: none; }
+  .menu button:focus-visible { box-shadow: inset 2px 0 var(--accent); }
   .files { flex: 1; display: flex; min-width: 0; border-radius: 8px; position: relative; }
   .files.dragging { outline: 2px dashed var(--accent); outline-offset: 2px; }
   .working {

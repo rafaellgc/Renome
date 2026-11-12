@@ -67,10 +67,12 @@ This document describes **what** the program does, not **how**.
 ## 2. Rules (pipeline)
 
 Transformations are **rules** stacked and applied in sequence to the name. Only one
-lookup rule (movie, TV show, music, book, comic) may be in the stack: with
-one there, on or off, the others are disabled in the "+ Rule" menu until it
-is removed; a preset or remembered set with more keeps the first and says
-which were left out.
+rule by kind of file (movie, TV show, music, book, comic, photo: each makes
+the whole name, and the photo one also names videos) may be in the stack:
+with one there, on or off, the others are disabled in the "+ Rule" menu
+until it is removed; the subtitle rule goes in once ("already in the
+list"); a preset or remembered set with more keeps the first and says
+which were left out (`blockedBy`/`oneLookup` in `rules.ts`).
 Each rule can be turned on/off, reordered and removed; a rule turned off
 is locked (no option changes, no searches) until turned on. The preview updates
 live. The rule set can be saved and loaded as a *preset* (JSON).
@@ -2286,6 +2288,15 @@ On macOS, ⌘ replaces Ctrl. The list is also shown in Options.
   hints clamped to two lines, a click opens them; a closed card shows a
   one-line summary; the card opens with a short slide.
 - The empty list shows buttons to add files or folders and the shortcut.
+- Toolbar, left to right: add, filter, list actions (move, remove, clear),
+  then the rename group (history, destination, Rename), a divider and the
+  app's own buttons (options, help last). Below 1080 px of width (small
+  window or large text) remove and clear keep only their icons and the bar
+  does not wrap.
+- Drop-down menus (`menu` action in `modal.ts`): first item focused on
+  open, arrows/Home/End move, Esc closes and gives the focus back.
+- Hint paragraphs in rule cards (not the template variables) are clamped
+  too: two lines, the rule's intro three.
 
 ## 6. Help
 
