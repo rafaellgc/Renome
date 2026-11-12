@@ -1603,7 +1603,8 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   `SKEL` + 10 digits and each value twice (control byte 0x0A) — written
   once, other readers read the book but Kindles show a blank page.
   Contents entries run to the nearest later place of an entry not deeper.
-  Tested on a Kindle Paperwhite (2024), comic and text book. The
+  Tested on a Kindle Paperwhite (2024): comics and text books open, show
+  their cover and go back to the library. The
   MOBI reader reads 122/527 back. CBZ: pages `001.jpg`… stored, the
   `ComicInfo.xml` kept (merged with the values when given). PDF 1.5: one
   page per picture sized at 300 dpi, JPEG as DCTDecode (grey or RGB),
