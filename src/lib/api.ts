@@ -97,6 +97,7 @@ export const api = {
     invoke<{ created: string[]; errors: [string, string][]; remaining: number | null }>("write_subtitles", { auth, historyId, items }),
   osCheck: (auth: SubsAuth) => invoke<number | null>("os_check", { auth }),
   subdlCheck: (key: string) => invoke<void>("subdl_check", { key }),
+  subsourceCheck: (key: string) => invoke<void>("subsource_check", { key }),
   discogsCheck: (token: string) => invoke<void>("discogs_check", { token }),
   googleBooksKey: (key: string) => invoke<void>("google_books_key", { key }),
   googleBooksCheck: (key: string) => invoke<void>("google_books_check", { key }),

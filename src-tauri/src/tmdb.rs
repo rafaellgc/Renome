@@ -133,6 +133,17 @@ impl Client {
         list.first().map(|i| i.id)
     }
 
+    /// The IMDb id of a movie (`tv` false) or show: `tt0120737`.
+    pub async fn imdb_of(&self, id: u64, tv: bool) -> Option<String> {
+        #[derive(Deserialize)]
+        struct Ids {
+            imdb_id: Option<String>,
+        }
+        let kind = if tv { "tv" } else { "movie" };
+        let ids: Ids = self.get(&format!("/{kind}/{id}/external_ids"), &[]).await.ok()?;
+        ids.imdb_id.filter(|i| i.starts_with("tt"))
+    }
+
     /// The show's id from a `tvshow.nfo` in the files' folders (or the
     /// ones above them), when one has it.
     pub async fn show_from_nfo(&self, folders: &[PathBuf]) -> Option<u64> {

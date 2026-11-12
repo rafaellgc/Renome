@@ -76,6 +76,7 @@
       items: [
         { name: "OpenSubtitles.com", url: "https://www.opensubtitles.com" },
         { name: "SubDL", url: "https://subdl.com" },
+        { name: "SubSource", url: "https://subsource.net" },
       ],
     },
   ];

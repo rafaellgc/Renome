@@ -17,6 +17,7 @@ use tauri::{AppHandle, Emitter};
 const OS_API: &str = "https://api.opensubtitles.com/api/v1";
 const SUBDL_API: &str = "https://api.subdl.com/api/v1";
 const SUBDL_DL: &str = "https://dl.subdl.com";
+const SUBSOURCE_API: &str = "https://api.subsource.net/api/v1";
 
 /// Tests point these at a local server.
 fn os_api() -> Option<String> {
@@ -24,6 +25,9 @@ fn os_api() -> Option<String> {
 }
 fn subdl_api() -> String {
     std::env::var("RENOME_SUBDL_API").unwrap_or_else(|_| SUBDL_API.into())
+}
+fn subsource_api() -> String {
+    std::env::var("RENOME_SUBSOURCE_API").unwrap_or_else(|_| SUBSOURCE_API.into())
 }
 fn subdl_dl() -> String {
     std::env::var("RENOME_SUBDL_DL").unwrap_or_else(|_| SUBDL_DL.into())
@@ -41,6 +45,11 @@ pub struct Auth {
     pub os_password: String,
     #[serde(default)]
     pub subdl_key: String,
+    #[serde(default)]
+    pub subsource_key: String,
+    /// TMDB's, to learn the IMDb id SubSource searches by.
+    #[serde(default)]
+    pub tmdb_key: String,
 }
 
 impl Auth {
@@ -49,6 +58,9 @@ impl Auth {
     }
     fn subdl(&self) -> bool {
         !self.subdl_key.trim().is_empty()
+    }
+    fn subsource(&self) -> bool {
+        !self.subsource_key.trim().is_empty() && !self.tmdb_key.trim().is_empty()
     }
 }
 
@@ -484,6 +496,186 @@ impl Subdl {
     }
 }
 
+/// SubSource (`api.subsource.net`, the user's key): movies and shows by
+/// their IMDb id (asked of TMDB), then the subtitles of each language; a
+/// download is a zip.
+struct Subsource {
+    http: reqwest::Client,
+    key: String,
+    tmdb: crate::tmdb::Client,
+    /// SubSource's number for a movie, or a show's season.
+    ids: std::sync::Mutex<MovieIds>,
+}
+
+/// SubSource's numbers by TMDB id and season (none when it has none).
+type MovieIds = std::collections::HashMap<(u64, Option<u32>), Option<u64>>;
+
+/// SubSource allows 60 requests a minute on a free key.
+static LAST_SUBSOURCE: tokio::sync::Mutex<Option<Instant>> = tokio::sync::Mutex::const_new(None);
+
+fn subsource_status(code: u16) -> String {
+    match code {
+        401 | 403 => "subsourceBadKey".into(),
+        429 => "subsourceQuota".into(),
+        _ => format!("subsourceNetwork: HTTP {code}"),
+    }
+}
+
+impl Subsource {
+    fn new(http: reqwest::Client, auth: &Auth) -> Self {
+        Self {
+            http,
+            key: auth.subsource_key.trim().to_string(),
+            tmdb: crate::tmdb::Client::new(&auth.tmdb_key, "en-US"),
+            ids: Default::default(),
+        }
+    }
+
+    async fn send(&self, path: &str, query: &[(&str, String)]) -> Result<reqwest::Response, String> {
+        {
+            let mut last = LAST_SUBSOURCE.lock().await;
+            if let Some(t) = *last {
+                tokio::time::sleep(Duration::from_millis(1000).saturating_sub(t.elapsed())).await;
+            }
+            *last = Some(Instant::now());
+        }
+        let r = self
+            .http
+            .get(format!("{}{path}", subsource_api()))
+            .header("X-API-Key", &self.key)
+            .query(query)
+            .send()
+            .await
+            .map_err(|e| net_error("subsource", &e))?;
+        match r.status().as_u16() {
+            200 => Ok(r),
+            code => Err(subsource_status(code)),
+        }
+    }
+
+    async fn get(&self, path: &str, query: &[(&str, String)]) -> Result<Value, String> {
+        match self.send(path, query).await {
+            Ok(r) => r.json().await.map_err(|e| net_error("subsource", &e)),
+            // Nothing there.
+            Err(e) if e == "subsourceNetwork: HTTP 404" => Ok(Value::Null),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// SubSource's number for the item's movie or season.
+    async fn movie(&self, item: &Item) -> Result<Option<u64>, String> {
+        let key = (item.tmdb, item.season);
+        if let Some(id) = self.ids.lock().unwrap().get(&key) {
+            return Ok(*id);
+        }
+        let tv = item.season.is_some();
+        let found = match self.tmdb.imdb_of(item.tmdb, tv).await {
+            None => None,
+            Some(imdb) => {
+                let mut q = vec![
+                    ("searchType", "imdb".to_string()),
+                    ("imdb", imdb),
+                    ("type", if tv { "series" } else { "movie" }.to_string()),
+                ];
+                if let Some(s) = item.season {
+                    q.push(("season", s.to_string()));
+                }
+                let v = self.get("/movies/search", &q).await?;
+                v["data"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find(|m| item.season.is_none_or(|s| m["season"].as_u64() == Some(u64::from(s))))
+                    .and_then(|m| m["movieId"].as_u64())
+            }
+        };
+        self.ids.lock().unwrap().insert(key, found);
+        Ok(found)
+    }
+
+    async fn search(&self, item: &Item, langs: &[Lang]) -> Result<Vec<Candidate>, String> {
+        let Some(movie) = self.movie(item).await? else {
+            return Ok(Vec::new());
+        };
+        let video = item
+            .path
+            .file_stem()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let fit = |r: &str| {
+            subs::score(
+                &video,
+                &Candidate {
+                    release: r.to_string(),
+                    ..Candidate::default()
+                },
+            )
+        };
+        let mut out = Vec::new();
+        for lang in langs.iter().filter(|l| !l.subsource.is_empty()) {
+            let q = [
+                ("movieId", movie.to_string()),
+                ("language", lang.subsource.clone()),
+                ("limit", "100".to_string()),
+            ];
+            let v = self.get("/subtitles", &q).await?;
+            for s in v["data"].as_array().into_iter().flatten() {
+                let Some(id) = s["subtitleId"].as_u64() else { continue };
+                // Machine translations and foreign parts only are left out.
+                let kind = s["productionType"].as_str().unwrap_or_default();
+                if kind == "machine" || kind == "forced" || s["foreignParts"] == true {
+                    continue;
+                }
+                let releases: Vec<&str> = s["releaseInfo"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .flat_map(|r| r.split(['\n', ';']))
+                    .map(str::trim)
+                    .filter(|r| !r.is_empty())
+                    .collect();
+                // An episode's: those naming another episode are left out
+                // (season packs, naming none, stay).
+                if let (Some(se), Some(ep)) = (item.season, item.episode) {
+                    let read: Vec<_> = releases.iter().map(|r| renome_core::tv::parse(r, "")).collect();
+                    let named = read.iter().any(|g| g.season.is_some() && !g.episodes.is_empty());
+                    let ours = read.iter().any(|g| {
+                        g.season.map(u32::from) == Some(se)
+                            && g.episodes.iter().any(|&n| u32::from(n) == ep)
+                    });
+                    if named && !ours {
+                        continue;
+                    }
+                }
+                let release = releases
+                    .iter()
+                    .copied()
+                    .max_by(|a, b| fit(a).total_cmp(&fit(b)))
+                    .unwrap_or_default();
+                out.push(Candidate {
+                    source: Source::Subsource,
+                    id: id.to_string(),
+                    lang: lang.tag.clone(),
+                    release: release.to_string(),
+                    downloads: s["downloads"].as_u64().unwrap_or(0),
+                    exact: false,
+                    hearing_impaired: s["hearingImpaired"].as_bool().unwrap_or(false),
+                    trusted: false,
+                    url: String::new(),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    async fn download(&self, c: &Candidate) -> Result<Vec<u8>, String> {
+        let r = self.send(&format!("/subtitles/{}/download", c.id), &[]).await?;
+        let b = r.bytes().await.map_err(|e| net_error("subsource", &e))?;
+        Ok(b.to_vec())
+    }
+}
+
 /// A video to find subtitles for: its movie's (or show's) TMDB number,
 /// and the season and episode of an episode.
 #[derive(Debug, Clone, Deserialize)]
@@ -545,7 +737,8 @@ pub async fn search(
         http: http.clone(),
         key: auth.subdl_key.clone(),
     });
-    let (mut os_ok, mut subdl_ok) = (true, true);
+    let subsource = auth.subsource().then(|| Subsource::new(http.clone(), &auth));
+    let (mut os_ok, mut subdl_ok, mut subsource_ok) = (true, true, true);
     let mut out = Search {
         langs: langs.iter().map(|l| l.tag.clone()).collect(),
         ..Search::default()
@@ -590,6 +783,19 @@ pub async fn search(
                     Err(e) => {
                         subdl_ok =
                             !(e == "subdlBadKey" || e == "subdlQuota" || e.ends_with("Offline"));
+                        if !out.errors.contains(&e) {
+                            out.errors.push(e);
+                        }
+                    }
+                }
+            }
+            if let Some(ss) = subsource.as_ref().filter(|_| subsource_ok) {
+                match ss.search(&item, &missing).await {
+                    Ok(c) => candidates.extend(c),
+                    Err(e) => {
+                        subsource_ok = !(e == "subsourceBadKey"
+                            || e == "subsourceQuota"
+                            || e.ends_with("Offline"));
                         if !out.errors.contains(&e) {
                             out.errors.push(e);
                         }
@@ -658,7 +864,8 @@ pub async fn write(
         http: http.clone(),
         key: auth.subdl_key.clone(),
     });
-    let (mut os_ok, mut subdl_ok) = (true, true);
+    let subsource = auth.subsource().then(|| Subsource::new(http.clone(), &auth));
+    let (mut os_ok, mut subdl_ok, mut subsource_ok) = (true, true, true);
     let mut out = Written::default();
     let total = items.iter().map(|i| i.langs.len()).sum();
     let mut done = 0;
@@ -712,6 +919,22 @@ pub async fn write(
                             .map(|(ext, b)| (b, ext)),
                         None => continue,
                     },
+                    Source::Subsource => match subsource.as_ref().filter(|_| subsource_ok) {
+                        Some(sd) => sd
+                            .download(c)
+                            .await
+                            .and_then(|b| {
+                                let ep = item.season.zip(item.episode);
+                                let video = item
+                                    .path
+                                    .file_stem()
+                                    .map(|n| n.to_string_lossy().into_owned())
+                                    .unwrap_or_default();
+                                subs::from_archive(&b, ep, &video).ok_or_else(|| "subsEmpty".to_string())
+                            })
+                            .map(|(ext, b)| (b, ext)),
+                        None => continue,
+                    },
                 };
                 tried += 1;
                 match got {
@@ -746,6 +969,7 @@ pub async fn write(
                         match e.as_str() {
                             "osQuota" | "osBadKey" | "osBadLogin" => os_ok = false,
                             "subdlQuota" | "subdlBadKey" => subdl_ok = false,
+                            "subsourceQuota" | "subsourceBadKey" => subsource_ok = false,
                             _ => {}
                         }
                         if e == "osQuota" {
@@ -835,4 +1059,21 @@ pub async fn check_subdl(key: String) -> Result<(), String> {
         episode: None,
     };
     sd.search(&item, &subs::langs("en")).await.map(|_| ())
+}
+
+/// Checks SubSource's key with a search of a well-known IMDb id.
+pub async fn check_subsource(key: String) -> Result<(), String> {
+    let ss = Subsource::new(
+        http(),
+        &Auth {
+            subsource_key: key,
+            ..Auth::default()
+        },
+    );
+    ss.send(
+        "/movies/search",
+        &[("searchType", "imdb".into()), ("imdb", "tt0111161".into())],
+    )
+    .await
+    .map(|_| ())
 }

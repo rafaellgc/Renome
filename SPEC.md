@@ -311,7 +311,16 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   v<version>`; with a user name and password it logs in once per
   session, `/login`, and then asks the server the answer names; about
   4 requests a second) and SubDL (`api.subdl.com/api/v1/subtitles`,
-  `api_key`; downloads from `dl.subdl.com`, zips). Languages: typed as
+  `api_key`; downloads from `dl.subdl.com`, zips) and SubSource
+  (`api.subsource.net/api/v1`, `X-API-Key`, 1 request a second; used
+  only with a TMDB key too: the movie's or show's IMDb id from TMDB
+  `/{movie|tv}/{id}/external_ids`, then `/movies/search?searchType=imdb`
+  (`type`, `season`; the entry of the season), then `/subtitles?movieId=
+  &language=` per language (`brazilian_portuguese`, `english`,
+  `spanish_latin_america`…); `productionType` machine/forced and
+  `foreignParts` left out; for an episode, those whose release names
+  name another episode; `/subtitles/{id}/download` is a zip, read as
+  SubDL's). Languages: typed as
   two-letter codes with an optional region or three-letter ones (`pt-BR`,
   `pob`, `en`, `eng`; unknown ones dropped); OpenSubtitles' codes in
   lower case (`pt-br`), SubDL's upper case (`EN`, `BR_PT`, `PT`,

@@ -1109,6 +1109,11 @@ async fn subdl_check(key: String) -> Result<(), String> {
     subtitles::check_subdl(key).await
 }
 
+#[tauri::command]
+async fn subsource_check(key: String) -> Result<(), String> {
+    subtitles::check_subsource(key).await
+}
+
 type Songs = Vec<(PathBuf, AudioTags)>;
 
 /// The tags of the given songs in the list (with the name filled in, as
@@ -3006,6 +3011,7 @@ pub fn run() {
             write_video_tags,
             os_check,
             subdl_check,
+            subsource_check,
             mb_lookup,
             mb_search,
             mb_choose,

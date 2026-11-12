@@ -34,6 +34,7 @@ export interface Settings {
   osPassword: string;
   /** SubDL API key (empty: not used). */
   subdlKey: string;
+  subsourceKey: string;
   /** Rules from the last session (when `rememberRules`). */
   rules: Step[];
   /** The optional columns shown in the list, in their order. */
@@ -64,6 +65,7 @@ const DEFAULTS: Settings = {
   osUser: "",
   osPassword: "",
   subdlKey: "",
+  subsourceKey: "",
   rules: [],
   columns: [],
   showMissing: true,
@@ -129,7 +131,7 @@ export function saveSettings() {
 }
 
 /** The settings kept in the system's password store, not in the file. */
-export const SECRET_FIELDS = ["tmdbKey", "comicVineKey", "discogsToken", "metronToken", "googleBooksKey", "gcdEmail", "gcdPassword", "osKey", "osUser", "osPassword", "subdlKey"] as const;
+export const SECRET_FIELDS = ["tmdbKey", "comicVineKey", "discogsToken", "metronToken", "googleBooksKey", "gcdEmail", "gcdPassword", "osKey", "osUser", "osPassword", "subdlKey", "subsourceKey"] as const;
 
 /** Whether the secrets came (the store may wait to be unlocked or
  *  allowed), and where they are kept: `stored` in the password store,

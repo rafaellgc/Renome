@@ -478,7 +478,7 @@ export interface EpisodeState {
 
 /** A subtitle found for a video (see the core's `subtitles::Candidate`). */
 export interface SubCandidate {
-  source: "openSubtitles" | "subdl";
+  source: "openSubtitles" | "subdl" | "subsource";
   id: string;
   lang: string;
   release: string;
@@ -491,7 +491,7 @@ export interface SubCandidate {
 }
 
 /** The keys and account for the subtitle services. */
-export interface SubsAuth { osKey: string; osUser: string; osPassword: string; subdlKey: string }
+export interface SubsAuth { osKey: string; osUser: string; osPassword: string; subdlKey: string; subsourceKey?: string; tmdbKey?: string }
 
 export interface EpisodeMatch {
   /** Empty for TMDB; `anilist`. */

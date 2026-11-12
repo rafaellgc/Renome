@@ -46,6 +46,21 @@
   }
 
   let showSubdl = $state(false);
+  let subsourceStatus = $state<{ ok: boolean; text: string } | null>(null);
+  let subsourceTesting = $state(false);
+  let showSubsource = $state(false);
+  async function testSubsource() {
+    subsourceTesting = true;
+    subsourceStatus = null;
+    try {
+      await api.subsourceCheck(settings.subsourceKey.trim());
+      subsourceStatus = { ok: true, text: t("tmdbKeyOk") };
+    } catch (e) {
+      subsourceStatus = { ok: false, text: tError(e) };
+    } finally {
+      subsourceTesting = false;
+    }
+  }
   let subdlStatus = $state<{ ok: boolean; text: string } | null>(null);
   let subdlTesting = $state(false);
 
@@ -334,6 +349,29 @@
           {#if subdlStatus}<b class:good={subdlStatus.ok} class:bad={!subdlStatus.ok}>{subdlStatus.text}</b> · {/if}
           {t("subdlKeyHint")}
           <button class="link" onclick={() => openUrl("https://subdl.com/panel/api")}>{t("subdlGetKey")}</button>
+        </small>
+      </div>
+      <h4>SubSource</h4>
+      <div class="grid">
+        <label for="opt-subsource-key">{t("tmdbKey")}</label>
+        <div class="key">
+          <input
+            id="opt-subsource-key"
+            type={showSubsource ? "text" : "password"}
+            bind:value={settings.subsourceKey}
+            disabled={!secrets.ready}
+            oninput={() => (subsourceStatus = null)}
+            spellcheck="false"
+            autocomplete="off"
+          />
+          <button onclick={() => (showSubsource = !showSubsource)}>{t(showSubsource ? "hide" : "show")}</button>
+          <button disabled={!settings.subsourceKey.trim() || subsourceTesting} onclick={testSubsource}>{t("tmdbTest")}</button>
+        </div>
+        <span></span>
+        <small>
+          {#if subsourceStatus}<b class:good={subsourceStatus.ok} class:bad={!subsourceStatus.ok}>{subsourceStatus.text}</b> · {/if}
+          {t("subsourceKeyHint")}
+          <button class="link" onclick={() => openUrl("https://subsource.net/api-docs")}>{t("subdlGetKey")}</button>
         </small>
       </div>
     </section>

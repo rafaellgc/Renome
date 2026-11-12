@@ -26,7 +26,7 @@
     onclose: () => void;
   } = $props();
 
-  const SOURCE = { openSubtitles: "OpenSubtitles", subdl: "SubDL" } as const;
+  const SOURCE = { openSubtitles: "OpenSubtitles", subdl: "SubDL", subsource: "SubSource" } as const;
   const count = new Intl.NumberFormat();
   /** A language's name in the window's language (`pt-BR` → "Português
    *  (Brasil)"); the code when it has none. */

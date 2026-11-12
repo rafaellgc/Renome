@@ -81,6 +81,8 @@ export class Subtitles {
       osUser: settings.osUser.trim(),
       osPassword: settings.osPassword,
       subdlKey: settings.subdlKey.trim(),
+      subsourceKey: settings.subsourceKey.trim(),
+      tmdbKey: settings.tmdbKey.trim(),
     };
   }
 
@@ -103,7 +105,7 @@ export class Subtitles {
     const langs = this.wanted;
     if (langs === null) return;
     const auth = this.auth();
-    if (!auth.osKey && !auth.subdlKey) {
+    if (!auth.osKey && !auth.subdlKey && !(auth.subsourceKey && auth.tmdbKey)) {
       const ok = await confirm({ title: t("subsTitle"), text: t("subsNeedKey"), ok: t("options"), cancel: t("cancel") });
       if (ok) this.#ctx.openOptions();
       return;

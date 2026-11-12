@@ -55,6 +55,51 @@ pub struct Lang {
     pub opensubtitles: String,
     /// SubDL's: `BR_PT`, `PT`, `EN`.
     pub subdl: String,
+    /// SubSource's: `brazilian_portuguese`, `english`; empty when it has
+    /// none for it.
+    pub subsource: String,
+}
+
+/// SubSource's name of a language (two letters and region).
+fn subsource_code(two: &str, region: &str) -> &'static str {
+    match (two, region) {
+        ("pt", "BR") => return "brazilian_portuguese",
+        ("es", "ES") => return "spanish_spain",
+        ("es", r) if !r.is_empty() => return "spanish_latin_america",
+        ("fr", "CA") => return "french_canada",
+        ("zh", "TW" | "HK") => return "chinese_traditional",
+        ("zh", "CN" | "SG") => return "chinese_simplified",
+        _ => {}
+    }
+    const NAMES: [(&str, &str); 72] = [
+        ("af", "afrikaans"), ("am", "amharic"), ("ar", "arabic"), ("as", "assamese"),
+        ("az", "azerbaijani"), ("be", "belarusian"), ("bg", "bulgarian"), ("bn", "bengali"),
+        ("br", "breton"), ("bs", "bosnian"), ("ca", "catalan"), ("cs", "czech"),
+        ("cy", "welsh"), ("da", "danish"), ("de", "german"), ("el", "greek"),
+        ("en", "english"), ("eo", "espranto"), ("es", "spanish"), ("et", "estonian"),
+        ("eu", "basque"), ("fa", "farsi_persian"), ("fi", "finnish"), ("fr", "french"),
+        ("ga", "irish"), ("gd", "gaelic"), ("gl", "gaelician"), ("he", "hebrew"),
+        ("hi", "hindi"), ("hr", "croatian"), ("hu", "hungarian"), ("hy", "armenian"),
+        ("id", "indonesian"), ("is", "icelandic"), ("it", "italian"), ("ja", "japanese"),
+        ("ka", "georgian"), ("kk", "kazakh"), ("km", "khmer"), ("kn", "kannada"),
+        ("ko", "korean"), ("ku", "kurdish"), ("ky", "kyrgyz"), ("lb", "luxembourgish"),
+        ("lt", "lithuanian"), ("lv", "latvian"), ("mk", "macedonian"), ("ml", "malayalam"),
+        ("mn", "mongolian"), ("mr", "marathi"), ("ms", "malay"), ("my", "burmese"),
+        ("ne", "nepali"), ("nl", "dutch"), ("no", "norwegian"), ("pl", "polish"),
+        ("ps", "pashto"), ("pt", "portuguese"), ("ro", "romanian"), ("ru", "russian"),
+        ("si", "sinhala"), ("sk", "slovak"), ("sl", "slovenian"), ("sq", "albanian"),
+        ("sr", "serbian"), ("sv", "swedish"), ("sw", "swahili"), ("ta", "tamil"),
+        ("te", "telugu"), ("th", "thai"), ("tr", "turkish"), ("uk", "ukrainian"),
+    ];
+    const MORE: [(&str, &str); 6] = [
+        ("ur", "urdu"), ("uz", "uzbek"), ("vi", "vietnamese"), ("zh", "chinese"),
+        ("tl", "tagalog"), ("tt", "tatar"),
+    ];
+    NAMES
+        .iter()
+        .chain(MORE.iter())
+        .find(|(t, _)| *t == two)
+        .map_or("", |(_, n)| *n)
 }
 
 /// The two-letter code of a language written as two or three letters.
@@ -94,6 +139,7 @@ pub fn langs(text: &str) -> Vec<Lang> {
         };
         let lang = Lang {
             opensubtitles: tag.to_ascii_lowercase(),
+            subsource: subsource_code(two, &region).to_string(),
             tag,
             subdl,
         };
@@ -199,6 +245,7 @@ pub enum Source {
     #[default]
     OpenSubtitles,
     Subdl,
+    Subsource,
 }
 
 /// A subtitle found for a video.
@@ -490,6 +537,10 @@ mod tests {
         assert_eq!(l[1].subdl, "EN");
         assert_eq!(langs("pt")[0].subdl, "PT");
         assert_eq!(langs("por")[0].tag, "pt");
+        assert_eq!(l[0].subsource, "brazilian_portuguese");
+        assert_eq!(l[1].subsource, "english");
+        assert_eq!(l[2].subsource, "spanish_latin_america");
+        assert_eq!(langs("pt")[0].subsource, "portuguese");
     }
 
     #[test]
