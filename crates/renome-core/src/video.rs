@@ -278,6 +278,67 @@ pub fn frame_rate(path: &Path) -> Option<f64> {
     (1.0..=300.0).contains(&fps).then_some(fps)
 }
 
+/// How long a video plays, in seconds, from its headers: Matroska's
+/// segment duration, MP4's movie header, AVI's main header (frames times
+/// their length). `None` for other formats or when it does not say.
+pub fn length(path: &Path) -> Option<f64> {
+    let mut f = BufReader::new(File::open(path).ok()?);
+    let mut head = [0u8; 12];
+    f.read_exact(&mut head).ok()?;
+    f.seek(SeekFrom::Start(0)).ok()?;
+    let secs = match head {
+        [0x1a, 0x45, 0xdf, 0xa3, ..] => {
+            let info = matroska_element(&mut f, 0x1549_a966)?;
+            let (mut scale, mut dur) = (1_000_000u64, None);
+            for (id, data) in ebml(&info) {
+                match id {
+                    0x2a_d7b1 => scale = ebml_uint(data),
+                    0x4489 => {
+                        dur = match data.len() {
+                            4 => Some(f64::from(f32::from_be_bytes(data.try_into().ok()?))),
+                            8 => Some(f64::from_be_bytes(data.try_into().ok()?)),
+                            _ => None,
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            dur? * scale as f64 / 1e9
+        }
+        [b'R', b'I', b'F', b'F', _, _, _, _, b'A', b'V', b'I', b' '] => {
+            let mut buf = vec![0u8; 64 * 1024];
+            let n = f.read(&mut buf).ok()?;
+            let buf = &buf[..n];
+            let at = buf.windows(4).position(|w| w == b"avih")? + 8;
+            let le32 = |o: usize| Some(u32::from_le_bytes(buf.get(at + o..at + o + 4)?.try_into().ok()?));
+            // Microseconds per frame, then (three fields on) the frames.
+            f64::from(le32(0)?) * f64::from(le32(16)?) / 1e6
+        }
+        _ if [b"ftyp", b"moov", b"mdat", b"free", b"wide", b"skip"]
+            .iter()
+            .any(|k| head[4..8] == k[..]) =>
+        {
+            let moov = moov(&mut f)?;
+            let mvhd = child(&moov, b"mvhd")?;
+            // Version 1 has 64-bit times and duration.
+            let (scale, dur) = if *mvhd.first()? == 1 {
+                (
+                    u32::from_be_bytes(mvhd.get(20..24)?.try_into().ok()?),
+                    u64::from_be_bytes(mvhd.get(24..32)?.try_into().ok()?),
+                )
+            } else {
+                (
+                    u32::from_be_bytes(mvhd.get(12..16)?.try_into().ok()?),
+                    u64::from(u32::from_be_bytes(mvhd.get(16..20)?.try_into().ok()?)),
+                )
+            };
+            (scale > 0).then(|| dur as f64 / f64::from(scale))?
+        }
+        _ => return None,
+    };
+    (secs.is_finite() && secs > 0.0).then_some(secs)
+}
+
 /// Matroska and WebM: the segment's elements are walked by their headers
 /// until its track list, which is returned; the clusters before it, if
 /// any, are skipped.
@@ -732,6 +793,70 @@ mod tests {
         out.extend_from_slice(kind);
         out.extend_from_slice(body);
         out
+    }
+
+    /// `RENOME_LENGTH_PROBE=<dir>`: prints every video's length.
+    #[test]
+    #[ignore]
+    fn probe_length() {
+        let Ok(dir) = std::env::var("RENOME_LENGTH_PROBE") else { return };
+        for e in walkdir::WalkDir::new(dir).into_iter().flatten() {
+            if e.file_type().is_file() {
+                if let Some(l) = length(e.path()) {
+                    println!("{l:.2}\t{}", e.path().display());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn how_long_videos_play() {
+        let d = tempfile::tempdir().unwrap();
+        // MP4: a movie header of 90 s at 600 units a second.
+        let mut mvhd = vec![0u8; 12];
+        mvhd.extend_from_slice(&600u32.to_be_bytes());
+        mvhd.extend_from_slice(&54_000u32.to_be_bytes());
+        mvhd.extend_from_slice(&[0u8; 80]);
+        let mp4 = [
+            mp4_box(b"ftyp", b"isom\0\0\0\0"),
+            mp4_box(b"moov", &mp4_box(b"mvhd", &mvhd)),
+        ]
+        .concat();
+        let p = d.path().join("a.mp4");
+        std::fs::write(&p, &mp4).unwrap();
+        assert_eq!(length(&p), Some(90.0));
+        // Matroska: 2 500 ms as a float at the usual scale.
+        let el = |id: &[u8], body: &[u8]| {
+            let mut v = id.to_vec();
+            v.push(0x80 | body.len() as u8);
+            v.extend_from_slice(body);
+            v
+        };
+        let info = [
+            el(&[0x2a, 0xd7, 0xb1], &[0x0f, 0x42, 0x40]),
+            el(&[0x44, 0x89], &2500f64.to_be_bytes()),
+        ]
+        .concat();
+        let mkv = [
+            el(&[0x1a, 0x45, 0xdf, 0xa3], &el(&[0x42, 0x82], b"matroska")),
+            el(&[0x18, 0x53, 0x80, 0x67], &el(&[0x15, 0x49, 0xa9, 0x66], &info)),
+        ]
+        .concat();
+        let p = d.path().join("a.mkv");
+        std::fs::write(&p, &mkv).unwrap();
+        assert_eq!(length(&p), Some(2.5));
+        // AVI: 1 000 frames of 40 000 µs.
+        let mut avih = vec![0u8; 56];
+        avih[..4].copy_from_slice(&40_000u32.to_le_bytes());
+        avih[16..20].copy_from_slice(&1_000u32.to_le_bytes());
+        let mut avi = b"RIFF\0\0\0\0AVI LIST\0\0\0\0hdrlavih".to_vec();
+        avi.extend_from_slice(&56u32.to_le_bytes());
+        avi.extend_from_slice(&avih);
+        let p = d.path().join("a.avi");
+        std::fs::write(&p, &avi).unwrap();
+        assert_eq!(length(&p), Some(40.0));
+        std::fs::write(&p, b"nothing a video").unwrap();
+        assert_eq!(length(&p), None);
     }
 
     #[test]

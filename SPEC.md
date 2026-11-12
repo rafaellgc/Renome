@@ -354,8 +354,16 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
     rest. OpenSubtitles: `POST /download` with `file_id` (token when
     logged in) gives a link and the downloads left. SubDL: the zip's
     subtitle (`srt`, `ass`, `ssa`, `vtt`, `sub`; `__MACOSX` copies left
-    out); with several, the episode's (`S01E02`, `1x02`), else the
-    largest. Text is saved as UTF-8 (a BOM dropped, UTF-16 with its mark
+    out); with several, the episode's (number read as in file names,
+    `tv::parse`: with the season first, then without it — `E02`,
+    `- 02`), then the one sharing most words with the video's name, then
+    the largest. A SubDL subtitle listed for several releases (also
+    `a;b` in one) is labelled with the one ranking best for the video.
+    A text subtitle whose last line (ads dropped) ends over 60 s after
+    the video (`video::length`: Matroska segment duration, MP4 `mvhd`,
+    AVI `avih`) or before its half is for another cut or frame rate:
+    the next one is tried; when none fits, the first is written anyway
+    with a warning (it cost a download). Text is saved as UTF-8 (a BOM dropped, UTF-16 with its mark
     decoded, else Windows-1252 when not valid UTF-8). A name that exists
     is never replaced. The files are recorded in the rename's history
     entry (or an entry of their own), so undo deletes them. Failures are

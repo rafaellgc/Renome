@@ -415,12 +415,37 @@ impl Subdl {
             {
                 continue;
             }
-            let release = s["releases"]
+            // It can be for several releases: the one nearest the video's.
+            let mut releases: Vec<&str> = s["releases"]
                 .as_array()
-                .and_then(|r| r.first())
-                .and_then(Value::as_str)
-                .or(s["release_name"].as_str())
-                .or(s["name"].as_str())
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .flat_map(|r| r.split(';'))
+                .map(str::trim)
+                .filter(|r| !r.is_empty())
+                .collect();
+            if releases.is_empty() {
+                releases.extend(s["release_name"].as_str().or(s["name"].as_str()));
+            }
+            let video = item
+                .path
+                .file_stem()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let fit = |r: &str| {
+                subs::score(
+                    &video,
+                    &Candidate {
+                        release: r.to_string(),
+                        ..Candidate::default()
+                    },
+                )
+            };
+            let release = releases
+                .iter()
+                .copied()
+                .max_by(|a, b| fit(a).total_cmp(&fit(b)))
                 .unwrap_or_default();
             out.push(Candidate {
                 source: Source::Subdl,
@@ -644,12 +669,19 @@ pub async fn write(
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
+        // How long the video plays, to tell a subtitle made for another
+        // cut or frame rate.
+        let length = renome_core::video::length(&item.path);
+        let fps = renome_core::video::frame_rate(&item.path);
         for list in &item.langs {
             if stop() {
                 break 'items;
             }
             let mut last_err = None;
             let mut tried = 0;
+            // The first one that did not fit the video's length: written
+            // when none of the others does (it cost a download).
+            let mut unfit: Option<(PathBuf, Vec<u8>)> = None;
             for c in list {
                 if tried == TRIES {
                     break;
@@ -670,7 +702,12 @@ pub async fn write(
                             .await
                             .and_then(|b| {
                                 let ep = item.season.zip(item.episode);
-                                subs::from_archive(&b, ep).ok_or_else(|| "subsEmpty".to_string())
+                                let video = item
+                                    .path
+                                    .file_stem()
+                                    .map(|n| n.to_string_lossy().into_owned())
+                                    .unwrap_or_default();
+                                subs::from_archive(&b, ep, &video).ok_or_else(|| "subsEmpty".to_string())
                             })
                             .map(|(ext, b)| (b, ext)),
                         None => continue,
@@ -682,21 +719,24 @@ pub async fn write(
                         let to = subs::target(&item.path, &c.lang, c.hearing_impaired, &ext);
                         let text = ["srt", "ass", "ssa", "vtt", "sub"]
                             .contains(&ext.to_lowercase().as_str());
+                        let fit = match length {
+                            Some(secs) if text => subs::fits(&bytes, Some(&c.lang), secs, fps),
+                            _ => None,
+                        };
                         let bytes = if text {
                             renome_core::subtext::to_utf8(&bytes, Some(&c.lang))
                         } else {
                             bytes
                         };
-                        match write_new(&to, &bytes) {
-                            Ok(()) => out.created.push(to),
-                            Err(e) => {
-                                let file = to
-                                    .file_name()
-                                    .map(|n| n.to_string_lossy().into_owned())
-                                    .unwrap_or_default();
-                                out.errors.push((file, e));
+                        if fit == Some(false) {
+                            if unfit.is_none() {
+                                unfit = Some((to, bytes));
                             }
+                            last_err = Some("subsLength".to_string());
+                            continue;
                         }
+                        save(&mut out, &to, &bytes);
+                        unfit = None;
                         last_err = None;
                         break;
                     }
@@ -715,6 +755,11 @@ pub async fn write(
                     }
                 }
             }
+            if let Some((to, bytes)) = unfit {
+                // Kept, with a word that it may be out of time.
+                save(&mut out, &to, &bytes);
+                last_err = Some("subsLengthKept".to_string());
+            }
             if let Some(e) = last_err {
                 out.errors.push((
                     format!(
@@ -729,6 +774,20 @@ pub async fn write(
         }
     }
     out
+}
+
+/// Writes a downloaded subtitle, noting it or why it could not be.
+fn save(out: &mut Written, to: &std::path::Path, bytes: &[u8]) {
+    match write_new(to, bytes) {
+        Ok(()) => out.created.push(to.to_path_buf()),
+        Err(e) => {
+            let file = to
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            out.errors.push((file, e));
+        }
+    }
 }
 
 /// Writes a file that must not be there yet.

@@ -193,15 +193,16 @@ pub fn hash(path: &Path) -> Option<String> {
 }
 
 /// Where a subtitle comes from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Source {
+    #[default]
     OpenSubtitles,
     Subdl,
 }
 
 /// A subtitle found for a video.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Candidate {
     pub source: Source,
@@ -337,6 +338,64 @@ pub fn rank(video: &str, cands: &mut [Candidate]) {
     cands.sort_by(|a, b| score(video, b).total_cmp(&score(video, a)));
 }
 
+/// Which of an archive's subtitles (index, name, extension, size) is the
+/// video's: see [`from_archive`].
+fn pick_in_archive<'a>(
+    found: &'a [(usize, String, String, u64)],
+    episode: Option<(u32, u32)>,
+    video: &str,
+) -> Option<&'a (usize, String, String, u64)> {
+    let mut pool: Vec<&(usize, String, String, u64)> = found.iter().collect();
+    if let Some((s, e)) = episode.filter(|_| pool.len() > 1) {
+        let read: Vec<_> = pool
+            .iter()
+            .map(|f| {
+                let stem = f.1.rsplit_once('.').map_or(f.1.as_str(), |(a, _)| a);
+                crate::tv::parse(stem, "")
+            })
+            .collect();
+        let has = |g: &crate::tv::EpisodeGuess| {
+            g.episodes.iter().any(|&n| u32::from(n) == e) || g.number == Some(e)
+        };
+        let exact: Vec<_> = (0..pool.len())
+            .filter(|&i| read[i].season.map(u32::from) == Some(s) && has(&read[i]))
+            .collect();
+        let loose: Vec<_> = (0..pool.len())
+            .filter(|&i| read[i].season.is_none() && has(&read[i]))
+            .collect();
+        let keep = if exact.is_empty() { loose } else { exact };
+        if !keep.is_empty() {
+            pool = keep.into_iter().map(|i| pool[i]).collect();
+        }
+    }
+    let words = |s: &str| -> std::collections::HashSet<String> {
+        s.to_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| w.len() > 1)
+            .map(str::to_string)
+            .collect()
+    };
+    let of_video = words(video);
+    pool.into_iter()
+        .max_by_key(|f| (words(&f.1).intersection(&of_video).count(), f.3))
+}
+
+/// Whether a downloaded subtitle can be for a video that plays `video`
+/// seconds: one whose last line (ads left out) comes over a minute after
+/// the video ends, or before its middle, is for another cut or another
+/// frame rate. `None` when it cannot be told (unreadable, no lines, a
+/// MicroDVD file without its frame rate).
+pub fn fits(bytes: &[u8], lang: Option<&str>, video: f64, fps: Option<f64>) -> Option<bool> {
+    let (text, _) = crate::subtext::decode(bytes, lang);
+    let mut doc = crate::subtext::Doc::parse(&text, fps)?;
+    if doc.needs_fps() {
+        return None;
+    }
+    doc.drop_ads();
+    let last = doc.cues().map(|c| c.end).max()? as f64 / 1000.0;
+    Some(last <= video + 60.0 && last >= video / 2.0)
+}
+
 /// The name a subtitle gets: the video's, with its language and `.sdh`
 /// for the hard of hearing (`Movie (2010).pt-BR.srt`).
 pub fn target(video: &Path, lang: &str, hearing_impaired: bool, ext: &str) -> PathBuf {
@@ -355,10 +414,12 @@ pub fn target(video: &Path, lang: &str, hearing_impaired: bool, ext: &str) -> Pa
 
 /// The subtitle in a downloaded archive (SubDL sends zips): the one file
 /// with a subtitle extension (macOS' `__MACOSX` copies left out); when
-/// there are several, the one for the episode (`S01E02`), else the
-/// largest. Its extension and bytes. An archive that is not a zip is taken
-/// for the subtitle itself (`srt`).
-pub fn from_archive(bytes: &[u8], episode: Option<(u32, u32)>) -> Option<(String, Vec<u8>)> {
+/// there are several, the one for the episode (its number read as in
+/// file names: `S01E02`, `1x02`, `E02`, `- 02`…), then the one sharing
+/// most words with the video's name (`video`), then the largest. Its
+/// extension and bytes. An archive that is not a zip is taken for the
+/// subtitle itself (`srt`).
+pub fn from_archive(bytes: &[u8], episode: Option<(u32, u32)>, video: &str) -> Option<(String, Vec<u8>)> {
     if !bytes.starts_with(b"PK") {
         return (!bytes.is_empty()).then(|| ("srt".to_string(), bytes.to_vec()));
     }
@@ -380,19 +441,7 @@ pub fn from_archive(bytes: &[u8], episode: Option<(u32, u32)>) -> Option<(String
             found.push((i, base.clone(), ext.to_lowercase(), f.size()));
         }
     }
-    let pick = match episode {
-        Some((s, e)) if found.len() > 1 => {
-            let marks = [format!("s{s:02}e{e:02}"), format!("{s}x{e:02}")];
-            found
-                .iter()
-                .find(|(_, name, _, _)| {
-                    let n = name.to_lowercase();
-                    marks.iter().any(|m| n.contains(m))
-                })
-                .or_else(|| found.iter().max_by_key(|f| f.3))
-        }
-        _ => found.iter().max_by_key(|f| f.3),
-    }?;
+    let pick = pick_in_archive(&found, episode, video)?;
     let mut out = Vec::new();
     zip.by_index(pick.0).ok()?.read_to_end(&mut out).ok()?;
     Some((pick.2.clone(), out))
@@ -400,6 +449,21 @@ pub fn from_archive(bytes: &[u8], episode: Option<(u32, u32)>) -> Option<(String
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn subtitle_fits_the_video_length() {
+        // Two lines, the last one at `t`.
+        let at = |t: &str| {
+            format!("1\n00:00:05,000 --> 00:00:07,000\nOlá.\n\n2\n{t},000 --> {t},500\nFim.\n")
+        };
+        // A 100-minute video.
+        let v = 6000.0;
+        assert_eq!(super::fits(at("01:38:00").as_bytes(), None, v, None), Some(true));
+        assert_eq!(super::fits(at("01:40:50").as_bytes(), None, v, None), Some(true));
+        assert_eq!(super::fits(at("01:45:00").as_bytes(), None, v, None), Some(false));
+        assert_eq!(super::fits(at("00:40:00").as_bytes(), None, v, None), Some(false));
+        assert_eq!(super::fits(b"nada", None, v, None), None);
+    }
+
     use super::*;
 
     fn cand(release: &str, downloads: u64) -> Candidate {
@@ -530,11 +594,40 @@ mod tests {
             z.finish().unwrap();
         }
         let zip = buf.into_inner();
-        assert_eq!(from_archive(&zip, Some((1, 1))).unwrap().1, b"one");
-        assert_eq!(from_archive(&zip, None).unwrap().1, b"two!");
+        assert_eq!(from_archive(&zip, Some((1, 1)), "").unwrap().1, b"one");
+        assert_eq!(from_archive(&zip, None, "").unwrap().1, b"two!");
         assert_eq!(
-            from_archive(b"1\n00:00", None).unwrap(),
+            from_archive(b"1\n00:00", None, "").unwrap(),
             ("srt".into(), b"1\n00:00".to_vec())
         );
+    }
+
+    #[test]
+    fn episode_and_release_found_in_a_zip() {
+        use std::io::Write;
+        let zip_of = |names: &[(&str, &str)]| {
+            let mut buf = std::io::Cursor::new(Vec::new());
+            {
+                let mut z = zip::ZipWriter::new(&mut buf);
+                let o = zip::write::SimpleFileOptions::default();
+                for (n, body) in names {
+                    z.start_file(*n, o).unwrap();
+                    z.write_all(body.as_bytes()).unwrap();
+                }
+                z.finish().unwrap();
+            }
+            buf.into_inner()
+        };
+        // Numbered without the season.
+        let z = zip_of(&[("Show - 03.srt", "three"), ("Show - 04.srt", "four"), ("Show - 05 long.srt", "five!!")]);
+        assert_eq!(from_archive(&z, Some((1, 4)), "Show S01E04").unwrap().1, b"four");
+        let z = zip_of(&[("Show.E03.srt", "three"), ("Show.E04.srt", "four")]);
+        assert_eq!(from_archive(&z, Some((2, 3)), "").unwrap().1, b"three");
+        // The release of the video, not the largest.
+        let z = zip_of(&[
+            ("Movie.2010.1080p.BluRay.x264-GRP.srt", "blu"),
+            ("Movie.2010.720p.WEB-DL-OTHER.srt", "web, longer"),
+        ]);
+        assert_eq!(from_archive(&z, None, "Movie.2010.1080p.BluRay.x264-GRP").unwrap().1, b"blu");
     }
 }
