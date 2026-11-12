@@ -63,6 +63,11 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.32.0" date="2026-11-12">
+      <description>
+        <p>Subtitles can also come from SubSource, are checked against the video's length (one made for another cut is passed over) and are picked better inside zips. The best one is chosen fairly among the services, sparing OpenSubtitles' few downloads a day, and a language already inside the video can still be downloaded as a file. Comic readers are listed by model, grouped by brand and line, newest first. A text size option makes the whole window larger.</p>
+      </description>
+    </release>
     <release version="0.31.0" date="2026-11-11">
       <description>
         <p>Comics and books made into AZW3 now open on Kindles: they show their cover in the library and go back to it after the last page. Comic e-books can be KEPUB, fitted CBZ or PDF, for about 25 reader screens, with contrast, enlarging, 16 greys, split or turned double pages, webtoon strips, joined volumes and books in parts. Converted books are checked against other tools: FB2 is always valid, the language is guessed from the text when missing, and old encodings of text and subtitles are recognised better.</p>
