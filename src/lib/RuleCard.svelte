@@ -90,30 +90,50 @@
 
   /** What a closed card does, in a few words. */
   const brief = $derived.by(() => {
-    const q = (x: string) => `“${x}”`;
+    // Spaces shown, so a replaced space is seen.
+    const q = (x: string) => `“${x.replace(/ /g, "␣")}”`;
+    // An option's label without its examples in brackets.
+    const short = (k: Key) => t(k).replace(/\s*\(.*\)\s*$/, "");
+    const list = (pairs: [boolean, string][]) => pairs.filter(([on]) => on).map(([, x]) => x).join(" · ");
     switch (r.type) {
       case "replace":
-        return r.find ? `${q(r.find)} → ${q(r.replace)}` : "";
+        return r.find ? (r.replace ? `${q(r.find)} → ${q(r.replace)}` : t("briefDrop", { x: q(r.find) })) : "";
       case "regex":
-        return r.pattern ? `/${r.pattern}/ → ${r.replace}` : "";
+        return r.pattern ? `/${r.pattern}/ → ${r.replace || "∅"}` : "";
       case "rearrange":
-        return r.order;
+        return r.order ? `${t("newOrder")}: ${r.order}` : "";
       case "case":
         return t(({ lower: "caseLower", upper: "caseUpper", sentence: "caseSentence", title: "caseTitle", titleSmart: "caseTitleSmart" } as const)[r.mode]);
-      case "insert":
-        return r.source === "text" ? (r.text ? q(r.text) : "") : t(({ now: "srcNow", modified: "srcModified", taken: "srcTaken", folder: "srcFolder" } as const)[r.source]);
+      case "insert": {
+        const what = r.source === "text" ? (r.text ? q(r.text) : "") : short(({ now: "srcNow", modified: "srcModified", taken: "srcTaken", folder: "srcFolder" } as const)[r.source]);
+        const where = r.at === "start" ? t("atStart") : r.at === "end" ? t("atEnd") : `${t("position")} ${r.position}`;
+        return what ? `${what} · ${where.toLowerCase()}` : "";
+      }
       case "number":
-        return r.template;
+        return `${r.template} · ${t("start").toLowerCase()} ${r.start}`;
       case "remove":
-        return r.chars ? q(r.chars) : "";
+        return list([[r.extraSpaces, short("rmExtraSpaces")], [r.allSpaces, short("rmAllSpaces")], [r.accents, short("rmAccents")], [r.digits, short("rmDigits")], [r.leadingNumber, short("rmLeadingNumber")], [!!r.chars, q(r.chars)]]);
+      case "convert":
+        return list([[r.mojibake, short("cvMojibake")], [r.latin, short("cvLatin")], [!!r.web, short("cvWeb")]]);
+      case "removeRange":
+      {
+        const bound = (b: string, pos: number, text: string) => (b === "text" ? q(text) : b === "start" ? t("atStart").toLowerCase() : b === "end" ? t("atEnd").toLowerCase() : String(pos));
+        return `${bound(r.from, r.fromPosition, r.fromText)} → ${bound(r.to, r.toPosition, r.toText)}`;
+      }
+      case "charAt":
+        return `${t("position")} ${r.position}${r.replace ? ` → ${q(r.replace)}` : ""}`;
+      case "extension":
+        return r.mode === "set" ? `.${r.value}` : short(({ lower: "extLower", upper: "extUpper", remove: "extRemove", content: "extContent" } as const)[r.mode]);
+      case "subtitle":
+        return list([[r.toSrt, "SRT"], [r.utf8, "UTF-8"], [r.ads, short("subAds")], [r.hearing, short("subHearing")], [!!r.shiftMs || !!r.fpsFrom, short("sectTime")], [r.extract, short("subExtract")]]);
       case "movie":
       case "series":
       case "music":
       case "book":
       case "comic":
       case "photo": {
-        const found = lookup && (lookup.found || lookup.choose || lookup.none) ? ` · ${lookup.found + lookup.choose}/${lookup.found + lookup.choose + lookup.none}` : "";
-        return r.template + found;
+        const n = lookup ? lookup.found + lookup.choose + lookup.none : 0;
+        return n ? `${r.template} · ${t("briefFound", { found: lookup!.found + lookup!.choose, n })}` : r.template;
       }
       default:
         return "";
@@ -824,7 +844,6 @@
     padding: 0 12px 8px 46px;
     font-size: var(--fs-sm);
     color: var(--muted);
-    font-family: ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

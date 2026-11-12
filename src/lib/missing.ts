@@ -349,3 +349,44 @@ export function missingFolder(ghosts: Ghost[], dirOf: (path: string) => string |
   const dir = common.join(sep);
   return dir || (common.length ? sep : null);
 }
+
+/** Lower case, without accents or punctuation, for comparing names. */
+function plain(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}#]+/gu, " ")
+    .trim();
+}
+
+const dirOf = (p: string) => p.replace(/[\\/][^\\/]*$/, "");
+
+/** Whether a name typed by hand is that missing item's: its code
+ *  (S01E05 or 1x05, #7, v07, a track's number at the start) or, for a
+ *  movie or a book, its title. */
+function names(g: Ghost, name: string): boolean {
+  const n = plain(name);
+  const num = `0*${g.number}(?!\\d)`;
+  switch (g.kind) {
+    case "episode":
+      return new RegExp(`(^|[^a-z0-9])(s0*${g.season} ?e${num}|${g.season}x${num})`).test(n);
+    case "issue":
+      return new RegExp(`(#|\\bv|\\bc|\\bvol |\\bn ?)${num}`).test(n) || (!!g.title && plain(g.title).length > 2 && n.includes(plain(g.title)));
+    case "track":
+      return new RegExp(`^(${g.season}[ -])?${num}`).test(n) || (!!g.title && plain(g.title).length > 2 && n.includes(plain(g.title)));
+    default:
+      return !!g.title && plain(g.title).length > 2 && n.includes(plain(g.title));
+  }
+}
+
+/** The missing items a file renamed by hand now is: left out (the file
+ *  has to sit in the same folder as the item's place). */
+export function notTypedIn(ghosts: Ghost[], items: PreviewItem[]): Ghost[] {
+  const typed = items.filter((i) => i.manual);
+  if (!typed.length) return ghosts;
+  return ghosts.filter((g) => {
+    const dir = dirOf(g.anchor);
+    return !typed.some((i) => dirOf(i.path) === dir && names(g, i.newName));
+  });
+}

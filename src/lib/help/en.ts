@@ -75,7 +75,7 @@ export const en: Section[] = [
 </ul>
 <p>Folders have no extension: in <code>Show.2020</code>, the <code>.2020</code> is part of the name.</p>
 <h4>Saving and opening rules</h4>
-<p>The folder and floppy-disk buttons beside <b>+ Rule</b> open and save the rule set to a <code>.json</code> file, to reuse later. By default the program also remembers the rules when it is closed.</p>
+<p>The <b>Sets</b> button, beside <b>+ Rule</b>, keeps rule sets by name inside the program. <b>Save the current rules…</b> asks for a name and saves; the saved sets show in the list, in alphabetical order, with how many rules they have. Clicking one opens it in place of the current rules. The pencil renames and the bin deletes (deleting does not touch the rules open). Saving with the name of a set that exists asks before replacing it. To take a set to another computer, use <b>Export to a file…</b> and <b>Import from a file…</b> (<code>.json</code> files). By default the program also remembers the rules when it is closed.</p>
 <h4>Positions</h4>
 <p>Where a rule asks for a position, it counts visible characters starting at 1. Accented letters and emoji count as one character.</p>`,
   },

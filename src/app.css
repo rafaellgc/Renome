@@ -156,3 +156,28 @@ button.icon.close:hover:not(:disabled) { color: var(--text); background: var(--h
 button.danger-fill { background: #c62f2f; border-color: #c62f2f; color: white; font-weight: 600; }
 button.danger-fill:hover:not(:disabled) { background: #c62f2f; filter: brightness(1.08); }
 input[type="search"]::-webkit-search-cancel-button { cursor: pointer; }
+
+/* Drop-down menus (the toolbar's, "+ Rule", the rule sets). */
+.menu {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  min-width: 230px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 4px;
+  z-index: 5;
+}
+.menu-host { position: relative; }
+.menu button { display: flex; align-items: center; gap: 8px; border: none; background: none; text-align: left; border-radius: var(--r-sm); }
+.menu button .icon-svg { color: var(--muted); }
+.menu .tick { width: 14px; display: inline-flex; color: var(--accent); }
+.menu-group { margin: 6px 10px 2px; font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.menu-group:first-child { margin-top: 4px; }
+.menu.right { left: auto; right: 0; }
+.menu button:hover, .menu button:focus-visible { background: var(--hover); outline: none; }
+.menu button:focus-visible { box-shadow: inset 2px 0 var(--accent); }

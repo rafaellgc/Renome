@@ -89,16 +89,23 @@
     "r-number": "number", "r-remove": "remove", "r-convert": "convert", "r-range": "removeRange", "r-char": "charAt", "r-ext": "extension",
     "r-movie": "movie", "r-series": "series", "r-music": "music", "r-book": "book", "r-comic": "comic", "r-photo": "photo", "r-subtitle": "subtitle",
   };
-  /** The rules' sections in the order of the "+ Rule" menu: alphabetical
-   *  by the rule's name in the current language. */
+  const MEDIA: RuleType[] = ["movie", "series", "music", "book", "comic", "photo", "subtitle"];
+  /** The rules' sections in the order of the "+ Rule" menu: those by kind
+   *  of file, then those on the name's text, each alphabetical by the
+   *  rule's name in the current language; the first of each group carries
+   *  the group's title for the index. */
   const sections = $derived.by(() => {
     const all = { pt, en, es }[settings.lang];
     const name = (id: string) => t(`rule.${RULE_OF[id]}`);
-    const rules = all
-      .filter((s) => RULE_OF[s.id])
-      .sort((a, b) => name(a.id).localeCompare(name(b.id), LOCALES[settings.lang]));
+    const byName = (a: { id: string }, b: { id: string }) => name(a.id).localeCompare(name(b.id), LOCALES[settings.lang]);
+    const media = all.filter((s) => RULE_OF[s.id] && MEDIA.includes(RULE_OF[s.id])).sort(byName);
+    const text = all.filter((s) => RULE_OF[s.id] && !MEDIA.includes(RULE_OF[s.id])).sort(byName);
+    const rules: ((typeof all)[number] & { group?: string })[] = [
+      ...media.map((s, i) => (i ? s : { ...s, group: t("ruleGroupMedia") })),
+      ...text.map((s, i) => (i ? s : { ...s, group: t("ruleGroupText") })),
+    ];
     let next = 0;
-    return all.map((s) => (RULE_OF[s.id] ? rules[next++] : s));
+    return all.map((s) => (RULE_OF[s.id] ? rules[next++] : s)) as ((typeof all)[number] & { group?: string })[];
   });
   let current = $state("start");
   let content = $state<HTMLElement>();
@@ -141,6 +148,7 @@
       <div class="manual">
         <nav aria-label={t("helpContents")}>
           {#each sections as s (s.id)}
+            {#if s.group}<p class="nav-group">{s.group}</p>{/if}
             <button class:sub={s.sub} class:on={current === s.id} onclick={() => go(s.id)}>{s.title}</button>
           {/each}
         </nav>
@@ -271,6 +279,7 @@
     white-space: normal;
   }
   nav button.sub { padding-left: 22px; color: var(--muted); }
+  .nav-group { margin: 8px 8px 2px 22px; font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
   nav button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
   .content {
     flex: 1;

@@ -75,7 +75,7 @@ export const es: Section[] = [
 </ul>
 <p>Las carpetas no tienen extensión: en <code>Serie.2020</code>, el <code>.2020</code> es parte del nombre.</p>
 <h4>Guardar y abrir reglas</h4>
-<p>Los botones de carpeta y de disquete, junto a <b>+ Regla</b>, abren y guardan el conjunto de reglas en un archivo <code>.json</code>, para reutilizarlo. Por defecto, el programa también recuerda las reglas al cerrarse.</p>
+<p>El botón <b>Conjuntos</b>, junto a <b>+ Regla</b>, guarda conjuntos de reglas con un nombre dentro del programa. <b>Guardar las reglas actuales…</b> pide un nombre y guarda; los conjuntos guardados aparecen en la lista, en orden alfabético, con cuántas reglas tienen. Un clic en uno lo abre en lugar de las reglas actuales. El lápiz lo renombra y la papelera lo elimina (eliminar no toca las reglas abiertas). Guardar con el nombre de un conjunto que ya existe pregunta antes de reemplazarlo. Para llevar un conjunto a otro equipo, use <b>Exportar a un archivo…</b> e <b>Importar de un archivo…</b> (archivos <code>.json</code>). Por defecto, el programa también recuerda las reglas al cerrarse.</p>
 <h4>Posiciones</h4>
 <p>Cuando una regla pide una posición, cuenta caracteres visibles desde 1. Las letras con tilde y los emojis cuentan como un carácter.</p>`,
   },

@@ -75,7 +75,12 @@ list"); a preset or remembered set with more keeps the first and says
 which were left out (`blockedBy`/`oneLookup` in `rules.ts`).
 Each rule can be turned on/off, reordered and removed; a rule turned off
 is locked (no option changes, no searches) until turned on. The preview updates
-live. The rule set can be saved and loaded as a *preset* (JSON).
+live. Rule sets are kept by name in the settings (`ruleSets`: name and steps,
+listed alphabetically with their rule count, in the "Sets" menu beside
+"+ Rule"): save the current rules under a name (same name, case-insensitive:
+asks before replacing), open one in place of the current rules, rename
+(inline), delete (asks). A set can also be exported to and imported from a
+*preset* (JSON) file.
 
 By default rules act on the name without the extension; text rules can
 optionally act only on the extension or on the full name.
@@ -551,7 +556,11 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   after today) that no listed video holds, in the seasons at least one
   listed video (after the filter) is matched to; seasons without one are
   skipped. A multi-episode file covers all its episodes; a subtitle alone
-  does not. Each row sits before the video with the nearest later
+  does not. A file renamed by hand in the same folder covers the
+  missing item its typed name names (episodes: `S01E05`/`1x05`; issues:
+  `#7`, `v07`, `c007`; tracks: the number first; movies, books and issues
+  or tracks with a title: the title), for every kind of missing row
+  (`notTypedIn` in `missing.ts`). Each row sits before the video with the nearest later
   episode of its season, else after the one with the nearest earlier
   (swapped when sorted backwards); it shows `SxxEyy · title` and the air
   date. These rows cannot be selected (clicks, arrows and Shift ranges
@@ -2279,6 +2288,9 @@ On macOS, ⌘ replaces Ctrl. The list is also shown in Options.
   short fade/scale-in, off with reduced motion. Sizes: default 520, `md`
   720, `lg` 980 px.
 - Buttons show a focus ring for the keyboard (`:focus-visible`).
+- The manual lists the rules in the menu's order (by kind of file, then
+  name text, each alphabetical in the language), with the two group titles
+  in its contents.
 - The "+ Rule" menu has two groups (by kind of file, with the services
   below each name; name text), and says once why lookup rules are off.
 - Rule cards: long rules split into titled blocks (Name, Lookup, Files
@@ -2286,8 +2298,10 @@ On macOS, ⌘ replaces Ctrl. The list is also shown in Options.
   Date, Folders; subtitle: Format, Clean-up, Timing, Take out of videos),
   the lookup button right after the name block (music: after "listen");
   hints clamped to two lines, a click opens them; a closed card shows a
-  one-line summary; the card opens with a short slide.
-- The empty list shows buttons to add files or folders and the shortcut.
+  one-line summary in words for every rule (what is replaced, with spaces
+  shown as ␣; the options on; the template and how many were found); the
+  card opens with a short slide.
+- The empty list shows buttons to add files or folders.
 - Toolbar, left to right: add, filter, list actions (move, remove, clear),
   then the rename group (history, destination, Rename), a divider and the
   app's own buttons (options, help last). Below 1080 px of width (small

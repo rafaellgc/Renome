@@ -5,6 +5,7 @@ import type { DetailColumn, Step } from "./types";
 
 export type Lang = "pt" | "en" | "es";
 export type Theme = "light" | "dark" | "system";
+export type RuleSet = { name: string; steps: Step[] };
 /** How big the window's text (and all else, in proportion) is. */
 export type TextSize = "normal" | "large" | "larger";
 export const TEXT_SCALE: Record<TextSize, number> = { normal: 1, large: 1.15, larger: 1.3 };
@@ -42,6 +43,8 @@ export interface Settings {
   subsourceKey: string;
   /** Rules from the last session (when `rememberRules`). */
   rules: Step[];
+  /** Rule sets saved by name, in the order they were saved. */
+  ruleSets: RuleSet[];
   /** The optional columns shown in the list, in their order. */
   columns: DetailColumn[];
   /** The faded rows of what is missing are shown (they are still counted). */
@@ -73,6 +76,7 @@ const DEFAULTS: Settings = {
   subdlKey: "",
   subsourceKey: "",
   rules: [],
+  ruleSets: [],
   columns: [],
   showMissing: true,
   cacheDays: 7,

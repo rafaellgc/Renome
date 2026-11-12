@@ -75,7 +75,7 @@ export const pt: Section[] = [
 </ul>
 <p>Pastas não têm extensão: em <code>Série.2020</code>, o <code>.2020</code> faz parte do nome.</p>
 <h4>Salvar e abrir regras</h4>
-<p>Os botões de pasta e de disquete, ao lado de <b>+ Regra</b>, abrem e salvam o conjunto de regras num arquivo <code>.json</code>, para reaproveitar depois. Por padrão, o programa também lembra as regras ao ser fechado.</p>
+<p>O botão <b>Conjuntos</b>, ao lado de <b>+ Regra</b>, guarda conjuntos de regras com um nome dentro do programa. <b>Salvar as regras atuais…</b> pede um nome e salva; os conjuntos salvos aparecem na lista, em ordem alfabética, com quantas regras têm. Clicar num deles o abre no lugar das regras atuais. O lápis renomeia e a lixeira exclui (excluir não mexe nas regras abertas). Salvar com o nome de um conjunto que já existe pergunta antes de substituir. Para levar um conjunto a outro computador, use <b>Exportar para um arquivo…</b> e <b>Importar de um arquivo…</b> (arquivos <code>.json</code>). Por padrão, o programa também lembra as regras ao ser fechado.</p>
 <h4>Posições</h4>
 <p>Onde uma regra pede uma posição, a contagem é de caracteres visíveis a partir de 1. Letras acentuadas e emojis contam como um caractere.</p>`,
   },

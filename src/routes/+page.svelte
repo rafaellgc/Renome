@@ -16,6 +16,7 @@
   import { asText, counts, extOf, isEpub, moved, without, type PageCtx } from "$lib/page/common";
   import Dialog from "$lib/Dialog.svelte";
   import Icon from "$lib/Icon.svelte";
+  import RuleSets from "$lib/RuleSets.svelte";
   import { dialog as dialogBox, menu as menuNav } from "$lib/modal";
   import { closeDialog, confirm, dialog, notify } from "$lib/dialogs.svelte";
   import FileTable from "$lib/FileTable.svelte";
@@ -27,7 +28,7 @@
   import PictureCompare from "$lib/PictureCompare.svelte";
   import ComicReview from "$lib/ComicReview.svelte";
   import EpisodeReview from "$lib/EpisodeReview.svelte";
-  import { missingBooks, missingEpisodes, missingFolder, missingIssues, missingMovies, missingTracks, today, type Ghost } from "$lib/missing";
+  import { missingBooks, missingEpisodes, missingFolder, missingIssues, missingMovies, missingTracks, notTypedIn, today, type Ghost } from "$lib/missing";
   import MovieReview from "$lib/MovieReview.svelte";
   import Options from "$lib/Options.svelte";
   import RuleCard from "$lib/RuleCard.svelte";
@@ -224,7 +225,7 @@
    *  issues from the series the listed comics are from, tracks from the
    *  albums, released movies from the collections and volumes between a
    *  book series' files. */
-  const ghosts = $derived(unique([
+  const ghosts = $derived(notTypedIn(unique([
     ...(tv.rule?.rule.type === "series" && tv.rule.rule.missing
       ? missingEpisodes(tv.shows, tv.matches, preview.items, sortDesc, today())
       : []),
@@ -236,7 +237,7 @@
       ? missingMovies(movies.sets, movies.setOf, Object.fromEntries(Object.entries(movies.matches).map(([p, m]) => [p, m.id])), preview.items, sortDesc, today())
       : []),
     ...(books.rule?.rule.type === "book" && books.rule.rule.missing ? missingBooks(books.state, preview.items, sortDesc) : []),
-  ]));
+  ]), preview.items));
   /** Each missing row once: the list is keyed by them, and a repeated key
    *  stops it from being drawn at all. */
   function unique<T extends { key: string }>(rows: T[]): T[] {
@@ -390,7 +391,11 @@
     const run = ++previewRun;
     try {
       const p = await api.preview(payload(), $state.snapshot(overrides), $state.snapshot(view));
-      if (run === previewRun) preview = p;
+      if (run === previewRun) {
+        preview = p;
+        // An empty list has nothing selected, whatever finished last.
+        if (!p.total && selected.size) selected = new Set();
+      }
       photosProgress = null;
     } catch (e) {
       photosProgress = null;
@@ -413,7 +418,7 @@
   $effect(() => {
     const deps = [settings.lang, settings.theme, settings.includeHidden, settings.confirmApply,
       settings.disableRulesAfterApply, settings.warnWindows, settings.rememberRules, settings.tmdbLang, settings.showMissing,
-      JSON.stringify(steps)];
+      settings.textSize, settings.cacheDays, JSON.stringify(settings.ruleSets), JSON.stringify(steps)];
     if (!ready || !deps) return;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
@@ -1497,8 +1502,13 @@
               {/each}
             </div>
           {/if}
-          <button class="icon" title="{t("openRules")}…" aria-label={t("openRules")} onclick={loadPreset}><Icon name="folder-open" /></button>
-          <button class="icon" title="{t("saveRules")}…" aria-label={t("saveRules")} disabled={!steps.length} onclick={savePreset}><Icon name="save" /></button>
+          <RuleSets
+            current={() => (steps.length ? payload() : null)}
+            onload={(set) => (steps = loadSteps(set.steps, t("ruleSetLoaded", { name: set.name })))}
+            onimport={loadPreset}
+            onexport={savePreset}
+            onnotice={(text) => (notice = text)}
+          />
         </div>
       </div>
       <div class="rule-list">
@@ -1659,7 +1669,6 @@
             <button class="primary with-icon" onclick={pickFiles}><Icon name="file-plus" />{t("addFiles")}</button>
             <button class="with-icon" onclick={() => pickFolders()}><Icon name="folder-plus" />{t("addFolders")}</button>
           </div>
-          <p class="drop-keys"><kbd>{MOD}+O</kbd></p>
         </div>
       {/if}
     </section>
@@ -1938,7 +1947,6 @@
     .send { max-width: 160px; }
   }
   .divider { width: 1px; align-self: stretch; margin: 2px 0; background: var(--border); }
-  .menu-host { position: relative; }
   .spacer { flex: 1; }
   .filter-box { flex: 0 1 280px; min-width: 140px; }
   .filter { width: 100%; }
@@ -1950,36 +1958,14 @@
   h2 { margin: 0; font-size: var(--fs-lg); }
   .rule-list { flex: 1; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 8px; padding-right: 2px; }
   .empty { color: var(--muted); font-size: var(--fs-md); margin: 4px 2px; }
-  .menu {
-    position: absolute;
-    left: 0;
-    top: calc(100% + 4px);
-    min-width: 230px;
-    display: flex;
-    flex-direction: column;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: var(--shadow);
-    padding: 4px;
-    z-index: 5;
-  }
-  .menu button { display: flex; align-items: center; gap: 8px; border: none; background: none; text-align: left; border-radius: var(--r-sm); }
-  .menu button :global(.icon-svg) { color: var(--muted); }
-  .menu .tick { width: 14px; display: inline-flex; color: var(--accent); }
-  .menu-group { margin: 6px 10px 2px; font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
-  .menu-group:first-child { margin-top: 4px; }
   .rules-menu { min-width: 260px; max-height: calc(100vh - 140px); overflow-y: auto; }
   .rules-menu button { flex: none; height: auto; min-height: 30px; padding: 4px 10px; }
   .menu-note { margin: 0 10px 4px; font-size: var(--fs-xs); color: var(--warn-text); max-width: 260px; }
   .item-text { display: flex; flex-direction: column; }
   .item-text small { font-size: var(--fs-xs); color: var(--muted); white-space: normal; }
   .send-label { overflow: hidden; text-overflow: ellipsis; }
-  .menu.right { left: auto; right: 0; }
   .send { max-width: 240px; white-space: nowrap; }
   .send.on { border-color: var(--accent); color: var(--accent); }
-  .menu button:hover, .menu button:focus-visible { background: var(--hover); outline: none; }
-  .menu button:focus-visible { box-shadow: inset 2px 0 var(--accent); }
   .files { flex: 1; display: flex; min-width: 0; border-radius: 8px; position: relative; }
   .files.dragging { outline: 2px dashed var(--accent); outline-offset: 2px; }
   .working {
@@ -2034,8 +2020,6 @@
   .drop p { margin: 0; }
   .drop-icon { display: inline-flex; justify-content: center; margin-bottom: 12px; color: var(--accent); opacity: 0.85; }
   .drop-actions { display: flex; gap: 8px; justify-content: center; margin-top: 18px; }
-  .drop-keys { margin-top: 10px !important; font-size: var(--fs-xs); }
-  .drop-keys kbd { font: var(--fs-xs) ui-monospace, monospace; padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: var(--r-sm); background: var(--surface-2); }
   .toast {
     position: fixed;
     right: 16px;
