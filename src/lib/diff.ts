@@ -16,6 +16,8 @@ interface Piece {
   state: State;
   /** A word (not a space or a sign). */
   word: boolean;
+  /** Moved: the same word on the other side, maybe spelled otherwise. */
+  partner?: Piece;
 }
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
@@ -91,22 +93,20 @@ function refine(a: string, b: string): [Piece[], Piece[]] | null {
 /** Changed words found changed on the other side too moved; so do the
  *  spaces and signs between two such words (`C. S.`). */
 function markMoved(a: Piece[], b: Piece[]) {
-  const count = (ps: Piece[]) => {
-    const c = new Map<string, number>();
-    for (const p of ps) if (p.word && p.state === "changed") c.set(fold(p.text), (c.get(fold(p.text)) ?? 0) + 1);
-    return c;
-  };
-  const inA = count(a);
-  const inB = count(b);
-  for (const [ps, there] of [[a, inB], [b, inA]] as const) {
-    const left = new Map(there);
-    for (const p of ps) {
-      const k = fold(p.text);
-      if (p.word && p.state === "changed" && (left.get(k) ?? 0) > 0) {
-        p.state = "moved";
-        left.set(k, left.get(k)! - 1);
-      }
-    }
+  // Paired in order: the first `Lewis` of one side with the first of
+  // the other, so a word spelled otherwise there (`Ate` → `Até`) can
+  // show the letters that changed.
+  const waiting = new Map<string, Piece[]>();
+  for (const p of b) if (p.word && p.state === "changed") waiting.set(fold(p.text), [...(waiting.get(fold(p.text)) ?? []), p]);
+  for (const p of a) {
+    if (!p.word || p.state !== "changed") continue;
+    const q = waiting.get(fold(p.text))?.shift();
+    if (!q) continue;
+    p.state = q.state = "moved";
+    p.partner = q;
+    q.partner = p;
+  }
+  for (const ps of [a, b]) {
     for (let i = 1; i < ps.length - 1; i++) {
       if (ps[i].state !== "changed" || ps[i].word) continue;
       let k = i;
@@ -119,6 +119,18 @@ function markMoved(a: Piece[], b: Piece[]) {
       i = k - 1;
     }
   }
+}
+
+/** A moved word spelled otherwise on the other side (`Ate` → `Até`,
+ *  `SEGREDO` → `Segredo`): its letters, the ones that changed marked as
+ *  changes, the rest as moved. */
+function spell(ps: Piece[]): Piece[] {
+  return ps.flatMap((p) => {
+    if (p.state !== "moved" || !p.partner || p.partner.text === p.text) return [p];
+    const x = letters(p.text);
+    const [k] = lcs(x, letters(p.partner.text));
+    return x.map((t, i): Piece => ({ text: t, state: k[i] ? "moved" : "changed", word: true }));
+  });
 }
 
 /** Pieces in runs. A space or sign left alone between two changes joins
@@ -147,6 +159,15 @@ export function diff(a: string, b: string): [Seg[], Seg[]] {
   const x = tokens(a);
   const y = tokens(b);
   const [kx, ky] = lcs(x, y);
+  // A space or sign kept alone, among changes on its side, is a
+  // coincidence: the `.` of `C. S.` kept as the `.` of the extension
+  // would break the moved name in two.
+  const ix = kx.flatMap((k, n) => (k ? [n] : []));
+  const iy = ky.flatMap((k, n) => (k ? [n] : []));
+  const alone = (t: string[], k: boolean[], n: number) =>
+    !isWord(t[n]) && n > 0 && n < t.length - 1 && !k[n - 1] && !k[n + 1];
+  const drop = ix.map((n, q) => alone(x, kx, n) || alone(y, ky, iy[q]));
+  ix.forEach((n, q) => { if (drop[q]) kx[n] = ky[iy[q]] = false; });
   const pa: Piece[] = [];
   const pb: Piece[] = [];
   const add = (to: Piece[], t: string, state: State) => to.push({ text: t, state, word: isWord(t) });
@@ -172,5 +193,5 @@ export function diff(a: string, b: string): [Seg[], Seg[]] {
     }
   }
   markMoved(pa, pb);
-  return [segments(pa), segments(pb)];
+  return [segments(spell(pa)), segments(spell(pb))];
 }
