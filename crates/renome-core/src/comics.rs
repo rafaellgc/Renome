@@ -1329,11 +1329,23 @@ pub fn arrange(comics: &mut [ComicMatch]) -> Vec<Option<ComicMatch>> {
             None => v.push((m.series.clone(), 1)),
         }
     }
+    // The most common spelling, counting those apart only in case as one
+    // (`capt aurora` twice and `Capt Aurora` once: three); of those, the
+    // one with the most capitals (a name written by hand over one made from
+    // a lowercase file name), then the first.
+    let capitals = |s: &str| s.split_whitespace().filter(|w| w.chars().next().is_some_and(char::is_uppercase)).count();
     let chosen: HashMap<&str, String> = spellings
         .iter()
         .map(|(r, v)| {
-            let most = v.iter().map(|(_, n)| *n).max().unwrap_or(0);
-            let s = v.iter().find(|(_, n)| *n == most).map(|(s, _)| s.clone());
+            let folded = |s: &str| s.to_lowercase();
+            let total = |s: &str| v.iter().filter(|(o, _)| folded(o) == folded(s)).map(|(_, n)| n).sum::<usize>();
+            let most = v.iter().map(|(s, _)| total(s)).max().unwrap_or(0);
+            let s = v
+                .iter()
+                .enumerate()
+                .filter(|(_, (s, _))| total(s) == most)
+                .max_by_key(|(i, (s, _))| (capitals(s), std::cmp::Reverse(*i)))
+                .map(|(_, (s, _))| s.clone());
             (*r, s.unwrap_or_default())
         })
         .collect();
@@ -2299,8 +2311,13 @@ mod tests {
             c("Aquaman - Arqueiro Verde"),
             c("Aquaman - Arqueiro Verde"),
             c("Red Sonja - A Balada"),
+            c("capt aurora"),
+            c("Capt Aurora"),
+            c("capt aurora"),
         ];
         let folders = arrange(&mut all);
+        // Apart only in case, they count as one, and the capitalized wins.
+        assert!(all[all.len() - 3..].iter().all(|m| m.series == "Capt Aurora"));
         assert_eq!(all[2].series, "Scooby Apocalypse");
         assert_eq!(all[3].series, "Evento Leviatã");
         let f = |i: usize| folders[i].as_ref().map(|m| m.series.as_str());

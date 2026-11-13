@@ -1304,6 +1304,7 @@
     }
     if (e.key === "F1") {
       e.preventDefault();
+      addMenu = sendMenu = ruleMenu = false;
       help ??= "manual";
       return;
     }

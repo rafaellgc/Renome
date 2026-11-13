@@ -1236,9 +1236,11 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
 - Series folders: a comic already in a folder named after its series
   (another volume's form, a `Vol. 1` folder under it, a near spelling,
   or the series of a special included) stays. The batch's comics are
-  arranged together: one spelling per series (the most common; case,
-  accents and one letter apart in one word of five or more letters are
-  the same), in folders and names; a series of one file goes into the
+  arranged together: one spelling per series (the most common, those
+  apart only in case counted together, and of them the one with the most
+  capitalized words, then the first; case, accents and one letter apart
+  in one word of five or more letters are the same series), in folders
+  and names; a series of one file goes into the
   folder of the longest series in the batch its name starts with, or,
   when two such files share what comes before ` - `, into one named so;
   every other series gets its folder, even for one file.

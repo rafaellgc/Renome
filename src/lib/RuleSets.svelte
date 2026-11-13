@@ -110,7 +110,7 @@
   }
 </script>
 
-<svelte:window onpointerdown={outside} />
+<svelte:window onpointerdown={outside} onkeydown={(e) => { if (open && e.key === "F1") close(); }} />
 
 <div class="menu-host sets" bind:this={root}>
   <button class="with-icon" aria-haspopup="menu" aria-expanded={open} title={t("ruleSetsTitle")} onclick={() => (open ? close() : (open = true))}>
