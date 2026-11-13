@@ -883,6 +883,17 @@ pub async fn write(
     let subsource = auth.subsource().then(|| Subsource::new(http.clone(), &auth));
     let (mut os_ok, mut subdl_ok, mut subsource_ok) = (true, true, true);
     let mut out = Written::default();
+    let mut items = items;
+    if let Some(os) = &os {
+        let first_os = |l: &Vec<Candidate>| l.first().is_some_and(|c| c.source == Source::OpenSubtitles);
+        let need = items.iter().flat_map(|i| &i.langs).filter(|l| first_os(l)).count();
+        if need > 0
+            && let Some(left) = os.remaining().await
+        {
+            out.remaining = Some(left);
+            spare_quota(&mut items, left.max(0) as usize, subdl.is_some(), subsource.is_some());
+        }
+    }
     let total = items.iter().map(|i| i.langs.len()).sum();
     let mut done = 0;
     let _ = app.emit("subs-progress", Progress { done, total });
@@ -1016,6 +1027,32 @@ pub async fn write(
     out
 }
 
+/// When OpenSubtitles has fewer downloads left today than the subtitles
+/// that would come from it, the least wanted ones (the last languages, the
+/// last videos) that another source also has come from that one first,
+/// keeping the quota for those only OpenSubtitles has.
+fn spare_quota(items: &mut [Write], left: usize, subdl: bool, subsource: bool) {
+    let other = |c: &Candidate| match c.source {
+        Source::OpenSubtitles => false,
+        Source::Subdl => subdl,
+        Source::Subsource => subsource,
+    };
+    let first_os = |l: &Vec<Candidate>| l.first().is_some_and(|c| c.source == Source::OpenSubtitles);
+    let mut need = items.iter().flat_map(|i| &i.langs).filter(|l| first_os(l)).count();
+    // Videos in order, and in each the languages as asked: the most wanted first.
+    let mut lists: Vec<&mut Vec<Candidate>> = items.iter_mut().flat_map(|i| i.langs.iter_mut()).collect();
+    for list in lists.iter_mut().rev() {
+        if need <= left {
+            break;
+        }
+        if first_os(list) && list.iter().any(other) {
+            // Stable: the others keep their order, OpenSubtitles' after them.
+            list.sort_by_key(|c| c.source == Source::OpenSubtitles);
+            need -= 1;
+        }
+    }
+}
+
 /// Writes a downloaded subtitle, noting it or why it could not be.
 fn save(out: &mut Written, to: &std::path::Path, bytes: &[u8]) {
     match write_new(to, bytes) {
@@ -1092,4 +1129,38 @@ pub async fn check_subsource(key: String) -> Result<(), String> {
     )
     .await
     .map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn c(source: Source, lang: &str) -> Candidate {
+        Candidate { source, lang: lang.into(), ..Default::default() }
+    }
+
+    fn firsts(items: &[Write]) -> Vec<(String, Source)> {
+        items.iter().flat_map(|i| &i.langs).map(|l| (l[0].lang.clone(), l[0].source)).collect()
+    }
+
+    #[test]
+    fn short_quota_goes_to_the_most_wanted() {
+        let os = Source::OpenSubtitles;
+        let video = |langs| Write { path: "v.mkv".into(), season: None, episode: None, langs };
+        // pt-BR only on OpenSubtitles, English also on SubDL; one download left.
+        let mut items = vec![video(vec![
+            vec![c(os, "pt-BR"), c(os, "pt-BR")],
+            vec![c(os, "en"), c(Source::Subdl, "en")],
+        ])];
+        spare_quota(&mut items, 1, true, false);
+        assert_eq!(firsts(&items), [("pt-BR".to_string(), os), ("en".to_string(), Source::Subdl)]);
+        // Without a SubDL key, nothing changes.
+        let mut same = vec![video(vec![vec![c(os, "en"), c(Source::Subdl, "en")]])];
+        spare_quota(&mut same, 0, false, false);
+        assert_eq!(firsts(&same), [("en".to_string(), os)]);
+        // Enough downloads: OpenSubtitles stays first.
+        let mut enough = vec![video(vec![vec![c(os, "en"), c(Source::Subdl, "en")]])];
+        spare_quota(&mut enough, 5, true, false);
+        assert_eq!(firsts(&enough), [("en".to_string(), os)]);
+    }
 }

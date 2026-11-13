@@ -114,6 +114,7 @@ button.icon svg { display: block; }
 button.with-icon { display: inline-flex; align-items: center; gap: 6px; }
 /* A count inside a button ("Rename [12]"). */
 .count { display: inline-block; min-width: 20px; margin-left: 6px; padding: 0 6px; border-radius: 9px; font-size: var(--fs-sm); line-height: 18px; font-variant-numeric: tabular-nums; text-align: center; background: rgb(255 255 255 / 0.22); }
+.count.none { visibility: hidden; }
 button.primary-soft { background: var(--accent-soft); border-color: transparent; color: var(--accent); font-weight: 600; }
 button.primary-soft:hover:not(:disabled) { background: var(--accent-soft); filter: brightness(0.97); }
 

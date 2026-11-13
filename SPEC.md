@@ -374,7 +374,10 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
     the file's extension is not a subtitle one). Per language the chosen
     one is tried, then the next ones of that language in order (3 at
     most): a source out of quota or with a wrong key is skipped for the
-    rest. OpenSubtitles: `POST /download` with `file_id` (token when
+    rest. Languages go in the order asked; when OpenSubtitles has fewer
+    downloads left (`/infos/user`) than the subtitles that would come from
+    it, the last ones (last videos, last languages) that SubDL or
+    SubSource also has try those first (`spare_quota`). OpenSubtitles: `POST /download` with `file_id` (token when
     logged in) gives a link and the downloads left. SubDL: the zip's
     subtitle (`srt`, `ass`, `ssa`, `vtt`, `sub`; `__MACOSX` copies left
     out); with several, the episode's (number read as in file names,

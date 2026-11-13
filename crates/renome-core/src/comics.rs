@@ -1061,6 +1061,21 @@ pub fn merge(g: &ComicGuess, info: &ComicInfo) -> ComicMatch {
             );
         }
     }
+    // A name that says more than the series inside (`Series Special
+    // Edition` with `Series` and no number nor title): the rest is the
+    // title, or it would be lost.
+    let rest = if !info.series.is_empty()
+        && info.number.is_empty()
+        && g.number.is_empty()
+        && info.title.is_empty()
+        && g.title.is_empty()
+        && fold(&g.series).starts_with(&format!("{} ", fold(&info.series)))
+    {
+        let n = fold(&info.series).split_whitespace().count();
+        g.series.split_whitespace().skip(n).collect::<Vec<_>>().join(" ")
+    } else {
+        String::new()
+    };
     // `Volume` holds a volume number or the series' first year.
     let (volume, series_year) = match info.volume.parse::<u32>() {
         Ok(v) if (1800..=2200).contains(&v) => (g.volume, u16::try_from(v).ok()),
@@ -1073,7 +1088,7 @@ pub fn merge(g: &ComicGuess, info: &ComicInfo) -> ComicMatch {
         number: or(&info.number, &g.number),
         volume,
         chapter: g.chapter.clone(),
-        title: or(&info.title, &g.title),
+        title: or(&or(&info.title, &g.title), &rest),
         year: info.year.or(g.year),
         count: info.count.or(g.count),
         publisher: info.publisher.clone(),
@@ -1927,6 +1942,17 @@ mod tests {
             Some("abril")
         );
         assert_eq!(parse_cbi("{}"), None);
+    }
+
+    #[test]
+    fn name_longer_than_the_series_inside_keeps_the_rest() {
+        let info = parse_info("<ComicInfo><Series>Aurora</Series></ComicInfo>").unwrap();
+        let m = merge(&parse_name("Aurora edicao especial", ""), &info);
+        assert_eq!((m.series.as_str(), m.title.as_str()), ("Aurora", "edicao especial"));
+        assert_eq!(comic_name("{série} #{número} - {título} ({ano})", &m, " - "), "Aurora - edicao especial");
+        // With a number, the name's words are not a title.
+        let m = merge(&parse_name("Aurora Especial 002", ""), &info);
+        assert_eq!(m.title, "");
     }
 
     #[test]

@@ -146,8 +146,12 @@ export class Subtitles {
     return pairs.flatMap(([from, to]) => {
       const s = this.found[from];
       if (!s) return [];
+      // In the order the languages were asked for: the first is the most
+      // wanted, and gets the downloads when the day's quota is short.
+      const order = (l: string) => (this.langs.indexOf(l) + 1 || 999);
       const langs = Object.entries(s.pick)
         .filter(([l, i]) => i >= 0 && !s.have.includes(l))
+        .sort(([a], [b]) => order(a) - order(b))
         .map(([l, i]) => [s.candidates[i], ...s.candidates.filter((c, j) => j !== i && c.lang === l)]);
       if (!langs.length) return [];
       const e = this.#series.matches[from];

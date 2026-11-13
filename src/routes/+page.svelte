@@ -577,13 +577,20 @@
     ruleMenu = false;
   }
 
+  /** "2 subtitles fixed, 1 extracted from videos", leaving out what is none. */
+  const subToolsText = (fixed: number, extracted: number) =>
+    [fixed ? t("subToolsN", { n: fixed }) : "", extracted ? t("subToolsM", { n: extracted }) : ""].filter(Boolean).join(", ");
+
   /** Loaded steps with one lookup rule at most; the notice says which
    *  were left out, else `done` (when given). */
-  function loadSteps(loaded: Step[], done = ""): Step[] {
+  function loadSteps(loaded: Step[], done = "", saved = false): Step[] {
     const { steps: kept, dropped } = oneLookup(loaded);
     if (dropped.length) notice = t("lookupsDropped", { rules: [...new Set(dropped)].map((r) => t(`rule.${r}`)).join(", ") });
     else if (done) notice = done;
-    return kept.map((s) => newStep(s.rule, s.enabled));
+    // All off is how rules are left after renaming (an option), not a
+    // choice: a saved set opened like that comes back on.
+    const allOff = saved && kept.length > 0 && kept.every((s) => !s.enabled);
+    return kept.map((s) => newStep(s.rule, allOff || s.enabled));
   }
 
   function moveStep(i: number, delta: -1 | 1) {
@@ -876,7 +883,7 @@
             if (res.errors.length) {
               await notify({
                 title: t("subToolsTitle"),
-                text: t("subToolsN", { n: res.written, m: res.created }),
+                text: subToolsText(res.written, res.created),
                 items: res.errors.map(([file, why]) => (file ? `${file} — ${tError(why)}` : tError(why))),
               });
             }
@@ -930,7 +937,7 @@
         r.listsRemoved ? t("listsRemovedN", { n: r.listsRemoved }) : "",
         saved ? t("sidecarsN", { n: saved }) : "",
         subsSaved ? t("subsSavedN", { n: subsSaved }) : "",
-        subTools.written || subTools.created ? t("subToolsN", { n: subTools.written, m: subTools.created }) : "",
+        subToolsText(subTools.written, subTools.created),
         keptLists ? t("playlistsKeptN", { n: keptLists }) : "",
         tagged ? t("tagsN", { n: tagged }) : "",
         inside ? t("insideN", { n: inside }) : "",
@@ -1265,7 +1272,7 @@
     const path = await open({ title: t("openRules"), filters: presetFilter() });
     if (typeof path !== "string") return;
     try {
-      steps = loadSteps(await api.loadPreset(path), t("rulesLoaded"));
+      steps = loadSteps(await api.loadPreset(path), t("rulesLoaded"), true);
     } catch (e) {
       await notify({ title: t("openRules"), text: tError(e) });
     }
@@ -1472,7 +1479,7 @@
         </div>
       {/if}
       <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !movies.metaOnly.length && !tv.metaOnly.length && !books.metaOnly.length && !music.coverOnly && !music.playlistOnly.length && !music.tagsOnly.length && !comics.infoOnly.length && !books.epubOnly.length && !books.convertOnly.length && !subs.only.length && !subToolsOnly.length && !videoTagOnly.length) || busy || !!working} onclick={applyAll}>
-        {t(sendTo ? (sendTo.copy ? "copyAction" : "moveAction") : "rename")}{#if applyCount}<span class="count">{applyCount.toLocaleString(LOCALES[settings.lang])}</span>{/if}
+        {t(sendTo ? (sendTo.copy ? "copyAction" : "moveAction") : "rename")}<span class="count" class:none={!applyCount} aria-hidden={!applyCount}>{applyCount.toLocaleString(LOCALES[settings.lang])}</span>
       </button>
     </div>
     <span class="divider" aria-hidden="true"></span>
@@ -1507,7 +1514,7 @@
           {/if}
           <RuleSets
             current={() => (steps.length ? payload() : null)}
-            onload={(set) => (steps = loadSteps(set.steps, t("ruleSetLoaded", { name: set.name })))}
+            onload={(set) => (steps = loadSteps(set.steps, t("ruleSetLoaded", { name: set.name }), true))}
             onimport={loadPreset}
             onexport={savePreset}
             onnotice={(text) => (notice = text)}
