@@ -63,6 +63,11 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.33.0" date="2026-11-12">
+      <description>
+        <p>A cleaner interface: one set of icons, clearer windows that work by keyboard, rules grouped by kind of file, and rule sets saved by name in a menu. Closed rule cards show what they do in words. Typing a name by hand hides the matching missing item. The subtitle rule is no longer offered with music, book, comic or photo rules. Subtitles are downloaded in the order of the languages asked, keeping OpenSubtitles' downloads for those only it has. Several small fixes found testing on Linux, Windows and macOS.</p>
+      </description>
+    </release>
     <release version="0.32.0" date="2026-11-12">
       <description>
         <p>Subtitles can also come from SubSource, are checked against the video's length (one made for another cut is passed over) and are picked better inside zips. The best one is chosen fairly among the services, sparing OpenSubtitles' few downloads a day, and a language already inside the video can still be downloaded as a file. Comic readers are listed by model, grouped by brand and line, newest first. A text size option makes the whole window larger.</p>
