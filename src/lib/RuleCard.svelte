@@ -9,16 +9,16 @@
    *  order. */
   /** A reader model's label: name, screen and whether it is colour. */
   const readerLabel = (m: Reader) => {
-    const [w, h] = SIZES[m.device] ?? [0, 0];
-    return `${m.name} · ${w} × ${h}${COLOUR_INK.includes(m.device) ? ` · ${t("comicColour")}` : ""}`;
+    const [w, h] = SCREENS[m.device]?.size ?? [0, 0];
+    const name = m.name.startsWith("@") ? t(m.name.slice(1) as Key) : m.name;
+    return `${name} · ${w} × ${h}${isColourInk(m.device) ? ` · ${t("comicColour")}` : ""}`;
   };
   const SPREADS: ComicSpread[] = ["split", "rotate", "both", "keep"];
+  const FORMAT_LABEL: Record<Format, Key> = { azw3: "comicEbookAzw3", kepub: "comicEbookKepub", epub: "comicEbookEpub", cbz: "comicEbookCbz", pdf: "comicEbookPdf" };
   /** Colour ink screens (fine dots shimmer) and grey ones (16 greys). */
-  const COLOUR_INK = ["kindle-color", "kindle-scribe-color", "kobo-clara-color", "kobo-color", "remarkable-pro", "remarkable-move"];
-  const NO_GREY = ["original", "tablet", "custom", ...COLOUR_INK];
   const NO_PNG = ["kindle-scribe", "kindle-scribe2025", "kindle-scribe-color", "kindle-color"];
   import { api } from "./api";
-  import { OTHER_DEVICES, READERS, SIZES, chooseReader, readerOf, type Reader } from "./readers";
+  import { OTHER_DEVICES, READERS, SCREENS, chooseReader, formatsOf, isColourInk, isGreyInk, limitedFormats, readerOf, type Format, type Reader } from "./readers";
 
   /** Whether this system can print books to PDF (asked once). */
   let canPrint = $state(false);
@@ -663,36 +663,49 @@
         {/if}
         <h4 class="sect">{t("sectEbook")}</h4>
         <label>{t("comicEbook")}
-          <select bind:value={r.ebook}>
+          <select
+            value={r.ebook ? readerOf(r.device ?? "kindle-pw", r.model) : ""}
+            onchange={(e) => {
+              const v = (e.currentTarget as HTMLSelectElement).value;
+              if (!v) {
+                r.ebook = "";
+                return;
+              }
+              const c = chooseReader(v);
+              r.device = c.device;
+              r.model = c.model;
+              // The best format it opens (the format follows the reader).
+              r.ebook = formatsOf(c.device, c.model, r.anyProgram)[0];
+            }}
+          >
             <option value="">{t("comicEbookNone")}</option>
-            <option value="azw3">{t("comicEbookAzw3")}</option>
-            <option value="epub">{t("comicEbookEpub")}</option>
-            <option value="kepub">{t("comicEbookKepub")}</option>
-            <option value="cbz">{t("comicEbookCbz")}</option>
-            <option value="pdf">{t("comicEbookPdf")}</option>
+            {#each READERS as [group, , list] (group)}
+              <optgroup label={t(group as Key)}>
+                {#each list as m (m.id)}<option value={m.id}>{readerLabel(m)}</option>{/each}
+              </optgroup>
+            {/each}
+            <optgroup label={t("comicDevices_other")}>
+              {#each OTHER_DEVICES as d (d)}<option value={d}>{t(`comicDevice_${d}` as Key)}</option>{/each}
+            </optgroup>
           </select>
         </label>
         <p class="hint">{t("comicEbookHint")}</p>
         {#if r.ebook}
-          <label class="sub">{t("comicDevice")}
-            <select
-              value={readerOf(r.device ?? "kindle-pw", r.model)}
-              onchange={(e) => {
-                const c = chooseReader((e.currentTarget as HTMLSelectElement).value);
-                r.device = c.device;
-                r.model = c.model;
-              }}
-            >
-              {#each READERS as [group, list] (group)}
-                <optgroup label={t(group as Key)}>
-                  {#each list as m (m.id)}<option value={m.id}>{readerLabel(m)}</option>{/each}
-                </optgroup>
-              {/each}
-              <optgroup label={t("comicDevices_other")}>
-                {#each OTHER_DEVICES as d (d)}<option value={d}>{t(`comicDevice_${d}` as Key)}</option>{/each}
-              </optgroup>
+          {@const opens = formatsOf(r.device ?? "kindle-pw", r.model, r.anyProgram)}
+          <!-- A rule made before keeps its format, even one the reader does not open. -->
+          {@const fmts = opens.includes(r.ebook) ? opens : [...opens, r.ebook]}
+          <label class="sub">{t("comicFormat")}
+            <select bind:value={r.ebook}>
+              {#each fmts as f (f)}<option value={f}>{t(FORMAT_LABEL[f])}</option>{/each}
             </select>
           </label>
+          {#if limitedFormats(r.device ?? "kindle-pw", r.model)}
+            <label class="check sub"><input type="checkbox" checked={r.anyProgram ?? false} onchange={(e) => {
+              r.anyProgram = (e.currentTarget as HTMLInputElement).checked;
+              const f = formatsOf(r.device ?? "kindle-pw", r.model, r.anyProgram);
+              if (r.ebook && !f.includes(r.ebook)) r.ebook = f[0];
+            }} /> <span>{t("comicAnyProgram")}<small>{t("comicAnyProgramHint")}</small></span></label>
+          {/if}
           {#if r.device === "custom"}
             <div class="sub size">
               <label>{t("comicWidth")} <input type="number" min="100" max="8000" value={r.width ?? 1264} onchange={(e) => (r.width = Number((e.currentTarget as HTMLInputElement).value) || 0)} /></label>
@@ -714,10 +727,10 @@
           {#if dev !== "original"}
             <label class="check sub"><input type="checkbox" checked={r.upscale ?? false} onchange={(e) => (r.upscale = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicUpscale")}<small>{t("comicUpscaleHint")}</small></span></label>
           {/if}
-          {#if !NO_GREY.includes(dev) && !NO_PNG.includes(dev)}
+          {#if isGreyInk(dev) && !NO_PNG.includes(dev)}
             <label class="check sub"><input type="checkbox" checked={r.greys16 ?? false} onchange={(e) => (r.greys16 = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicGreys16")}<small>{t("comicGreys16Hint")}</small></span></label>
           {/if}
-          {#if COLOUR_INK.includes(dev)}
+          {#if isColourInk(dev)}
             <label class="check sub"><input type="checkbox" checked={r.soften ?? false} onchange={(e) => (r.soften = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicSoften")}<small>{t("comicSoftenHint")}</small></span></label>
           {/if}
           <label class="check sub"><input type="checkbox" checked={r.webtoon ?? false} onchange={(e) => (r.webtoon = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicWebtoon")}<small>{t("comicWebtoonHint")}</small></span></label>

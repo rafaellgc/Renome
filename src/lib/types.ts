@@ -58,7 +58,9 @@ export type Rule =
       /** EPUB 2 brought to EPUB 3; large pictures made smaller. */
       epub3?: boolean; shrinkImages?: boolean;
     }
-  | { type: "comic"; template: string; colon: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; byFolder: boolean; writeInfo?: boolean; cleanInfo?: boolean; convert?: boolean; original?: "keep" | "delete"; drawPages?: boolean; pageSize?: number; missing: boolean; barcode?: boolean; skipPublishers?: string; ebook?: ComicFormat; device?: ComicDevice; model?: string; crop?: boolean; split?: boolean;
+  | { type: "comic"; template: string; colon: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; byFolder: boolean; writeInfo?: boolean; cleanInfo?: boolean; convert?: boolean; original?: "keep" | "delete"; drawPages?: boolean; pageSize?: number; missing: boolean; barcode?: boolean; skipPublishers?: string; ebook?: ComicFormat; device?: ComicDevice; model?: string;
+      /** The reader opens more formats with another reading program on it (KOReader, an app). */
+      anyProgram?: boolean; crop?: boolean; split?: boolean;
       /** Screen of a custom reader. */
       width?: number; height?: number;
       numbers?: boolean; spread?: ComicSpread; contrast?: boolean; upscale?: boolean; greys16?: boolean; soften?: boolean; webtoon?: boolean;
@@ -98,7 +100,9 @@ export type ComicDevice =
   | "original" | "kindle" | "kindle-pw" | "kindle-pw2024" | "kindle-oasis" | "kindle-pw-old" | "kindle-basic" | "kindle-dx"
   | "kindle-scribe" | "kindle-scribe2025" | "kindle-color" | "kindle-scribe-color"
   | "kobo" | "kobo-clara-color" | "kobo-libra" | "kobo-color" | "kobo-h2o" | "kobo-sage" | "kobo-elipsa" | "kobo-nia"
-  | "remarkable" | "remarkable-pro" | "remarkable-move" | "tablet" | "custom";
+  | "remarkable" | "remarkable-pro" | "remarkable-move"
+  | "eink480" | "eink528" | "eink824" | "colour824" | "colour1404" | "eink1650" | "eink1860" | "colour1860" | "eink1920" | "eink2400" | "colour2400"
+  | "tablet" | "ipad" | "ipad13" | "phone" | "custom";
 /** What a comic is made into for a reader. */
 export type ComicFormat = "" | "epub" | "kepub" | "azw3" | "cbz" | "pdf";
 /** What a double page becomes. */

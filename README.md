@@ -140,8 +140,10 @@ A built-in manual (F1) explains every rule with examples.
   rename). RAR files are read with libarchive, built into the app.
   Can also make comics into fixed-page books for readers — Kindle AZW3,
   EPUB, Kobo KEPUB, a fitted CBZ (KOReader) or PDF (reMarkable, Kindle
-  Scribe) — fit to some 25 Kindle, Kobo and reMarkable screens or any
-  size: cutting empty margins and page numbers, splitting or turning
+  Scribe) — fit to the screens of 127 Boox, Kindle, Kobo, Nook,
+  PocketBook, reMarkable, Supernote, tolino and Xteink readers, tablets,
+  phones or any size, offering only the formats each reader opens (all,
+  with KOReader or an app): cutting empty margins and page numbers, splitting or turning
   double pages, narrowing a wraparound cover to its front, cutting
   webtoon strips between panels, enlarging small scans, stretching the
   tones for ink screens, keeping only the 16 greys they show, softening

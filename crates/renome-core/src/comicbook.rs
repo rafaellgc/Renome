@@ -71,8 +71,36 @@ pub enum Device {
     RemarkablePro,
     /// reMarkable Paper Pro Move: 954 × 1696, colour.
     RemarkableMove,
+    /// Xteink X4, Boox Picco: 480 × 800.
+    Eink480,
+    /// Xteink X3: 528 × 792.
+    Eink528,
+    /// Boox Palma: 824 × 1648.
+    Eink824,
+    /// Boox Palma 2 Pro: 824 × 1648, colour.
+    Colour824,
+    /// PocketBook InkPad Color, Boox Tab Mini C: 1404 × 1872, colour.
+    Colour1404,
+    /// Boox Tab X, Max Lumi: 1650 × 2200.
+    Eink1650,
+    /// Boox Go 10.3: 1860 × 2480.
+    Eink1860,
+    /// Boox Note Air C, PocketBook InkPad Eo: 1860 × 2480, colour.
+    Colour1860,
+    /// Supernote Manta: 1920 × 2560.
+    Eink1920,
+    /// Boox Note Max: 2400 × 3200.
+    Eink2400,
+    /// Boox Tab X C: 2400 × 3200, colour.
+    Colour2400,
     /// A tablet: 1600 × 2560, colour.
     Tablet,
+    /// iPad 11": 1640 × 2360, colour.
+    Ipad,
+    /// iPad 13": 2048 × 2732, colour.
+    Ipad13,
+    /// A phone: 1080 × 2400, colour.
+    Phone,
     /// The options' width and height, colour.
     Custom,
 }
@@ -97,7 +125,18 @@ impl Device {
             KoboElipsa | Remarkable => (1404, 1872),
             RemarkablePro => (1620, 2160),
             RemarkableMove => (954, 1696),
+            Eink480 => (480, 800),
+            Eink528 => (528, 792),
+            Eink824 | Colour824 => (824, 1648),
+            Colour1404 => (1404, 1872),
+            Eink1650 => (1650, 2200),
+            Eink1860 | Colour1860 => (1860, 2480),
+            Eink1920 => (1920, 2560),
+            Eink2400 | Colour2400 => (2400, 3200),
             Tablet => (1600, 2560),
+            Ipad => (1640, 2360),
+            Ipad13 => (2048, 2732),
+            Phone => (1080, 2400),
         })
     }
 
@@ -122,6 +161,13 @@ impl Device {
                 | KoboElipsa
                 | KoboNia
                 | Remarkable
+                | Eink480
+                | Eink528
+                | Eink824
+                | Eink1650
+                | Eink1860
+                | Eink1920
+                | Eink2400
         )
     }
 
@@ -130,7 +176,16 @@ impl Device {
         use Device::*;
         matches!(
             self,
-            KindleColor | KindleScribeColor | KoboClaraColor | KoboColor | RemarkablePro | RemarkableMove
+            KindleColor
+                | KindleScribeColor
+                | KoboClaraColor
+                | KoboColor
+                | RemarkablePro
+                | RemarkableMove
+                | Colour824
+                | Colour1404
+                | Colour1860
+                | Colour2400
         )
     }
 
@@ -1255,6 +1310,24 @@ mod tests {
         z.start_file("ComicInfo.xml", o).unwrap();
         z.write_all(info.as_bytes()).unwrap();
         z.finish().unwrap();
+    }
+
+    #[test]
+    fn device_names_and_screens() {
+        // The names the window sends (readers.ts) and the screens they mean.
+        for (name, size, grey, colour) in [
+            ("eink480", (480, 800), true, false),
+            ("eink528", (528, 792), true, false),
+            ("colour824", (824, 1648), false, true),
+            ("colour1404", (1404, 1872), false, true),
+            ("eink1860", (1860, 2480), true, false),
+            ("eink2400", (2400, 3200), true, false),
+            ("ipad13", (2048, 2732), false, false),
+            ("phone", (1080, 2400), false, false),
+        ] {
+            let d: Device = serde_json::from_value(serde_json::json!(name)).unwrap();
+            assert_eq!((d.size(), d.grey(), d.colour_ink()), (Some(size), grey, colour), "{name}");
+        }
     }
 
     #[test]
