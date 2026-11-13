@@ -1084,7 +1084,11 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
 ### 2.4b Book conversion (`bookconv`)
 
 - Rule option `convertTo` (`epub`, `azw3`, `fb2`, `pdf`; empty: none) and
-  `original` (`keep` | `delete`, app side). Files taking part: book
+  `original` (`keep` | `delete`, app side). Optional `model` (window
+  only, "Any" by default): the reader the books are for, from the comic
+  rule's list (`readers.ts`, without sizes); formats it does not open as
+  it comes are marked in the menu and warned about (not hidden),
+  `anyProgram` takes that away; with PDF its screen sets the page size. Files taking part: book
   extensions plus `docx`, `odt`, `rtf`, `txt`, `html`, `htm`, `xhtml`,
   `htmlz`, `fbz`. `FileEntry::book_source` caches what the content is
   (`bookconv::source_of`: magic bytes, zip member names, XML root) and
@@ -1178,8 +1182,12 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   4096-byte PalmDOC records with multibyte overlap, FDST, SKEL/FRAG/NCX
   INDX with TAGX and CNCX, FLIS/FCIS/EOF, EXTH 100/101/103–106/503/524/
   501 PDOC/113/201/129); `print.rs` (EPUB→PDF: one HTML page in a temp folder,
-  ids prefixed per chapter, A5 print CSS, pictures over 1400 px shrunk;
-  the app loads it in a hidden web view and prints with WebKitGTK's print
+  ids prefixed per chapter, print CSS for A5 (margins 16/18/14 mm) or,
+  when the rule names a reader (`model`, window only; the job's
+  `pdfPage` [w, h] mm from its screen's pixels and the model's usual
+  density, 20–1000 mm), that page with 4% margins (3–8 mm) and pictures
+  as tall as fit (`print::Page`), the GTK page setup following;
+  pictures over 1400 px shrunk; the app loads it in a hidden web view and prints with WebKitGTK's print
   operation to the file printer, named by GTK's own translation of "Print
   to File"; then lopdf sets Info Title/Author/Creator and `/Lang`, and
   photo-like Flate images (>600 colours) are re-stored as JPEG; Linux
@@ -1590,16 +1598,16 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   first, with their screen and "colour"; then tablets and phones; custom
   and original last), each pointing at the `device` with its screen; the
   chosen one is kept as `model` (window only; a rule without one shows
-  its device's first model). The reader is chosen first ("none" = no
-  e-book); `ebook` then offers only the formats it opens as it comes
-  (per brand, some models apart: Kindle AZW3, PDF; Kobo KEPUB, EPUB, CBZ,
-  PDF; Nook EPUB, PDF; PocketBook EPUB, CBZ, PDF, AZW3; reMarkable PDF,
-  EPUB; Supernote EPUB, CBZ, PDF; tolino EPUB, CBZ, PDF, without CBZ
-  before 2024; Xteink X3/X4 EPUB; Boox, Android readers, tablets and
-  phones EPUB, CBZ, PDF, AZW3), the best first, picked when the current
-  one is not among them; `anyProgram` (window only: KOReader or an app
-  on it) offers all. A rule made before keeps its format even when the
-  reader does not open it. Presets are saved and loaded as the window sends them (checked
+  its device's first model). The format comes first (`ebook`, all five
+  offered), then the reader (`readerFor`; a "most used" group first,
+  then every brand). Formats the reader does not open as it comes (per
+  brand, some models apart: Kindle AZW3, PDF; Kobo KEPUB, EPUB, CBZ,
+  PDF; Nook EPUB, PDF; PocketBook EPUB, CBZ, PDF, AZW3, FB2; reMarkable
+  PDF, EPUB; Supernote EPUB, CBZ, PDF, FB2; tolino EPUB, CBZ, PDF,
+  without CBZ before 2024; Xteink X3/X4 EPUB; Boox, Android readers,
+  tablets and phones EPUB, CBZ, PDF, AZW3, FB2) stay choosable, marked in
+  the menu and with a warning naming the best one; `anyProgram` (window
+  only: KOReader or an app on it) takes the marks away. Presets are saved and loaded as the window sends them (checked
   against `Step`), so options only the window reads stay. `crop`
   (default on), `numbers`, `spread` (`keep`|`split`|`rotate`|`both`;
   older presets' `split: false` = keep, else split), `contrast` (UI

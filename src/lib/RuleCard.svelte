@@ -8,17 +8,29 @@
   /** The readers a comic e-book can be made for, by maker, in the menu's
    *  order. */
   /** A reader model's label: name, screen and whether it is colour. */
+  const modelName = (m: Reader) => (m.name.startsWith("@") ? t(m.name.slice(1) as Key) : m.name);
   const readerLabel = (m: Reader) => {
     const [w, h] = SCREENS[m.device]?.size ?? [0, 0];
-    const name = m.name.startsWith("@") ? t(m.name.slice(1) as Key) : m.name;
-    return `${name} · ${w} × ${h}${isColourInk(m.device) ? ` · ${t("comicColour")}` : ""}`;
+    return `${modelName(m)} · ${w} × ${h}${isColourInk(m.device) ? ` · ${t("comicColour")}` : ""}`;
+  };
+  /** A format's name in a menu, marked when the reader does not open it as
+   *  it comes (it can still be chosen). */
+  const formatOption = (label: string, f: Format, device: ComicDevice | undefined, model: string | undefined, any: boolean | undefined) =>
+    device && !any && !opens(device, model, f) ? `${label} — ${t("readerNotOpensShort")}` : label;
+  /** Why a format may not suit the reader, if it may not. */
+  const notOpens = (f: Format | "" | undefined, device: ComicDevice | undefined, model: string | undefined, any: boolean | undefined) => {
+    if (!f || !device || any || opens(device, model, f)) return "";
+    const m = modelOf(readerOf(device, model));
+    const best = formatsOf(device, model)?.[0];
+    return t("readerNotOpens", { reader: m ? modelName(m) : "", format: f.toUpperCase(), best: (best ?? "").toUpperCase() });
   };
   const SPREADS: ComicSpread[] = ["split", "rotate", "both", "keep"];
-  const FORMAT_LABEL: Record<Format, Key> = { azw3: "comicEbookAzw3", kepub: "comicEbookKepub", epub: "comicEbookEpub", cbz: "comicEbookCbz", pdf: "comicEbookPdf" };
+  const COMIC_FORMATS = ["azw3", "kepub", "epub", "cbz", "pdf"] as const;
+  const FORMAT_LABEL: Record<(typeof COMIC_FORMATS)[number], Key> = { azw3: "comicEbookAzw3", kepub: "comicEbookKepub", epub: "comicEbookEpub", cbz: "comicEbookCbz", pdf: "comicEbookPdf" };
   /** Colour ink screens (fine dots shimmer) and grey ones (16 greys). */
   const NO_PNG = ["kindle-scribe", "kindle-scribe2025", "kindle-scribe-color", "kindle-color"];
   import { api } from "./api";
-  import { OTHER_DEVICES, READERS, SCREENS, chooseReader, formatsOf, isColourInk, isGreyInk, limitedFormats, readerOf, type Format, type Reader } from "./readers";
+  import { OTHER_DEVICES, POPULAR, READERS, SCREENS, chooseReader, formatsOf, isColourInk, isGreyInk, modelOf, opens, readerOf, type Format, type Reader } from "./readers";
 
   /** Whether this system can print books to PDF (asked once). */
   let canPrint = $state(false);
@@ -87,6 +99,8 @@
 
   let open = $state(true);
   const r = $derived(step.rule);
+  /** The screen of the reader a book rule converts for, if one is chosen. */
+  const bookDev = $derived(step.rule.type === "book" ? modelOf(step.rule.model)?.device : undefined);
 
   /** What a closed card does, in a few words. */
   const brief = $derived.by(() => {
@@ -571,14 +585,26 @@
         <label>{t("bookConvert")}
           <select bind:value={r.convertTo}>
             <option value="">{t("bookConvertNone")}</option>
-            <option value="epub">EPUB</option>
-            <option value="azw3">{t("bookConvertAzw3")}</option>
-            <option value="fb2">FB2</option>
-            {#if canPrint || r.convertTo === "pdf"}<option value="pdf">PDF</option>{/if}
+            <option value="epub">{formatOption("EPUB", "epub", bookDev, r.model, r.anyProgram)}</option>
+            <option value="azw3">{formatOption(t("bookConvertAzw3"), "azw3", bookDev, r.model, r.anyProgram)}</option>
+            <option value="fb2">{formatOption("FB2", "fb2", bookDev, r.model, r.anyProgram)}</option>
+            {#if canPrint || r.convertTo === "pdf"}<option value="pdf">{formatOption("PDF", "pdf", bookDev, r.model, r.anyProgram)}</option>{/if}
           </select>
         </label>
         <p class="hint">{t("bookConvertHint")}</p>
         {#if r.convertTo}
+          <label class="sub">{t("readerForOptional")}
+            <select bind:value={r.model}>
+              <option value={undefined}>{t("readerAny")}</option>
+              {@render readerOptions(false)}
+            </select>
+          </label>
+          {@const why = notOpens(r.convertTo, bookDev, r.model, r.anyProgram)}
+          {#if why}<p class="warn sub">{why}</p>{/if}
+          {#if bookDev}
+            <label class="check sub"><input type="checkbox" checked={r.anyProgram ?? false} onchange={(e) => (r.anyProgram = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicAnyProgram")}<small>{t("comicAnyProgramHint")}</small></span></label>
+          {/if}
+          <p class="hint sub">{t(r.convertTo === "pdf" ? (bookDev ? "bookPdfScreen" : "bookPdfA5") : "bookReaderHint")}</p>
           <label class="sub">{t("comicOriginal")}
             <select bind:value={r.original}>
               <option value="keep">{t("bookOriginalKeep")}</option>
@@ -663,48 +689,32 @@
         {/if}
         <h4 class="sect">{t("sectEbook")}</h4>
         <label>{t("comicEbook")}
-          <select
-            value={r.ebook ? readerOf(r.device ?? "kindle-pw", r.model) : ""}
-            onchange={(e) => {
-              const v = (e.currentTarget as HTMLSelectElement).value;
-              if (!v) {
-                r.ebook = "";
-                return;
-              }
-              const c = chooseReader(v);
-              r.device = c.device;
-              r.model = c.model;
-              // The best format it opens (the format follows the reader).
-              r.ebook = formatsOf(c.device, c.model, r.anyProgram)[0];
-            }}
-          >
+          <select bind:value={r.ebook}>
             <option value="">{t("comicEbookNone")}</option>
-            {#each READERS as [group, , list] (group)}
-              <optgroup label={t(group as Key)}>
-                {#each list as m (m.id)}<option value={m.id}>{readerLabel(m)}</option>{/each}
-              </optgroup>
-            {/each}
-            <optgroup label={t("comicDevices_other")}>
-              {#each OTHER_DEVICES as d (d)}<option value={d}>{t(`comicDevice_${d}` as Key)}</option>{/each}
-            </optgroup>
+            {#each COMIC_FORMATS as f (f)}<option value={f}>{formatOption(t(FORMAT_LABEL[f]), f, r.device ?? "kindle-pw", r.model, r.anyProgram)}</option>{/each}
           </select>
         </label>
         <p class="hint">{t("comicEbookHint")}</p>
         {#if r.ebook}
-          {@const opens = formatsOf(r.device ?? "kindle-pw", r.model, r.anyProgram)}
-          <!-- A rule made before keeps its format, even one the reader does not open. -->
-          {@const fmts = opens.includes(r.ebook) ? opens : [...opens, r.ebook]}
-          <label class="sub">{t("comicFormat")}
-            <select bind:value={r.ebook}>
-              {#each fmts as f (f)}<option value={f}>{t(FORMAT_LABEL[f])}</option>{/each}
+          <label class="sub">{t("readerFor")}
+            <select
+              value={readerOf(r.device ?? "kindle-pw", r.model)}
+              onchange={(e) => {
+                const c = chooseReader((e.currentTarget as HTMLSelectElement).value);
+                r.device = c.device;
+                r.model = c.model;
+              }}
+            >
+              {@render readerOptions(true)}
+              <optgroup label={t("comicDevices_other")}>
+                {#each OTHER_DEVICES as d (d)}<option value={d}>{t(`comicDevice_${d}` as Key)}</option>{/each}
+              </optgroup>
             </select>
           </label>
-          {#if limitedFormats(r.device ?? "kindle-pw", r.model)}
-            <label class="check sub"><input type="checkbox" checked={r.anyProgram ?? false} onchange={(e) => {
-              r.anyProgram = (e.currentTarget as HTMLInputElement).checked;
-              const f = formatsOf(r.device ?? "kindle-pw", r.model, r.anyProgram);
-              if (r.ebook && !f.includes(r.ebook)) r.ebook = f[0];
-            }} /> <span>{t("comicAnyProgram")}<small>{t("comicAnyProgramHint")}</small></span></label>
+          {@const why = notOpens(r.ebook, r.device ?? "kindle-pw", r.model, r.anyProgram)}
+          {#if why}<p class="warn sub">{why}</p>{/if}
+          {#if formatsOf(r.device ?? "kindle-pw", r.model)}
+            <label class="check sub"><input type="checkbox" checked={r.anyProgram ?? false} onchange={(e) => (r.anyProgram = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicAnyProgram")}<small>{t("comicAnyProgramHint")}</small></span></label>
           {/if}
           {#if r.device === "custom"}
             <div class="sub size">
@@ -762,6 +772,17 @@
     </fieldset>
   {/if}
 </article>
+
+{#snippet readerOptions(sizes: boolean)}
+  <optgroup label={t("readerPopular")}>
+    {#each POPULAR as m (m.id)}<option value={m.id}>{sizes ? readerLabel(m) : modelName(m)}</option>{/each}
+  </optgroup>
+  {#each READERS as [group, , list] (group)}
+    <optgroup label={t(group as Key)}>
+      {#each list as m (m.id)}<option value={m.id}>{sizes ? readerLabel(m) : modelName(m)}</option>{/each}
+    </optgroup>
+  {/each}
+{/snippet}
 
 {#snippet videoOptions()}
   {#if r.type === "movie" || r.type === "series"}
@@ -896,6 +917,7 @@
   .row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
   .checks { display: flex; flex-direction: column; gap: 4px; }
   .hint { margin: -4px 0 0; font-size: var(--fs-xs); color: var(--muted); }
+  .warn { margin: -4px 0 0; font-size: var(--fs-xs); color: var(--warn-text); }
   /* A block of a long rule: a quiet title with a line. */
   .sect {
     display: flex;

@@ -55,6 +55,8 @@ export type Rule =
     }
   | {
       type: "book"; template: string; colon: string; folders: boolean; folderTemplate: string; cover: boolean; opf: boolean; writeEpub?: boolean; missing: boolean; convertTo?: BookTarget; original?: "keep" | "delete";
+      /** The reader the books are for (window only: marks formats it does not open; PDF pages its screen's size). */
+      model?: string; anyProgram?: boolean;
       /** EPUB 2 brought to EPUB 3; large pictures made smaller. */
       epub3?: boolean; shrinkImages?: boolean;
     }

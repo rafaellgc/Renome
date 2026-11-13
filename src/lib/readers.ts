@@ -6,11 +6,8 @@
 
 import type { ComicDevice, ComicFormat } from "./types";
 
-/** An e-book format (not "none"). */
-export type Format = Exclude<ComicFormat, "">;
-
-/** Every format, in the order the menu shows them. */
-export const ALL_FORMATS: Format[] = ["azw3", "kepub", "epub", "cbz", "pdf"];
+/** A format a reader may open: the comic rule's and the book rule's. */
+export type Format = Exclude<ComicFormat, ""> | "fb2";
 
 export type Reader = {
   /** Kept in the rule as `model` (to show which model was chosen). */
@@ -24,18 +21,18 @@ export type Reader = {
 
 /** A screen as the converter fits pages into it: size, and whether it is
  *  grey ink, colour ink or a lit colour screen (tablets, phones). */
-type Screen = { size: [number, number]; ink: "grey" | "colour" | "lcd" };
+type Screen = { size: [number, number]; ink: "grey" | "colour" | "lcd"; ppi: number };
 
-const s = (w: number, h: number, ink: Screen["ink"] = "grey"): Screen => ({ size: [w, h], ink });
+const s = (w: number, h: number, ink: Screen["ink"] = "grey", ppi = 300): Screen => ({ size: [w, h], ink, ppi });
 
 export const SCREENS: Partial<Record<ComicDevice, Screen>> = {
   kindle: s(1072, 1448),
   "kindle-pw": s(1236, 1648),
   "kindle-pw2024": s(1272, 1696),
   "kindle-oasis": s(1264, 1680),
-  "kindle-pw-old": s(758, 1024),
-  "kindle-basic": s(600, 800),
-  "kindle-dx": s(824, 1000),
+  "kindle-pw-old": s(758, 1024, "grey", 212),
+  "kindle-basic": s(600, 800, "grey", 167),
+  "kindle-dx": s(824, 1000, "grey", 150),
   "kindle-scribe": s(1860, 2480),
   "kindle-scribe2025": s(1986, 2648),
   "kindle-color": s(1272, 1696, "colour"),
@@ -44,28 +41,29 @@ export const SCREENS: Partial<Record<ComicDevice, Screen>> = {
   "kobo-clara-color": s(1072, 1448, "colour"),
   "kobo-libra": s(1264, 1680),
   "kobo-color": s(1264, 1680, "colour"),
-  "kobo-h2o": s(1080, 1430),
+  "kobo-h2o": s(1080, 1430, "grey", 265),
   "kobo-sage": s(1440, 1920),
-  "kobo-elipsa": s(1404, 1872),
-  "kobo-nia": s(758, 1024),
-  remarkable: s(1404, 1872),
-  "remarkable-pro": s(1620, 2160, "colour"),
-  "remarkable-move": s(954, 1696, "colour"),
-  eink480: s(480, 800),
-  eink528: s(528, 792),
+  // 7.8" (300) or 10.3" (227) screens: in between.
+  "kobo-elipsa": s(1404, 1872, "grey", 260),
+  "kobo-nia": s(758, 1024, "grey", 212),
+  remarkable: s(1404, 1872, "grey", 226),
+  "remarkable-pro": s(1620, 2160, "colour", 229),
+  "remarkable-move": s(954, 1696, "colour", 264),
+  eink480: s(480, 800, "grey", 220),
+  eink528: s(528, 792, "grey", 259),
   eink824: s(824, 1648),
   colour824: s(824, 1648, "colour"),
-  colour1404: s(1404, 1872, "colour"),
-  eink1650: s(1650, 2200),
+  colour1404: s(1404, 1872, "colour", 260),
+  eink1650: s(1650, 2200, "grey", 207),
   eink1860: s(1860, 2480),
   colour1860: s(1860, 2480, "colour"),
   eink1920: s(1920, 2560),
   eink2400: s(2400, 3200),
   colour2400: s(2400, 3200, "colour"),
-  tablet: s(1600, 2560, "lcd"),
-  ipad: s(1640, 2360, "lcd"),
-  ipad13: s(2048, 2732, "lcd"),
-  phone: s(1080, 2400, "lcd"),
+  tablet: s(1600, 2560, "lcd", 270),
+  ipad: s(1640, 2360, "lcd", 264),
+  ipad13: s(2048, 2732, "lcd", 264),
+  phone: s(1080, 2400, "lcd", 400),
 };
 
 /** Colour ink screens, where fine dot patterns shimmer in colour. */
@@ -76,7 +74,7 @@ export const isGreyInk = (d: ComicDevice) => SCREENS[d]?.ink === "grey";
 const r = (id: string, name: string, device: ComicDevice, formats?: Format[]): Reader => ({ id, name, device, formats });
 
 /** What Android readers, tablets and phones open (with a reading app). */
-const APPS: Format[] = ["epub", "cbz", "pdf", "azw3"];
+const APPS: Format[] = ["epub", "cbz", "pdf", "azw3", "fb2"];
 
 /** Brand (an i18n key), the formats its readers open as they come, and
  *  its models. */
@@ -188,7 +186,7 @@ export const READERS: [string, Format[], Reader[]][] = [
   ],
   [
     "comicDevices_pocketbook",
-    ["epub", "cbz", "pdf", "azw3"],
+    ["epub", "cbz", "pdf", "azw3", "fb2"],
     [
       r("pb-basic-lux-4", "PocketBook Basic Lux 4 (2023)", "kobo-nia"),
       r("pb-color", "PocketBook Color (2020)", "kobo-clara-color"),
@@ -230,7 +228,7 @@ export const READERS: [string, Format[], Reader[]][] = [
   ],
   [
     "comicDevices_supernote",
-    ["epub", "cbz", "pdf"],
+    ["epub", "cbz", "pdf", "fb2"],
     [
       r("supernote-a5x", "Supernote A5 X (2020)", "kobo-elipsa"),
       r("supernote-a6x", "Supernote A6 X (2021)", "kobo-elipsa"),
@@ -279,7 +277,17 @@ export const READERS: [string, Format[], Reader[]][] = [
  *  format. */
 export const OTHER_DEVICES: ComicDevice[] = ["custom", "original"];
 
+/** The models most people have, shown first. */
+const POPULAR_IDS = [
+  "kindle-pw-2024", "kindle-2024", "kindle-colorsoft", "kindle-scribe-2025",
+  "kobo-clara-bw", "kobo-clara-colour", "kobo-libra-colour",
+  "pb-verse-pro", "pb-era", "boox-go-7", "boox-palma-2", "remarkable-2", "remarkable-pro",
+  "ipad", "tablet", "phone",
+];
+
 const ALL = READERS.flatMap(([, brand, list]) => list.map((m) => ({ ...m, formats: m.formats ?? brand })));
+
+export const POPULAR: Reader[] = POPULAR_IDS.map((id) => ALL.find((m) => m.id === id)!).filter(Boolean);
 
 /** The option chosen in a rule: its model, else (rules made before
  *  models) the first model of its device, else the device itself. */
@@ -294,14 +302,22 @@ export function chooseReader(value: string): { device: ComicDevice; model?: stri
   return m ? { device: m.device, model: m.id } : { device: value as ComicDevice };
 }
 
-/** The formats a reader opens as it comes, best first (any, for the
- *  others or when another reading program is used on it). */
-export function formatsOf(device: ComicDevice, model: string | undefined, anyProgram = false): Format[] {
-  if (anyProgram) return ALL_FORMATS;
-  const m = ALL.find((x) => x.id === readerOf(device, model));
-  return m?.formats ?? ALL_FORMATS;
+/** A model by its id. */
+export const modelOf = (id: string | undefined) => (id ? ALL.find((m) => m.id === id) : undefined);
+
+/** Whether a reader opens a format as it comes (the others, any). */
+export function opens(device: ComicDevice, model: string | undefined, format: Format): boolean {
+  const m = modelOf(readerOf(device, model));
+  return !m || m.formats.includes(format);
 }
 
-/** Whether a reader opens fewer than every format (so another program
- *  would add some). */
-export const limitedFormats = (device: ComicDevice, model: string | undefined) => formatsOf(device, model).length < ALL_FORMATS.length;
+/** The formats a reader opens as it comes, best first (none listed: any). */
+export const formatsOf = (device: ComicDevice, model: string | undefined): Format[] | null => modelOf(readerOf(device, model))?.formats ?? null;
+
+/** A screen's size in mm (for pages printed to fit it). */
+export function screenMm(device: ComicDevice): [number, number] | null {
+  const sc = SCREENS[device];
+  if (!sc) return null;
+  const mm = (px: number) => Math.round((px / sc.ppi) * 254) / 10;
+  return [mm(sc.size[0]), mm(sc.size[1])];
+}

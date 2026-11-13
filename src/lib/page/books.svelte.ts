@@ -2,6 +2,7 @@
 // others) found per file, the choices, the details typed in and what
 // writing them needs.
 
+import { modelOf, screenMm } from "../readers";
 import { api } from "$lib/api";
 import { authorSpellings } from "$lib/authors";
 import { notify } from "$lib/dialogs.svelte";
@@ -156,7 +157,10 @@ export class Books {
     const r = this.rule?.rule;
     const original = r?.type === "book" ? (r.original ?? "keep") : "keep";
     const base = this.has(key) ? this.insideItem(key, path) : { path };
-    return { ...base, bookTo: to, convert: original };
+    // A PDF the size of the chosen reader's screen.
+    const device = r?.type === "book" ? modelOf(r.model)?.device : undefined;
+    const pdfPage = to === "pdf" && device ? screenMm(device) : null;
+    return { ...base, bookTo: to, convert: original, ...(pdfPage ? { pdfPage } : {}) };
   }
 
   /** What the cover and metadata.opf of a book need; `key` is the path before renaming. */

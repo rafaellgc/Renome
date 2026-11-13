@@ -1,5 +1,5 @@
 //! Books made into PDF: the book is written as one HTML page, ready to be
-//! printed (A5 pages, each chapter on a new one, the reader's hyphenation
+//! printed (A5 pages, or a reader's screen, each chapter on a new one, the reader's hyphenation
 //! and justified text), which the app has the system's web view print to
 //! a PDF file; the PDF then gets the book's details.
 
@@ -25,26 +25,60 @@ pub struct PdfJob {
     pub language: String,
 }
 
-const PRINT_CSS: &str = "
-@page { size: A5; margin: 16mm 14mm 18mm 14mm; }
-html, body { margin: 0; padding: 0; }
-body { font-family: serif; font-size: 11pt; line-height: 1.4; text-align: justify; hyphens: auto; -webkit-hyphens: auto; orphans: 2; widows: 2; }
-.chapter { break-before: page; page-break-before: always; }
-.chapter:first-child { break-before: auto; page-break-before: auto; }
-h1, h2, h3, h4, h5, h6 { break-after: avoid; page-break-after: avoid; text-align: center; hyphens: manual; }
-img { max-width: 100%; max-height: 165mm; break-inside: avoid; page-break-inside: avoid; }
-.chapter > :first-child, .chapter > :first-child > :first-child { break-before: auto !important; page-break-before: auto !important; }
-.chapter > :last-child, .chapter > :last-child > :last-child { break-after: auto !important; page-break-after: auto !important; }
-a { color: inherit; text-decoration: none; }
-.noteref { vertical-align: super; font-size: 0.75em; line-height: 0; }
-.cover-page { break-after: page; page-break-after: always; text-align: center; }
-.cover-page img { max-height: 165mm; }
-.fixed { break-after: page; page-break-after: always; text-align: center; margin: 0; }
-.fixed img { max-width: 100%; max-height: 165mm; }
-";
+/// A page to print on: size and margins (top, bottom, sides), in mm.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Page {
+    pub width: f64,
+    pub height: f64,
+    pub top: f64,
+    pub bottom: f64,
+    pub side: f64,
+}
+
+impl Page {
+    /// A5, with book margins.
+    pub const A5: Page = Page { width: 148.0, height: 210.0, top: 16.0, bottom: 18.0, side: 14.0 };
+
+    /// A reader's screen (mm): narrow margins, the screen has its own.
+    pub fn screen(width: f64, height: f64) -> Page {
+        let m = (width.min(height) * 0.04).clamp(3.0, 8.0);
+        Page { width, height, top: m, bottom: m, side: m }
+    }
+}
+
+/// The print rules for a page size.
+fn print_css(p: Page) -> String {
+    // The tallest picture: the page's height less its margins (and a
+    // little for the line it stands in).
+    let tall = (p.height - p.top - p.bottom - 6.0).max(20.0);
+    format!(
+        "
+@page {{ size: {w}mm {h}mm; margin: {t}mm {s}mm {b}mm {s}mm; }}
+html, body {{ margin: 0; padding: 0; }}
+body {{ font-family: serif; font-size: 11pt; line-height: 1.4; text-align: justify; hyphens: auto; -webkit-hyphens: auto; orphans: 2; widows: 2; }}
+.chapter {{ break-before: page; page-break-before: always; }}
+.chapter:first-child {{ break-before: auto; page-break-before: auto; }}
+h1, h2, h3, h4, h5, h6 {{ break-after: avoid; page-break-after: avoid; text-align: center; hyphens: manual; }}
+img {{ max-width: 100%; max-height: {tall}mm; break-inside: avoid; page-break-inside: avoid; }}
+.chapter > :first-child, .chapter > :first-child > :first-child {{ break-before: auto !important; page-break-before: auto !important; }}
+.chapter > :last-child, .chapter > :last-child > :last-child {{ break-after: auto !important; page-break-after: auto !important; }}
+a {{ color: inherit; text-decoration: none; }}
+.noteref {{ vertical-align: super; font-size: 0.75em; line-height: 0; }}
+.cover-page {{ break-after: page; page-break-after: always; text-align: center; }}
+.cover-page img {{ max-height: {tall}mm; }}
+.fixed {{ break-after: page; page-break-after: always; text-align: center; margin: 0; }}
+.fixed img {{ max-width: 100%; max-height: {tall}mm; }}
+",
+        w = p.width,
+        h = p.height,
+        t = p.top,
+        b = p.bottom,
+        s = p.side,
+    )
+}
 
 /// The book as one HTML page in `dir`, with its pictures beside it.
-pub fn print_page(book: &Book, dir: &Path) -> Result<PathBuf, String> {
+pub fn print_page(book: &Book, dir: &Path, page: Page) -> Result<PathBuf, String> {
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     for r in &book.files {
         if r.media.starts_with("image/") {
@@ -122,7 +156,7 @@ pub fn print_page(book: &Book, dir: &Path) -> Result<PathBuf, String> {
         l = esc_attr(lang),
         t = esc(&book.meta.title),
         css = book.css.replace("</style", ""),
-        print = PRINT_CSS,
+        print = print_css(page),
     );
     let page = dir.join("book.html");
     std::fs::write(&page, html).map_err(|e| e.to_string())?;
@@ -157,6 +191,7 @@ pub fn prepare(
     path: &Path,
     values: Option<&crate::inside::BookValues>,
     work: &Path,
+    page: Page,
 ) -> Result<PdfJob, String> {
     let source = super::source_of(path).ok_or("bookFormat")?;
     if !Target::Pdf.takes(source) || source == Source::Other {
@@ -175,7 +210,7 @@ pub fn prepare(
     }
     super::fill_from_name(&mut book.meta, path);
     super::drop_dead_fragments(&mut book);
-    let html = print_page(&book, work)?;
+    let html = print_page(&book, work, page)?;
     Ok(PdfJob {
         html,
         pdf: crate::tagwrite::temp_of(path),
@@ -331,6 +366,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn pages_a5_or_the_screen() {
+        let a5 = print_css(Page::A5);
+        assert!(a5.contains("size: 148mm 210mm; margin: 16mm 14mm 18mm 14mm;"));
+        assert!(a5.contains("max-height: 170mm"));
+        // A 6" reader: its size, narrow margins, pictures as tall as fit.
+        let s = print_css(Page::screen(90.8, 122.6));
+        assert!(s.contains("size: 90.8mm 122.6mm; margin: 3.632mm"), "{s}");
+    }
+
+    #[test]
     fn one_page_with_unique_ids() {
         let d = tempfile::tempdir().unwrap();
         let mut b = super::super::epub_out::tests::sample();
@@ -340,7 +385,7 @@ mod tests {
             body: "<p id=\"x\">a <a href=\"c0001.xhtml\">um</a> <a href=\"#x\">aqui</a></p>".into(),
             ..Default::default()
         });
-        let page = print_page(&b, d.path()).unwrap();
+        let page = print_page(&b, d.path(), Page::A5).unwrap();
         let s = std::fs::read_to_string(page).unwrap();
         assert!(s.contains("<section class=\"chapter\" id=\"c1\">"));
         assert!(s.contains("id=\"c1-x\""));

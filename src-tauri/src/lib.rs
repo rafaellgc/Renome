@@ -1454,6 +1454,10 @@ struct InsideJob {
     /// given), its original kept beside or sent to the trash (`convert`).
     #[serde(default)]
     book_to: Option<renome_core::bookconv::Target>,
+    /// A book printed to PDF on pages the size of a reader's screen
+    /// (width, height in mm); A5 without.
+    #[serde(default)]
+    pdf_page: Option<(f64, f64)>,
     /// An EPUB polished (EPUB 3, smaller pictures), with `book`'s details
     /// written in the same pass when given.
     #[serde(default)]
@@ -1617,13 +1621,17 @@ async fn print_book(
         .as_ref()
         .map(|b| renome_core::inside::book_values(b, &job.language));
     let original = job.convert.unwrap_or(renome_core::convert::Original::Keep);
+    let page = job
+        .pdf_page
+        .filter(|&(w, h)| (20.0..=1000.0).contains(&w) && (20.0..=1000.0).contains(&h))
+        .map_or(print::Page::A5, |(w, h)| print::Page::screen(w, h));
     let prep = {
         let (path, work) = (path.clone(), work.clone());
-        tauri::async_runtime::spawn_blocking(move || print::prepare(&path, values.as_ref(), &work))
+        tauri::async_runtime::spawn_blocking(move || print::prepare(&path, values.as_ref(), &work, page))
             .await
             .map_err(|e| e.to_string())??
     };
-    if let Err(e) = print_to_pdf(app, &prep.html, &prep.pdf).await {
+    if let Err(e) = print_to_pdf(app, &prep.html, &prep.pdf, page).await {
         let _ = std::fs::remove_dir_all(&prep.dir);
         let _ = std::fs::remove_file(&prep.pdf);
         return Err(e);
@@ -1641,7 +1649,12 @@ fn pdf_print_available() -> bool {
 }
 
 /// Prints the page `html` to the PDF file `pdf` with a hidden web view.
-async fn print_to_pdf(app: &AppHandle, html: &Path, pdf: &Path) -> Result<(), String> {
+async fn print_to_pdf(
+    app: &AppHandle,
+    html: &Path,
+    pdf: &Path,
+    page: renome_core::bookconv::print::Page,
+) -> Result<(), String> {
     use tauri::webview::PageLoadEvent;
     use tauri::{WebviewUrl, WebviewWindowBuilder};
     static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -1671,7 +1684,7 @@ async fn print_to_pdf(app: &AppHandle, html: &Path, pdf: &Path) -> Result<(), St
     let (dtx, drx) = tokio::sync::oneshot::channel::<Result<(), String>>();
     let dtx = std::sync::Arc::new(std::sync::Mutex::new(Some(dtx)));
     let out = pdf.to_path_buf();
-    let started = print_webview(&win, out, dtx.clone());
+    let started = print_webview(&win, out, page, dtx.clone());
     if let Err(e) = started {
         let _ = win.destroy();
         return Err(e);
@@ -1688,7 +1701,12 @@ type PrintDone =
     std::sync::Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<Result<(), String>>>>>;
 
 #[cfg(target_os = "linux")]
-fn print_webview(win: &tauri::WebviewWindow, out: PathBuf, done: PrintDone) -> Result<(), String> {
+fn print_webview(
+    win: &tauri::WebviewWindow,
+    out: PathBuf,
+    page: renome_core::bookconv::print::Page,
+    done: PrintDone,
+) -> Result<(), String> {
     win.with_webview(move |pw| {
         use webkit2gtk::PrintOperationExt;
         let send = move |r: Result<(), String>| {
@@ -1710,20 +1728,21 @@ fn print_webview(win: &tauri::WebviewWindow, out: PathBuf, done: PrintDone) -> R
         settings.set(gtk::PRINT_SETTINGS_OUTPUT_URI, Some(uri.as_str()));
         op.set_print_settings(&settings);
         let setup = gtk::PageSetup::new();
-        setup.set_paper_size(&gtk::PaperSize::new(Some("iso_a5")));
-        for (side, mm) in [
-            ("top", 16.0),
-            ("bottom", 18.0),
-            ("left", 14.0),
-            ("right", 14.0),
-        ] {
-            match side {
-                "top" => setup.set_top_margin(mm, gtk::Unit::Mm),
-                "bottom" => setup.set_bottom_margin(mm, gtk::Unit::Mm),
-                "left" => setup.set_left_margin(mm, gtk::Unit::Mm),
-                _ => setup.set_right_margin(mm, gtk::Unit::Mm),
-            }
+        if page == renome_core::bookconv::print::Page::A5 {
+            setup.set_paper_size(&gtk::PaperSize::new(Some("iso_a5")));
+        } else {
+            setup.set_paper_size(&gtk::PaperSize::new_custom(
+                "renome-screen",
+                "Reader",
+                page.width,
+                page.height,
+                gtk::Unit::Mm,
+            ));
         }
+        setup.set_top_margin(page.top, gtk::Unit::Mm);
+        setup.set_bottom_margin(page.bottom, gtk::Unit::Mm);
+        setup.set_left_margin(page.side, gtk::Unit::Mm);
+        setup.set_right_margin(page.side, gtk::Unit::Mm);
         op.set_page_setup(&setup);
         let send = std::rc::Rc::new(std::cell::RefCell::new(Some(send)));
         let s1 = send.clone();
@@ -1747,7 +1766,12 @@ fn print_webview(win: &tauri::WebviewWindow, out: PathBuf, done: PrintDone) -> R
 }
 
 #[cfg(not(target_os = "linux"))]
-fn print_webview(_: &tauri::WebviewWindow, _: PathBuf, _: PrintDone) -> Result<(), String> {
+fn print_webview(
+    _: &tauri::WebviewWindow,
+    _: PathBuf,
+    _: renome_core::bookconv::print::Page,
+    _: PrintDone,
+) -> Result<(), String> {
     Err("pdfPrint".into())
 }
 
