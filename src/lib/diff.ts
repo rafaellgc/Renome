@@ -106,11 +106,23 @@ function markMoved(a: Piece[], b: Piece[]) {
     p.partner = q;
     q.partner = p;
   }
+  // Swapped: a word kept in place for the comparison but on the other
+  // side of a moved one there (`Title - Author` → `Author - Title`: the
+  // author moved as much as the title did).
+  const at = new Map<Piece, number>();
+  for (const ps of [a, b]) ps.forEach((p, n) => at.set(p, n));
+  const moved = a.filter((p) => p.state === "moved");
+  for (const w of a) {
+    if (!w.word || w.state !== "same" || !w.partner) continue;
+    const wp = w.partner;
+    const flips = moved.some((m) => (at.get(m)! < at.get(w)!) !== (at.get(m.partner!)! < at.get(wp)!));
+    if (flips) w.state = w.partner.state = "moved";
+  }
   for (const ps of [a, b]) {
     for (let i = 1; i < ps.length - 1; i++) {
-      if (ps[i].state !== "changed" || ps[i].word) continue;
+      if (ps[i].state === "moved" || ps[i].word) continue;
       let k = i;
-      while (k < ps.length && ps[k].state === "changed" && !ps[k].word) k++;
+      while (k < ps.length && ps[k].state !== "moved" && !ps[k].word) k++;
       const prev = ps[i - 1];
       const next = ps[k];
       if (prev?.state === "moved" && next?.state === "moved" && ps.slice(i, k).every((p) => p.text !== "-" && p.text !== "–")) {
@@ -121,15 +133,15 @@ function markMoved(a: Piece[], b: Piece[]) {
   }
 }
 
-/** A moved word spelled otherwise on the other side (`Ate` → `Até`,
- *  `SEGREDO` → `Segredo`): its letters, the ones that changed marked as
- *  changes, the rest as moved. */
+/** A word spelled otherwise on the other side (`Ceu` → `Céu`,
+ *  `SEGREDO` → `Segredo`), in place or moved: its letters, the ones that
+ *  changed marked as changes. */
 function spell(ps: Piece[]): Piece[] {
   return ps.flatMap((p) => {
-    if (p.state !== "moved" || !p.partner || p.partner.text === p.text) return [p];
+    if (p.state === "changed" || !p.partner || p.partner.text === p.text) return [p];
     const x = letters(p.text);
     const [k] = lcs(x, letters(p.partner.text));
-    return x.map((t, i): Piece => ({ text: t, state: k[i] ? "moved" : "changed", word: true }));
+    return x.map((t, i): Piece => ({ text: t, state: k[i] ? p.state : "changed", word: true }));
   });
 }
 
@@ -158,7 +170,9 @@ function segments(ps: Piece[]): Seg[] {
 export function diff(a: string, b: string): [Seg[], Seg[]] {
   const x = tokens(a);
   const y = tokens(b);
-  const [kx, ky] = lcs(x, y);
+  // Compared without accents or capitals: `Ceu` → `Céu` is the same
+  // word in place, its letters marked after.
+  const [kx, ky] = lcs(x.map(fold), y.map(fold));
   // A space or sign kept alone, among changes on its side, is a
   // coincidence: the `.` of `C. S.` kept as the `.` of the extension
   // would break the moved name in two.
@@ -177,6 +191,8 @@ export function diff(a: string, b: string): [Seg[], Seg[]] {
     if (i < x.length && j < y.length && kx[i] && ky[j]) {
       add(pa, x[i++], "same");
       add(pb, y[j++], "same");
+      pa[pa.length - 1].partner = pb[pb.length - 1];
+      pb[pb.length - 1].partner = pa[pa.length - 1];
       continue;
     }
     const ra: string[] = [];
