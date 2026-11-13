@@ -63,6 +63,11 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.34.1" date="2026-11-13">
+      <description>
+        <p>The highlight of what a rename changes is clearer: what only moved, such as an author now before the title, is shown in its own colour on both sides; a name moved whole is no longer broken in two; an accent or capital changed inside a word is marked. Books keep the acronyms their file's name writes in capitals.</p>
+      </description>
+    </release>
     <release version="0.34.0" date="2026-11-13">
       <description>
         <p>Comics can be made into e-books for 127 readers of Boox, Kindle, Kobo, Nook, PocketBook, reMarkable, Supernote, tolino and Xteink, plus iPad, Android tablets and phones, with the most used first. Formats a reader does not open as it comes are marked, with a word on which to use, unless another reading program such as KOReader is used on it. The book rule can name the reader too, and books made into PDF then come out the size of its screen.</p>
