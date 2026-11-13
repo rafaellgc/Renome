@@ -63,6 +63,11 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.34.0" date="2026-11-13">
+      <description>
+        <p>Comics can be made into e-books for 127 readers of Boox, Kindle, Kobo, Nook, PocketBook, reMarkable, Supernote, tolino and Xteink, plus iPad, Android tablets and phones, with the most used first. Formats a reader does not open as it comes are marked, with a word on which to use, unless another reading program such as KOReader is used on it. The book rule can name the reader too, and books made into PDF then come out the size of its screen.</p>
+      </description>
+    </release>
     <release version="0.33.0" date="2026-11-12">
       <description>
         <p>A cleaner interface: one set of icons, clearer windows that work by keyboard, rules grouped by kind of file, and rule sets saved by name in a menu. Closed rule cards show what they do in words. Typing a name by hand hides the matching missing item. The subtitle rule is no longer offered with music, book, comic or photo rules. Subtitles are downloaded in the order of the languages asked, keeping OpenSubtitles' downloads for those only it has. Several small fixes found testing on Linux, Windows and macOS.</p>
