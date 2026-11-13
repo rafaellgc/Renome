@@ -792,7 +792,7 @@ ${ex("Filme.pt-BR.ass", "Filme.pt-BR.srt")}
 <ul>
   <li>no <b>Nome atual</b>, o que vai sair aparece <span class="del">em vermelho, riscado</span>;</li>
   <li>no <b>Novo nome</b>, o que entra aparece <span class="ins">em azul</span>;</li>
-  <li>o que só mudou de lugar (o autor que passou para a frente do título, por exemplo) aparece <span class="mov">sublinhado com pontinhos</span>, nos dois lados.</li>
+  <li>o que só mudou de lugar (o autor que passou para a frente do título, por exemplo) aparece <span class="mov">em roxo, sublinhado com pontinhos</span>, nos dois lados.</li>
   <li>um arquivo que vai mudar de pasta ganha um ícone de pasta no novo nome, e a coluna <b>Pasta</b> mostra, em azul, a pasta completa para onde ele vai (<code>→ ~/Música/Artista/Álbum (2019)</code>), no mesmo formato da pasta atual dos outros arquivos.</li>
   <li>com uma regra de busca ligada (filme, série, música, livro, quadrinho), um arquivo que ela não trata (um <code>.zip</code> na pasta da série, por exemplo) ganha a etiqueta cinza <b>fora da regra</b>; passe o mouse para ver o motivo. A linha continua normal: dá para renomeá-lo à mão, mas a busca não vai mexer nele.</li>
 </ul>

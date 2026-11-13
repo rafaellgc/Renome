@@ -21,6 +21,8 @@
   --danger-soft: #fbe7e7;
   --warn-soft: #fdf3d7;
   --warn-text: #7a5600;
+  --moved: #7b3fc2;
+  --moved-soft: #f1e9fb;
   /* Type scale: hint, label, body, base, title, display. */
   --fs-xs: 11px;
   --fs-sm: 12px;
@@ -57,6 +59,8 @@
   --danger-soft: #45242a;
   --warn-soft: #3d3420;
   --warn-text: #f2c14e;
+  --moved: #c9a2f5;
+  --moved-soft: #362a4a;
   color-scheme: dark;
 }
 

@@ -792,7 +792,7 @@ ${ex("Movie.en.ass", "Movie.en.srt")}
 <ul>
   <li>in <b>Current name</b>, what goes away is shown <span class="del">in red, struck through</span>;</li>
   <li>in <b>New name</b>, what comes in is shown <span class="ins">in blue</span>;</li>
-  <li>what only moved (the author now before the title, for instance) is shown <span class="mov">with a dotted underline</span>, on both sides.</li>
+  <li>what only moved (the author now before the title, for instance) is shown <span class="mov">in purple, with a dotted underline</span>, on both sides.</li>
   <li>a file that moves to another folder gets a folder icon in its new name, and the <b>Folder</b> column shows, in blue, the whole folder it goes to (<code>→ ~/Music/Artist/Album (2019)</code>), written like the other files' current folder.</li>
   <li>with a lookup rule on (movie, TV show, music, book, comic), a file it does not handle (a <code>.zip</code> in a show's folder, say) gets the grey tag <b>outside the rule</b>; hover over it to see why. The row stays as it is: you can rename it by hand, but the lookup will not touch it.</li>
 </ul>

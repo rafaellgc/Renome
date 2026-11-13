@@ -558,7 +558,8 @@
   .row.conflict mark.ins { color: var(--danger); background: color-mix(in srgb, var(--danger) 16%, transparent); }
   mark.del { color: var(--danger); text-decoration: line-through; text-decoration-thickness: 1px; }
   /* Only moved: the same words are on the other side. */
-  mark.mov, .row.conflict mark.ins.mov { color: inherit; background: none; font-weight: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  mark.mov { color: var(--moved); background: var(--moved-soft); font-weight: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  .row.conflict mark.mov { color: inherit; background: none; }
   /* Copy badge: icon + group number; the color repeats every 6 groups. */
   .copy {
     display: inline-flex;

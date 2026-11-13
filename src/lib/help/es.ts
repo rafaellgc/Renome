@@ -792,7 +792,7 @@ ${ex("Película.es.ass", "Película.es.srt")}
 <ul>
   <li>en <b>Nombre actual</b>, lo que se va aparece <span class="del">en rojo, tachado</span>;</li>
   <li>en <b>Nuevo nombre</b>, lo que entra aparece <span class="ins">en azul</span>;</li>
-  <li>lo que solo cambió de lugar (el autor que pasó delante del título, por ejemplo) aparece <span class="mov">subrayado con puntos</span>, en los dos lados.</li>
+  <li>lo que solo cambió de lugar (el autor que pasó delante del título, por ejemplo) aparece <span class="mov">en morado, subrayado con puntos</span>, en los dos lados.</li>
   <li>un archivo que cambia de carpeta recibe un icono de carpeta en el nombre nuevo, y la columna <b>Carpeta</b> muestra, en azul, la carpeta completa adonde va (<code>→ ~/Música/Artista/Álbum (2019)</code>), escrita como la carpeta actual de los demás archivos.</li>
   <li>con una regla de búsqueda activa (película, serie, música, libro, cómic), un archivo que ella no trata (un <code>.zip</code> en la carpeta de la serie, por ejemplo) recibe la etiqueta gris <b>fuera de la regla</b>; pase el ratón para ver el motivo. La fila sigue normal: puede renombrarlo a mano, pero la búsqueda no lo tocará.</li>
 </ul>
