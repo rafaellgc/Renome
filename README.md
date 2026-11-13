@@ -173,10 +173,14 @@ A built-in manual (F1) explains every rule with examples.
 
 | | |
 |---|---|
-| ![Choosing between two movies with the same title, with posters](docs/screenshots/movies.png) | ![Songs named and sorted into artist and album folders from their tags](docs/screenshots/music.png) |
-| Movies: when two have the same title, you choose | Music: named and sorted into `Artist/Album (Year)` from the tags |
-| ![Messy comic file names turned into series and number, in series folders, dark theme](docs/screenshots/comics.png) | ![Photos from two folders, numbered per folder with the folder name](docs/screenshots/photos.png) |
-| Comics: series, number and series folders, offline (dark theme) | Photos numbered per folder, with the folder name |
+| ![A TV show's episodes named from TMDB into show and season folders, with the missing episodes as faded rows](docs/screenshots/tv-missing.png) | ![Choosing between movies with the same title, with posters](docs/screenshots/movies.png) |
+| TV shows: episodes named and sorted into `Show (Year)/Season 01`, missing ones shown | Movies: when several have the same title, you choose |
+| ![Subtitles found per language for a movie, the best of each already chosen](docs/screenshots/subtitles.png) | ![Songs named and sorted into artist and album folders from their tags](docs/screenshots/music.png) |
+| Subtitles: the best per language, from OpenSubtitles, SubDL and SubSource | Music: named and sorted into `Artist/Album (Year)` from the tags |
+| ![Messy comic file names turned into series and number, in series folders, dark theme](docs/screenshots/comics.png) | ![Comics made into Kindle books, with the reader chosen from a list of models](docs/screenshots/comic-ebook.png) |
+| Comics: series, number and series folders, offline (dark theme) | Comics into e-books, fit to the screen of 127 readers |
+| ![Photos from two folders, numbered per folder with the folder name](docs/screenshots/photos.png) | ![The + Rule menu, rules by kind of file and rules for the name's text](docs/screenshots/rules-menu.png) |
+| Photos numbered per folder, with the folder name | Rules by kind of file, and for the name's text |
 | ![Built-in manual](docs/screenshots/help.png) | ![About, with the data sources](docs/screenshots/about.png) |
 | Built-in manual, in English, Portuguese and Spanish | About, with the data sources |
 
