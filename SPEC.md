@@ -981,7 +981,9 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
 - The title is the file's own when it names the same book (its author,
   series and number in the series removed; a subtitle only it has goes),
   else the catalogue's (article moved to the end put back in front, the
-  author's name in front removed); notes of the edition's language
+  author's name in front removed, and short words the file's name writes
+  in capitals among lowercase ones written so: `EUA`, `URSS`, `II`, not
+  a run of capitals like `O SEGREDO DOS`); notes of the edition's language
   (`Portuguese Edition`) are dropped. The file's spelling of the author
   is kept, and across the batch each author gets one spelling (initial
   of the first name and surname; the most used one, not in capitals).

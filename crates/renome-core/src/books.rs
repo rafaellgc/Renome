@@ -655,14 +655,14 @@ fn choose_title(g: &Guess, catalog: &str, authors: &[String], edition: bool) -> 
         authors,
     ));
     let Some(own) = own_title(g).map(|t| without_language(&t)) else {
-        return catalog;
+        return name_capitals(g, &catalog);
     };
     let sub = catalog.split_once(':').map_or("", |(_, s)| s.trim());
     let same = edition
         || title_fit(&own, &catalog) >= 0.85
         || (!sub.is_empty() && title_fit(&own, sub) >= 0.9);
     if !same {
-        return catalog;
+        return name_capitals(g, &catalog);
     }
     let fold = |s: &str| words_only(&text::strip_accents(&s.to_lowercase()));
     if own.contains(':')
@@ -672,6 +672,55 @@ fn choose_title(g: &Guess, catalog: &str, authors: &[String], edition: bool) -> 
         return main_title(&own).to_string();
     }
     own
+}
+
+/// A catalogue's title with the short words the file's name writes in
+/// capitals among lowercase ones (`EUA`, `URSS`, `II`) written so: the
+/// catalogues often have `Os Eua e a Nova Ordem`. Words in a run of
+/// capitals (`O SEGREDO DOS GIRASSOIS`) are the name shouting, not
+/// acronyms.
+fn name_capitals(g: &Guess, title: &str) -> String {
+    let caps = |w: &str| w.chars().any(char::is_alphabetic) && !w.chars().any(char::is_lowercase);
+    let mut acronyms: Vec<String> = Vec::new();
+    for source in std::iter::once(&g.title).chain(g.alts.iter().map(|(t, _)| t)) {
+        if shouting(source) {
+            continue;
+        }
+        let words: Vec<&str> = source
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| w.chars().any(char::is_alphabetic))
+            .collect();
+        for (i, w) in words.iter().enumerate() {
+            let short = (2..=5).contains(&w.chars().count());
+            let alone = !(i > 0 && caps(words[i - 1])) && !words.get(i + 1).is_some_and(|n| caps(n));
+            if short && caps(w) && alone && !acronyms.iter().any(|a| a == w) {
+                acronyms.push(w.to_string());
+            }
+        }
+    }
+    if acronyms.is_empty() {
+        return title.to_string();
+    }
+    let fold = |s: &str| text::strip_accents(&s.to_lowercase());
+    let mut out = String::new();
+    let mut word = String::new();
+    let flush = |word: &mut String, out: &mut String| {
+        match acronyms.iter().find(|a| fold(a) == fold(word)) {
+            Some(a) => out.push_str(a),
+            None => out.push_str(word),
+        }
+        word.clear();
+    };
+    for c in title.chars() {
+        if c.is_alphanumeric() {
+            word.push(c);
+        } else {
+            flush(&mut word, &mut out);
+            out.push(c);
+        }
+    }
+    flush(&mut word, &mut out);
+    out
 }
 
 /// The authors with the file's own spelling of its author (`C. S. Moraes`
@@ -1959,6 +2008,17 @@ mod tests {
         );
         assert_eq!(article_first("Recife, Oregon"), "Recife, Oregon");
         assert!(author_fit("Otto Lindqvist", &["Berg Lindqvist".into()]).unwrap() < 0.5);
+    }
+
+    #[test]
+    fn acronyms_from_the_name() {
+        let g = guess("Os EUA e a Nova Ordem Mundial - Um Debate - Alexandre Dugin", &BookMeta::default());
+        assert_eq!(name_capitals(&g, "Os Eua e a Nova Ordem Mundial"), "Os EUA e a Nova Ordem Mundial");
+        // A name in capitals is shouting: its words stay as the catalogue has them.
+        let g = guess("O SEGREDO DOS GIRASSOIS - Adriana Matheus", &BookMeta::default());
+        assert_eq!(name_capitals(&g, "O Segredo dos Girassóis"), "O Segredo dos Girassóis");
+        let g = guess("Historia da URSS vol II - Ana Prado", &BookMeta::default());
+        assert_eq!(name_capitals(&g, "História da Urss, Vol. Ii"), "História da URSS, Vol. II");
     }
 
     #[test]
