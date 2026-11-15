@@ -767,6 +767,13 @@ impl Pipeline {
     }
 
     /// The music rule's `(from_name, folders)`, when one is on.
+    /// A movie rule is on.
+    pub fn movie(&self) -> bool {
+        self.steps
+            .iter()
+            .any(|s| matches!(s, Compiled::Plain(Rule::Movie { .. })))
+    }
+
     pub fn music(&self) -> Option<(bool, bool)> {
         self.steps.iter().find_map(|s| match s {
             Compiled::Plain(Rule::Music {

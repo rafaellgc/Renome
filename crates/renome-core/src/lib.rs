@@ -41,6 +41,7 @@ pub mod convert;
 pub mod details;
 pub mod discogs;
 pub mod ebook;
+pub mod extras;
 pub mod fields;
 pub mod files;
 pub mod filter;

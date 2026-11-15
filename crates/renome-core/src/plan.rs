@@ -200,6 +200,16 @@ pub struct PreviewItem {
     /// Its picture subtitle tracks, which are not taken out.
     #[serde(skip_serializing_if = "is_zero")]
     pub sub_pictures: usize,
+    /// With the movie rule, a movie's extra (a making-of, a trailer): the
+    /// extras folder it goes to next to the movie (see [`crate::extras`]).
+    /// It is not looked up as a movie.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extra: Option<String>,
+    /// With the movie rule, what a release's makers added to advertise
+    /// themselves (see [`crate::extras::release_junk`]): it stays in the
+    /// old folder, with what else does not go with the movie.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub release_junk: bool,
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -731,6 +741,7 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
         .collect();
     let is_work = |i: &PreviewItem| {
         !i.is_dir
+            && i.extra.is_none()
             && (view.movies.contains_key(&i.path)
                 || view.episodes.contains_key(&i.path)
                 || view.books.contains_key(&i.path)
@@ -768,44 +779,49 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
     // Each movie folder's files were added with: the movie's.
     let added: HashMap<PathBuf, &Path> = items
         .iter()
-        .filter(|i| view.movies.contains_key(&i.path))
+        .filter(|i| i.extra.is_none() && view.movies.contains_key(&i.path))
         .filter_map(|i| Some((i.dir.clone(), *base.get(i.path.as_path())?)))
         .collect();
     // Only a movie's own folder.
     for (dir, place) in places.iter_mut() {
         let own = ids.get(dir).is_some_and(|s| s.len() == 1)
-            && !protected(dir, view)
             && items
                 .iter()
-                .find(|i| &i.dir == dir && view.movies.contains_key(&i.path))
-                .and_then(|i| view.movies.get(&i.path))
-                .is_some_and(|m| tmdb::names_movie(dir, m) || only_movie_files(dir, m.id, view));
+                .filter(|i| &i.dir == dir && i.extra.is_none())
+                .find_map(|i| Some((i, view.movies.get(&i.path)?)))
+                .is_some_and(|(i, m)| own_movie_folder(dir, &i.path, m, view));
         if !own {
             *place = None;
         }
     }
-    let place = |dir: &Path, own_base: Option<&Path>| -> Option<(PathBuf, Option<String>)> {
-        for (n, up) in dir.ancestors().take(3).enumerate() {
-            if let Some(found) = places.get(up) {
-                if added.get(up).copied() != own_base {
-                    return None;
-                }
-                let (Some(dest), folder) = found.clone()? else {
-                    return None;
-                };
-                if n == 0 {
-                    return Some((dest, folder));
-                }
-                let rel = dir.strip_prefix(up).ok()?;
-                let shown = rel.to_string_lossy().replace('\\', "/");
-                let folder = match folder {
-                    Some(f) => format!("{f}/{shown}"),
-                    None => shown,
-                };
-                return Some((dest.join(rel), Some(folder)));
+    // The movie folder a folder is in (two levels at most), where its movie
+    // goes, and the folder shown.
+    let home =
+        |dir: &Path, own_base: Option<&Path>| -> Option<(PathBuf, PathBuf, Option<String>)> {
+            let up = dir
+                .ancestors()
+                .take(3)
+                .find(|up| places.contains_key(*up))?;
+            if added.get(up).copied() != own_base {
+                return None;
             }
+            let (Some(dest), folder) = places.get(up)?.clone()? else {
+                return None;
+            };
+            Some((up.to_path_buf(), dest, folder))
+        };
+    let place = |dir: &Path, own_base: Option<&Path>| -> Option<(PathBuf, Option<String>)> {
+        let (up, dest, folder) = home(dir, own_base)?;
+        if up == dir {
+            return Some((dest, folder));
         }
-        None
+        let rel = dir.strip_prefix(&up).ok()?;
+        let shown = rel.to_string_lossy().replace('\\', "/");
+        let folder = match folder {
+            Some(f) => format!("{f}/{shown}"),
+            None => shown,
+        };
+        Some((dest.join(rel), Some(folder)))
     };
     for i in items.iter_mut() {
         if i.is_dir || i.manual || is_work(i) || i.new_name != i.original || i.dest.is_some() {
@@ -824,11 +840,26 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
             })
             .max_by_key(|(old, _, _)| old.len())
             .cloned();
-        if let Some((old, new, (dest, folder))) = named {
+        let own_base = base.get(i.path.as_path()).copied();
+        if i.release_junk {
+            // Stays in the old folder, with what else does not go.
+            continue;
+        } else if let Some((old, new, (dest, folder))) = named {
             i.new_name = format!("{new}{}", &i.original[old.len()..]);
             i.dest = dest;
             i.folder = folder;
-        } else if let Some((dest, folder)) = place(&i.dir, base.get(i.path.as_path()).copied()) {
+        } else if let Some(kind) = i.extra.clone() {
+            // In the extras folder next to the movie, whatever folder it
+            // was in.
+            let Some((_, dest, folder)) = home(&i.dir, own_base) else {
+                continue;
+            };
+            i.dest = Some(dest.join(&kind));
+            i.folder = Some(match folder {
+                Some(f) => format!("{f}/{kind}"),
+                None => kind,
+            });
+        } else if let Some((dest, folder)) = place(&i.dir, own_base) {
             i.dest = Some(dest);
             i.folder = folder;
         } else {
@@ -1138,6 +1169,7 @@ pub fn preview(
     };
 
     let music = pipeline.music();
+    let movie_rule = pipeline.movie();
     let converts = pipeline.converts_comics();
     let book_to = pipeline.converts_books();
     let comic_ebook = pipeline.comic_ebook();
@@ -1291,7 +1323,8 @@ pub fn preview(
         movie: view
             .movies
             .get(&file.path)
-            .filter(|_| file.is_dir || tmdb::is_screen(&file.ext)),
+            .filter(|_| file.is_dir || tmdb::is_screen(&file.ext))
+            .filter(|_| !movie_rule || crate::extras::extra_kind(&file.path).is_none()),
         episode: view
             .episodes
             .get(&file.path)
@@ -1481,7 +1514,18 @@ pub fn preview(
             let comic_to = comic_ebook
                 .filter(|(_, draw)| crate::rules::to_ebook(file, *draw))
                 .map(|(t, _)| t);
+            let extra = movie_rule
+                .then(|| crate::extras::extra_kind(&file.path))
+                .flatten()
+                .map(str::to_string);
+            let release_junk = movie_rule
+                && !file.is_dir
+                && extra.is_none()
+                && !view.movies.contains_key(&file.path)
+                && crate::extras::release_junk(&file.path, file.size);
             PreviewItem {
+                extra,
+                release_junk,
                 comic_to,
                 sub_fix,
                 sub_extract,
@@ -1829,8 +1873,17 @@ fn only_movie_files(dir: &Path, id: u64, view: &View) -> bool {
             .extension()
             .map(|x| x.to_string_lossy().to_lowercase())
             .unwrap_or_default();
+        let found = view.movies.get(e.path());
+        // Its extras, and what the release's makers added.
+        if found.is_none_or(|m| m.id == id) && crate::extras::extra_kind(e.path()).is_some() {
+            continue;
+        }
+        let size = e.metadata().map(|m| m.len()).unwrap_or(u64::MAX);
+        if found.is_none() && crate::extras::release_junk(e.path(), size) {
+            continue;
+        }
         if tmdb::is_video(&ext) {
-            if view.movies.get(e.path()).is_none_or(|m| m.id != id) {
+            if found.is_none_or(|m| m.id != id) {
                 return false;
             }
             any = true;
@@ -1846,20 +1899,45 @@ fn only_movie_files(dir: &Path, id: u64, view: &View) -> bool {
     any
 }
 
-/// A movie's own folder under another name: named after it
-/// (`Movie.2010.1080p.BluRay`), or holding only it and what goes with it.
+/// Whether `dir`, holding the movie `m` in `video` and no other movie, is
+/// that movie's own folder: named after it (`Movie.2010.1080p.BluRay`, in
+/// the language of the catalogue or the original one), named like its
+/// video (a release named in another language), or holding only it and what
+/// goes with it (subtitles, images, `.nfo`, its extras, the release's
+/// advertisements).
+fn own_movie_folder(dir: &Path, video: &Path, m: &tmdb::MovieMatch, view: &View) -> bool {
+    !protected(dir, view)
+        && (tmdb::names_movie(dir, m)
+            || named_like(dir, video)
+            || only_movie_files(dir, m.id, view))
+}
+
+/// A folder named like a file in it (`Movie.2017.1080p.WEB-DL/` holding
+/// `Movie.2017.1080p.WEB-DL.mkv`): the same title and year.
+fn named_like(dir: &Path, file: &Path) -> bool {
+    let (Some(d), Some(f)) = (dir.file_name(), file.file_stem()) else {
+        return false;
+    };
+    let (a, b) = (
+        tmdb::guess(&d.to_string_lossy()),
+        tmdb::guess(&f.to_string_lossy()),
+    );
+    !a.title.is_empty() && a.year == b.year && tmdb::similarity(&a.title, &b.title) >= 0.9
+}
+
+/// A movie's own folder under another name (see [`own_movie_folder`]).
 /// The movie's new folder goes next to it, not inside.
 fn place_movie_folders(items: &mut [PreviewItem], view: &View) {
     // The movies in each folder: a folder of several is no movie's own.
     let mut movies: HashMap<PathBuf, HashSet<u64>> = HashMap::new();
-    for i in items.iter().filter(|i| !i.is_dir) {
+    for i in items.iter().filter(|i| !i.is_dir && i.extra.is_none()) {
         if let Some(m) = view.movies.get(&i.path) {
             movies.entry(i.dir.clone()).or_default().insert(m.id);
         }
     }
     let mut own: HashMap<PathBuf, bool> = HashMap::new();
     for i in items.iter_mut() {
-        let Some(m) = view.movies.get(&i.path) else {
+        let Some(m) = view.movies.get(&i.path).filter(|_| i.extra.is_none()) else {
             continue;
         };
         let (Some(dest), Some(up)) = (&i.dest, i.dir.parent()) else {
@@ -1872,8 +1950,7 @@ fn place_movie_folders(items: &mut [PreviewItem], view: &View) {
         // (`Videos 2024` with a film and the family's documents).
         let is_own = *own.entry(i.dir.clone()).or_insert_with(|| {
             movies.get(&i.dir).is_some_and(|ids| ids.len() == 1)
-                && !protected(&i.dir, view)
-                && (tmdb::names_movie(&i.dir, m) || only_movie_files(&i.dir, m.id, view))
+                && own_movie_folder(&i.dir, &i.path, m, view)
         });
         if is_own {
             i.dest = Some(up.join(name));
@@ -3329,6 +3406,138 @@ mod tests {
         let video = ops.iter().find(|o| o.from == files[0].path).unwrap();
         assert_eq!(video.to, other.join("Filme (2001)/Filme (2001).mkv"));
         assert!(p.left_folders.is_empty());
+    }
+
+    #[test]
+    fn folder_named_like_its_video() {
+        let d = Path::new("/x");
+        let r = "The.Ash.Gardens.2017.1080p.WEB-DL";
+        assert!(named_like(&d.join(r), &d.join(r).join(format!("{r}.mkv"))));
+        assert!(named_like(
+            &d.join("The Ash Gardens (2017)"),
+            &d.join("x/The.Ash.Gardens.2017.mkv")
+        ));
+        assert!(!named_like(
+            &d.join("Filmes 2017"),
+            &d.join("x/The.Ash.Gardens.2017.mkv")
+        ));
+        // Another year: another movie.
+        assert!(!named_like(
+            &d.join("The Ash Gardens 2019"),
+            &d.join("x/The.Ash.Gardens.2017.mkv")
+        ));
+    }
+
+    #[test]
+    fn movie_release_extras_and_advertisements() {
+        let d = tempfile::tempdir().unwrap();
+        let m = MovieMatch {
+            extra: Default::default(),
+            id: 7,
+            title: "Os Jardins de Cinza".into(),
+            original_title: "Os Jardins de Cinza".into(),
+            year: Some(2017),
+        };
+        let steps = vec![Step {
+            enabled: true,
+            rule: Rule::Movie {
+                template: "{title} ({year})".into(),
+                colon: " - ".into(),
+                sidecar: false,
+                fanart: false,
+                folder: true,
+                missing: false,
+                subtitles: false,
+                sub_langs: String::new(),
+                video_tags: false,
+            },
+        }];
+        // Named in another language than the catalogue's, with an extra and
+        // the release's advertisements.
+        let release = "The.Ash.Gardens.2017.1080p.WEB-DL.x264.NAC.WWW.EXEMPLO.COM";
+        let old = d.path().join(release);
+        fs::create_dir_all(old.join("Making Of")).unwrap();
+        let mut files = entries(
+            &old,
+            &[
+                &format!("{release}.mkv"),
+                "EXEMPLO.COM.mp4",
+                "EXEMPLO.COM.url",
+                "LEIA.txt",
+            ],
+        );
+        fs::write(old.join("LEIA.txt"), "baixe mais em https://exemplo.com").unwrap();
+        files.extend(entries(
+            &old.join("Making Of"),
+            &["Making.of.The.Ash.Gardens.2017.1080p.mkv"],
+        ));
+        for f in &mut files {
+            f.base = d.path().to_path_buf();
+        }
+        let mut view = View {
+            leftover_suffix: "additional files".into(),
+            ..View::default()
+        };
+        view.movies.insert(files[0].path.clone(), m.clone());
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        let new = d.path().join("Os Jardins de Cinza (2017)");
+        let to = |name: &str| {
+            p.items
+                .iter()
+                .find(|i| i.original == name)
+                .map(|i| i.target())
+                .unwrap()
+        };
+        assert_eq!(
+            to(&format!("{release}.mkv")),
+            new.join("Os Jardins de Cinza (2017).mkv")
+        );
+        assert_eq!(
+            to("Making.of.The.Ash.Gardens.2017.1080p.mkv"),
+            new.join("behind the scenes/Making.of.The.Ash.Gardens.2017.1080p.mkv")
+        );
+        for junk in ["EXEMPLO.COM.mp4", "EXEMPLO.COM.url", "LEIA.txt"] {
+            let i = p.items.iter().find(|i| i.original == junk).unwrap();
+            assert!(i.release_junk, "{junk}");
+            assert_eq!(i.target(), old.join(junk));
+        }
+        assert_eq!(p.left_folders.len(), 1);
+        assert_eq!(
+            p.left_folders[0].to,
+            d.path()
+                .join("Os Jardins de Cinza (2017) (additional files)")
+        );
+        assert_eq!(p.left_folders[0].files, 3);
+
+        let h = crate::apply::History::new(d.path().join("hist"));
+        let r = h.apply(&p.operations());
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        let left = d
+            .path()
+            .join("Os Jardins de Cinza (2017) (additional files)");
+        assert!(left.join("EXEMPLO.COM.url").exists());
+        assert!(
+            new.join("behind the scenes/Making.of.The.Ash.Gardens.2017.1080p.mkv")
+                .exists()
+        );
+        assert!(!old.exists());
+
+        // Named after the movie: its advertisements stay behind too.
+        let d = tempfile::tempdir().unwrap();
+        let old = d.path().join("Os Jardins de Cinza 2017 WEB-DL 1080p");
+        fs::create_dir(&old).unwrap();
+        let files = entries(
+            &old,
+            &["Os Jardins de Cinza 2017.mkv", "GRUPO TELEGRAM.url"],
+        );
+        let mut view = View {
+            leftover_suffix: "additional files".into(),
+            ..View::default()
+        };
+        view.movies.insert(files[0].path.clone(), m.clone());
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        assert_eq!(p.items[1].target(), files[1].path);
+        assert_eq!(p.left_folders.len(), 1);
     }
 
     #[test]

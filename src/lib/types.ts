@@ -159,6 +159,10 @@ export interface PreviewItem {
   subExtract?: number;
   /** Its picture subtitle tracks, which are not taken out. */
   subPictures?: number;
+  /** A movie's extra: the extras folder it goes to. */
+  extra?: string;
+  /** What a release added to advertise itself: stays in the old folder. */
+  releaseJunk?: boolean;
   /** With a photo rule, where a photo's date came from ("none": it has none). */
   photoDate?: "typed" | "inside" | "name" | "modified" | "none";
   /** The name the lookups read, when the rules above the first lookup rule

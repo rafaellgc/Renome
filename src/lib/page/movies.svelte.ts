@@ -82,7 +82,7 @@ export class Movies {
       return;
     }
     const items = this.#ctx.items
-      .filter((i) => (i.isDir || isScreen(i.original)) && this.state[i.path]?.status !== "auto" && this.state[i.path]?.status !== "chosen")
+      .filter((i) => (i.isDir || isScreen(i.original)) && !i.extra && !i.releaseJunk && this.state[i.path]?.status !== "auto" && this.state[i.path]?.status !== "chosen")
       .map((i) => ({ path: i.path, name: i.isDir ? this.#ctx.readName(i) : splitExt(this.#ctx.readName(i))[0] }));
     if (!items.length) {
       this.#ctx.say(t("tmdbNoFiles"));

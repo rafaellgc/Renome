@@ -249,9 +249,12 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   folder goes next to it instead. A folder is the movie's own when it is
   named after the movie (its name holds `tmdbid-<id>` of that movie, or its title, guessed like a
   file name, has similarity ≥ 0.8 with the title or original title and
-  its year, if any, is within one of the movie's) or when it holds, three
-  levels down, only videos of that movie (at least one), subtitles,
-  images (jpg, jpeg, png, webp, gif, bmp), `.nfo` and `.txt` files; and
+  its year, if any, is within one of the movie's), when it is named like
+  the movie's video in it (title guessed from both with similarity ≥ 0.9
+  and the same year, if any: a release titled in another language), or
+  when it holds, three levels down, only videos of that movie (at least
+  one), subtitles, images (jpg, jpeg, png, webp, gif, bmp), `.nfo` and
+  `.txt` files, extras and release advertisements (below); and
   in both cases it holds no other movie of the batch and is not one of
   the user's own folders (see 2.2: the home folder and its standard
   folders, a disk's top folder, the file system's). The preview shows the
@@ -267,6 +270,29 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   with their subfolder (`extrafanart/`, two levels at most), when they
   were added with the movie (same folder added). Before "send to another
   folder" places what is left.
+- Movie extras (with the movie rule, `extras.rs`): a video in a folder
+  named `Making Of`, `Behind The Scenes`, `Bastidores`, `Trailers`,
+  `Featurettes`, `Deleted Scenes`, `Cenas deletadas`, `Interviews`,
+  `Entrevistas`, `Extras`, `Bonus`, `Special Features` (and the Spanish
+  names), or named starting with "making of" followed by a word, or ending
+  in Jellyfin's and Plex's suffixes (`-trailer`, `-behindthescenes`,
+  `-featurette`, `-deleted`, `-deletedscene`, `-interview`, `-scene`,
+  `-short`, `-extra`, `-other`), is a movie's extra: not looked up, not
+  counted as a movie of its folder, tagged "extra" in the list. In a
+  movie's own folder (above) that moves, it goes with its name to the
+  extras folder Jellyfin and Plex read (`behind the scenes`, `trailers`,
+  `featurettes`, `deleted scenes`, `interviews`, `scenes`, `shorts`,
+  `extras`) inside the movie's new folder; one named after the movie
+  (`Movie-trailer.mkv`) gets the movie's new name instead, next to it.
+- Release advertisements (with the movie rule): `.url`, `.webloc`,
+  `.website`; a `.txt` named after a site, or named as a read-me
+  (`leia`, `leia-me`, `readme`, `info`, `leeme`…) with a link or a site
+  in its first 64 KiB; an image named after a site; a video under 100 MB
+  named after a site (a site's address with at most four words in all),
+  not an extra and not matched to a movie. Not looked up, tagged
+  "advert" in the list, and they never follow the movie: they stay in
+  the old folder, renamed by the leftovers rule below. Nothing is
+  deleted.
 - With "save .nfo and poster", renaming also writes `<new name>.nfo` next
   to each renamed video, in Kodi format with every field Jellyfin's NFO
   reader takes that TMDB provides: title, originaltitle, year, premiered,

@@ -26,6 +26,7 @@
           {#each d.items as item, i (i)}<li>{item}</li>{/each}
         </ul>
       {/if}
+      {#if d.after}<p class="text">{d.after}</p>{/if}
       <div class="modal-foot">
         {#if d.cancel}
           <button data-default={d.danger || undefined} onclick={() => closeDialog(false)}>{d.cancel}</button>
@@ -52,5 +53,6 @@
     font-size: var(--fs-md);
     line-height: 1.5;
   }
-  .items li { overflow-wrap: anywhere; }
+  .items li { overflow-wrap: anywhere; white-space: pre-line; }
+  .items li + li { margin-top: 6px; }
 </style>

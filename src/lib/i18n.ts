@@ -400,6 +400,10 @@ const pt = {
   confirmText: "Renomear {n} arquivo(s)?",
   confirmConflicts: "{n} arquivo(s) com conflito serão ignorados.",
   outsideRow: "fora da regra",
+  extraRow: "extra",
+  extraRowTip: "Extra do filme: não é buscado e vai para a pasta \"{folder}\" dentro da pasta nova do filme.",
+  junkRow: "propaganda",
+  junkRowTip: "Propaganda do lançamento: não é buscada e não vai junto com o filme. Fica na pasta antiga, que ganha \"(arquivos adicionais)\" no nome. Nada é apagado.",
   outsideMovie: "Não é vídeo, legenda nem pasta: a busca de filmes não mexe nele. Dá para renomear à mão (clique duas vezes no novo nome).",
   outsideSeries: "Não é vídeo nem legenda: a busca de episódios não mexe nele. Dá para renomear à mão (clique duas vezes no novo nome).",
   outsideMusic: "Não é música, letra, playlist nem capa: a regra de música não mexe nele. Dá para renomear à mão (clique duas vezes no novo nome).",
@@ -407,6 +411,8 @@ const pt = {
   outsideComic: "Não é quadrinho: a busca de quadrinhos não mexe nele. Dá para renomear à mão (clique duas vezes no novo nome).",
   outsideAny: "Nenhuma das regras de busca ligadas trata este tipo de arquivo. Dá para renomear à mão (clique duas vezes no novo nome).",
   confirmLeftover: "A pasta “{from}” fica com {n} arquivo(s) que não vão para a pasta nova e passa a se chamar “{to}”, ao lado dela.",
+  confirmLeftoverHead: "{n} pasta(s) antiga(s) fica(m) com arquivos que não vão para a pasta nova. Nada é apagado: ela(s) ganha(m) “({suffix})” no nome e fica(m) ao lado da nova.",
+  confirmLeftoverItem: "{from}  ({n} arquivo(s))\n→ {to}",
   leftoverCount: "{n} pasta(s) com sobras",
   leftoverSuffix: "arquivos adicionais",
   confirmUndoHint: "Você pode desfazer depois pelo Histórico.",
@@ -1549,6 +1555,10 @@ const en: Dict = {
   confirmText: "Rename {n} file(s)?",
   confirmConflicts: "{n} file(s) with conflicts will be skipped.",
   outsideRow: "outside the rule",
+  extraRow: "extra",
+  extraRowTip: "Movie extra: not looked up; it goes to the \"{folder}\" folder inside the movie's new folder.",
+  junkRow: "advert",
+  junkRowTip: "Release advertisement: not looked up and not taken with the movie. It stays in the old folder, which gets \"(additional files)\" in its name. Nothing is deleted.",
   outsideMovie: "Not a video, subtitle or folder: the movie lookup leaves it alone. You can rename it by hand (double-click the new name).",
   outsideSeries: "Not a video or subtitle: the episode lookup leaves it alone. You can rename it by hand (double-click the new name).",
   outsideMusic: "Not a song, lyrics, playlist or cover: the music rule leaves it alone. You can rename it by hand (double-click the new name).",
@@ -1556,6 +1566,8 @@ const en: Dict = {
   outsideComic: "Not a comic: the comic lookup leaves it alone. You can rename it by hand (double-click the new name).",
   outsideAny: "None of the lookup rules on handles this kind of file. You can rename it by hand (double-click the new name).",
   confirmLeftover: "The folder “{from}” keeps {n} file(s) that do not go to the new folder and is renamed “{to}”, next to it.",
+  confirmLeftoverHead: "{n} old folder(s) will keep files that do not go to the new folder. Nothing is deleted: each one gets “({suffix})” in its name and stays next to the new one.",
+  confirmLeftoverItem: "{from}  ({n} file(s))\n→ {to}",
   leftoverCount: "{n} folder(s) with leftovers",
   leftoverSuffix: "additional files",
   confirmUndoHint: "You can undo it later from History.",
@@ -2694,6 +2706,10 @@ const es: Dict = {
   confirmText: "¿Renombrar {n} archivo(s)?",
   confirmConflicts: "Se omitirán {n} archivo(s) con conflicto.",
   outsideRow: "fuera de la regla",
+  extraRow: "extra",
+  extraRowTip: "Extra de la película: no se busca y va a la carpeta \"{folder}\" dentro de la carpeta nueva de la película.",
+  junkRow: "publicidad",
+  junkRowTip: "Publicidad del lanzamiento: no se busca y no va con la película. Se queda en la carpeta antigua, que recibe \"(archivos adicionales)\" en el nombre. No se borra nada.",
   outsideMovie: "No es vídeo, subtítulo ni carpeta: la búsqueda de películas no lo toca. Puede renombrarlo a mano (doble clic en el nombre nuevo).",
   outsideSeries: "No es vídeo ni subtítulo: la búsqueda de episodios no lo toca. Puede renombrarlo a mano (doble clic en el nombre nuevo).",
   outsideMusic: "No es canción, letra, lista ni portada: la regla de música no lo toca. Puede renombrarlo a mano (doble clic en el nombre nuevo).",
@@ -2701,6 +2717,8 @@ const es: Dict = {
   outsideComic: "No es un cómic: la búsqueda de cómics no lo toca. Puede renombrarlo a mano (doble clic en el nombre nuevo).",
   outsideAny: "Ninguna de las reglas de búsqueda activas trata este tipo de archivo. Puede renombrarlo a mano (doble clic en el nombre nuevo).",
   confirmLeftover: "La carpeta “{from}” se queda con {n} archivo(s) que no van a la carpeta nueva y pasa a llamarse “{to}”, junto a ella.",
+  confirmLeftoverHead: "{n} carpeta(s) antigua(s) se queda(n) con archivos que no van a la carpeta nueva. No se borra nada: cada una recibe “({suffix})” en el nombre y queda junto a la nueva.",
+  confirmLeftoverItem: "{from}  ({n} archivo(s))\n→ {to}",
   leftoverCount: "{n} carpeta(s) con sobrantes",
   leftoverSuffix: "archivos adicionales",
   confirmUndoHint: "Puede deshacerlo después desde el Historial.",
@@ -3473,7 +3491,8 @@ const IRREGULAR: Record<string, string> = {
   "copy(ies)": "copies",
 };
 
-/** "{n} arquivo(s)" made "1 arquivo" or "3 arquivos": each word with
+/** "{n} arquivo(s)" made "1 arquivo" or "3 arquivos" (and "fica(m)" "fica"
+ *  or "ficam"): each word with
  *  its plural ending in brackets follows the number before it (the first
  *  one in the text when none comes before). Without numbers, left as is. */
 function plurals(text: string, vars: Record<string, string | number>): string {
@@ -3484,7 +3503,7 @@ function plurals(text: string, vars: Record<string, string | number>): string {
   };
   const numbers = [...text.matchAll(/\{(\w+)\}/g)].map((m) => ({ at: m.index ?? 0, n: count(m[1]) })).filter((x) => x.n !== null);
   if (!numbers.length) return text;
-  return text.replace(/([\p{L}]*)\((s|es|ns|ões|eis|ies)\)/gu, (whole, word: string, _end, at: number) => {
+  return text.replace(/([\p{L}]*)\((s|es|ns|ões|eis|ies|m|n)\)/gu, (whole, word: string, _end, at: number) => {
     const before = numbers.filter((x) => x.at < at).pop() ?? numbers[0];
     if (before.n === 1) return word;
     return IRREGULAR[whole.toLowerCase()] ?? word + whole.slice(word.length + 1, -1);

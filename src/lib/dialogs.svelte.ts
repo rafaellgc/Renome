@@ -6,6 +6,8 @@ export interface DialogOptions {
   text?: string;
   /** Detail lines, e.g. errors per file. */
   items?: string[];
+  /** Text after the detail lines. */
+  after?: string;
   ok?: string;
   /** Omit for a plain notice with a single button. */
   cancel?: string;

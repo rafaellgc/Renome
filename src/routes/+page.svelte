@@ -320,7 +320,8 @@
     const out: Record<string, string> = {};
     for (const i of preview.items) {
       // Renamed by another rule: nothing to tell.
-      if ((i.status === "ok" && !i.manual) || on.some(([, takes]) => takes(i))) continue;
+      // Advertisements and extras carry their own tag.
+      if ((i.status === "ok" && !i.manual) || i.releaseJunk || i.extra || on.some(([, takes]) => takes(i))) continue;
       out[i.path] = on.length === 1 ? t(on[0][2]) : t("outsideAny");
     }
     return out;
@@ -659,11 +660,10 @@
       ...books.convertOnly.map((i) => books.convertItem(i.path, i.path, i.bookTo!)),
     ];
     if (!preview.changed && !meta.length && !tvMeta.length && !bookMeta.length && !music.coverOnly && !listOnly.length && !retagOnly.length && !insideOnly.length && !subsUnchanged.length && !toolsOnly.length && !tagOnly.length) return;
-    // Files left behind in a show's old folder are always told first.
-    const left = preview.leftFolders.map((f) => t("confirmLeftover", { n: f.files, from: basename(f.from), to: basename(f.to) }));
+    // Files left behind in an old folder are always told, listed.
+    const left = preview.leftFolders.map((f) => t("confirmLeftoverItem", { n: f.files, from: basename(f.from), to: basename(f.to) }));
     if (settings.confirmApply || left.length) {
       const lines = [
-        ...left,
         preview.changed
           ? sendTo
             ? t(sendTo.copy ? "confirmCopy" : "confirmMove", { n: preview.changed, dir: sendTo.dir })
@@ -682,7 +682,9 @@
       ].filter(Boolean);
       const ok = await confirm({
         title: t(sendTo ? (sendTo.copy ? "confirmCopyTitle" : "confirmMoveTitle") : "confirmTitle"),
-        text: `${lines.join("\n")}\n\n${t("confirmUndoHint")}`,
+        text: left.length ? `${lines.join("\n")}\n\n${t("confirmLeftoverHead", { n: left.length, suffix: t("leftoverSuffix") })}` : `${lines.join("\n")}\n\n${t("confirmUndoHint")}`,
+        items: left.length ? left : undefined,
+        after: left.length ? t("confirmUndoHint") : undefined,
         ok: t(sendTo ? (sendTo.copy ? "confirmCopyOk" : "confirmMoveOk") : "confirmOk"),
         cancel: t("cancel"),
       });
