@@ -63,6 +63,11 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.36.0" date="2026-11-15">
+      <description>
+        <p>Text rules can apply to some files only, chosen by a filter. Numbering and the name list count a video's subtitles, information and artwork files, and a photo's edits, together with it. An option adds (2), (3) when two files would end up with the same name. Photos and phone videos can be named and sorted by the city, state and country where they were taken, from their GPS, looked up in a list of places kept inside the program: nothing is sent anywhere.</p>
+      </description>
+    </release>
     <release version="0.35.0" date="2026-11-15">
       <description>
         <p>A new rule gives files names from a list typed or pasted, one per line, and can start from the current names to edit. The case rule can keep chosen words exactly as they are in the name, in any mode. Converting characters can split words run together. Movie folders named in another language are recognised, extras such as a making-of go to the folders media servers read, and a release's advertisements are left behind. A video as long as two episodes is offered as a pair.</p>
