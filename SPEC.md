@@ -509,6 +509,15 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   episode by season (specials last) with a filter by title or code.
   Ctrl+click marks several episodes of one season for a multi-episode
   file. Undecided files read the same way get the same choice.
+- Two episodes in one video (`tv::check_length`): with TMDB's episode
+  runtimes and the video's length from its headers (MKV, MP4, AVI; a
+  subtitle takes its video's), a file found as one episode whose video
+  lasts at least 1.6 times that episode's runtime and not within 20 % of
+  it, while the runtimes of that episode plus the next one (or the one
+  before plus it) are within 20 % of the video, is not settled: both
+  pairs that fit come first among the suggestions, and the review says
+  how long the video is. Cartoons whose half-hours TMDB lists as two
+  segments.
 - Each file keeps its show. Searching again skips files already settled
   for the same show.
 - Names: two-digit season and episode; several episodes give `01-E02`;

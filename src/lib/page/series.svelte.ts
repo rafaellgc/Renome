@@ -163,6 +163,7 @@ export class Series {
             guess: f.guess,
             alternatives: f.alternatives,
             conflict: f.conflict,
+            doubled: f.doubled,
             choice: f.choice.length ? f.choice : null,
             status: f.choice.length ? "auto" : f.alternatives.length ? "choose" : "none",
           };

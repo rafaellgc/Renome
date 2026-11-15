@@ -475,6 +475,8 @@ export interface EpisodeLookup {
   conflict: boolean;
   /** Likely episodes, best first. */
   alternatives: EpKey[][];
+  /** The video lasts about as long as two episodes: its minutes. */
+  doubled?: number;
 }
 
 export interface EpisodeState {
@@ -482,6 +484,7 @@ export interface EpisodeState {
   guess: EpisodeGuess;
   alternatives: EpKey[][];
   conflict: boolean;
+  doubled?: number;
   choice: EpKey[] | null;
   status: MovieStatus;
 }

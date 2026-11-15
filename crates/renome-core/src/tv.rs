@@ -378,6 +378,9 @@ pub struct ApiEpisode {
     pub overview: Option<String>,
     #[serde(default)]
     pub still_path: Option<String>,
+    /// Minutes.
+    #[serde(default)]
+    pub runtime: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -413,6 +416,9 @@ pub struct Episode {
     pub overview: String,
     #[serde(default)]
     pub still_path: Option<String>,
+    /// How long it is, in minutes, when the catalogue says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -488,6 +494,7 @@ pub fn build_show(d: &TvDetails, by_lang: &[Vec<ApiEpisode>], names: &[String]) 
                         air_date: e.air_date.clone().filter(|s| !s.is_empty()),
                         overview: e.overview.clone().unwrap_or_default(),
                         still_path: e.still_path.clone(),
+                        runtime: e.runtime.filter(|&m| m > 0),
                     }
                 })
                 .collect()
@@ -549,6 +556,65 @@ pub struct EpisodeLookup {
     pub conflict: bool,
     /// Likely episodes, best first (the first one is the suggestion).
     pub alternatives: Vec<Vec<Key>>,
+    /// The video lasts about as long as two episodes, the one found and
+    /// the next (or the one before): its minutes, for the review.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doubled: Option<u32>,
+}
+
+/// A video whose length fits two short episodes (cartoons whose
+/// catalogue lists each half-hour's two segments apart) better than the
+/// one found: both pairs (with the next one, with the one before) are
+/// offered first, and the user chooses. `secs`: how long the video plays.
+pub fn check_length(show: &Show, mut found: EpisodeLookup, secs: Option<f64>) -> EpisodeLookup {
+    let Some(mins) = secs.map(|s| s / 60.0).filter(|m| *m > 0.0) else {
+        return found;
+    };
+    let one = match (found.choice.as_slice(), found.alternatives.first()) {
+        ([k], _) => *k,
+        ([], Some(first)) if first.len() == 1 => first[0],
+        _ => return found,
+    };
+    let runtime = |k: Key| {
+        show.episodes
+            .iter()
+            .find(|e| (e.season, e.number) == k)
+            .and_then(|e| e.runtime)
+            .map(f64::from)
+    };
+    let Some(own) = runtime(one) else {
+        return found;
+    };
+    // Close to its own length: one episode.
+    let fits = |total: f64| (mins - total).abs() <= total * 0.2;
+    if fits(own) || mins < own * 1.6 {
+        return found;
+    }
+    let pairs: Vec<Vec<Key>> = [
+        (one, (one.0, one.1 + 1)),
+        ((one.0, one.1.saturating_sub(1)), one),
+    ]
+    .into_iter()
+    .filter(|(a, b)| a.1 > 0 && a != b)
+    .filter(|&(a, b)| {
+        let (Some(x), Some(y)) = (runtime(a), runtime(b)) else {
+            return false;
+        };
+        fits(x + y)
+    })
+    .map(|(a, b)| vec![a, b])
+    .collect();
+    if pairs.is_empty() {
+        return found;
+    }
+    let rest: Vec<Vec<Key>> = std::mem::take(&mut found.alternatives)
+        .into_iter()
+        .filter(|a| !pairs.contains(a))
+        .collect();
+    found.alternatives = pairs.into_iter().chain(rest).collect();
+    found.choice = Vec::new();
+    found.doubled = Some(mins.round() as u32);
+    found
 }
 
 fn words(s: &str) -> Vec<String> {
@@ -665,6 +731,7 @@ pub fn find(show: &Show, g: &EpisodeGuess) -> EpisodeLookup {
         guess: g.clone(),
         choice,
         conflict: false,
+        doubled: None,
         alternatives,
     };
     if !by_number.is_empty() {
@@ -688,6 +755,7 @@ pub fn find(show: &Show, g: &EpisodeGuess) -> EpisodeLookup {
                 guess: g.clone(),
                 choice: Vec::new(),
                 conflict: true,
+                doubled: None,
                 alternatives,
             };
         }
@@ -1579,7 +1647,41 @@ mod tests {
             air_date: None,
             overview: String::new(),
             still_path: None,
+            runtime: None,
         }
+    }
+
+    #[test]
+    fn video_as_long_as_two_episodes() {
+        let mut s = show();
+        s.episodes = (1..=6)
+            .map(|n| Episode {
+                runtime: Some(if n == 1 { 24 } else { 12 }),
+                ..ep(1, n, &format!("Segment {n}"))
+            })
+            .collect();
+        let at = |name: &str, secs: f64| check_length(&s, find(&s, &parse(name, "")), Some(secs));
+        // A half-hour named after its first segment: both pairs offered.
+        let r = at("Show S01E04", 23.0 * 60.0);
+        assert!(r.choice.is_empty());
+        assert_eq!(r.doubled, Some(23));
+        assert_eq!(r.alternatives[0], vec![(1, 4), (1, 5)]);
+        assert_eq!(r.alternatives[1], vec![(1, 3), (1, 4)]);
+        assert!(r.alternatives.contains(&vec![(1, 4)]));
+        // The pilot, a whole episode: as it was.
+        let r = at("Show S01E01", 23.5 * 60.0);
+        assert_eq!(r.choice, vec![(1, 1)]);
+        assert_eq!(r.doubled, None);
+        // As long as one segment.
+        assert_eq!(at("Show S01E04", 11.5 * 60.0).choice, vec![(1, 4)]);
+        // Already two episodes in the name.
+        assert_eq!(at("Show S01E04-E05", 23.0 * 60.0).choice, vec![(1, 4), (1, 5)]);
+        // The last segment has only the one before it.
+        let r = at("Show S01E06", 23.0 * 60.0);
+        assert_eq!(r.alternatives[0], vec![(1, 5), (1, 6)]);
+        // Without lengths, nothing changes.
+        let r = check_length(&s, find(&s, &parse("Show S01E04", "")), None);
+        assert_eq!(r.choice, vec![(1, 4)]);
     }
 
     fn show() -> Show {

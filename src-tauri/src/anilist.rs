@@ -352,6 +352,7 @@ fn anime_show(seasons: &[Value], typed: &str) -> renome_core::tv::Show {
                 air_date: aired.clone(),
                 overview: String::new(),
                 still_path: None,
+                runtime: None,
             });
         }
     }

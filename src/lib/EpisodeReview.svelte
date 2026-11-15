@@ -136,6 +136,9 @@
     {#if st?.conflict && st.alternatives.length > 1}
       <p class="warn">{t("epConflict", { num: code(st.alternatives[1]), title: code(st.alternatives[0]) })}</p>
     {/if}
+    {#if st?.doubled}
+      <p class="warn">{t("epDoubled", { min: st.doubled })}</p>
+    {/if}
 
     <div class="body">
       {#if st?.alternatives.length}

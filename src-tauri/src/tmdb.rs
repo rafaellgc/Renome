@@ -680,12 +680,24 @@ pub async fn lookup_episodes(
 /// Each file's episode of a show; files named after another show are left
 /// out.
 pub(crate) fn files_of(show: Show, items: &[TvItem], typed: &str) -> TvLookup {
+    // How long each video plays, by folder and name; a subtitle takes its
+    // video's, so both get the same episodes.
+    let lengths: HashMap<(PathBuf, String), f64> = items
+        .iter()
+        .filter(|i| !i.is_dir && tmdb::is_video(split_name(&i.name).1))
+        .filter_map(|i| {
+            let secs = renome_core::video::length(&i.path)?;
+            Some(((i.folder(), i.stem().to_string()), secs))
+        })
+        .collect();
     let files = items
         .iter()
         .filter_map(|i| {
             let dir = i.folder();
             let folder = dir.file_name().unwrap_or_default().to_string_lossy();
             let found = tv::find_in(&show, &tv::parse(i.stem(), &folder), &dir, typed)?;
+            let secs = lengths.get(&(dir.clone(), i.stem().to_string())).copied();
+            let found = tv::check_length(&show, found, secs);
             Some(TvFile {
                 path: i.path.clone(),
                 found,
