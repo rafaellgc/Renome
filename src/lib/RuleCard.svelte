@@ -4,7 +4,9 @@
   import { t, type Key } from "./i18n";
   import { comicPreset, comicPresetOf, defaultSubLangs, FPS_PAIRS, listNames, PHOTO_TEMPLATES, splitExt, splitParts, type ComicPreset } from "./rules";
   import { settings } from "./settings.svelte";
-  import type { ComicDevice, ComicSpread, Step } from "./types";
+  import type { ComicDevice, ComicSpread, RuleType, Step } from "./types";
+  /** Rules that pick their own kind of file: no filter of their own. */
+  const BY_KIND: RuleType[] = ["movie", "series", "music", "book", "comic", "photo", "subtitle"];
   /** The readers a comic e-book can be made for, by maker, in the menu's
    *  order. */
   /** A reader model's label: name, screen and whether it is colour. */
@@ -252,6 +254,7 @@
         {#if !r.names.trim() && currentNames.length}
           <button class="fill" title={t("listFillHint")} onclick={() => (r.names = currentNames.join("\n"))}>{t("listFill")}</button>
         {/if}
+        <label class="check" title={t("pairsHint")}><input type="checkbox" bind:checked={r.pairs} /> {t("pairs")}</label>
         <p class="hint">{t("listOrderHint")}</p>
       {:else if r.type === "case"}
         <label>{t("mode")}
@@ -307,6 +310,7 @@
           <label class="narrow">{t("digits")} <input type="number" min="0" max="12" bind:value={r.digits} /></label>
         </div>
         <label class="check"><input type="checkbox" bind:checked={r.perFolder} /> {t("perFolder")}</label>
+        <label class="check" title={t("pairsHint")}><input type="checkbox" bind:checked={r.pairs} /> {t("pairs")}</label>
       {:else if r.type === "remove"}
         <div class="checks">
           <label class="check"><input type="checkbox" bind:checked={r.extraSpaces} /> {t("rmExtraSpaces")}</label>
@@ -785,6 +789,9 @@
         <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("comicMissingLabel")}<small>{t("comicMissingHint")}</small></span></label>
       {/if}
 
+      {#if !BY_KIND.includes(r.type)}
+        <label class="only">{t("onlyFiles")} <input bind:value={step.only} spellcheck="false" placeholder={t("onlyFilesPlaceholder")} title={t("onlyFilesHint")} /></label>
+      {/if}
       {#if summary}<p class="hint">{summary}</p>{/if}
       {#if error}<p class="error">{error}</p>{/if}
     </fieldset>

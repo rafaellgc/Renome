@@ -94,6 +94,13 @@ pub struct View {
     /// (`Show (2010) [tmdbid-7] (additional files)`), in the UI's language.
     #[serde(default)]
     pub leftover_suffix: String,
+    /// The UI's language (`pt`, `en`, `es`): countries' names.
+    #[serde(default)]
+    pub lang: String,
+    /// Two files given the same name: the later ones get ` (2)`, ` (3)`…
+    /// instead of being left as they are.
+    #[serde(default)]
+    pub number_clashes: bool,
     /// Folders never taken for a show's or movie's own, nor renamed for
     /// leftovers (home, Downloads…; filled in by the app).
     #[serde(skip)]
@@ -101,6 +108,50 @@ pub struct View {
     /// Another folder the files go to, moved or copied.
     #[serde(default)]
     pub send_to: Option<SendTo>,
+}
+
+/// Two files given the same name, or a name another file has and keeps:
+/// the later ones get ` (2)`, ` (3)`… after the name, the first free one.
+/// Identical copies (when looked for) are left to be flagged as such.
+fn number_clashes(items: &mut [PreviewItem], keys: &mut PathKeys, view: &View) {
+    let copying = view.send_to.as_ref().is_some_and(|s| s.copy);
+    let moving: HashSet<PathBuf> = items
+        .iter()
+        .filter(|i| i.status == Status::Ok && !copying)
+        .map(|i| keys.key(&i.path))
+        .collect();
+    let mut used: HashSet<PathBuf> = HashSet::new();
+    for i in 0..items.len() {
+        if items[i].status != Status::Ok || view.identical.contains_key(&items[i].path) {
+            continue;
+        }
+        let taken = |keys: &mut PathKeys, used: &HashSet<PathBuf>, target: &Path| {
+            let key = keys.key(target);
+            used.contains(&key)
+                || (std::fs::symlink_metadata(target).is_ok()
+                    && !moving.contains(&key)
+                    && !same_file(target, &items[i].path))
+        };
+        let first = items[i].target();
+        if taken(keys, &used, &first) {
+            let name = items[i].new_name.clone();
+            let (stem, ext) = if items[i].is_dir {
+                (name.as_str(), "")
+            } else {
+                crate::files::split_name(&name)
+            };
+            for n in 2..10_000 {
+                let new = crate::files::join_name(&format!("{stem} ({n})"), ext);
+                let target = first.with_file_name(&new);
+                if !taken(keys, &used, &target) {
+                    items[i].new_name = new;
+                    break;
+                }
+            }
+        }
+        let key = keys.key(&items[i].target());
+        used.insert(key);
+    }
 }
 
 /// Where the files go instead of staying where they are: the folders the
@@ -1221,7 +1272,10 @@ pub fn preview(
         .collect();
     // The photo rule names a photo's files (raw, edits, a Live Photo's
     // video) by the date of the one that has it (see `photos::lead_rank`).
-    let photo_rule = pipeline.photos();
+    let photo_rule = pipeline.photos().map(|(mut o, set)| {
+        o.lang = crate::geo::Lang::from_code(&view.lang);
+        (o, set)
+    });
     let sub_tools = pipeline.subtitle_tools();
     let sub_langs = sub_tools
         .as_ref()
@@ -1314,10 +1368,29 @@ pub fn preview(
             Some((sub.path.as_path(), *video))
         })
         .collect();
+    // The same, files of one name with other extensions counting as one.
+    let pairs = crate::rules::Places::of(shown.iter().map(|&(_, _, f)| f));
+    // A rule for some files only counts among them.
+    let step_places: Vec<Option<crate::rules::Places>> = pipeline
+        .filters()
+        .map(|only| {
+            only.map(|o| {
+                crate::rules::Places::of(
+                    shown
+                        .iter()
+                        .map(|&(_, _, f)| f)
+                        .filter(|f| o.matches(&f.file_name())),
+                )
+            })
+        })
+        .collect();
     let ctx_of = |index, folder_index, file| Ctx {
+        file,
         index,
         folder_index,
-        file,
+        pair_index: pairs.get(&file.path).map_or(index, |p| p[2]),
+        pair_folder_index: pairs.get(&file.path).map_or(folder_index, |p| p[3]),
+        step_places: Some(&step_places),
         now,
         // Each lookup names only its own kind of file.
         movie: view
@@ -1635,9 +1708,13 @@ pub fn preview(
         number_shots(&mut items, &photos, &photo_groups, &view.identical);
     }
 
+    let mut keys = PathKeys::default();
+    if view.number_clashes {
+        number_clashes(&mut items, &mut keys, view);
+    }
+
     // Repeated targets within the batch. A file that keeps its name is not
     // flagged: the one moving onto it is, as "exists", below.
-    let mut keys = PathKeys::default();
     let mut targets: HashMap<PathBuf, Vec<usize>> = HashMap::new();
     for (i, item) in items.iter().enumerate() {
         if item.status == Status::Ok {
@@ -2062,6 +2139,7 @@ mod tests {
     fn replace(find: &str, with: &str) -> Vec<Step> {
         vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Replace {
                 find: find.into(),
                 replace: with.into(),
@@ -2070,6 +2148,73 @@ mod tests {
                 target: Target::Name,
             },
         }]
+    }
+
+    fn names_of(p: &Preview) -> Vec<String> {
+        p.items.iter().map(|i| i.new_name.clone()).collect()
+    }
+
+    #[test]
+    fn pairs_count_as_one_and_rules_only_on_some() {
+        let d = tempfile::tempdir().unwrap();
+        let files = entries(
+            d.path(),
+            &["a.mkv", "a.pt-BR.srt", "b.mkv", "b.srt", "c.jpg", "c.CR2.xmp", "d.mkv", "d-thumb.jpg", "d.nfo"],
+        );
+        let number = |pairs| Step {
+            enabled: true,
+            only: String::new(),
+            rule: Rule::Number {
+                template: "Ep {n}".into(),
+                start: 1,
+                step: 1,
+                digits: 1,
+                per_folder: false,
+                pairs,
+            },
+        };
+        let p = preview(&files, &[number(true)], &HashMap::new(), &View::default());
+        assert_eq!(
+            names_of(&p),
+            ["Ep 1.mkv", "Ep 1.pt-BR.srt", "Ep 2.mkv", "Ep 2.srt", "Ep 3.jpg", "Ep 3.CR2.xmp", "Ep 4.mkv", "Ep 4-thumb.jpg", "Ep 4.nfo"]
+        );
+        let p = preview(&files, &[number(false)], &HashMap::new(), &View::default());
+        assert_eq!(names_of(&p)[1], "Ep 2.srt");
+        // A rule for some files only: the others pass it by.
+        let mut only = replace("a", "x");
+        only[0].only = "srt".into();
+        let p = preview(&files, &only, &HashMap::new(), &View::default());
+        assert_eq!(names_of(&p)[..2], ["a.mkv", "x.pt-BR.srt"]);
+        // Counted among the files it takes.
+        let mut videos = vec![number(false)];
+        videos[0].only = "mkv".into();
+        let p = preview(&files, &videos, &HashMap::new(), &View::default());
+        assert_eq!(names_of(&p)[..4], ["Ep 1.mkv", "a.pt-BR.srt", "Ep 2.mkv", "b.srt"]);
+    }
+
+    #[test]
+    fn clashing_names_numbered_when_asked() {
+        let d = tempfile::tempdir().unwrap();
+        let files = entries(d.path(), &["x1.txt", "x2.txt", "x3.txt"]);
+        fs::write(d.path().join("Nota.txt"), "").unwrap();
+        let steps = vec![Step {
+            enabled: true,
+            only: String::new(),
+            rule: Rule::List {
+                names: "Nota\nNota\nOutra".into(),
+                pairs: false,
+            },
+        }];
+        let p = preview(&files, &steps, &HashMap::new(), &View::default());
+        assert!(p.items[..2].iter().all(|i| i.status == Status::Conflict));
+        let view = View {
+            number_clashes: true,
+            ..View::default()
+        };
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        // `Nota.txt` is on the disk already, and stays.
+        assert_eq!(names_of(&p), ["Nota (2).txt", "Nota (3).txt", "Outra.txt"]);
+        assert!(p.items.iter().all(|i| i.status == Status::Ok));
     }
 
     #[test]
@@ -2093,6 +2238,7 @@ mod tests {
             .collect();
         let steps = vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Subtitle {
                 to_srt: true,
                 utf8: true,
@@ -2143,6 +2289,7 @@ mod tests {
         );
         let steps = vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Photo {
                 template: "{ano}-{mês}-{dia} {hora}.{minuto}.{segundo}".into(),
                 from_name: true,
@@ -2388,6 +2535,7 @@ mod tests {
     fn replace_digits() -> Vec<Step> {
         vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Regex {
                 pattern: r"\d".into(),
                 replace: "".into(),
@@ -2508,12 +2656,14 @@ mod tests {
         let files = entries(d.path(), &["a.jpg", "b.txt", "c.jpg"]);
         let steps = vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Number {
                 template: "{n}".into(),
                 start: 1,
                 step: 1,
                 digits: 1,
                 per_folder: false,
+                pairs: false,
             },
         }];
         let view = View {
@@ -2536,12 +2686,14 @@ mod tests {
         files.extend(entries(&d.path().join("y"), &["c"]));
         let steps = vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Number {
                 template: "{folder}-{n}".into(),
                 start: 1,
                 step: 1,
                 digits: 1,
                 per_folder: true,
+                pairs: false,
             },
         }];
         let p = preview(&files, &steps, &HashMap::new(), &View::default());
@@ -2561,6 +2713,7 @@ mod tests {
         };
         let steps = vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Movie {
                 template: "{title} ({year})".into(),
                 colon: " - ".into(),
@@ -2621,6 +2774,7 @@ mod tests {
         };
         let steps = vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Movie {
                 template: "{title} ({year}) [tmdbid-{id}]".into(),
                 colon: " - ".into(),
@@ -2673,6 +2827,7 @@ mod tests {
         };
         let steps = vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Movie {
                 template: "{title} ({year})< - {resolution}>".into(),
                 colon: " - ".into(),
@@ -2714,6 +2869,7 @@ mod tests {
         fs::create_dir_all(&out).unwrap();
         let steps = vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Movie {
                 template: "{title} ({year})".into(),
                 colon: " - ".into(),
@@ -2821,6 +2977,7 @@ mod tests {
         let steps = vec![
             Step {
                 enabled: true,
+                only: String::new(),
                 rule: Rule::Replace {
                     find: "b".into(),
                     replace: "B".into(),
@@ -2831,6 +2988,7 @@ mod tests {
             },
             Step {
                 enabled: true,
+                only: String::new(),
                 rule: Rule::Movie {
                     template: "{title} ({year})".into(),
                     colon: " - ".into(),
@@ -2868,6 +3026,7 @@ mod tests {
         });
         let swap = vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Replace {
                 find: "a".into(),
                 replace: "b".into(),
@@ -2896,6 +3055,7 @@ mod tests {
         };
         let steps = vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Book {
                 template: "{author} - {title} ({year})".into(),
                 colon: " - ".into(),
@@ -2957,6 +3117,7 @@ mod tests {
         };
         let steps = vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Series {
                 template: "{show} - S{season}E{episode} - {title}".into(),
                 colon: " - ".into(),
@@ -3010,6 +3171,7 @@ mod tests {
         };
         let steps = vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Series {
                 template: "{show} - S{season}E{episode}".into(),
                 colon: " - ".into(),
@@ -3042,6 +3204,7 @@ mod tests {
     fn series_steps() -> Vec<Step> {
         vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Series {
                 template: "{show} - S{season}E{episode}".into(),
                 colon: " - ".into(),
@@ -3193,6 +3356,7 @@ mod tests {
         .files;
         let steps = vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Music {
                 template: "{track} - {title}".into(),
                 colon: " - ".into(),
@@ -3297,6 +3461,7 @@ mod tests {
         let files = crate::scan(&[d.path().to_path_buf()], &opts, &Default::default()).files;
         let steps = vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Music {
                 template: "{track} - {title}".into(),
                 colon: " - ".into(),
@@ -3345,6 +3510,7 @@ mod tests {
         };
         let steps = vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Movie {
                 template: "{title} ({year})".into(),
                 colon: " - ".into(),
@@ -3440,6 +3606,7 @@ mod tests {
         };
         let steps = vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Movie {
                 template: "{title} ({year})".into(),
                 colon: " - ".into(),
@@ -3571,6 +3738,7 @@ mod tests {
                 .collect();
         let steps = vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Music {
                 template: "{track} - {title}".into(),
                 colon: " - ".into(),
@@ -3623,6 +3791,7 @@ mod tests {
         );
         let steps = vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Book {
                 template: "{title}".into(),
                 colon: " - ".into(),
@@ -3688,6 +3857,7 @@ mod tests {
         let files = crate::scan(&[d.path().to_path_buf()], &opts, &Default::default()).files;
         let steps = vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Music {
                 template: "{title}".into(),
                 colon: " - ".into(),
@@ -3746,6 +3916,7 @@ mod tests {
         let comic = |convert| {
             vec![Step {
                 enabled: true,
+                only: String::new(),
                 rule: Rule::Comic {
                     template: "{series} {number}".into(),
                     colon: " - ".into(),
@@ -3820,6 +3991,7 @@ mod tests {
         }
         let steps = vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Comic {
                 template: "{series} {number}".into(),
                 colon: " - ".into(),

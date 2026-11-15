@@ -86,6 +86,12 @@ asks before replacing), open one in place of the current rules, rename
 By default rules act on the name without the extension; text rules can
 optionally act only on the extension or on the full name.
 
+Each text rule (not the rules by kind of file) has an "Only on files"
+filter (`Step::only`, the list filter's syntax: `srt`, `*.mkv`,
+`-trailer`), matched against the file's current name on disk: files it
+does not take pass that rule by unchanged. An invalid one is the rule's
+error (`invalidFilter`).
+
 The lookup rules (movie, TV show, book, comic) read and look up the name
 the rules above the first of them make, not the name on disk: a
 "Replace text" above the comic rule turns an abbreviation into the series
@@ -97,10 +103,10 @@ before it is read. The preview sends that name to the app
 | Replace text | find, replace with, case-sensitive, first occurrence only |
 | Regular expression | pattern, replacement (`$1`, `${name}`), case-sensitive, first occurrence only |
 | Rearrange parts | separator; new order using part numbers and text (`1 - 3 - 2`); the parts of a sample file are shown and can be clicked to build the order. Parts are trimmed; parts left out are removed; names with fewer parts are unchanged |
-| Names from a list | the names typed or pasted, one per line, given in the table's order to the files shown (blank lines skipped; more files than names: the rest unchanged); a button, while the box is empty, fills it with the names in the table (without extensions) to edit. The extension stays; a line ending with the file's own extension does not repeat it. Below the card: names for files |
+| Names from a list | the names typed or pasted, one per line, given in the table's order to the files shown (blank lines skipped; more files than names: the rest unchanged); a button, while the box is empty, fills it with the names in the table (without extensions) to edit. The extension stays; a line ending with the file's own extension does not repeat it. Below the card: names for files; with `pairs` (as in Number) a video and its subtitles take one line, the fill-in button lists them once, and the count is of such groups |
 | Case | lowercase; UPPERCASE; Sentence case; Title Case; Title Case except connectives (of, the, de, da…; a part after ` - `, `:`, `(`, `.` starts capitalized). Title Case keeps Roman numerals II–XXXIX in capitals (lowercase `vi`/`xi` are words) and leaves words with inner capitals (`iPhone`, `McDonald`) as they are; words to keep as written (comma-separated, typed in any case, empty by default): whole words matching one keep the case they had in the name, in every mode |
 | Insert | text, current date, file modification date, date the photo was taken (EXIF; optionally the modification date when missing, otherwise the name is unchanged) or the name of the folder the file is in; configurable date format; at the start, at the end or at a position (from the start or the end) |
-| Number | template with `{n}` (number), `{name}` (current name) and `{folder}` (folder name); start, step, minimum digits (zero padding); optionally restart in each folder |
+| Number | template with `{n}` (number), `{name}` (current name) and `{folder}` (folder name); start, step, minimum digits (zero padding); optionally restart in each folder; "same name with another extension counts as one" (`pairs`, on in rules added from now, off in saved ones): files of a folder with one name before the extension count once (`Ctx::pair_index`/`pair_folder_index`), a subtitle without its language, an edit without its photo's extension and a media server's picture without its kind (`-thumb`, `-poster`, `-fanart`, `-landscape`, `-banner`, `-clearlogo`, `-logo`, `-clearart`, `-disc`, `-backdrop` on JPEG/PNG/WebP/TBN) (`rules::pair_split`); those keep that part after the new name (`Ep 1.pt-BR.srt`, `Ep 1.CR2.xmp`, `Ep 1-thumb.jpg`) |
 | Remove | spaces; repeated/leading/trailing spaces; accents (also letters written apart from their base: `ø` → `o`, `ß` → `ss`, `æ` → `ae`, `ł` → `l`, `đ`/`ð` → `d`, `þ` → `th`, `œ` → `oe`, `ı` → `i`, `ħ` → `h`); digits; custom characters; the number at the start (up to three digits, an optional `1-` disc before it, and the separator after it: `01 - `, `01. `, `1-05 `; years, dates and a name that is only the number stay); a maximum length in characters (cut at the end, without spaces, dashes, dots or commas left there; 0: no limit) |
 | Convert characters | fix broken accents: each run of non-ASCII characters is turned back into the Windows-1252/Latin-1 bytes it was read as and, when those are UTF-8, decoded (up to 3 times, for text broken more than once; `SÃ£o` → `São`, `â€™` → `’`); text that does not decode stays; other alphabets in Latin letters: Cyrillic (Russian, Ukrainian, Belarusian, Serbian, Macedonian letters; `щ` → `shch`, `ъ`/`ь` dropped) and Greek (accents dropped, `ου` → `ou`), a capital as `Sh`, or `SH` inside a word in capitals; a web-safe name: the name in plain Latin letters (as above and with the accents rule's letters), then only ASCII letters, digits and dots, every other run of characters becoming one `-` or `_` (the user's choice), none at the ends; split words run together: a space before a capital after a lowercase letter, or before the last capital of a run followed by a lowercase letter (`HTMLParser` → `HTML Parser`), digits stay with their word; applied before the web-safe name |
 | Remove range | from: position N or first occurrence of a text; to: end, position N or occurrence of a text; include the delimiters or not |
@@ -1772,6 +1778,28 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   change date (the copy); the taken date cannot be recovered, and the
   manual points to filtering by `WA`, "Set the date", turning the name
   source off, or asking for the photo to be sent as a document.
+- Place keys `{city}`/`{cidade}`/`{ciudad}`, `{state}`/`{estado}`,
+  `{country}`/`{país}` (`photos::names_place`; looked up only when the name
+  or folder template has one): the EXIF GPS position (`photos::gps`,
+  degrees-minutes-seconds with N/S/E/W; zeros are no fix), or a phone
+  video's ISO 6709 decimal position (`video::iso6709`, from Apple's
+  `com.apple.quicktime.location.ISO6709` key or `moov/udta/©xyz`; not
+  MTS/M2TS/AVI or action cameras' GPMF) goes to `geo::nearest`. Data: `crates/renome-core/data/places.tsv.gz`
+  (2.6 MB, embedded), made by `scripts/places.js` from GeoNames `cities500`
+  (places of 500 people or more) and `admin1CodesASCII` (CC BY 4.0,
+  credited in About), countries named in Portuguese, English and Spanish
+  by CLDR (Node's `Intl.DisplayNames`); historical, abandoned and
+  destroyed places left out; a city's sections (PPLX) and towns named
+  after it plus more (`Paris 16 Passy`) take its name, and in Brazil,
+  Portugal and Japan every place of a municipality (second level) takes
+  its main town's (a town lacking that level takes its nearest
+  neighbour's); positions are deltas within each country/state group.
+  Lookup: a one-degree grid, rings until the next cannot hold better; the
+  score is the distance divided by the fourth root of the population (a
+  big city's outskirts go to it, a village's centre still wins nearby);
+  none beyond 150 km. The country is named in the UI's language
+  (`View::lang`). Nothing is sent anywhere. Empty keys tidy away like
+  `{camera}`.
 - "Set the date (N selected)" (photo rule card): for the photos and
   videos the rule reads selected in the list, a window with day, month,
   year and optional hour and minute (`DetailsEdit.svelte`; empty start
@@ -2035,7 +2063,11 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   then the folders: shared roots and folder levels unified, a show's, a
   movie's, a comic series', a book's and (with music folders) an album's
   own folder found, collections kept, songs' companion files following
-  them; then the checks: names, repeated targets, characters the target
+  them; then, with the option "If two files end up with the same name,
+  add (2), (3)…" (off by default; `View::number_clashes`), each later file
+  whose target is another's or a file that stays gets ` (n)` before its
+  extension, the first free n (identical copies left to be flagged);
+  then the checks: names, repeated targets, characters the target
   disk refuses, targets that exist; last, the old folders that keep
   files.
 - Rename: the renames (written down first, two phases, deepest first),

@@ -66,6 +66,8 @@ export const en: Section[] = [
   <li>An online search (movie, TV show, music, book, comic) can be stopped with <b>Stop</b>, in the progress box. What was found stays, and searching again goes on with the rest. The request under way finishes first, which can take a few seconds.</li>
   <li><b>Pasting a link</b>: when the search by name does not find the right one, paste the link to its page in the catalogue into the search field of the choice window, and that very item comes. Movie: TMDB or IMDb link, or the <code>tt…</code> code. TV show: TMDB id or link, IMDb link, or AniList id/link. Book: an ISBN or the Open Library link. Album (in the album field): the release's MusicBrainz or Discogs link. Comic: the series' link in the catalogue the rule uses (Comic Vine, also an issue's; GCD; MangaDex; AniList; MangaUpdates). Limitations: on Metron only the address with the series' number works (not the one with its name); a link from a catalogue other than the rule's is refused; a number alone is read as a title (only for TV shows is it an id).</li>
 </ul>
+<h4>Only on files</h4>
+<p>At the end of each text rule (replace, number, case, list…) there is the <b>Only on files</b> field. Empty, the rule applies to all files. With something typed, as in the list's filter (<code>srt</code>, <code>*.mkv</code>, <code>holiday</code>, <code>-trailer</code>), it only acts on the files whose current name matches; the others pass it by unchanged. Example: case only on subtitles, with <code>srt</code>. The rules by kind of file (movie, TV show, music…) don't have the field, since they already pick their files.</p>
 <h4>Apply to</h4>
 <p>Several rules ask where to act:</p>
 <ul>
@@ -136,11 +138,13 @@ ${ex("Show - Episode - S01E02.mkv", "Show - S01E02 - Episode.mkv")}
 <p>Gives each file a name from a list you type or paste. Useful when no database has the work, or has it wrong: copy the list of episodes or tracks from a website and apply it at once.</p>
 <ul>
   <li>One name per line: the 1st line goes to the 1st file in the table, the 2nd to the 2nd, and so on. The table's current order counts (arrange it first, by clicking the columns or moving files), and only the files the filter shows. Blank lines don't count.</li>
+  <li><b>Same name with another extension counts as one</b> (on in new rules): a video and its subtitles, or a photo and its RAW, take a single line and get the same name; each keeps its extension, a subtitle its language (<code>Name.en.srt</code>) and an edit its photo's extension (<code>Name.CR2.xmp</code>).</li>
   <li><b>Fill in with the current names</b> (shown while the box is empty): puts the names in the table into the box, in its order. Then just edit the ones that should change; those left as they are don't change.</li>
 </ul>
 ${ex("File 01.mkv", "First Episode.mkv")}
 <p>Each file keeps its extension. If the line ends with the file's own extension (<code>First Episode.mkv</code>), it isn't repeated. Below the card you see how many names there are for how many files; with fewer names, the last files stay as they are.</p>
-<p><b>Limitations</b>: one file more or less in the table shifts every name after it; check the preview before renaming. With subtitles next to the videos, each subtitle is also a file in the order; use the filter (for example, <code>mkv</code>) to keep only the videos.</p>`,
+<p>With <b>Only on files</b> filled in, the order counts only the files that match; then the fill-in button goes and the card shows only how many names there are.</p>
+<p><b>Limitations</b>: one file more or less in the table shifts every name after it; check the preview before renaming. With subtitles next to the videos, turn on <b>Same name with another extension counts as one</b>, or type <code>mkv</code> in <b>Only on files</b>.</p>`,
   },
   {
     id: "r-case",
@@ -206,6 +210,7 @@ ${ex("beach.jpg", "Trip 01.jpg")}
   <li><b>Start</b> and <b>Step</b>: 1 and 1 give 1, 2, 3…; 10 and 10 give 10, 20, 30…; a negative step counts down.</li>
   <li><b>Digits</b>: pads with zeros on the left (2 digits: 01, 02… 10).</li>
   <li><b>Restart numbering in each folder</b>: each folder starts over.</li>
+  <li><b>Same name with another extension counts as one</b> (on in new rules): in the same folder, <code>movie.mkv</code> and its subtitles (<code>movie.srt</code>, <code>movie.en.srt</code>), or a photo with its RAW and edits (<code>IMG_1.jpg</code>, <code>IMG_1.CR2</code>, <code>IMG_1.CR2.xmp</code>), get the same number. So do the <code>.nfo</code> and the pictures Jellyfin, Plex and Kodi keep beside the video (<code>movie-thumb.jpg</code>, <code>-poster</code>, <code>-fanart</code>…). A subtitle keeps its language, a picture its <code>-thumb</code> and an edit its photo's extension.</li>
 </ul>
 <p>Numbering follows the list order and counts only the files visible in the filter. When sorting by New name, it follows the current name order. To control the order, sort by another column or use ⤒ ⤓.</p>`,
   },
@@ -749,6 +754,9 @@ ${ex("IMG-20190513-WA0001.jpg", "2019-05-13.jpg")}
 <p>When a photo's date is wrong or missing (a photo received through WhatsApp loses the date it was taken and only keeps, in its name, the day it arrived), select the photos and videos in the list and click <b>Set the date</b> in the rule. Type day, month and year and, if you like, hour and minute. The typed date counts over every other: the file is named by it, goes to that date's folder and, with <b>Set the file date</b>, gets it as its modified date. Without a time, each photo keeps the time it had (from inside it or its name), or none. With several selected, all of them get the fields you change. Clearing every field goes back to the file's date. The mark in the list says <b>Date typed by hand</b>. Limitations: the date is not written inside the photo (in the EXIF), only in its name, folder and modified date; it lasts while the program is open and the files are in the list; <b>Clear</b> forgets it.</p>
 <h4>Template</h4>
 <p>Use <code>{year}</code>, <code>{month}</code>, <code>{day}</code>, <code>{hour}</code>, <code>{minute}</code>, <code>{second}</code>, <code>{date}</code> (2019-05-12), <code>{month name}</code>, <code>{camera}</code> (make and model, like <code>Apple iPhone 12</code>), <code>{width}</code>, <code>{height}</code> and <code>{name}</code> (the current name). The ready templates give <code>2019-05-12 14.30.22</code>, <code>20190512_143022</code>, with the camera in brackets, or the date before the current name. What is left empty (a time not known, a camera the photo does not tell) goes, with the separators and brackets around it.</p>
+<h4>Where the photo was taken</h4>
+<p><code>{city}</code>, <code>{state}</code> and <code>{country}</code> say where the photo was taken, from the GPS position stored in it (phones store it when location is on, in photos and videos). They work in the name and in the folders: <code>{year}/{country}/{city}</code>, <code>{year}-{month}-{day} - {city}</code>. The place comes from a list of the world's cities kept inside Renome (GeoNames, places of 500 people or more): <b>nothing is sent to the internet</b>. The country comes in the program's language; the city and state as GeoNames writes them (usually in the country's language or in English: <code>São Paulo</code>, <code>Munich</code>, <code>State of Berlin</code>). A photo without GPS leaves them empty; the marks around them go, as with <code>{camera}</code>.</p>
+<p><b>Limitations</b>: it is the nearest city, weighed by size (an outlying district of a big city gets the city, not the small town next to it), not a map with borders. Near a border, the photo may land in the town next door. In Brazil, Portugal and Japan districts give the municipality's name; elsewhere, a large district may show instead of the city (<code>Brooklyn</code>, <code>Manhattan</code>). Far from any place (over 150 km, at sea), it stays empty. Photos only: videos' positions are not read.</p>
 <h4>Files that go together</h4>
 <p>In one folder, files with the <b>same name before the extension</b> are one photo and get the same new name: the JPEG and the RAW (<code>IMG_0001.JPG</code> and <code>IMG_0001.CR2</code>), the edits (<code>IMG_0001.xmp</code>, <code>IMG_0001.CR2.xmp</code>, the iPhone's <code>.AAE</code>) and a Live Photo's photo and video (<code>IMG_0001.HEIC</code> and <code>IMG_0001.MOV</code>). The date is that of the file that has it inside (the photo before the RAW and the video).</p>
 <h4>Photos of the same second</h4>
@@ -769,7 +777,8 @@ ${ex("IMG-20190513-WA0001.jpg", "2019-05-13.jpg")}
   <li>Two different files with one name and different extensions in one folder (<code>photo.jpg</code> and <code>photo.png</code>) are taken as one photo.</li>
   <li>With folders by date, a photo in a subfolder (<code>Photos/Trip</code>) leaves it for the date's folder.</li>
   <li><b>Set the file date</b> applies only to files renamed or moved; one already named right is not touched. The creation date is not changed.</li>
-  <li>Nothing is written inside the photos, and where they were taken (GPS) is not used.</li>
+  <li>Nothing is written inside the photos.</li>
+  <li>A video's place is read only from phones' MP4 and MOV files (iPhone and Android). Camera videos (MTS, M2TS, AVI) and action cameras, which store the position another way, get no place.</li>
 </ul>`,
   },
   {
@@ -971,6 +980,7 @@ ${ex("Show.S01E02.720p.WEB.mkv", "Show S01E02.mkv")}
   <li><b>Remember rules when closing the app</b>.</li>
   <li><b>Include hidden files when adding folders</b>.</li>
   <li><b>Ask for confirmation before renaming</b>.</li>
+  <li><b>If two files end up with the same name, add (2), (3)…</b> (off by default): instead of both showing as a problem and not being renamed, the first keeps the name and the others get <code> (2)</code>, <code> (3)</code>… before the extension. It also applies to a name another file in the folder already has and keeps. Identical copies found by <b>Identical files</b> are still marked as copies.</li>
   <li><b>Turn rules off after renaming</b>.</li>
   <li><b>Warn about names Windows does not accept</b>: characters such as <code>:</code> and <code>?</code>, a dot or space at the end, and reserved names such as <code>CON</code> and <code>NUL</code>. Useful for files headed to Windows. On a USB stick or disk formatted for Windows (FAT, exFAT), such names are not accepted at all: there they are an error, with or without this option.</li>
   <li><b>Online searches: keep the answers for</b> 1 day, 7 days (the default), 30 days, 6 months, or do not keep. The answers of TMDB, MusicBrainz, AcoustID, Discogs, Open Library, the Grand Comics Database, Comic Vine, Metron, MangaDex, AniList and MangaUpdates are kept on disk; looking up the same files again is instant and does not use up the services' limits (the GCD without an account takes only about 30 requests an hour). TMDB allows keeping them up to 6 months only, AniList's are kept 7 days at most (its terms do not allow making a copy of its data) and Discogs' last only 6 hours, whatever the choice. Keys and passwords are not kept with them. <b>Clear</b> deletes them all and shows how much they take. Limitation: a show still airing, a comic series still running or a fix made in a catalogue shows up only after the kept answer expires; to see it now, clear.</li>

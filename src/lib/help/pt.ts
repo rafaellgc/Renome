@@ -66,6 +66,8 @@ export const pt: Section[] = [
   <li>Uma busca na internet (filme, série, música, livro, quadrinho) pode ser interrompida com <b>Parar</b>, no quadro de progresso. O que já foi encontrado fica, e buscar de novo continua com o resto. A consulta em andamento termina antes, o que pode levar alguns segundos.</li>
   <li><b>Colar um link</b>: quando a busca por nome não acha o certo, cole no campo de busca da janela de escolha o link da página no catálogo, e vem exatamente aquele item. Filme: link do TMDB ou do IMDb, ou o código <code>tt…</code>. Série: ID ou link do TMDB, link do IMDb, ou ID/link do AniList. Livro: um ISBN ou o link do Open Library. Álbum (no campo do álbum): link do lançamento no MusicBrainz ou no Discogs. Quadrinho: link da série no catálogo escolhido na regra (Comic Vine, também de uma edição; GCD; MangaDex; AniList; MangaUpdates). Limitações: no Metron, só o endereço com o número da série serve (o com o nome, não); um link de outro catálogo que não o da regra é recusado; um número sozinho é lido como título (só na série vale como ID).</li>
 </ul>
+<h4>Só nos arquivos</h4>
+<p>No fim de cada regra de texto (substituir, numerar, maiúsculas, lista…) há o campo <b>Só nos arquivos</b>. Vazio, a regra vale para todos. Com algo escrito, do mesmo jeito que no filtro da lista (<code>srt</code>, <code>*.mkv</code>, <code>férias</code>, <code>-trailer</code>), ela só age nos arquivos cujo nome atual combina; os outros passam por ela sem mudar. Exemplo: maiúsculas só nas legendas, com <code>srt</code>. As regras por tipo de arquivo (filme, série, música…) não têm o campo, porque já escolhem os arquivos delas.</p>
 <h4>Aplicar em</h4>
 <p>Várias regras perguntam onde agir:</p>
 <ul>
@@ -136,11 +138,13 @@ ${ex("Série - Episódio - S01E02.mkv", "Série - S01E02 - Episódio.mkv")}
 <p>Dá a cada arquivo um nome de uma lista que você digita ou cola. Serve quando nenhuma base de dados tem a obra, ou tem errado: copie a lista de episódios ou faixas de um site e aplique de uma vez.</p>
 <ul>
   <li>Um nome por linha: a 1ª linha vai para o 1º arquivo da tabela, a 2ª para o 2º, e assim por diante. Vale a ordem em que a tabela está agora (arrume antes, clicando nas colunas ou movendo os arquivos) e só os arquivos visíveis com o filtro. Linhas em branco não contam.</li>
+  <li><b>Mesmo nome com outra extensão conta como um só</b> (ligado nas regras novas): um vídeo e suas legendas, ou uma foto e seu RAW, ocupam uma linha só e recebem o mesmo nome; cada um fica com a sua extensão, a legenda com o idioma (<code>Nome.pt-BR.srt</code>) e a edição com a extensão da foto (<code>Nome.CR2.xmp</code>).</li>
   <li><b>Preencher com os nomes atuais</b> (aparece com a caixa vazia): põe na caixa os nomes que estão na tabela, na ordem dela. Depois é só editar os que devem mudar; os que ficarem iguais não mudam.</li>
 </ul>
 ${ex("Arquivo 01.mkv", "Primeiro Episódio.mkv")}
 <p>A extensão de cada arquivo fica. Se a linha terminar com a mesma extensão do arquivo (<code>Primeiro Episódio.mkv</code>), ela não é repetida. Abaixo do card aparece quantos nomes há para quantos arquivos; com menos nomes, os últimos arquivos ficam como estão.</p>
-<p><b>Limitações</b>: um arquivo a mais ou a menos na tabela desloca todos os nomes seguintes; confira a prévia antes de renomear. Com legendas ao lado dos vídeos, cada legenda também conta como um arquivo na ordem; use o filtro (por exemplo, <code>mkv</code>) para ficar só com os vídeos.</p>`,
+<p>Com <b>Só nos arquivos</b> preenchido, a ordem conta só os arquivos que combinam; aí o botão de preencher some e o card mostra só quantos nomes há.</p>
+<p><b>Limitações</b>: um arquivo a mais ou a menos na tabela desloca todos os nomes seguintes; confira a prévia antes de renomear. Com legendas ao lado dos vídeos, ligue <b>Mesmo nome com outra extensão conta como um só</b>, ou escreva <code>mkv</code> em <b>Só nos arquivos</b>.</p>`,
   },
   {
     id: "r-case",
@@ -206,6 +210,7 @@ ${ex("praia.jpg", "Viagem 01.jpg")}
   <li><b>Início</b> e <b>Passo</b>: 1 e 1 dão 1, 2, 3…; 10 e 10 dão 10, 20, 30…; passo negativo conta para trás.</li>
   <li><b>Dígitos</b>: completa com zeros à esquerda (2 dígitos: 01, 02… 10).</li>
   <li><b>Recomeçar a numeração em cada pasta</b>: cada pasta começa do início.</li>
+  <li><b>Mesmo nome com outra extensão conta como um só</b> (ligado nas regras novas): na mesma pasta, <code>filme.mkv</code> e suas legendas (<code>filme.srt</code>, <code>filme.pt-BR.srt</code>), ou uma foto e seu RAW e suas edições (<code>IMG_1.jpg</code>, <code>IMG_1.CR2</code>, <code>IMG_1.CR2.xmp</code>), recebem o mesmo número. Também andam juntos o <code>.nfo</code> e as imagens que Jellyfin, Plex e Kodi guardam ao lado do vídeo (<code>filme-thumb.jpg</code>, <code>-poster</code>, <code>-fanart</code>…). A legenda mantém o idioma, a imagem o <code>-thumb</code> e a edição a extensão da foto.</li>
 </ul>
 <p>A numeração segue a ordem da lista e conta só os arquivos visíveis no filtro. Na ordem por Novo nome, segue a ordem do nome atual. Para controlar a ordem, ordene por outra coluna ou use ⤒ ⤓.</p>`,
   },
@@ -749,6 +754,9 @@ ${ex("IMG-20190513-WA0001.jpg", "2019-05-13.jpg")}
 <p>Quando a data de uma foto está errada ou falta (uma foto recebida pelo WhatsApp perde a data em que foi tirada e só guarda, no nome, o dia em que chegou), selecione as fotos e vídeos na lista e clique em <b>Definir a data</b>, na regra. Digite dia, mês e ano e, se quiser, hora e minuto. A data digitada vale mais que todas as outras: o arquivo é nomeado, vai para a pasta dessa data e, com <b>Acertar a data do arquivo</b>, fica com ela como data de modificação. Sem hora, cada foto fica com a hora que já tinha (de dentro dela ou do nome), ou sem hora. Com várias selecionadas, todas recebem os campos que você mudar. Apagar todos os campos volta à data do arquivo. A marca na lista diz <b>Data digitada à mão</b>. Limitações: a data não é gravada dentro da foto (no EXIF), só no nome, na pasta e na data de modificação; vale enquanto o programa estiver aberto e os arquivos na lista; <b>Limpar</b> a esquece.</p>
 <h4>Modelo</h4>
 <p>Use <code>{ano}</code>, <code>{mês}</code>, <code>{dia}</code>, <code>{hora}</code>, <code>{minuto}</code>, <code>{segundo}</code>, <code>{data}</code> (2019-05-12), <code>{nome do mês}</code>, <code>{câmera}</code> (marca e modelo, como <code>Apple iPhone 12</code>), <code>{largura}</code>, <code>{altura}</code> e <code>{nome}</code> (o nome atual). Os modelos prontos dão <code>2019-05-12 14.30.22</code>, <code>20190512_143022</code>, com a câmera entre parênteses, ou a data antes do nome atual. O que fica vazio (uma hora que não se sabe, uma câmera que a foto não diz) some junto com os separadores e parênteses em volta.</p>
+<h4>Onde a foto foi tirada</h4>
+<p><code>{cidade}</code>, <code>{estado}</code> e <code>{país}</code> dizem onde a foto foi tirada, pela posição de GPS gravada nela (celulares gravam quando a localização está ligada, nas fotos e nos vídeos). Servem no nome e nas pastas: <code>{ano}/{país}/{cidade}</code>, <code>{ano}-{mês}-{dia} - {cidade}</code>. O lugar vem de uma lista de cidades do mundo que vai dentro do Renome (a GeoNames, de lugares com 500 habitantes ou mais): <b>nada é enviado para a internet</b>. O país sai no idioma do programa; a cidade e o estado, como a GeoNames os escreve (em geral, no idioma do país ou em inglês: <code>São Paulo</code>, <code>Munich</code>, <code>State of Berlin</code>). Uma foto sem GPS fica com eles vazios; os sinais em volta somem, como com <code>{câmera}</code>.</p>
+<p><b>Limitações</b>: é a cidade mais próxima, pesada pelo tamanho (um bairro afastado de uma cidade grande fica com a cidade, não com a vizinha pequena), e não um mapa com as divisas. Perto de uma divisa, a foto pode cair na cidade ao lado. No Brasil, em Portugal e no Japão os bairros e distritos dão o nome do município; em outros países, um bairro grande pode aparecer no lugar da cidade (<code>Brooklyn</code>, <code>Manhattan</code>). Longe de qualquer lugar (mais de 150 km, no mar), fica vazio. Só fotos: a posição dos vídeos não é lida.</p>
 <h4>Arquivos que andam juntos</h4>
 <p>Na mesma pasta, os arquivos com o <b>mesmo nome antes da extensão</b> são uma foto só e recebem o mesmo nome novo: o JPEG e o RAW (<code>IMG_0001.JPG</code> e <code>IMG_0001.CR2</code>), as edições (<code>IMG_0001.xmp</code>, <code>IMG_0001.CR2.xmp</code>, o <code>.AAE</code> do iPhone) e a foto e o vídeo de uma Live Photo (<code>IMG_0001.HEIC</code> e <code>IMG_0001.MOV</code>). A data é a do arquivo que a tem dentro (a foto antes do RAW e do vídeo).</p>
 <h4>Fotos do mesmo segundo</h4>
@@ -769,7 +777,8 @@ ${ex("IMG-20190513-WA0001.jpg", "2019-05-13.jpg")}
   <li>Dois arquivos diferentes com o mesmo nome e extensões diferentes na mesma pasta (<code>foto.jpg</code> e <code>foto.png</code>) são tratados como uma foto só.</li>
   <li>Com pastas por data, uma foto que estava numa subpasta (<code>Fotos/Viagem</code>) sai dela para a pasta da data.</li>
   <li><b>Acertar a data do arquivo</b> vale só para os arquivos renomeados ou movidos; um que já tem o nome certo não é tocado. A data de criação não é alterada.</li>
-  <li>Nada é gravado dentro das fotos, e o lugar onde foram tiradas (GPS) não é usado.</li>
+  <li>Nada é gravado dentro das fotos.</li>
+  <li>O lugar de um vídeo só é lido nos MP4 e MOV de celular (iPhone e Android). Vídeos de câmeras (MTS, M2TS, AVI) e de câmeras de ação, que guardam a posição de outro jeito, ficam sem lugar.</li>
 </ul>`,
   },
   {
@@ -971,6 +980,7 @@ ${ex("Serie.S01E02.720p.WEB.mkv", "Serie S01E02.mkv")}
   <li><b>Lembrar as regras ao fechar o programa</b>.</li>
   <li><b>Incluir arquivos ocultos ao adicionar pastas</b>.</li>
   <li><b>Pedir confirmação antes de renomear</b>.</li>
+  <li><b>Se dois arquivos ficarem com o mesmo nome, acrescentar (2), (3)…</b> (desligado por padrão): em vez de os dois aparecerem como problema e não serem renomeados, o primeiro fica com o nome e os outros ganham <code> (2)</code>, <code> (3)</code>… antes da extensão. Vale também para um nome que outro arquivo da pasta já tem e mantém. Cópias idênticas achadas por <b>Arquivos idênticos</b> continuam marcadas como cópias.</li>
   <li><b>Desligar as regras depois de renomear</b>.</li>
   <li><b>Avisar sobre nomes que o Windows não aceita</b>: caracteres como <code>:</code> e <code>?</code>, ponto ou espaço no fim, e nomes reservados como <code>CON</code> e <code>NUL</code>. Útil para arquivos que vão para o Windows. Num pendrive ou disco formatado para Windows (FAT, exFAT), esses nomes não são aceitos de jeito nenhum: lá eles são erro, com ou sem esta opção.</li>
   <li><b>Buscas online: guardar as respostas por</b> 1 dia, 7 dias (o padrão), 30 dias, 6 meses, ou não guardar. As respostas do TMDB, MusicBrainz, AcoustID, Discogs, Open Library, Grand Comics Database, Comic Vine, Metron, MangaDex, AniList e MangaUpdates ficam guardadas no disco; buscar de novo os mesmos arquivos fica instantâneo e não gasta os limites dos serviços (o GCD sem conta aceita só umas 30 consultas por hora). O TMDB só permite guardar por até 6 meses, as do AniList ficam no máximo 7 dias (os termos dele não deixam fazer uma cópia dos dados) e as do Discogs valem só 6 horas, qualquer que seja a escolha. As chaves e senhas não vão junto. O botão <b>Limpar</b> apaga tudo e mostra quanto ocupa. Limitação: uma série ainda em exibição, uma série de quadrinhos em andamento ou uma correção feita no catálogo só aparecem depois que a resposta guardada vence; para ver logo, limpe.</li>

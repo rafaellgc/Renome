@@ -19,6 +19,8 @@ export interface Settings {
   disableRulesAfterApply: boolean;
   warnWindows: boolean;
   rememberRules: boolean;
+  /** Two files given the same name: number the later ones. */
+  numberClashes: boolean;
   /** TMDB API key or read access token (empty: not set up). */
   tmdbKey: string;
   /** Language of TMDB titles; empty follows the interface. */
@@ -62,6 +64,7 @@ const DEFAULTS: Settings = {
   disableRulesAfterApply: true,
   warnWindows: true,
   rememberRules: true,
+  numberClashes: false,
   tmdbKey: "",
   tmdbLang: "",
   comicVineKey: "",

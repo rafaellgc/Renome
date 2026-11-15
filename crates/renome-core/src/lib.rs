@@ -45,6 +45,7 @@ pub mod extras;
 pub mod fields;
 pub mod files;
 pub mod filter;
+pub mod geo;
 pub mod fingerprint;
 pub mod identical;
 pub mod inside;

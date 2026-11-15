@@ -256,6 +256,10 @@
         <span>{t("confirmApply")}</span>
       </label>
       <label class="check">
+        <input type="checkbox" bind:checked={settings.numberClashes} />
+        <span>{t("numberClashes")}<small>{t("numberClashesHint")}</small></span>
+      </label>
+      <label class="check">
         <input type="checkbox" bind:checked={settings.disableRulesAfterApply} />
         <span>{t("disableAfterApply")}<small>{t("disableAfterApplyHint")}</small></span>
       </label>

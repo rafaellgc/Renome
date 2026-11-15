@@ -35,7 +35,7 @@
   import ShowPicker from "$lib/ShowPicker.svelte";
   import SubtitleReview from "$lib/SubtitleReview.svelte";
   import { LOCALES, MOD, t, tError, type Key } from "$lib/i18n";
-  import { RULE_TYPES, blockedBy, isKindRule, oneLookup, isAudio, isBook, isComic, isScreen, isTaggableVideo, isVideo, listNames, newRule, newStep, splitExt } from "$lib/rules";
+  import { RULE_TYPES, blockedBy, isKindRule, oneLookup, isAudio, isBook, isComic, isScreen, isTaggableVideo, isVideo, listNames, newRule, newStep, pairBase, splitExt } from "$lib/rules";
   import { SECRET_FIELDS, loadSecrets, loadSettings, saveSecrets, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
     ApplyReport, Copies, MovieStatus, HistoryEntry, OpError, Preview, PreviewItem, Rule, RuleType, Step, View, ViewSort,
@@ -327,7 +327,7 @@
     return out;
   });
 
-  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, alikeOnly, similarOnly, movies: movies.matches, episodes: tv.matches, songs: music.matches, books: books.matches, comics: comics.matches, dates: photos.dates, leftoverSuffix: t("leftoverSuffix"), sendTo });
+  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, alikeOnly, similarOnly, movies: movies.matches, episodes: tv.matches, songs: music.matches, books: books.matches, comics: comics.matches, dates: photos.dates, leftoverSuffix: t("leftoverSuffix"), lang: settings.lang, numberClashes: settings.numberClashes, sendTo });
   /** Example name for rule cards: the first file in natural name order, so
    *  it does not jump around while the preview re-sorts. */
   const collator = new Intl.Collator(undefined, { numeric: true });
@@ -369,6 +369,19 @@
 
   /** The names in the table, without extensions, for the list rule. */
   const currentNames = $derived(preview.items.map((i) => (i.isDir ? i.original : splitExt(i.original)[0])));
+  /** The same, files of one name with other extensions (a video and its
+   *  subtitles) once, as the list rule counts them with "pairs". */
+  const currentPairs = $derived.by(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const i of preview.items) {
+      const base = i.isDir ? i.original : pairBase(i.original);
+      if (seen.has(base.toLowerCase())) continue;
+      seen.add(base.toLowerCase());
+      out.push(base);
+    }
+    return out;
+  });
 
   function ruleError(i: number) {
     const e = preview.ruleErrors.find((e) => e.index === i);
@@ -577,7 +590,10 @@
 
   function addRule(type: RuleType) {
     if (blockedBy(steps, type)) return;
-    steps.push(newStep(newRule(type)));
+    const rule = newRule(type);
+    // New ones count a video and its subtitles as one (saved ones as they were).
+    if (rule.type === "number" || rule.type === "list") rule.pairs = true;
+    steps.push(newStep(rule));
     ruleMenu = false;
   }
 
@@ -1625,9 +1641,11 @@
               : step.rule.type === "photo" && step.enabled && undatedCount
                 ? t("photoUndatedN", { n: undatedCount })
                 : step.rule.type === "list" && step.rule.names.trim()
-                  ? t("listCountN", { names: listNames(step.rule.names).length, files: preview.items.length })
+                  ? step.only?.trim()
+                    ? t("listOrderN", { n: listNames(step.rule.names).length })
+                    : t("listCountN", { names: listNames(step.rule.names).length, files: (step.rule.pairs ? currentPairs : currentNames).length })
                   : null}
-            currentNames={step.rule.type === "list" ? currentNames : []}
+            currentNames={step.rule.type === "list" && !step.only?.trim() ? (step.rule.pairs ? currentPairs : currentNames) : []}
           />
         {:else}
           <p class="empty">{t("emptyRules")}</p>

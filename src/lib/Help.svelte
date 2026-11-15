@@ -44,7 +44,7 @@
   const DONATE = "https://ko-fi.com/rafaellgc";
 
   /** The services the lookups use, credited as their terms ask. */
-  const SOURCES: { key: "sourcesMusic" | "sourcesBooks" | "sourcesComics" | "sourcesSubs"; items: { name: string; url: string; note?: "gcdLicense" | "acoustidTerms" | "discogsNotice" }[] }[] = [
+  const SOURCES: { key: "sourcesMusic" | "sourcesBooks" | "sourcesComics" | "sourcesSubs" | "sourcesPlaces"; items: { name: string; url: string; note?: "gcdLicense" | "acoustidTerms" | "discogsNotice" | "geonamesLicense" }[] }[] = [
     {
       key: "sourcesMusic",
       items: [
@@ -80,6 +80,10 @@
         { name: "SubDL", url: "https://subdl.com" },
         { name: "SubSource", url: "https://subsource.net" },
       ],
+    },
+    {
+      key: "sourcesPlaces",
+      items: [{ name: "GeoNames", url: "https://www.geonames.org", note: "geonamesLicense" }],
     },
   ];
 

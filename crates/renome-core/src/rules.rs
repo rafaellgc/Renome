@@ -2,7 +2,8 @@
 //! the [`Pipeline`] compiles the list and applies the rules in order.
 
 use std::borrow::Cow;
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use chrono::format::{Item, StrftimeItems};
@@ -24,6 +25,10 @@ pub struct Step {
     #[serde(default = "yes")]
     pub enabled: bool,
     pub rule: Rule,
+    /// Only the files whose names this filter takes (as the list's
+    /// filter: `srt`, `*.mkv`, `-trailer`); empty: all.
+    #[serde(default)]
+    pub only: String,
 }
 
 fn yes() -> bool {
@@ -158,6 +163,10 @@ pub enum Rule {
         /// Restarts the numbering in each folder.
         #[serde(default)]
         per_folder: bool,
+        /// Files of one name with other extensions (`a.mkv`, `a.srt`)
+        /// count as one.
+        #[serde(default)]
+        pairs: bool,
     },
     Remove {
         #[serde(default)]
@@ -242,7 +251,12 @@ pub enum Rule {
     },
     /// New names typed or pasted, one per line, in the list's order. The
     /// extension stays.
-    List { names: String },
+    List {
+        names: String,
+        /// Files of one name with other extensions count as one.
+        #[serde(default)]
+        pairs: bool,
+    },
     /// Names the file after the movie chosen for it on TMDB (files without
     /// one are left alone). The search itself happens outside the rules.
     Movie {
@@ -595,6 +609,10 @@ pub struct Ctx<'a> {
     pub index: usize,
     /// Position among the files of the same folder.
     pub folder_index: usize,
+    /// Like `index` and `folder_index`, files of one name with other
+    /// extensions (`a.mkv`, `a.srt`, `a.pt-BR.srt`) counting as one.
+    pub pair_index: usize,
+    pub pair_folder_index: usize,
     pub file: &'a FileEntry,
     pub now: DateTime<Local>,
     /// The movie chosen for this file, for the movie rule.
@@ -619,6 +637,41 @@ pub struct Ctx<'a> {
     pub as_folder: bool,
     /// What the photo rule names this file by (its photo's date).
     pub photo: Option<&'a crate::photos::Named>,
+    /// For each step with its own filter ([`Step::only`]), the places of
+    /// the files it takes among themselves.
+    pub step_places: Option<&'a [Option<Places>]>,
+}
+
+/// Where each file is in a list: `[index, folder_index, pair_index,
+/// pair_folder_index]` (see [`Ctx`]).
+#[derive(Debug, Default)]
+pub struct Places(HashMap<PathBuf, [usize; 4]>);
+
+impl Places {
+    pub fn of<'f>(files: impl Iterator<Item = &'f FileEntry>) -> Self {
+        let mut out = HashMap::new();
+        let mut folder: HashMap<&Path, usize> = HashMap::new();
+        let mut seen: HashMap<(&Path, String), (usize, usize)> = HashMap::new();
+        let mut pair_folder: HashMap<&Path, usize> = HashMap::new();
+        for (index, f) in files.enumerate() {
+            let n = folder.entry(&f.dir).or_default();
+            *n += 1;
+            let at = *n - 1;
+            let next = seen.len();
+            let base = pair_split(f).0.to_lowercase();
+            let pair = *seen.entry((f.dir.as_path(), base)).or_insert_with(|| {
+                let n = pair_folder.entry(&f.dir).or_default();
+                *n += 1;
+                (next, *n - 1)
+            });
+            out.insert(f.path.clone(), [index, at, pair.0, pair.1]);
+        }
+        Self(out)
+    }
+
+    pub fn get(&self, path: &Path) -> Option<[usize; 4]> {
+        self.0.get(path).copied()
+    }
 }
 
 enum Compiled {
@@ -629,7 +682,7 @@ enum Compiled {
         first_only: bool,
         target: Target,
     },
-    List(Vec<String>),
+    List(Vec<String>, bool),
     Plain(Rule),
 }
 
@@ -647,6 +700,8 @@ impl Compiled {
 
 pub struct Pipeline {
     steps: Vec<Compiled>,
+    /// Each step's own filter (see [`Step::only`]).
+    only: Vec<Option<crate::filter::Filter>>,
     pub errors: Vec<RuleError>,
 }
 
@@ -729,12 +784,35 @@ impl Pipeline {
 
     /// Compiles the enabled rules. Invalid rules are skipped and reported in
     /// `errors`, so the preview keeps working while the user is typing.
+    /// Each step's own filter, in order (as `Ctx::step_places`).
+    pub fn filters(&self) -> impl Iterator<Item = Option<&crate::filter::Filter>> {
+        self.only.iter().map(Option::as_ref)
+    }
+
     pub fn new(steps: &[Step]) -> Self {
         let mut compiled = Vec::new();
+        let mut only = Vec::new();
         let mut errors = Vec::new();
         for (index, step) in steps.iter().enumerate().filter(|(_, s)| s.enabled) {
+            let filter = match step.only.trim() {
+                "" => None,
+                text => match crate::filter::Filter::new(text) {
+                    Ok(f) => Some(f),
+                    Err(e) => {
+                        errors.push(RuleError {
+                            index,
+                            code: "invalidFilter",
+                            detail: e,
+                        });
+                        continue;
+                    }
+                },
+            };
             match compile(&step.rule) {
-                Ok(Some(c)) => compiled.push(c),
+                Ok(Some(c)) => {
+                    compiled.push(c);
+                    only.push(filter);
+                }
                 Ok(None) => {}
                 Err((code, detail)) => errors.push(RuleError {
                     index,
@@ -745,6 +823,7 @@ impl Pipeline {
         }
         Self {
             steps: compiled,
+            only,
             errors,
         }
     }
@@ -760,16 +839,21 @@ impl Pipeline {
     pub fn photos(&self) -> Option<(crate::photos::Options, bool)> {
         self.steps.iter().find_map(|s| match s {
             Compiled::Plain(Rule::Photo {
+                template,
                 from_name,
                 modified,
                 shift_hours,
+                folders,
+                folder_template,
                 set_modified,
-                ..
             }) => Some((
                 crate::photos::Options {
                     from_name: *from_name,
                     modified: *modified,
                     shift_hours: *shift_hours,
+                    places: crate::photos::names_place(template)
+                        || (*folders && crate::photos::names_place(folder_template)),
+                    lang: crate::geo::Lang::default(),
                 },
                 *set_modified,
             )),
@@ -814,10 +898,30 @@ impl Pipeline {
         let mut moved = None;
         let mut stem = ctx.file.stem.clone();
         let mut ext = ctx.file.ext.clone();
-        for step in &self.steps {
+        let name = ctx.file.file_name();
+        let all = *ctx;
+        for (i, (step, only)) in self.steps.iter().zip(&self.only).enumerate() {
             if to_lookup && step.is_lookup() {
                 break;
             }
+            if only.as_ref().is_some_and(|f| !f.matches(&name)) {
+                continue;
+            }
+            // Counted among the files the step takes.
+            let own = only
+                .as_ref()
+                .and(all.step_places)
+                .and_then(|p| p.get(i)?.as_ref()?.get(&all.file.path));
+            let ctx = &match own {
+                Some([index, folder_index, pair_index, pair_folder_index]) => Ctx {
+                    index,
+                    folder_index,
+                    pair_index,
+                    pair_folder_index,
+                    ..all
+                },
+                None => all,
+            };
             match step {
                 Compiled::Replace {
                     re,
@@ -835,9 +939,11 @@ impl Pipeline {
                         }
                     });
                 }
-                Compiled::List(names) => {
-                    if let Some(new) = names.get(ctx.index) {
-                        stem = list_name(new, &ext);
+                Compiled::List(names, pairs) => {
+                    let index = if *pairs { ctx.pair_index } else { ctx.index };
+                    if let Some(new) = names.get(index) {
+                        let kept = if *pairs { pair_split(ctx.file).1 } else { "" };
+                        stem = list_name(new, &ext) + kept;
                     }
                 }
                 Compiled::Plain(rule) => {
@@ -996,14 +1102,14 @@ fn compile(rule: &Rule) -> Result<Option<Compiled>, (&'static str, String)> {
             validate_date_format(date_format)?;
             return Ok(Some(Compiled::Plain(rule.clone())));
         }
-        Rule::List { names } => {
+        Rule::List { names, pairs } => {
             let names: Vec<String> = names
                 .lines()
                 .map(str::trim)
                 .filter(|l| !l.is_empty())
                 .map(String::from)
                 .collect();
-            return Ok((!names.is_empty()).then_some(Compiled::List(names)));
+            return Ok((!names.is_empty()).then_some(Compiled::List(names, *pairs)));
         }
         _ => return Ok(Some(Compiled::Plain(rule.clone()))),
     };
@@ -1019,6 +1125,33 @@ fn compile(rule: &Rule) -> Result<Option<Compiled>, (&'static str, String)> {
         target,
     }))
 }
+
+/// A file's name apart from its extension, for files counted as one, and
+/// what follows it: a subtitle's language (`a.pt-BR.srt`: `a`, `.pt-BR`),
+/// an edit's photo extension (`a.CR2.xmp`: `a`, `.CR2`), a picture's kind
+/// (`a-thumb.jpg`: `a`, `-thumb`).
+pub fn pair_split(f: &FileEntry) -> (&str, &str) {
+    let cut = if crate::tmdb::is_subtitle(&f.ext) {
+        f.stem.len() - crate::tmdb::subtitle_suffix(&f.stem, &f.ext).len()
+    } else if crate::photos::is_sidecar(&f.ext) {
+        crate::files::split_name(&f.stem).0.len()
+    } else if ARTWORK_EXT.iter().any(|e| f.ext.eq_ignore_ascii_case(e))
+        && let Some((base, kind)) = f.stem.rsplit_once('-')
+        && ARTWORK.iter().any(|k| kind.eq_ignore_ascii_case(k))
+    {
+        base.len()
+    } else {
+        f.stem.len()
+    };
+    f.stem.split_at(cut)
+}
+
+/// A video's pictures as media servers name them (`Episode-thumb.jpg`).
+const ARTWORK: [&str; 10] = [
+    "thumb", "poster", "fanart", "landscape", "banner", "clearlogo", "logo", "clearart",
+    "disc", "backdrop",
+];
+const ARTWORK_EXT: [&str; 5] = ["jpg", "jpeg", "png", "webp", "tbn"];
 
 /// A new name from a list, without the file's own extension if the line
 /// has it.
@@ -1118,21 +1251,25 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             step,
             digits,
             per_folder,
+            pairs,
         } => {
-            let index = if *per_folder {
-                ctx.folder_index
-            } else {
-                ctx.index
+            let index = match (*per_folder, *pairs) {
+                (false, false) => ctx.index,
+                (true, false) => ctx.folder_index,
+                (false, true) => ctx.pair_index,
+                (true, true) => ctx.pair_folder_index,
             };
             let n = start.saturating_add(step.saturating_mul(index as i64));
             let num = format!("{n:0digits$}");
             let folder = folder_name(ctx.file);
+            let kept = if *pairs { pair_split(ctx.file).1 } else { "" };
+            let name = stem.strip_suffix(kept).unwrap_or(stem).to_string();
             *stem = expand(template, |key| match key {
                 "n" => Some(num.as_str()),
-                "name" | "nome" | "nombre" => Some(stem.as_str()),
+                "name" | "nome" | "nombre" => Some(name.as_str()),
                 "folder" | "pasta" | "carpeta" => Some(folder.as_str()),
                 _ => None,
-            });
+            }) + kept;
         }
 
         Rule::Remove {
@@ -1790,6 +1927,7 @@ mod tests {
             .into_iter()
             .map(|rule| Step {
                 enabled: true,
+                only: String::new(),
                 rule,
             })
             .collect();
@@ -1802,6 +1940,9 @@ mod tests {
         let (s, e) = p.run(&Ctx {
             index,
             folder_index: index,
+            pair_index: index,
+            pair_folder_index: index,
+            step_places: None,
             file: f,
             now: Local::now(),
             movie: None,
@@ -1957,6 +2098,7 @@ mod tests {
     fn invalid_regex_reported() {
         let steps = vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Regex {
                 pattern: "(".into(),
                 replace: "".into(),
@@ -1976,6 +2118,7 @@ mod tests {
             step: 2,
             digits: 3,
             per_folder: false,
+            pairs: false,
         };
         assert_eq!(run(vec![r()], "foto.jpg", 0), "foto - 001.jpg");
         assert_eq!(run(vec![r()], "foto.jpg", 4), "foto - 009.jpg");
@@ -2036,6 +2179,7 @@ mod tests {
             |p: &std::path::Path| FileEntry::from_path(p, &std::fs::metadata(p).unwrap()).unwrap();
         let rule = Pipeline::new(&[Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Extension {
                 mode: ExtMode::Content,
                 value: String::new(),
@@ -2074,6 +2218,7 @@ mod tests {
         let taken = |fallback| {
             Pipeline::new(&[Step {
                 enabled: true,
+                only: String::new(),
                 rule: Rule::Insert {
                     source: InsertSource::Taken,
                     text: String::new(),
@@ -2102,6 +2247,7 @@ mod tests {
             step: 1,
             digits: 2,
             per_folder: false,
+            pairs: false,
         };
         // `{n}` inside the current name is not expanded again; unknown keys stay.
         assert_eq!(run(vec![r], "a{n}.txt", 0), "tmp 01 {x} a{n}.txt");
@@ -2123,6 +2269,7 @@ mod tests {
         let p = Pipeline::new(&[
             Step {
                 enabled: true,
+                only: String::new(),
                 rule: Rule::Extension {
                     mode: ExtMode::Set,
                     value: "jpg".into(),
@@ -2130,6 +2277,7 @@ mod tests {
             },
             Step {
                 enabled: true,
+                only: String::new(),
                 rule: Rule::Replace {
                     find: "w.2".into(),
                     replace: "w (2".into(),
@@ -2140,6 +2288,7 @@ mod tests {
             },
             Step {
                 enabled: true,
+                only: String::new(),
                 rule: Rule::Insert {
                     source: InsertSource::Text,
                     text: ")".into(),
@@ -2157,6 +2306,7 @@ mod tests {
     fn bad_date_format_reported() {
         let steps = vec![Step {
             enabled: true,
+            only: String::new(),
             rule: Rule::Insert {
                 source: InsertSource::Now,
                 text: String::new(),
@@ -2225,6 +2375,7 @@ mod tests {
     fn names_from_a_list() {
         let list = Rule::List {
             names: "Primeiro\n\n  Segundo.mkv  \nTerceiro".into(),
+            pairs: false,
         };
         assert_eq!(run(vec![list.clone()], "a.mkv", 0), "Primeiro.mkv");
         // Blank lines skipped; the file's own extension not doubled.
@@ -2426,12 +2577,16 @@ mod tests {
     fn disabled_steps_skipped() {
         let steps = vec![Step {
             enabled: false,
+            only: String::new(),
             rule: replace("a", "b", false, false),
         }];
         let f = file("a.txt");
         let (s, _) = Pipeline::new(&steps).run(&Ctx {
             index: 0,
             folder_index: 0,
+            pair_index: 0,
+            pair_folder_index: 0,
+            step_places: None,
             file: &f,
             now: Local::now(),
             movie: None,

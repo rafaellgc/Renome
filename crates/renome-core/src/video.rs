@@ -523,12 +523,14 @@ fn mp4_info(moov: &[u8]) -> Option<VideoInfo> {
 /// When a phone's or camera's MP4 or QuickTime video was recorded, in the
 /// local time where it was (Apple's `creationdate`, which says it), else
 /// in this computer's time zone (the movie header's time, in UTC as the
-/// format wants); and the device (Apple's `make` and `model`).
+/// format wants); the device (Apple's `make` and `model`); and where
+/// (latitude, longitude), which iPhones and Android phones write.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Recorded {
     pub at: Option<chrono::NaiveDateTime>,
     pub make: String,
     pub model: String,
+    pub gps: Option<(f64, f64)>,
 }
 
 /// See [`Recorded`]; `None` for other formats.
@@ -605,11 +607,21 @@ fn recorded_in(moov: &[u8]) -> Option<Recorded> {
                             .ok()
                     });
                 }
+                "com.apple.quicktime.location.ISO6709" => {
+                    out.gps = out.gps.or_else(|| iso6709(&value));
+                }
                 "com.apple.quicktime.make" => out.make = value,
                 "com.apple.quicktime.model" => out.model = value,
                 _ => {}
             }
         }
+    }
+    // moov/udta/©xyz (Android phones, and iPhones too): the text's
+    // length, its language, then the text.
+    if out.gps.is_none()
+        && let Some(xyz) = child(moov, b"udta").and_then(|u| child(u, b"\xa9xyz"))
+    {
+        out.gps = xyz.get(4..).and_then(|t| iso6709(&String::from_utf8_lossy(t)));
     }
     if out.at.is_none()
         && let Some(mvhd) = child(moov, b"mvhd")
@@ -633,6 +645,36 @@ fn recorded_in(moov: &[u8]) -> Option<Recorded> {
         }
     }
     Some(out)
+}
+
+/// A position as ISO 6709 writes it in decimal degrees, as phones do:
+/// `+37.3318-122.0312+012.345/` (latitude, longitude, height). `None` with
+/// no fix (both zero) or in degrees and minutes.
+fn iso6709(text: &str) -> Option<(f64, f64)> {
+    let text = text.trim().trim_end_matches('\0');
+    let mut parts = Vec::new();
+    let mut start = 0;
+    for (i, c) in text.char_indices() {
+        if (c == '+' || c == '-' || c == '/') && i > start {
+            parts.push(&text[start..i]);
+            start = i;
+        }
+        if c == '/' {
+            break;
+        }
+    }
+    let number = |s: &&str| -> Option<f64> {
+        let digits = s.trim_start_matches(['+', '-']);
+        // Whole degrees: up to two digits of latitude, three of longitude.
+        if digits.split('.').next()?.len() > 3 {
+            return None;
+        }
+        s.parse::<f64>().ok().filter(|v| v.is_finite())
+    };
+    let lat = number(parts.first()?)?;
+    let lon = number(parts.get(1)?)?;
+    ((-90.0..=90.0).contains(&lat) && (-180.0..=180.0).contains(&lon) && (lat != 0.0 || lon != 0.0))
+        .then_some((lat, lon))
 }
 
 /// The `moov` box's content, found by the top-level headers: the media
@@ -882,11 +924,12 @@ mod tests {
         assert_eq!(recorded(&p).unwrap().at, Some(utc));
         // Apple's keys: the local time where it was, and the phone.
         let key = |name: &str| mp4_box(b"mdta", name.as_bytes());
-        let mut keys = vec![0, 0, 0, 0, 0, 0, 0, 3];
+        let mut keys = vec![0, 0, 0, 0, 0, 0, 0, 4];
         for k in [
             "com.apple.quicktime.make",
             "com.apple.quicktime.model",
             "com.apple.quicktime.creationdate",
+            "com.apple.quicktime.location.ISO6709",
         ] {
             keys.extend(key(k));
         }
@@ -899,6 +942,7 @@ mod tests {
             item(1, "Apple"),
             item(2, "iPhone 12"),
             item(3, "2019-05-12T11:30:22-0300"),
+            item(4, "-23.5505-046.6333+760.000/"),
         ]
         .concat();
         let meta = [
@@ -920,6 +964,29 @@ mod tests {
         let r = recorded(&p).unwrap();
         assert_eq!(r.at.unwrap().to_string(), "2019-05-12 11:30:22");
         assert_eq!((r.make.as_str(), r.model.as_str()), ("Apple", "iPhone 12"));
+        assert_eq!(r.gps, Some((-23.5505, -46.6333)));
+        // An Android phone's place: moov/udta/©xyz.
+        let mut xyz = vec![0, 17, 0x15, 0xc7];
+        xyz.extend_from_slice(b"+48.8584+002.2945/");
+        let android = [
+            mp4_box(b"ftyp", b"isom\0\0\0\0"),
+            mp4_box(
+                b"moov",
+                &[mp4_box(b"mvhd", &mvhd), mp4_box(b"udta", &mp4_box(b"\xa9xyz", &xyz))].concat(),
+            ),
+        ]
+        .concat();
+        let p = d.path().join("c.mp4");
+        std::fs::write(&p, &android).unwrap();
+        assert_eq!(recorded(&p).unwrap().gps, Some((48.8584, 2.2945)));
+    }
+
+    #[test]
+    fn iso6709_positions() {
+        assert_eq!(iso6709("+37.3318-122.0312/"), Some((37.3318, -122.0312)));
+        assert_eq!(iso6709("+00.0000+000.0000/"), None);
+        assert_eq!(iso6709("+4851.5-00217.7/"), None);
+        assert_eq!(iso6709(""), None);
     }
 
     #[test]

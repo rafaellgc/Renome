@@ -122,6 +122,17 @@ export const FPS_PAIRS: [number, number][] = [
 /** A list rule's names: its lines without blank ones (as the Rust core). */
 export const listNames = (text: string) => text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 
+/** A file's name apart from its extension, for files counted as one (as
+ *  the Rust core): a subtitle without its language (`a.pt-BR.srt`: `a`),
+ *  an edit without its photo's extension (`a.CR2.xmp`: `a`). */
+export function pairBase(name: string): string {
+  const [stem, ext] = splitExt(name);
+  if (SUBTITLE.has(ext.toLowerCase())) return stem.replace(/(?:\.(?:[a-z]{2,3}(?:[-_][a-z0-9]{2,4})?|forced|sdh|cc|hi))+$/i, "");
+  if (/^(xmp|aae)$/i.test(ext)) return splitExt(stem)[0];
+  if (/^(jpe?g|png|webp|tbn)$/i.test(ext)) return stem.replace(/-(thumb|poster|fanart|landscape|banner|clearlogo|logo|clearart|disc|backdrop)$/i, "");
+  return stem;
+}
+
 export function newRule(type: RuleType): Rule {
   switch (type) {
     case "replace":

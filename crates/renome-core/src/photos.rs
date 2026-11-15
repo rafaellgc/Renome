@@ -62,6 +62,9 @@ pub struct Inside {
     pub camera: String,
     pub width: u32,
     pub height: u32,
+    /// Where it was taken (latitude, longitude), from a photo's EXIF GPS or
+    /// what a phone writes in its video.
+    pub gps: Option<(f64, f64)>,
 }
 
 /// Reads [`Inside`]: EXIF from photos and raw files, the header from MP4
@@ -113,6 +116,7 @@ pub(crate) fn read_inside(file: &FileEntry) -> Option<Inside> {
             camera: camera(&rec.make, &rec.model),
             width,
             height,
+            gps: rec.gps,
         });
     }
     if !(is_photo(&file.ext) || is_raw(&file.ext)) {
@@ -145,6 +149,7 @@ pub(crate) fn read_inside(file: &FileEntry) -> Option<Inside> {
         };
         out.width = number(Tag::PixelXDimension);
         out.height = number(Tag::PixelYDimension);
+        out.gps = gps(&exif);
     }
     if (out.width == 0 || out.height == 0)
         && is_photo(&file.ext)
@@ -153,6 +158,33 @@ pub(crate) fn read_inside(file: &FileEntry) -> Option<Inside> {
         (out.width, out.height) = (w, h);
     }
     Some(out)
+}
+
+/// The GPS position in EXIF: degrees, minutes and seconds north or south,
+/// east or west.
+fn gps(exif: &exif::Exif) -> Option<(f64, f64)> {
+    use exif::{In, Tag, Value};
+    let degrees = |tag, side, negative: &[u8]| {
+        let Value::Rational(v) = &exif.get_field(tag, In::PRIMARY)?.value else {
+            return None;
+        };
+        let part = |i: usize| v.get(i).map_or(0.0, |r| r.to_f64());
+        let d = part(0) + part(1) / 60.0 + part(2) / 3600.0;
+        let sign = match &exif.get_field(side, In::PRIMARY)?.value {
+            Value::Ascii(a) => a.first().and_then(|s| s.first()).copied(),
+            _ => None,
+        };
+        let d = if sign.is_some_and(|c| negative.contains(&c)) {
+            -d
+        } else {
+            d
+        };
+        d.is_finite().then_some(d)
+    };
+    let lat = degrees(Tag::GPSLatitude, Tag::GPSLatitudeRef, b"Ss")?;
+    let lon = degrees(Tag::GPSLongitude, Tag::GPSLongitudeRef, b"Ww")?;
+    // No fix: cameras write zeros.
+    (lat != 0.0 || lon != 0.0).then_some((lat, lon))
 }
 
 /// `Canon EOS 80D`, `Apple iPhone 12`: the make before the model, unless
@@ -195,6 +227,9 @@ pub struct Shot {
     pub camera: String,
     pub width: u32,
     pub height: u32,
+    /// Where it was taken, when the template asks and it has a GPS
+    /// position (see [`crate::geo`]).
+    pub place: Option<crate::geo::Place>,
 }
 
 /// What the rule names a file by: its group's shot, and what of its own
@@ -216,7 +251,20 @@ pub struct Options {
     /// another time zone); not to the file's change date, nor to a name's
     /// day without a time.
     pub shift_hours: i32,
+    /// Looks up where photos were taken (the templates name the place).
+    pub places: bool,
+    /// The language countries are named in.
+    pub lang: crate::geo::Lang,
 }
+
+/// A template that names where the photo was taken.
+pub fn names_place(template: &str) -> bool {
+    PLACE_KEYS.iter().any(|k| template.contains(&format!("{{{k}}}")))
+}
+
+const PLACE_KEYS: [&str; 9] = [
+    "city", "cidade", "ciudad", "state", "estado", "country", "país", "pais", "region",
+];
 
 /// The date in a name: `IMG_20190512_143022`, `PXL_20190512_143022123`,
 /// `IMG-20190512-WA0001` (the day alone), `Screenshot_2019-05-12-14-30-22`,
@@ -284,6 +332,11 @@ pub fn shot(file: &FileEntry, opts: &Options) -> Option<Shot> {
     } else {
         return None;
     };
+    let place = opts
+        .places
+        .then_some(inside.gps)
+        .flatten()
+        .and_then(|(lat, lon)| crate::geo::nearest(lat, lon, opts.lang));
     Some(Shot {
         taken,
         has_time,
@@ -291,6 +344,7 @@ pub fn shot(file: &FileEntry, opts: &Options) -> Option<Shot> {
         camera: inside.camera,
         width: inside.width,
         height: inside.height,
+        place,
     })
 }
 
@@ -325,6 +379,7 @@ pub fn typed(file: &FileEntry, own: Option<Shot>, text: &str) -> Option<Shot> {
         camera: own.as_ref().map_or(inside.camera, |o| o.camera.clone()),
         width: own.as_ref().map_or(inside.width, |o| o.width),
         height: own.as_ref().map_or(inside.height, |o| o.height),
+        place: own.and_then(|o| o.place),
     })
 }
 
@@ -349,6 +404,12 @@ pub fn expand(template: &str, s: &Shot, name: &str, folder: bool) -> String {
     let (width, height) = (size(s.width), size(s.height));
     let camera = crate::tmdb::safe_title(&s.camera, " - ");
     let name = crate::tmdb::safe_text(name, " - ");
+    let place = s.place.clone().unwrap_or_default();
+    let (city, state, country) = (
+        crate::tmdb::safe_title(&place.city, " - "),
+        crate::tmdb::safe_title(&place.state, " - "),
+        crate::tmdb::safe_title(&place.country, " - "),
+    );
     let mut extra = crate::fields::Extra::new();
     crate::fields::add_ymd(
         &mut extra,
@@ -365,6 +426,9 @@ pub fn expand(template: &str, s: &Shot, name: &str, folder: bool) -> String {
         "width" | "largura" | "ancho" => Some(width.as_str()),
         "height" | "altura" | "alto" => Some(height.as_str()),
         "name" | "nome" | "nombre" => Some(name.as_str()),
+        "city" | "cidade" | "ciudad" => Some(city.as_str()),
+        "state" | "estado" | "region" => Some(state.as_str()),
+        "country" | "país" | "pais" => Some(country.as_str()),
         key => crate::fields::get(&extra, key),
     });
     let out = out.replace("()", "").replace("[]", "");
@@ -494,7 +558,54 @@ mod tests {
             camera: "Canon EOS 80D".into(),
             width: 6000,
             height: 4000,
+            place: None,
         }
+    }
+
+    #[test]
+    fn place_from_gps() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("IMG_0001.jpg");
+        std::fs::copy(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/gps.jpg"),
+            &p,
+        )
+        .unwrap();
+        let f = FileEntry::from_path(&p, &std::fs::metadata(&p).unwrap()).unwrap();
+        let (lat, lon) = f.photo_inside().unwrap().gps.unwrap();
+        assert!((lat + 23.536).abs() < 1e-3 && (lon + 46.456).abs() < 1e-3);
+        let opts = Options {
+            from_name: true,
+            modified: false,
+            shift_hours: 0,
+            places: true,
+            lang: crate::geo::Lang::Pt,
+        };
+        let s = shot(&f, &opts).unwrap();
+        assert_eq!(
+            expand("{ano}-{mês}-{dia} - {cidade} ({país})", &s, "", false),
+            "2024-07-14 - São Paulo (Brasil)"
+        );
+    }
+
+    #[test]
+    fn place_in_names_and_folders() {
+        let mut s = shot_at(2019, 5, 12, 14, 30, 22, true);
+        s.place = Some(crate::geo::Place {
+            city: "Cidade".into(),
+            state: "Estado".into(),
+            country: "País".into(),
+        });
+        assert_eq!(
+            expand("{ano}-{mês}-{dia} - {cidade}, {estado}", &s, "", false),
+            "2019-05-12 - Cidade, Estado"
+        );
+        assert_eq!(folders("{país}/{cidade}", &s), ["País", "Cidade"]);
+        // Without a place: the separators around it go.
+        s.place = None;
+        assert_eq!(expand("{ano}-{mês}-{dia} ({cidade})", &s, "", false), "2019-05-12");
+        assert!(folders("{ano}/{cidade}", &s) == ["2019"]);
+        assert!(names_place("{year}/{country}") && !names_place("{ano}/{mês}"));
     }
 
     #[test]
@@ -615,6 +726,8 @@ mod tests {
             from_name: true,
             modified: false,
             shift_hours: -3,
+            places: false,
+            lang: crate::geo::Lang::Pt,
         };
         let at = |name: &str| shot(&file(name), &opts).unwrap().taken.to_string();
         assert_eq!(at("IMG_20190512_013022.jpg"), "2019-05-11 22:30:22");

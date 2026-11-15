@@ -18,7 +18,7 @@ export type Rule =
       text: string; dateFormat: string; fallback: boolean;
       at: Anchor; position: number;
     }
-  | { type: "number"; template: string; start: number; step: number; digits: number; perFolder: boolean }
+  | { type: "number"; template: string; start: number; step: number; digits: number; perFolder: boolean; pairs?: boolean }
   | { type: "remove"; allSpaces: boolean; extraSpaces: boolean; accents: boolean; digits: boolean; chars: string; leadingNumber: boolean; maxLength: number; target: Target }
   | { type: "convert"; mojibake: boolean; latin: boolean; web: "" | "-" | "_"; splitWords?: boolean; target: Target }
   | {
@@ -30,7 +30,7 @@ export type Rule =
   | { type: "charAt"; position: number; fromEnd: boolean; onlyIf: string; caseSensitive: boolean; replace: string }
   | { type: "extension"; mode: "set" | "lower" | "upper" | "remove" | "content"; value: string }
   | { type: "rearrange"; separator: string; order: string; target: Target }
-  | { type: "list"; names: string }
+  | { type: "list"; names: string; pairs?: boolean }
   | {
       type: "movie"; template: string; colon: string; sidecar: boolean; fanart: boolean; folder: boolean; missing: boolean;
       /** Download subtitles in `subLangs` (`pt-BR, en`) with the rename. */
@@ -117,6 +117,8 @@ export interface Step {
   id: string;
   enabled: boolean;
   rule: Rule;
+  /** Only the files this filter takes (as the list's filter); empty: all. */
+  only?: string;
 }
 
 export type Status = "unchanged" | "ok" | "conflict";
@@ -212,6 +214,10 @@ export interface View {
   dates?: Record<string, string>;
   /** What a show's old folder is called after when files stay in it. */
   leftoverSuffix: string;
+  /** The UI's language: countries' names. */
+  lang?: string;
+  /** Clashing names get " (2)", " (3)"… */
+  numberClashes?: boolean;
   /** Another folder the files go to, moved or copied. */
   sendTo: { dir: string; copy: boolean } | null;
 }

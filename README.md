@@ -53,8 +53,10 @@ A built-in manual (F1) explains every rule with examples.
   you mark go to the Trash only when you confirm.
 - Photos: names photos, raw files, edits and phone videos by when they
   were taken (from the date inside the file, else the one in its name),
-  offline, with keys such as year, month, camera and size, and optionally
-  sorts them into `Year/Year-Month` folders. A photo's files (JPEG, raw,
+  offline, with keys such as year, month, camera, size and the city, state
+  and country where they were taken (from the GPS of photos and phone videos, looked up in a
+  list of the world's places kept inside the app, GeoNames; nothing is
+  sent anywhere), and optionally sorts them into `Year/Year-Month` folders. A photo's files (JPEG, raw,
   `.xmp`, Live Photo video) stay together; shots from the same second are
   numbered. Can also set each file's date to when it was taken (undone
   with the rename). Nothing is written inside the files.
