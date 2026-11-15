@@ -85,7 +85,7 @@
 
   /** Each rule's section, by rule type. */
   const RULE_OF: Record<string, RuleType> = {
-    "r-replace": "replace", "r-regex": "regex", "r-rearrange": "rearrange", "r-case": "case", "r-insert": "insert",
+    "r-replace": "replace", "r-regex": "regex", "r-rearrange": "rearrange", "r-list": "list", "r-case": "case", "r-insert": "insert",
     "r-number": "number", "r-remove": "remove", "r-convert": "convert", "r-range": "removeRange", "r-char": "charAt", "r-ext": "extension",
     "r-movie": "movie", "r-series": "series", "r-music": "music", "r-book": "book", "r-comic": "comic", "r-photo": "photo", "r-subtitle": "subtitle",
   };

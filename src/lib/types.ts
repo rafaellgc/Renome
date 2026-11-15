@@ -11,7 +11,7 @@ export type BookTarget = "" | "epub" | "azw3" | "fb2" | "pdf";
 export type Rule =
   | { type: "replace"; find: string; replace: string; caseSensitive: boolean; firstOnly: boolean; target: Target }
   | { type: "regex"; pattern: string; replace: string; caseSensitive: boolean; firstOnly: boolean; target: Target }
-  | { type: "case"; mode: CaseMode; target: Target }
+  | { type: "case"; mode: CaseMode; target: Target; keep?: string }
   | {
       type: "insert";
       source: "text" | "now" | "modified" | "taken" | "folder";
@@ -20,7 +20,7 @@ export type Rule =
     }
   | { type: "number"; template: string; start: number; step: number; digits: number; perFolder: boolean }
   | { type: "remove"; allSpaces: boolean; extraSpaces: boolean; accents: boolean; digits: boolean; chars: string; leadingNumber: boolean; maxLength: number; target: Target }
-  | { type: "convert"; mojibake: boolean; latin: boolean; web: "" | "-" | "_"; target: Target }
+  | { type: "convert"; mojibake: boolean; latin: boolean; web: "" | "-" | "_"; splitWords?: boolean; target: Target }
   | {
       type: "removeRange";
       from: Bound; fromPosition: number; fromText: string;
@@ -30,6 +30,7 @@ export type Rule =
   | { type: "charAt"; position: number; fromEnd: boolean; onlyIf: string; caseSensitive: boolean; replace: string }
   | { type: "extension"; mode: "set" | "lower" | "upper" | "remove" | "content"; value: string }
   | { type: "rearrange"; separator: string; order: string; target: Target }
+  | { type: "list"; names: string }
   | {
       type: "movie"; template: string; colon: string; sidecar: boolean; fanart: boolean; folder: boolean; missing: boolean;
       /** Download subtitles in `subLangs` (`pt-BR, en`) with the rename. */

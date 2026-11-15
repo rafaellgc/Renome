@@ -129,6 +129,20 @@ ${ex("Show - Episode - S01E02.mkv", "Show - S01E02 - Episode.mkv")}
 </ul>`,
   },
   {
+    id: "r-list",
+    title: "Names from a list",
+    sub: true,
+    html: `
+<p>Gives each file a name from a list you type or paste. Useful when no database has the work, or has it wrong: copy the list of episodes or tracks from a website and apply it at once.</p>
+<ul>
+  <li>One name per line: the 1st line goes to the 1st file in the table, the 2nd to the 2nd, and so on. The table's current order counts (arrange it first, by clicking the columns or moving files), and only the files the filter shows. Blank lines don't count.</li>
+  <li><b>Fill in with the current names</b> (shown while the box is empty): puts the names in the table into the box, in its order. Then just edit the ones that should change; those left as they are don't change.</li>
+</ul>
+${ex("File 01.mkv", "First Episode.mkv")}
+<p>Each file keeps its extension. If the line ends with the file's own extension (<code>First Episode.mkv</code>), it isn't repeated. Below the card you see how many names there are for how many files; with fewer names, the last files stay as they are.</p>
+<p><b>Limitations</b>: one file more or less in the table shifts every name after it; check the preview before renaming. With subtitles next to the videos, each subtitle is also a file in the order; use the filter (for example, <code>mkv</code>) to keep only the videos.</p>`,
+  },
+  {
     id: "r-case",
     title: "Upper / lower case",
     sub: true,
@@ -141,6 +155,7 @@ ${ex("Show - Episode - S01E02.mkv", "Show - S01E02 - Episode.mkv")}
   <li><b>Title Case, except of/the/and…</b>: → <code>A Day at the Beach</code>. Short linking words (of, the, and, to, in, de, da, del, la, y…) stay lowercase, except at the start of the name or of a part (after <code> - </code>, <code>:</code> or <code>(</code>).</li>
 </ul>
 <p>In both Title Case modes, Roman numerals stay in capitals (<code>Fase III</code>, <code>Part II</code>) and words with capitals inside stay as they are (<code>iPhone</code>, <code>McDonald's</code>).</p>
+<p><b>Keep as written</b> (in any mode): words, separated by commas, that stay exactly as they are in the name. Type them in any case: with <code>swat</code>, <b>lowercase</b> turns <code>SWAT Kats - S01E01</code> into <code>SWAT kats - s01e01</code>. Only whole words count (<code>swa</code> doesn't catch <code>SWAT</code>). It starts empty.</p>
 <p>Use "Apply to: Extension" to change only the extension.</p>`,
   },
   {
@@ -218,6 +233,7 @@ ${ex("beach.jpg", "Trip 01.jpg")}
 <ul>
   <li><b>Fix broken accents</b>: names made on one system and read with another encoding get their accents turned into pairs of signs: <code>CoraÃ§Ã£o</code>, <code>SÃ£o JoÃ£o</code>, <code>donâ€™t</code>. The option brings back the right text: <code>Coração</code>, <code>São João</code>, <code>don’t</code>. A name that is already right stays as it is.</li>
   <li><b>Other alphabets in Latin letters</b>: Cyrillic (Russian, Ukrainian, Serbian…) and Greek become Latin letters, as they are pronounced: <code>Кино</code> → <code>Kino</code>, <code>Щедрик</code> → <code>Shchedrik</code>, <code>Ελλάδα</code> → <code>Ellada</code>. The rest of the name stays the same. Japanese, Chinese, Arabic and other alphabets are not converted.</li>
+  <li><b>Split words run together</b>: puts a space before each capital that starts a new word: <code>MySummerTrip</code> → <code>My Summer Trip</code>, <code>HTMLForBeginners</code> → <code>HTML For Beginners</code>. Digits stay with their word (<code>S01E02</code> doesn't change). Names with capitals inside on purpose are split too (<code>McDonald</code> → <code>Mc Donald</code>, <code>iPhone</code> → <code>i Phone</code>); check the preview.</li>
   <li><b>Web-safe name</b>: keeps only letters without accents, digits and dots, with <code>-</code> or <code>_</code> between words: <code>Férias em São Paulo (2024)</code> → <code>Ferias-em-Sao-Paulo-2024</code>. For sending files to websites, FTP servers and old devices. It also converts Cyrillic and Greek; letters of other alphabets leave the name. If nothing is left, the name is empty and the list shows the error.</li>
 </ul>
 <p><b>Limitations</b>: it only fixes the most common fault (UTF-8 text read as Latin-1 or Windows-1252). Names whose accents became <code>?</code> or <code>�</code> lost the letter for good and cannot be fixed. A name that mixes right and broken letters in the same word may stay as it is.</p>

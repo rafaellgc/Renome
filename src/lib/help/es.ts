@@ -129,6 +129,20 @@ ${ex("Serie - Episodio - S01E02.mkv", "Serie - S01E02 - Episodio.mkv")}
 </ul>`,
   },
   {
+    id: "r-list",
+    title: "Nombres de una lista",
+    sub: true,
+    html: `
+<p>Da a cada archivo un nombre de una lista que usted escribe o pega. Sirve cuando ninguna base de datos tiene la obra, o la tiene mal: copie la lista de episodios o pistas de un sitio web y aplíquela de una vez.</p>
+<ul>
+  <li>Un nombre por línea: la 1.ª línea va al 1.er archivo de la tabla, la 2.ª al 2.º, y así sucesivamente. Cuenta el orden actual de la tabla (ordénela antes, con clic en las columnas o moviendo los archivos) y solo los archivos que muestra el filtro. Las líneas en blanco no cuentan.</li>
+  <li><b>Rellenar con los nombres actuales</b> (aparece con el cuadro vacío): pone en el cuadro los nombres de la tabla, en su orden. Luego basta con editar los que deben cambiar; los que quedan iguales no cambian.</li>
+</ul>
+${ex("Archivo 01.mkv", "Primer Episodio.mkv")}
+<p>Cada archivo conserva su extensión. Si la línea termina con la misma extensión del archivo (<code>Primer Episodio.mkv</code>), no se repite. Debajo de la tarjeta se ve cuántos nombres hay para cuántos archivos; con menos nombres, los últimos archivos no cambian.</p>
+<p><b>Limitaciones</b>: un archivo de más o de menos en la tabla desplaza todos los nombres siguientes; revise la vista previa antes de renombrar. Con subtítulos junto a los videos, cada subtítulo también cuenta como un archivo en el orden; use el filtro (por ejemplo, <code>mkv</code>) para quedarse solo con los videos.</p>`,
+  },
+  {
     id: "r-case",
     title: "Mayúsculas / minúsculas",
     sub: true,
@@ -141,6 +155,7 @@ ${ex("Serie - Episodio - S01E02.mkv", "Serie - S01E02 - Episodio.mkv")}
   <li><b>Cada Palabra, excepto de/la/y/of…</b>: → <code>Foto de la Playa</code>. Las palabras cortas de enlace (de, del, la, los, y, con, of, the, and, da, do…) quedan en minúsculas, salvo al inicio del nombre o de una parte (después de <code> - </code>, <code>:</code> o <code>(</code>).</li>
 </ul>
 <p>En los dos modos "Cada Palabra", los números romanos quedan en mayúsculas (<code>Fase III</code>, <code>Parte II</code>) y las palabras con mayúsculas en medio quedan como están (<code>iPhone</code>, <code>McDonald's</code>).</p>
+<p><b>Mantener como está escrito</b> (en cualquier modo): palabras, separadas por comas, que quedan exactamente como están en el nombre. Escríbalas en mayúsculas o minúsculas, da igual: con <code>swat</code>, <b>minúsculas</b> convierte <code>SWAT Kats - S01E01</code> en <code>SWAT kats - s01e01</code>. Solo cuenta la palabra entera (<code>swa</code> no toma <code>SWAT</code>). Empieza vacío.</p>
 <p>Use "Aplicar a: Extensión" para cambiar solo la extensión.</p>`,
   },
   {
@@ -218,6 +233,7 @@ ${ex("playa.jpg", "Viaje 01.jpg")}
 <ul>
   <li><b>Arreglar acentos rotos</b>: los nombres creados en un sistema y leídos con otra codificación quedan con los acentos cambiados por pares de signos: <code>CoraÃ§Ã£o</code>, <code>SÃ£o JoÃ£o</code>, <code>donâ€™t</code>. La opción devuelve el texto correcto: <code>Coração</code>, <code>São João</code>, <code>don’t</code>. Un nombre que ya está bien queda como está.</li>
   <li><b>Otros alfabetos en letras latinas</b>: el cirílico (ruso, ucraniano, serbio…) y el griego pasan a letras latinas, como se pronuncian: <code>Кино</code> → <code>Kino</code>, <code>Щедрик</code> → <code>Shchedrik</code>, <code>Ελλάδα</code> → <code>Ellada</code>. El resto del nombre queda igual. El japonés, el chino, el árabe y otros alfabetos no se convierten.</li>
+  <li><b>Separar palabras pegadas</b>: pone un espacio antes de cada mayúscula que empieza una palabra nueva: <code>MiViajeDeVerano</code> → <code>Mi Viaje De Verano</code>, <code>HTMLParaPrincipiantes</code> → <code>HTML Para Principiantes</code>. Los números quedan con su palabra (<code>S01E02</code> no cambia). Los nombres con mayúsculas en medio a propósito también se separan (<code>McDonald</code> → <code>Mc Donald</code>, <code>iPhone</code> → <code>i Phone</code>); revise la vista previa.</li>
   <li><b>Nombre seguro para internet</b>: deja solo letras sin acento, números y puntos, con <code>-</code> o <code>_</code> entre las palabras: <code>Férias em São Paulo (2024)</code> → <code>Ferias-em-Sao-Paulo-2024</code>. Sirve para enviar archivos a sitios web, servidores FTP y aparatos antiguos. También convierte el cirílico y el griego; las letras de otros alfabetos salen del nombre. Si no queda nada, el nombre queda vacío y la lista muestra el error.</li>
 </ul>
 <p><b>Limitaciones</b>: solo arregla el defecto más común (texto en UTF-8 leído como Latin-1 o Windows-1252). Los nombres cuyos acentos se volvieron <code>?</code> o <code>�</code> perdieron la letra para siempre y no tienen arreglo. Un nombre que mezcla letras correctas y rotas en la misma palabra puede quedar como está.</p>

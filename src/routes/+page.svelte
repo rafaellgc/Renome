@@ -35,7 +35,7 @@
   import ShowPicker from "$lib/ShowPicker.svelte";
   import SubtitleReview from "$lib/SubtitleReview.svelte";
   import { LOCALES, MOD, t, tError, type Key } from "$lib/i18n";
-  import { RULE_TYPES, blockedBy, isKindRule, oneLookup, isAudio, isBook, isComic, isScreen, isTaggableVideo, isVideo, newRule, newStep } from "$lib/rules";
+  import { RULE_TYPES, blockedBy, isKindRule, oneLookup, isAudio, isBook, isComic, isScreen, isTaggableVideo, isVideo, listNames, newRule, newStep, splitExt } from "$lib/rules";
   import { SECRET_FIELDS, loadSecrets, loadSettings, saveSecrets, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
     ApplyReport, Copies, MovieStatus, HistoryEntry, OpError, Preview, PreviewItem, Rule, RuleType, Step, View, ViewSort,
@@ -366,6 +366,9 @@
   const canMove = $derived(selected.size > 0 && sortKey !== "newName");
   /** The name the lookups read: what the rules above the lookup rule make of it. */
   const readName = (i: PreviewItem) => i.lookupName ?? i.original;
+
+  /** The names in the table, without extensions, for the list rule. */
+  const currentNames = $derived(preview.items.map((i) => (i.isDir ? i.original : splitExt(i.original)[0])));
 
   function ruleError(i: number) {
     const e = preview.ruleErrors.find((e) => e.index === i);
@@ -1621,7 +1624,10 @@
               ? t(step.rule.listen ? "musicUntaggedListenN" : "musicUntaggedN", { n: music.untagged })
               : step.rule.type === "photo" && step.enabled && undatedCount
                 ? t("photoUndatedN", { n: undatedCount })
-                : null}
+                : step.rule.type === "list" && step.rule.names.trim()
+                  ? t("listCountN", { names: listNames(step.rule.names).length, files: preview.items.length })
+                  : null}
+            currentNames={step.rule.type === "list" ? currentNames : []}
           />
         {:else}
           <p class="empty">{t("emptyRules")}</p>

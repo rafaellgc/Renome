@@ -386,6 +386,56 @@ pub fn title_case(s: &str, keep_connectives: bool) -> String {
     out
 }
 
+/// `changed` (what a case change made of `before`) with the words of
+/// `list` (separated by commas or spaces, in any case) written again as
+/// they were in `before`: with `swat`, `SWAT Kats` made lower case stays
+/// `SWAT kats`. Only whole words.
+pub fn keep_words(before: &str, changed: &str, list: &str) -> String {
+    let words: Vec<String> = list
+        .split(|c: char| c == ',' || c == ';' || c.is_whitespace())
+        .filter(|w| !w.is_empty())
+        .map(str::to_lowercase)
+        .collect();
+    if words.is_empty() {
+        return changed.to_string();
+    }
+    let old = tokens(before);
+    let new = tokens(changed);
+    // A case change keeps the words where they were; if not, leave it.
+    if old.len() != new.len() || old.iter().zip(&new).any(|(a, b)| a.0 != b.0) {
+        return changed.to_string();
+    }
+    old.iter()
+        .zip(&new)
+        .map(|(&(is_word, was), &(_, now))| {
+            if is_word && words.contains(&was.to_lowercase()) {
+                was
+            } else {
+                now
+            }
+        })
+        .collect()
+}
+
+/// Words written together with a capital at each one apart:
+/// `DougCantDance` → `Doug Cant Dance`, `HTMLParser` → `HTML Parser`.
+/// Digits stay with their word (`Ep01`, `S01E02`).
+pub fn split_glued(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len() + 8);
+    for (i, &c) in chars.iter().enumerate() {
+        if i > 0 && c.is_uppercase() {
+            let prev = chars[i - 1];
+            let next_lower = chars.get(i + 1).is_some_and(|n| n.is_lowercase());
+            if prev.is_lowercase() || (prev.is_uppercase() && next_lower) {
+                out.push(' ');
+            }
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// The old (pre-UTF-8) encoding an unmarked text most likely is, as
 /// browsers guess it (chardetng, Firefox's detector): Western, Central
 /// European, Cyrillic, Greek, Japanese and the rest. `None` when the text
@@ -488,5 +538,25 @@ mod tests {
             .encode("むかしむかし、ドアのない家がありました。")
             .0;
         assert_eq!(guess_encoding(&ja), Some(encoding_rs::SHIFT_JIS));
+    }
+
+    #[test]
+    fn words_kept_as_written() {
+        let lower = "swat kats - s01e01";
+        assert_eq!(keep_words("SWAT Kats - S01E01", lower, "swat"), "SWAT kats - s01e01");
+        assert_eq!(keep_words("SWAT Kats - S01E01", lower, "sWaT, KATS"), "SWAT Kats - s01e01");
+        // Only whole words.
+        assert_eq!(keep_words("SWAT Kats", "swat kats", "swa"), "swat kats");
+        assert_eq!(keep_words("SWAT Kats", "swat kats", ""), "swat kats");
+    }
+
+    #[test]
+    fn glued_words_split() {
+        assert_eq!(split_glued("DougCantDance"), "Doug Cant Dance");
+        assert_eq!(split_glued("HTMLParser"), "HTML Parser");
+        assert_eq!(split_glued("S01E02"), "S01E02");
+        assert_eq!(split_glued("Show.S01E02.MyEpisode"), "Show.S01E02.My Episode");
+        assert_eq!(split_glued("Já está certo"), "Já está certo");
+        assert_eq!(split_glued("ÁguaViva"), "Água Viva");
     }
 }

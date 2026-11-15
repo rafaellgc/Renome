@@ -2,7 +2,7 @@
   import { slide } from "svelte/transition";
   import Icon from "./Icon.svelte";
   import { t, type Key } from "./i18n";
-  import { comicPreset, comicPresetOf, defaultSubLangs, FPS_PAIRS, PHOTO_TEMPLATES, splitExt, splitParts, type ComicPreset } from "./rules";
+  import { comicPreset, comicPresetOf, defaultSubLangs, FPS_PAIRS, listNames, PHOTO_TEMPLATES, splitExt, splitParts, type ComicPreset } from "./rules";
   import { settings } from "./settings.svelte";
   import type { ComicDevice, ComicSpread, Step } from "./types";
   /** The readers a comic e-book can be made for, by maker, in the menu's
@@ -48,6 +48,7 @@
     subs,
     edit,
     summary = null,
+    currentNames = [],
   }: {
     step: Step;
     error?: string | null;
@@ -59,6 +60,9 @@
     onremove: () => void;
     /** A line about the rule's effect (songs without tags). */
     summary?: string | null;
+    /** The names in the table now (without extensions), in its order: what
+     *  the list rule's box can start from. */
+    currentNames?: string[];
     /** Photo rule: dates typed in for the files chosen in the list (the
      *  button's text and hint, already translated). */
     edit?: { n: number; typed: number; label: string; hint: string; onclick: () => void };
@@ -116,6 +120,10 @@
         return r.pattern ? `/${r.pattern}/ → ${r.replace || "∅"}` : "";
       case "rearrange":
         return r.order ? `${t("newOrder")}: ${r.order}` : "";
+      case "list": {
+        const n = listNames(r.names).length;
+        return n ? t("listOrderN", { n }) : "";
+      }
       case "case":
         return t(({ lower: "caseLower", upper: "caseUpper", sentence: "caseSentence", title: "caseTitle", titleSmart: "caseTitleSmart" } as const)[r.mode]);
       case "insert": {
@@ -128,7 +136,7 @@
       case "remove":
         return list([[r.extraSpaces, short("rmExtraSpaces")], [r.allSpaces, short("rmAllSpaces")], [r.accents, short("rmAccents")], [r.digits, short("rmDigits")], [r.leadingNumber, short("rmLeadingNumber")], [!!r.chars, q(r.chars)]]);
       case "convert":
-        return list([[r.mojibake, short("cvMojibake")], [r.latin, short("cvLatin")], [!!r.web, short("cvWeb")]]);
+        return list([[r.mojibake, short("cvMojibake")], [r.latin, short("cvLatin")], [!!r.splitWords, short("cvSplit")], [!!r.web, short("cvWeb")]]);
       case "removeRange":
       {
         const bound = (b: string, pos: number, text: string) => (b === "text" ? q(text) : b === "start" ? t("atStart").toLowerCase() : b === "end" ? t("atEnd").toLowerCase() : String(pos));
@@ -237,6 +245,14 @@
         <label>{t("newOrder")} <input class="mono" bind:value={r.order} spellcheck="false" placeholder="1 - 3 - 2" /></label>
         <p class="hint">{t("newOrderHint")}</p>
         {@render target()}
+      {:else if r.type === "list"}
+        <label>{t("listNames")}
+          <textarea class="mono list" bind:value={r.names} spellcheck="false" rows="8" wrap="off"></textarea>
+        </label>
+        {#if !r.names.trim() && currentNames.length}
+          <button class="fill" title={t("listFillHint")} onclick={() => (r.names = currentNames.join("\n"))}>{t("listFill")}</button>
+        {/if}
+        <p class="hint">{t("listOrderHint")}</p>
       {:else if r.type === "case"}
         <label>{t("mode")}
           <select bind:value={r.mode}>
@@ -247,6 +263,7 @@
             <option value="titleSmart">{t("caseTitleSmart")}</option>
           </select>
         </label>
+        <label>{t("caseKeep")} <input bind:value={r.keep} spellcheck="false" placeholder="swat, dvd" title={t("caseKeepHint")} /></label>
         {@render target()}
       {:else if r.type === "insert"}
         <label>{t("what")}
@@ -307,6 +324,7 @@
         <div class="checks">
           <label class="check" title={t("cvMojibakeHint")}><input type="checkbox" bind:checked={r.mojibake} /> {t("cvMojibake")}</label>
           <label class="check"><input type="checkbox" bind:checked={r.latin} /> {t("cvLatin")}</label>
+          <label class="check"><input type="checkbox" bind:checked={r.splitWords} /> {t("cvSplit")}</label>
         </div>
         <label>{t("cvWeb")}
           <select bind:value={r.web} title={t("cvWebHint")}>
@@ -907,6 +925,20 @@
     min-width: 0;
   }
   label.narrow { flex: 0 0 80px; }
+  textarea.list {
+    font: inherit;
+    font-family: ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace;
+    color: var(--text);
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-2);
+    resize: vertical;
+    min-height: 80px;
+    user-select: text;
+  }
+  button.fill { align-self: flex-start; }
+  textarea.list:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
   label.check {
     flex-direction: row;
     align-items: center;

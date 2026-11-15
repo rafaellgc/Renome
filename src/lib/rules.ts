@@ -2,7 +2,7 @@ import { settings } from "./settings.svelte";
 import type { Rule, RuleType, Step } from "./types";
 
 export const RULE_TYPES: RuleType[] = [
-  "replace", "regex", "rearrange", "case", "insert", "number", "remove", "convert", "removeRange", "charAt", "extension", "movie", "series", "music", "book", "comic", "photo", "subtitle",
+  "replace", "regex", "rearrange", "list", "case", "insert", "number", "remove", "convert", "removeRange", "charAt", "extension", "movie", "series", "music", "book", "comic", "photo", "subtitle",
 ];
 
 const NAME_VAR = { pt: "{nome}", en: "{name}", es: "{nombre}" } as const;
@@ -119,6 +119,9 @@ export const FPS_PAIRS: [number, number][] = [
   [23.976, 25], [25, 23.976], [24, 25], [25, 24], [23.976, 24], [24, 23.976], [29.97, 25], [25, 29.97],
 ];
 
+/** A list rule's names: its lines without blank ones (as the Rust core). */
+export const listNames = (text: string) => text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+
 export function newRule(type: RuleType): Rule {
   switch (type) {
     case "replace":
@@ -126,7 +129,7 @@ export function newRule(type: RuleType): Rule {
     case "regex":
       return { type, pattern: "", replace: "", caseSensitive: false, firstOnly: false, target: "name" };
     case "case":
-      return { type, mode: "titleSmart", target: "name" };
+      return { type, mode: "titleSmart", target: "name", keep: "" };
     case "insert":
       return { type, source: "text", text: "", dateFormat: "%Y-%m-%d", fallback: true, at: "start", position: 1 };
     case "number":
@@ -134,7 +137,7 @@ export function newRule(type: RuleType): Rule {
     case "remove":
       return { type, allSpaces: false, extraSpaces: true, accents: false, digits: false, chars: "", leadingNumber: false, maxLength: 0, target: "name" };
     case "convert":
-      return { type, mojibake: true, latin: false, web: "", target: "name" };
+      return { type, mojibake: true, latin: false, web: "", splitWords: false, target: "name" };
     case "removeRange":
       return { type, from: "text", fromPosition: 1, fromText: "", to: "text", toPosition: 1, toText: "", inclusive: true };
     case "charAt":
@@ -143,6 +146,8 @@ export function newRule(type: RuleType): Rule {
       return { type, mode: "lower", value: "" };
     case "rearrange":
       return { type, separator: " - ", order: "", target: "name" };
+    case "list":
+      return { type, names: "" };
     case "movie":
       return { type, template: MOVIE_TEMPLATE[settings.lang], colon: " - ", sidecar: false, fanart: false, folder: false, missing: true };
     case "series":

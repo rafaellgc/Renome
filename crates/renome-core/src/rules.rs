@@ -129,6 +129,10 @@ pub enum Rule {
         mode: CaseMode,
         #[serde(default)]
         target: Target,
+        /// Words (in any case) that stay as they were in the name, whatever
+        /// the mode (`swat` keeps `SWAT`).
+        #[serde(default)]
+        keep: String,
     },
     Insert {
         source: InsertSource,
@@ -187,6 +191,9 @@ pub enum Rule {
         /// empty: off.
         #[serde(default)]
         web: String,
+        /// Words written together apart (`DougCantDance` → `Doug Cant Dance`).
+        #[serde(default)]
+        split_words: bool,
         #[serde(default)]
         target: Target,
     },
@@ -233,6 +240,9 @@ pub enum Rule {
         #[serde(default)]
         target: Target,
     },
+    /// New names typed or pasted, one per line, in the list's order. The
+    /// extension stays.
+    List { names: String },
     /// Names the file after the movie chosen for it on TMDB (files without
     /// one are left alone). The search itself happens outside the rules.
     Movie {
@@ -619,6 +629,7 @@ enum Compiled {
         first_only: bool,
         target: Target,
     },
+    List(Vec<String>),
     Plain(Rule),
 }
 
@@ -824,6 +835,11 @@ impl Pipeline {
                         }
                     });
                 }
+                Compiled::List(names) => {
+                    if let Some(new) = names.get(ctx.index) {
+                        stem = list_name(new, &ext);
+                    }
+                }
                 Compiled::Plain(rule) => {
                     // Folders themselves are renamed in place.
                     if !ctx.file.is_dir
@@ -980,6 +996,15 @@ fn compile(rule: &Rule) -> Result<Option<Compiled>, (&'static str, String)> {
             validate_date_format(date_format)?;
             return Ok(Some(Compiled::Plain(rule.clone())));
         }
+        Rule::List { names } => {
+            let names: Vec<String> = names
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .map(String::from)
+                .collect();
+            return Ok((!names.is_empty()).then_some(Compiled::List(names)));
+        }
         _ => return Ok(Some(Compiled::Plain(rule.clone()))),
     };
     let re = RegexBuilder::new(&pattern)
@@ -993,6 +1018,19 @@ fn compile(rule: &Rule) -> Result<Option<Compiled>, (&'static str, String)> {
         first_only,
         target,
     }))
+}
+
+/// A new name from a list, without the file's own extension if the line
+/// has it.
+fn list_name(name: &str, ext: &str) -> String {
+    if !ext.is_empty() {
+        if let Some((stem, e)) = name.rsplit_once('.') {
+            if e.eq_ignore_ascii_case(ext) && !stem.is_empty() {
+                return stem.to_string();
+            }
+        }
+    }
+    name.to_string()
 }
 
 fn validate_date_format(fmt: &str) -> Result<(), (&'static str, String)> {
@@ -1023,12 +1061,15 @@ fn format_date(ts: NaiveDateTime, fmt: &str) -> String {
 
 fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
     match rule {
-        Rule::Case { mode, target } => on_target(stem, ext, *target, |s| match mode {
-            CaseMode::Lower => s.to_lowercase(),
-            CaseMode::Upper => s.to_uppercase(),
-            CaseMode::Sentence => text::sentence_case(s),
-            CaseMode::Title => text::title_case(s, false),
-            CaseMode::TitleSmart => text::title_case(s, true),
+        Rule::Case { mode, target, keep } => on_target(stem, ext, *target, |s| {
+            let changed = match mode {
+                CaseMode::Lower => s.to_lowercase(),
+                CaseMode::Upper => s.to_uppercase(),
+                CaseMode::Sentence => text::sentence_case(s),
+                CaseMode::Title => text::title_case(s, false),
+                CaseMode::TitleSmart => text::title_case(s, true),
+            };
+            text::keep_words(s, &changed, keep)
         }),
 
         Rule::Insert {
@@ -1137,6 +1178,7 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             mojibake,
             latin,
             web,
+            split_words,
             target,
         } => {
             on_target(stem, ext, *target, |s| {
@@ -1146,6 +1188,9 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
                 }
                 if *latin {
                     s = text::to_latin(&s);
+                }
+                if *split_words {
+                    s = text::split_glued(&s);
                 }
                 if !web.is_empty() {
                     s = text::web_safe(&s, web);
@@ -1230,6 +1275,9 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
         } => on_target(stem, ext, *target, |s| {
             rearrange(s, separator, order).unwrap_or_else(|| s.to_string())
         }),
+
+        // Compiled apart (see `compile_list`).
+        Rule::List { .. } => {}
 
         Rule::Movie {
             template, colon, ..
@@ -2174,11 +2222,50 @@ mod tests {
     }
 
     #[test]
+    fn names_from_a_list() {
+        let list = Rule::List {
+            names: "Primeiro\n\n  Segundo.mkv  \nTerceiro".into(),
+        };
+        assert_eq!(run(vec![list.clone()], "a.mkv", 0), "Primeiro.mkv");
+        // Blank lines skipped; the file's own extension not doubled.
+        assert_eq!(run(vec![list.clone()], "b.mkv", 1), "Segundo.mkv");
+        // Another extension in the line is part of the name.
+        assert_eq!(run(vec![list.clone()], "b.srt", 1), "Segundo.mkv.srt");
+        // More files than names: the rest stay.
+        assert_eq!(run(vec![list], "d.mkv", 3), "d.mkv");
+    }
+
+    #[test]
+    fn case_keeps_listed_words() {
+        let r = |mode| Rule::Case {
+            mode,
+            target: Target::Name,
+            keep: "swat, dvd".into(),
+        };
+        assert_eq!(
+            run(vec![r(CaseMode::Lower)], "SWAT Kats - S01E01.mkv", 0),
+            "SWAT kats - s01e01.mkv"
+        );
+        assert_eq!(
+            run(vec![r(CaseMode::TitleSmart)], "SWAT kats em Dvd.mkv", 0),
+            "SWAT Kats em Dvd.mkv"
+        );
+        // A word only partly typed keeps nothing.
+        let part = Rule::Case {
+            mode: CaseMode::Lower,
+            target: Target::Name,
+            keep: "swa".into(),
+        };
+        assert_eq!(run(vec![part], "SWAT Kats.mkv", 0), "swat kats.mkv");
+    }
+
+    #[test]
     fn convert_characters() {
         let r = |mojibake, latin, web: &str| Rule::Convert {
             mojibake,
             latin,
             web: web.into(),
+            split_words: false,
             target: Target::Name,
         };
         assert_eq!(
@@ -2201,6 +2288,14 @@ mod tests {
             ),
             "Ferias-em-Sao-Paulo-2024.JPG"
         );
+        let split = Rule::Convert {
+            mojibake: false,
+            latin: false,
+            web: "-".into(),
+            split_words: true,
+            target: Target::Name,
+        };
+        assert_eq!(run(vec![split], "DougCantDance.mkv", 0), "Doug-Cant-Dance.mkv");
     }
 
     #[test]

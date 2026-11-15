@@ -129,6 +129,20 @@ ${ex("Série - Episódio - S01E02.mkv", "Série - S01E02 - Episódio.mkv")}
 </ul>`,
   },
   {
+    id: "r-list",
+    title: "Nomes de uma lista",
+    sub: true,
+    html: `
+<p>Dá a cada arquivo um nome de uma lista que você digita ou cola. Serve quando nenhuma base de dados tem a obra, ou tem errado: copie a lista de episódios ou faixas de um site e aplique de uma vez.</p>
+<ul>
+  <li>Um nome por linha: a 1ª linha vai para o 1º arquivo da tabela, a 2ª para o 2º, e assim por diante. Vale a ordem em que a tabela está agora (arrume antes, clicando nas colunas ou movendo os arquivos) e só os arquivos visíveis com o filtro. Linhas em branco não contam.</li>
+  <li><b>Preencher com os nomes atuais</b> (aparece com a caixa vazia): põe na caixa os nomes que estão na tabela, na ordem dela. Depois é só editar os que devem mudar; os que ficarem iguais não mudam.</li>
+</ul>
+${ex("Arquivo 01.mkv", "Primeiro Episódio.mkv")}
+<p>A extensão de cada arquivo fica. Se a linha terminar com a mesma extensão do arquivo (<code>Primeiro Episódio.mkv</code>), ela não é repetida. Abaixo do card aparece quantos nomes há para quantos arquivos; com menos nomes, os últimos arquivos ficam como estão.</p>
+<p><b>Limitações</b>: um arquivo a mais ou a menos na tabela desloca todos os nomes seguintes; confira a prévia antes de renomear. Com legendas ao lado dos vídeos, cada legenda também conta como um arquivo na ordem; use o filtro (por exemplo, <code>mkv</code>) para ficar só com os vídeos.</p>`,
+  },
+  {
     id: "r-case",
     title: "Maiúsculas / minúsculas",
     sub: true,
@@ -141,6 +155,7 @@ ${ex("Série - Episódio - S01E02.mkv", "Série - S01E02 - Episódio.mkv")}
   <li><b>Cada Palavra, exceto de/da/e/of…</b>: → <code>Foto de Férias</code>. Palavras curtas de ligação (de, da, do, e, em, para, of, the, and, del, la, y…) ficam em minúsculas, a não ser no início do nome ou de uma parte (depois de <code> - </code>, <code>:</code> ou <code>(</code>).</li>
 </ul>
 <p>Nos dois modos "Cada Palavra", algarismos romanos ficam em maiúsculas (<code>Fase III</code>, <code>Parte II</code>) e palavras com maiúsculas no meio ficam como estão (<code>iPhone</code>, <code>McDonald's</code>).</p>
+<p><b>Manter como escrito</b> (em qualquer modo): palavras, separadas por vírgula, que ficam exatamente como estão no nome. Digite-as com qualquer caixa: com <code>swat</code>, <b>minúsculas</b> faz de <code>SWAT Kats - S01E01</code> o nome <code>SWAT kats - s01e01</code>. Só vale a palavra inteira (<code>swa</code> não pega <code>SWAT</code>). Começa vazio.</p>
 <p>Use "Aplicar em: Extensão" para mudar só a extensão.</p>`,
   },
   {
@@ -218,6 +233,7 @@ ${ex("praia.jpg", "Viagem 01.jpg")}
 <ul>
   <li><b>Consertar acentos quebrados</b>: nomes criados num sistema e lidos com outra codificação ficam com os acentos trocados por pares de símbolos: <code>CoraÃ§Ã£o</code>, <code>SÃ£o JoÃ£o</code>, <code>donâ€™t</code>. A opção devolve o texto certo: <code>Coração</code>, <code>São João</code>, <code>don’t</code>. Um nome que já está certo fica como está.</li>
   <li><b>Outros alfabetos em letras latinas</b>: cirílico (russo, ucraniano, sérvio…) e grego viram letras latinas, como se pronunciam: <code>Кино</code> → <code>Kino</code>, <code>Щедрик</code> → <code>Shchedrik</code>, <code>Ελλάδα</code> → <code>Ellada</code>. O resto do nome fica igual. Japonês, chinês, árabe e outros alfabetos não são convertidos.</li>
+  <li><b>Separar palavras grudadas</b>: põe um espaço antes de cada maiúscula que começa uma palavra nova: <code>MinhaViagemDeFerias</code> → <code>Minha Viagem De Ferias</code>, <code>HTMLParaIniciantes</code> → <code>HTML Para Iniciantes</code>. Números ficam junto da palavra (<code>S01E02</code> não muda). Nomes que têm maiúsculas no meio de propósito também são separados (<code>McDonald</code> → <code>Mc Donald</code>, <code>iPhone</code> → <code>i Phone</code>); confira a prévia.</li>
   <li><b>Nome seguro para internet</b>: deixa só letras sem acento, números e pontos, com <code>-</code> ou <code>_</code> entre as palavras: <code>Férias em São Paulo (2024)</code> → <code>Ferias-em-Sao-Paulo-2024</code>. Serve para enviar arquivos a sites, servidores FTP e aparelhos antigos. Também converte cirílico e grego; letras de outros alfabetos saem do nome. Se nada sobrar, o nome fica vazio e a lista mostra o erro.</li>
 </ul>
 <p><b>Limitações</b>: só conserta o defeito mais comum (texto em UTF-8 lido como Latin-1 ou Windows-1252). Nomes em que os acentos viraram <code>?</code> ou <code>�</code> perderam a letra de vez e não têm conserto. Um nome que mistura letras certas e quebradas na mesma palavra pode ficar como está.</p>
