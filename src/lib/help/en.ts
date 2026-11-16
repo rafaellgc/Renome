@@ -38,6 +38,8 @@ export const en: Section[] = [
   <li>Case and accents do not matter: <code>cafe</code> finds "Café".</li>
   <li><b>Size</b>: <code>&gt;700MB</code> shows files larger than 700 MB; <code>&lt;100MB</code>, smaller ones. Units: B, KB, MB, GB and TB, as in the Size column. For decimals, use a dot: <code>&lt;1.5GB</code>. Spaces are fine: <code>&gt; 40 MB</code> works the same.</li>
   <li><b>Modification date</b> (the Modified column), as a year, month or day, always year first: <code>=2024</code> (in 2024), <code>&gt;=2024-06</code> (from June 2024 on), <code>&lt;2024-05-12</code> (before 12 May 2024). <code>&gt;2024</code> means from 2025 on.</li>
+  <li><b>How long ago</b> it was modified: <code>&lt;7d</code> (in the last 7 days), <code>&gt;3mo</code> (over 3 months ago), <code>&gt;1y</code> (over a year ago). Units: <code>d</code> (days), <code>w</code> (weeks), <code>mo</code> (months) and <code>y</code> (years); spelled out works too: <code>&lt; 2 weeks</code>.</li>
+  <li><b>Folder</b>: <code>folder:</code> before the text looks in the names of the folders the file is in, from the folder you added down: <code>folder:"Season 2"</code> (in quotes when it has spaces), <code>-folder:extras</code> hides what is in an Extras folder, <code>folder:S0?</code> takes wildcards. With several, one matching is enough.</li>
   <li>Size and date add to the rest, and all must hold: <code>*.mkv &gt;1GB</code> shows only the .mkv files over 1 GB; <code>&gt;=2024-01 &lt;2024-07</code>, the first half of 2024. With <code>-</code> in front, it turns round: <code>-&lt;100MB</code> hides the small ones.</li>
   <li>Folders in the list have no size: a size filter hides them. The date is the file's, not when a photo was taken.</li>
 </ul>

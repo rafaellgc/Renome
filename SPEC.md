@@ -32,9 +32,16 @@ This document describes **what** the program does, not **how**.
   name: a size with its unit (`>700MB`, `<1.5GB`; B/KB/MB/GB/TB, powers
   of 1024, as the list shows sizes; folders never match one) or the
   modification date as a year, month or day (`>=2024`, `<2024-06`,
-  `=2024-05-12`; local time; `>2024` is from 2025 on); `-` before one
-  negates it; anything else after the sign is `invalidFilter`. Only
-  visible files are renamed, and numbering only counts them.
+  `=2024-05-12`; local time; `>2024` is from 2025 on) or how long ago
+  (`<7d`, `>2sem`, `>3mes`/`>3mo`, `>1a`/`>1y`; units spelled out in pt,
+  en or es also taken; `=` refused; a lone `m`/`M` is neither months nor
+  MB, so refused); `-` before one negates it; spaces inside a condition
+  are allowed (`> 40 MB`); anything else after the sign is `invalidFilter`.
+  `pasta:`/`folder:`/`carpeta:` terms (quoted
+  when they have spaces) look in the names of the folders the file is in,
+  from the folder it was added with down (`folders_of`): text anywhere in
+  them or a wildcard pattern matching one; any of these must match, and
+  none of the `-pasta:` ones. Only visible files are renamed, and numbering only counts them.
 - Files can be passed on the command line (`renome file1 file2 folder/`).
 - Columns: current name, new name, folder, size, modification date (size
   and date are hidden in narrow windows).
