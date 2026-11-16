@@ -256,7 +256,7 @@
   $effect(() => {
     if (!available.length) columnsMenu = false;
   });
-  const extraWidths = $derived(extra.map((c) => WIDTH[c]).join(" "));
+  const extraWidths = $derived(extra.map((c) => (c === "taken" ? `${dateW}px` : WIDTH[c])).join(" "));
 
   type Col = { key: Exclude<ViewSort, "manual">; label: Parameters<typeof t>[0]; cls: string };
   const columns = $derived<Col[]>([
@@ -278,9 +278,27 @@
   const minWidth = $derived.by(() => {
     if (!extra.length) return 0;
     const wide = winWidth > 1000;
-    const base = wide ? 28 + 140 + 160 + 90 + 76 + 120 : 28 + 120 + 140 + 80;
+    const base = wide ? 28 + 140 + 160 + 90 + sizeW + dateW : 28 + 120 + 140 + 80;
     const count = (wide ? 6 : 4) + extra.length;
-    return base + extra.reduce((n, c) => n + MIN[c], 0) + 8 * (count - 1) + 20;
+    return base + extra.reduce((n, c) => n + (c === "taken" ? dateW : MIN[c]), 0) + 8 * (count - 1) + 20;
+  });
+
+  /** Size and date columns as wide as their text in the font in use (the
+   *  system's, which may be wider than the one they were drawn for). */
+  let tableEl = $state<HTMLDivElement>();
+  let sizeW = $state(76);
+  let dateW = $state(120);
+  $effect(() => {
+    const f = fmt;
+    if (!tableEl) return;
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (!ctx) return;
+    const cs = getComputedStyle(tableEl);
+    ctx.font = `${cs.getPropertyValue("--fs-md").trim() || "13px"} ${cs.fontFamily}`;
+    const wide = (texts: string[]) => Math.ceil(Math.max(...texts.map((x) => ctx.measureText(x).width)) * 1.06) + 4;
+    const dates = Array.from({ length: 12 }, (_, m) => f.format(new Date(2028, m, 28, m % 2 ? 23 : 10, 58)));
+    dateW = Math.max(120, wide(dates));
+    sizeW = Math.max(76, wide(["999.9 MB", "999 KB", "8.8 GB"]));
   });
   function toggleColumn(c: DetailColumn) {
     settings.columns = settings.columns.includes(c) ? settings.columns.filter((x) => x !== c) : [...settings.columns, c];
@@ -312,7 +330,7 @@
 
 <svelte:window bind:innerWidth={winWidth} onkeydown={(e) => { if (columnsMenu && e.key === "Escape") { e.stopPropagation(); columnsMenu = false; } }} />
 
-<div class="table" style:--extra={extraWidths || undefined}>
+<div class="table" bind:this={tableEl} style:--extra={extraWidths || undefined} style:--w-size="{sizeW}px" style:--w-date="{dateW}px">
   {#if columnsMenu}
     <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
     <div class="cols-back" onclick={() => (columnsMenu = false)}></div>
@@ -456,7 +474,7 @@
   }
   .head, .row {
     display: grid;
-    grid-template-columns: 28px minmax(140px, 1fr) minmax(160px, 1.2fr) minmax(90px, 0.8fr) var(--extra, ) 76px 120px;
+    grid-template-columns: 28px minmax(140px, 1fr) minmax(160px, 1.2fr) minmax(90px, 0.8fr) var(--extra, ) var(--w-size, 76px) var(--w-date, 120px);
     align-items: center;
     gap: 8px;
     padding: 0 10px;
