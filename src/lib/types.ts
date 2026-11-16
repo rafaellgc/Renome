@@ -37,6 +37,9 @@ export type Rule =
       subtitles?: boolean; subLangs?: string;
       /** Title, date and cover written inside MKV and MP4 videos. */
       videoTags?: boolean;
+      /** The release's advertisements go to the trash (with their old
+       *  folder when nothing else is left in it). */
+      trashAds?: boolean;
       /** What came inside the video taken out first. */
       videoClean?: boolean;
       /** The audio and subtitle tracks named by language. */
@@ -60,6 +63,11 @@ export type Rule =
       model?: string; anyProgram?: boolean;
       /** EPUB 2 brought to EPUB 3; large pictures made smaller. */
       epub3?: boolean; shrinkImages?: boolean;
+      /** Audiobooks too (audio files; off: books only). */
+      audio?: boolean;
+      /** The book's details and cover written inside audiobooks' files;
+       *  with `audioClean`, their other tags go. */
+      audioTags?: boolean; audioClean?: boolean;
     }
   | { type: "comic"; template: string; colon: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; byFolder: boolean; writeInfo?: boolean; cleanInfo?: boolean; convert?: boolean; original?: "keep" | "delete"; drawPages?: boolean; pageSize?: number; missing: boolean; barcode?: boolean; skipPublishers?: string; ebook?: ComicFormat; device?: ComicDevice; model?: string;
       /** The reader opens more formats with another reading program on it (KOReader, an app). */
@@ -166,6 +174,8 @@ export interface PreviewItem {
   extra?: string;
   /** What a release added to advertise itself: stays in the old folder. */
   releaseJunk?: boolean;
+  /** An advertisement that goes to the trash after the moves. */
+  toTrash?: boolean;
   /** With a photo rule, where a photo's date came from ("none": it has none). */
   photoDate?: "typed" | "inside" | "name" | "modified" | "none";
   /** The name the lookups read, when the rules above the first lookup rule
@@ -182,6 +192,10 @@ export interface Preview {
   conflicts: number;
   /** A show's old folders renamed for the files that stay in them. */
   leftFolders: { from: string; to: string; files: number }[];
+  /** Advertisements sent to the trash after the moves (where they are
+   *  then), and old folders left with nothing else, sent whole. */
+  trash: string[];
+  trashFolders: string[];
 }
 
 export interface ScanOptions {
@@ -220,6 +234,8 @@ export interface View {
   numberClashes?: boolean;
   /** Another folder the files go to, moved or copied. */
   sendTo: { dir: string; copy: boolean } | null;
+  /** The release's advertisements go to the trash (movie rule). */
+  trashAds?: boolean;
 }
 
 /** A MusicBrainz release offered for an album, best first. */
@@ -416,6 +432,11 @@ export interface BookMatch {
   seriesIndex: string;
   /** Template fields (language, pages), by field. */
   extra?: Record<string, string>;
+  /** An audiobook's narrator, and a part's place among its files (from 1)
+   *  and how many there are (0: one file). */
+  narrator?: string;
+  part?: number;
+  parts?: number;
 }
 
 export interface BookLookup {
@@ -511,6 +532,28 @@ export interface SubCandidate {
 }
 
 /** The keys and account for the subtitle services. */
+/** An audiobook: its files in order and what their tags and folder say. */
+export interface AudioBook { paths: string[]; title: string; author: string; year: number | null; narrator: string; series: string; seriesIndex: string }
+
+/** A newer version, and how this copy gets it: by itself, or from the
+ *  release page (a .deb or .rpm). */
+export interface UpdateFound { version: string; way: "itself" | "page" }
+
+/** A library folder of a media server (its own path) and the same
+ *  folder on this computer (empty: not paired yet). */
+export interface ServerFolder { libraryId: string; library: string; server: string; local: string; on: boolean }
+
+/** A media server told about the folders where files were renamed. Its
+ *  key is kept apart, with the other secrets. */
+export interface MediaServer { id: string; kind: "jellyfin" | "plex"; url: string; folders: ServerFolder[] }
+
+/** A media server as the program is given it. */
+export interface ServerCall { kind: "jellyfin" | "plex"; url: string; key: string; folders: ServerFolder[] }
+
+/** A server's library and its folders (`here`: the same path is a folder
+ *  on this computer). */
+export interface ServerLibrary { id: string; name: string; paths: { path: string; here: boolean }[] }
+
 export interface SubsAuth { osKey: string; osUser: string; osPassword: string; subdlKey: string; subsourceKey?: string; tmdbKey?: string }
 
 export interface EpisodeMatch {

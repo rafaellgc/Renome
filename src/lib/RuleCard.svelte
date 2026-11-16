@@ -407,6 +407,7 @@
         <p class="hint mono">{t("movieTemplateHint")}</p>
         <label class="colon">{t("colonLabel")} <input class="mono sep" bind:value={r.colon} spellcheck="false" /></label>
         <label class="check"><input type="checkbox" bind:checked={r.folder} /> <span>{t("folderLabel")}<small>{t("folderHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.trashAds} /> <span>{t("trashAdsLabel")}<small>{t("trashAdsHint")}</small></span></label>
         <h4 class="sect">{t("sectSearch")}</h4>
         {@render actions(t("tmdbSearch"), "movieSummary")}
         <h4 class="sect">{t("sectBeside")}</h4>
@@ -594,6 +595,7 @@
         {#if r.folders}
           <label class="sub">{t("musicFolderName")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
         {/if}
+        <label class="check"><input type="checkbox" checked={r.audio !== false} onchange={(e) => (r.audio = e.currentTarget.checked)} /> <span>{t("bookAudio")}<small>{t("bookAudioHint")}</small></span></label>
         <h4 class="sect">{t("sectSearch")}</h4>
         {@render actions(t("olSearch"), "bookSummary")}
         <h4 class="sect">{t("sectBeside")}</h4>
@@ -603,6 +605,12 @@
         <label class="check"><input type="checkbox" bind:checked={r.writeEpub} /> <span>{t("bookWriteEpub")}<small>{t("bookWriteEpubHint")}</small></span></label>
         <label class="check"><input type="checkbox" bind:checked={r.epub3} /> <span>{t("bookEpub3")}<small>{t("bookEpub3Hint")}</small></span></label>
         <label class="check"><input type="checkbox" bind:checked={r.shrinkImages} /> <span>{t("bookShrink")}<small>{t("bookShrinkHint")}</small></span></label>
+        {#if r.audio !== false}
+          <label class="check"><input type="checkbox" bind:checked={r.audioTags} /> <span>{t("bookAudioTags")}<small>{t("bookAudioTagsHint")}</small></span></label>
+          {#if r.audioTags}
+            <label class="check sub"><input type="checkbox" bind:checked={r.audioClean} /> <span>{t("bookAudioClean")}<small>{t("bookAudioCleanHint")}</small></span></label>
+          {/if}
+        {/if}
         <h4 class="sect">{t("sectConvert")}</h4>
         <label>{t("bookConvert")}
           <select bind:value={r.convertTo}>

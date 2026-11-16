@@ -40,13 +40,13 @@
   import type {
     ApplyReport, Copies, MovieStatus, HistoryEntry, OpError, Preview, PreviewItem, Rule, RuleType, Step, View, ViewSort,
   } from "$lib/types";
-  import { DETAIL_COLUMNS, type DetailColumn } from "$lib/types";
+  import { DETAIL_COLUMNS, type DetailColumn, type UpdateFound } from "$lib/types";
   import { COL_LABEL, detailText } from "$lib/details";
 
   let ready = $state(false);
   let steps = $state<Step[]>([]);
   let overrides = $state<Record<string, string>>({});
-  let preview = $state<Preview>({ items: [], ruleErrors: [], filterError: null, total: 0, changed: 0, conflicts: 0, leftFolders: [] });
+  let preview = $state<Preview>({ items: [], ruleErrors: [], filterError: null, total: 0, changed: 0, conflicts: 0, leftFolders: [], trash: [], trashFolders: [] });
   let selected = $state(new Set<string>());
   let filter = $state("");
   let sortKey = $state<ViewSort>("newName");
@@ -312,7 +312,7 @@
       [!!tv.rule, (i) => !i.isDir && isScreen(i.original), "outsideSeries"],
       // Songs bring their lyrics, cue sheets, playlists and covers along.
       [!!music.rule, (i) => !i.isDir && (isAudio(i.original) || /\.(lrc|cue|m3u8?|pls|jpe?g|png|webp)$/i.test(i.original)), "outsideMusic"],
-      [!!books.rule, (i) => !i.isDir && (isBook(i.original) || !!i.bookTo), "outsideBook"],
+      [!!books.rule, (i) => !i.isDir && (books.takes(i.original) || !!i.bookTo), "outsideBook"],
       [!!comics.rule, (i) => (i.isDir ? i.convert : isComic(i.original)), "outsideComic"],
     ];
     const on = kinds.filter(([enabled]) => enabled);
@@ -327,7 +327,7 @@
     return out;
   });
 
-  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, alikeOnly, similarOnly, movies: movies.matches, episodes: tv.matches, songs: music.matches, books: books.matches, comics: comics.matches, dates: photos.dates, leftoverSuffix: t("leftoverSuffix"), lang: settings.lang, numberClashes: settings.numberClashes, sendTo });
+  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, alikeOnly, similarOnly, movies: movies.matches, episodes: tv.matches, songs: music.matches, books: books.matches, comics: comics.matches, dates: photos.dates, leftoverSuffix: t("leftoverSuffix"), lang: settings.lang, numberClashes: settings.numberClashes, sendTo, trashAds: steps.some((s) => s.enabled && s.rule.type === "movie" && !!s.rule.trashAds) });
   /** Example name for rule cards: the first file in natural name order, so
    *  it does not jump around while the preview re-sorts. */
   const collator = new Intl.Collator(undefined, { numeric: true });
@@ -433,9 +433,10 @@
   // Save the settings (and the rules, if asked) when they change.
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
   $effect(() => {
-    const deps = [settings.lang, settings.theme, settings.includeHidden, settings.confirmApply,
-      settings.disableRulesAfterApply, settings.warnWindows, settings.rememberRules, settings.tmdbLang, settings.showMissing,
-      settings.textSize, settings.cacheDays, JSON.stringify(settings.ruleSets), JSON.stringify(steps)];
+    // Every setting, so none is left out when one is added (the rules
+    // are written here, so they are not one of them).
+    const { rules: _rules, ...rest } = settings;
+    const deps = [JSON.stringify(rest), JSON.stringify(steps)];
     if (!ready || !deps) return;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
@@ -653,6 +654,7 @@
     const tvMeta = tv.metaOnly.map((i) => tv.sidecarItem(i.path, i.path));
     const listOnly = music.playlistOnly;
     const retagOnly = music.tagsOnly.map((i) => i.path);
+    const audioTagOnly = books.tagsOnly.map((i) => books.audioTagItem(i.path, i.path));
     const subsUnchanged = subs.only.map((i) => i.path);
     const subsPlanned = subs.wanted === null ? 0 : preview.items.reduce((n, i) => n + (i.status !== "conflict" ? subs.chosen(subs.found[i.path]) : 0), 0);
     const bookMeta = books.metaOnly.map((i) => books.sidecarItem(i.path, i.path));
@@ -678,10 +680,14 @@
       ...books.epubOnly.map((i) => books.writeItem(i.path, i.path)),
       ...books.convertOnly.map((i) => books.convertItem(i.path, i.path, i.bookTo!)),
     ];
-    if (!preview.changed && !meta.length && !tvMeta.length && !bookMeta.length && !music.coverOnly && !listOnly.length && !retagOnly.length && !insideOnly.length && !subsUnchanged.length && !toolsOnly.length && !tagOnly.length) return;
+    if (!preview.changed && !meta.length && !tvMeta.length && !bookMeta.length && !music.coverOnly && !listOnly.length && !retagOnly.length && !audioTagOnly.length && !insideOnly.length && !subsUnchanged.length && !toolsOnly.length && !tagOnly.length) return;
     // Files left behind in an old folder are always told, listed.
     const left = preview.leftFolders.map((f) => t("confirmLeftoverItem", { n: f.files, from: basename(f.from), to: basename(f.to) }));
-    if (settings.confirmApply || left.length) {
+    // The release's advertisements going to the trash: always told.
+    const ads = preview.changed ? preview.items.filter((i) => i.toTrash).length : 0;
+    const adFiles = [...preview.trash];
+    const adFolders = [...preview.trashFolders];
+    if (settings.confirmApply || left.length || ads) {
       const lines = [
         preview.changed
           ? sendTo
@@ -692,12 +698,13 @@
         bookMeta.length ? t("confirmBookMeta", { n: bookMeta.length }) : "",
         music.coverOnly ? t("confirmCovers", { n: music.coverOnly }) : "",
         listOnly.length ? t("confirmPlaylists", { n: listOnly.length }) : "",
-        retagOnly.length ? t("confirmTags", { n: retagOnly.length }) : "",
+        retagOnly.length + audioTagOnly.length ? t("confirmTags", { n: retagOnly.length + audioTagOnly.length }) : "",
         insideOnly.length ? t("confirmInside", { n: insideOnly.length }) : "",
         toolsOnly.length ? t("confirmSubTools", { n: toolsOnly.length }) : "",
         tagOnly.length ? t("confirmInside", { n: tagOnly.length }) : "",
         subsPlanned ? t("confirmSubs", { n: subsPlanned }) : "",
         preview.conflicts ? t("confirmConflicts", { n: preview.conflicts }) : "",
+        ads ? t("confirmTrashAds", { n: ads, folders: adFolders.length }) : "",
       ].filter(Boolean);
       const ok = await confirm({
         title: t(sendTo ? (sendTo.copy ? "confirmCopyTitle" : "confirmMoveTitle") : "confirmTitle"),
@@ -728,6 +735,19 @@
       // more is written, or undo could not take it back.
       // The list's undo starts over (as the core's, when it renamed).
       if (preview.changed) foundUndo = [];
+      // The advertisements, once the files are where they go.
+      let adsTrashed = 0;
+      let adsFailed = 0;
+      if (ads && r.done.length) {
+        try {
+          const res = await api.trashLeftovers(adFiles, adFolders);
+          // Counted in files; a folder sent whole holds several.
+          adsFailed = res.failed.length;
+          adsTrashed = adsFailed ? res.trashed.length : ads;
+        } catch {
+          adsFailed = adFiles.length + adFolders.length;
+        }
+      }
       const recorded = !r.done.length || !!r.historyId;
       if (recorded && rule?.type === "movie" && rule.sidecar) {
         const items = r.done
@@ -790,13 +810,40 @@
       const brule = books.rule?.rule;
       if (recorded && brule?.type === "book" && (brule.cover || brule.opf)) {
         const items = r.done
-          .filter((op) => books.has(op.from) && isBook(op.to))
+          .filter((op) => books.has(op.from) && (isBook(op.to) || (isAudio(op.to) && books.leads(op.from))))
           .map((op) => books.sidecarItem(op.from, op.to))
           .concat(bookMeta);
         if (items.length) {
           books.progress = { done: 0, total: items.length, kind: "save" };
           try {
             saved += await writeMeta(() => api.writeBookSidecars(r.historyId, $state.snapshot(items), brule.cover, brule.opf, brule.folders));
+          } finally {
+            books.progress = null;
+          }
+        }
+      }
+      // After the covers: a book without one in the catalogue takes the
+      // one just saved in its folder.
+      let audioTagged = 0;
+      if (recorded && brule?.type === "book" && books.audioTags) {
+        const items = r.done
+          .filter((op) => books.has(op.from) && isAudio(op.to))
+          .map((op) => books.audioTagItem(op.from, op.to))
+          .concat(audioTagOnly);
+        if (items.length) {
+          books.progress = { done: 0, total: items.length, kind: "save" };
+          try {
+            const res = await api.writeAudiobookTags(r.historyId, $state.snapshot(items), true, !!brule.audioClean);
+            audioTagged = res.written;
+            if (res.errors.length) {
+              await notify({
+                title: t("tagsTitle"),
+                text: t("audioTagsN", { n: res.written }),
+                items: res.errors.map(([file, why]) => (file ? `${file} — ${tError(why)}` : tError(why))),
+              });
+            }
+          } catch (e) {
+            await notify({ title: t("tagsTitle"), text: tError(e) });
           } finally {
             books.progress = null;
           }
@@ -954,6 +1001,8 @@
         preview.changed ? t(sent ? (sent.copy ? "copiedN" : "movedN") : "renamedN", { n: r.done.filter((op) => !leftFrom.has(op.from)).length }) : "",
         r.stopped ? t("applyStopped") : "",
         r.done.some((op) => leftFrom.has(op.from)) ? t("leftFoldersN", { n: r.done.filter((op) => leftFrom.has(op.from)).length }) : "",
+        adsTrashed ? t("adsTrashedN", { n: adsTrashed }) : "",
+        adsFailed ? t("adsFailedN", { n: adsFailed }) : "",
         r.lists ? t("listsN", { n: r.lists }) : "",
         r.listsRemoved ? t("listsRemovedN", { n: r.listsRemoved }) : "",
         saved ? t("sidecarsN", { n: saved }) : "",
@@ -961,6 +1010,7 @@
         subToolsText(subTools.written, subTools.created),
         keptLists ? t("playlistsKeptN", { n: keptLists }) : "",
         tagged ? t("tagsN", { n: tagged }) : "",
+        audioTagged ? t("audioTagsN", { n: audioTagged }) : "",
         inside ? t("insideN", { n: inside }) : "",
         drawnPages ? t("insideDrawnN", { n: drawnPages }) : "",
         r.errors.length ? t("errorsN", { n: r.errors.length }) : "",
@@ -968,6 +1018,7 @@
       await refresh();
       checkIdentical();
       if (!r.errors.length && notice) done(notice);
+      tellServer(r.done);
       await showErrors(r, t("resultTitle"), `${t("renamedN", { n: r.done.length })}\n${t("errorsN", { n: r.errors.length })}:`);
     } catch (e) {
       notice = `${t("error")}: ${tError(e)}`;
@@ -978,6 +1029,71 @@
       busy = false;
       task = null;
     }
+  }
+
+  /** A newer version found on GitHub, and how far its download went
+   *  (0–100) once it is being installed. */
+  let update = $state<UpdateFound | null>(null);
+  let updating = $state<number | null>(null);
+
+  async function installUpdate() {
+    const u = update;
+    if (!u || updating !== null) return;
+    if (u.way === "page") {
+      await openUrl(`https://github.com/rafaellgc/Renome/releases/tag/v${u.version}`);
+      return;
+    }
+    if (busy) {
+      await notify({ title: t("updateTitle", { v: u.version }), text: t("updateBusy") });
+      return;
+    }
+    const ok = await confirm({ title: t("updateTitle", { v: u.version }), text: t("updateText"), ok: t("updateInstall"), cancel: t("cancel") });
+    if (!ok) return;
+    updating = 0;
+    const off = await listen<{ done: number; total: number | null }>("update-progress", (e) => {
+      if (e.payload.total) updating = Math.min(100, Math.floor((e.payload.done / e.payload.total) * 100));
+    });
+    try {
+      await api.updateInstall();
+    } catch (e) {
+      await notify({ title: t("updateTitle", { v: u.version }), text: tError(e) });
+    } finally {
+      off();
+      updating = null;
+    }
+  }
+
+  /** Tells the media servers in the options about the folders where
+   *  files were renamed, moved or put back (only those inside their
+   *  library folders); says so in the notice. */
+  function tellServer(done: { from: string; to: string }[]) {
+    let keys: Record<string, string> = {};
+    try {
+      keys = JSON.parse(settings.serverKeys || "{}");
+    } catch {
+      // No keys.
+    }
+    const servers = settings.servers.filter((s) => s.url.trim() && keys[s.id]?.trim() && s.folders.some((f) => f.on && f.local));
+    if (!done.length || !servers.length) return;
+    const name = (k: string) => (k === "plex" ? "Plex" : "Jellyfin");
+    api
+      .serverTell(
+        servers.map((s) => ({ kind: s.kind, url: s.url.trim(), key: keys[s.id].trim(), folders: $state.snapshot(s.folders) })),
+        done.flatMap((op) => [op.from, op.to]),
+      )
+      .then((answers) => {
+        const texts = answers
+          .map((a, i) =>
+            "Ok" in a
+              ? a.Ok
+                ? t("serverTold", { name: name(servers[i].kind), n: a.Ok })
+                : ""
+              : `${t("serverNotTold", { name: name(servers[i].kind) })}: ${tError(a.Err)}`,
+          )
+          .filter(Boolean);
+        if (texts.length) notice = [notice, ...texts].filter(Boolean).join(" · ");
+      })
+      .catch(() => {});
   }
 
   async function openHistory() {
@@ -1005,6 +1121,7 @@
       await refresh();
       checkIdentical();
       if (!r.errors.length) done(notice);
+      tellServer(r.done);
       await showErrors(
         r,
         r.done.length ? t("resultTitle") : t("undoFailed"),
@@ -1437,6 +1554,9 @@
       ready = true;
       await refresh();
       checkIdentical();
+      // A moment after opening, so it does not slow the start.
+      if (settings.checkUpdates)
+        setTimeout(() => api.updateCheck().then((u) => (update = u)).catch(() => {}), 4000);
     })();
     return () => {
       unlisten.then((f) => f());
@@ -1780,6 +1900,11 @@
     {/if}
     <span class="spacer"></span>
     <span class="notice">{notice}</span>
+    {#if update}
+      <button class="link update" title={t(update.way === "page" ? "updatePageHint" : "updateHint")} disabled={updating !== null} onclick={installUpdate}>
+        {updating !== null ? t("updateDownloading", { p: updating }) : t("updateAvailable", { v: update.version })}
+      </button>
+    {/if}
     <button class="link" title={t("donateHint")} onclick={() => openUrl("https://ko-fi.com/rafaellgc")}><Icon name="heart" size={13} />{t("donate")}</button>
   </footer>
 </div>
@@ -2119,6 +2244,7 @@
   }
   footer .link:hover:not(:disabled) { background: var(--hover); }
   footer .link.on { background: var(--accent-soft); font-weight: 600; }
+  footer .link.update { background: var(--accent-soft); font-weight: 600; }
   .copy-icon { width: 12px; height: 12px; }
   .modal ul { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
   .modal li { display: flex; align-items: center; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--row-line); }

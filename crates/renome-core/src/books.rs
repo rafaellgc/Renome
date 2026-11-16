@@ -1322,6 +1322,12 @@ pub struct BookMatch {
     /// [`crate::fields`].
     #[serde(default)]
     pub extra: crate::fields::Extra,
+    /// An audiobook's narrator (from its tags or folder name).
+    pub narrator: String,
+    /// An audiobook in several files: this file's place among them, from
+    /// 1, and how many there are (0 for a book in one file).
+    pub part: u32,
+    pub parts: u32,
 }
 
 /// A name as libraries sort it, by surname: `Moraes, C. S.`, `Alvarenga,
@@ -1386,7 +1392,16 @@ pub fn book_name(template: &str, m: &BookMatch, colon: &str) -> String {
     let series = safe(&m.series);
     let volume = safe(&volume(&m.series_index));
     let extra = crate::fields::safe(&m.extra, colon);
+    let narrator = safe(&m.narrator);
+    let part = if m.parts > 1 && m.part > 0 {
+        let width = m.parts.to_string().len().max(2);
+        format!("{:0width$}", m.part)
+    } else {
+        String::new()
+    };
     let out = crate::rules::expand(template, |key| match key {
+        "narrator" | "narrador" => Some(narrator.as_str()),
+        "part" | "parte" => Some(part.as_str()),
         "author" | "autor" => Some(author.as_str()),
         "author sort" | "autor invertido" => Some(sorted.as_str()),
         "initial" | "inicial" => Some(letter.as_str()),
@@ -1405,7 +1420,18 @@ pub fn book_name(template: &str, m: &BookMatch, colon: &str) -> String {
         "id" | "olid" => Some(m.work.as_str()),
         key => crate::fields::get(&extra, key),
     });
-    tidy(&out)
+    let out = tidy(&out);
+    // The parts of an audiobook told apart, when the template does not.
+    if !part.is_empty() && !has_key(template, &["part", "parte"]) {
+        return format!("{out} - {part}");
+    }
+    out
+}
+
+/// Whether a template uses one of these keys (`{parte}`, `{part:3}`).
+fn has_key(template: &str, keys: &[&str]) -> bool {
+    let t = template.to_lowercase();
+    keys.iter().any(|k| t.contains(&format!("{{{k}}}")) || t.contains(&format!("{{{k}:")))
 }
 
 /// Removes what missing values leave behind: `()`, `[]`, `#`, and dashes
@@ -1424,6 +1450,12 @@ pub fn tidy(s: &str) -> String {
 /// Folders made from the rule's folder template (levels split at `/`);
 /// levels that come out empty are skipped.
 pub fn folders(template: &str, m: &BookMatch, colon: &str) -> Vec<String> {
+    // The book's folders, not a part's.
+    let m = &BookMatch {
+        part: 0,
+        parts: 0,
+        ..m.clone()
+    };
     template
         .split('/')
         .map(|level| book_name(level, m, colon))
@@ -2149,6 +2181,27 @@ mod tests {
             folders("{author}/{series}/{title}", &none, " - "),
             vec!["J. K. Brandão", "Nina Torres e a Chave de Vidro"]
         );
+    }
+
+    #[test]
+    fn audiobook_parts() {
+        let m = BookMatch {
+            title: "Ecos".into(),
+            authors: vec!["Lia Marta Quaresma".into()],
+            narrator: "Tomé Rocha".into(),
+            part: 3,
+            parts: 12,
+            ..Default::default()
+        };
+        assert_eq!(book_name("{autor} - {título}", &m, " - "), "Lia Marta Quaresma - Ecos - 03");
+        assert_eq!(book_name("{parte} - {título}", &m, " - "), "03 - Ecos");
+        assert_eq!(book_name("{título} {{narrador}}", &m, " - ").contains("Tomé Rocha"), true);
+        let long = BookMatch { part: 7, parts: 140, ..m.clone() };
+        assert_eq!(book_name("{título}", &long, " - "), "Ecos - 007");
+        // One file: no part; the folders never get one.
+        let one = BookMatch { part: 1, parts: 1, ..m.clone() };
+        assert_eq!(book_name("{título}", &one, " - "), "Ecos");
+        assert_eq!(folders("{autor}/{título}", &m, " - "), vec!["Lia Marta Quaresma", "Ecos"]);
     }
 
     #[test]

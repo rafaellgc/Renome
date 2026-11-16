@@ -327,7 +327,7 @@ impl Client {
         self.get(&format!("/works/{id}.json"), &[]).await
     }
 
-    async fn cover(&self, id: i64) -> Result<Vec<u8>, String> {
+    pub async fn cover(&self, id: i64) -> Result<Vec<u8>, String> {
         let url = format!("{}/b/id/{id}-L.jpg", covers_base());
         let res = self.send(&url, &[("default", "false")]).await?;
         Ok(res.bytes().await.map_err(net_error)?.to_vec())

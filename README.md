@@ -111,6 +111,11 @@ A built-in manual (F1) explains every rule with examples.
   (read by Audiobookshelf and e-book managers), and can write the details
   inside EPUB, AZW3, MOBI and FB2 books, bring EPUB 2 books to EPUB 3 and
   shrink their large pictures (all undone like any rename).
+- Audiobooks (in the book rule): the files of a folder (and its `CD1`,
+  `CD2` folders) or an `.m4b` are one book, looked up once by their tags
+  and folder name, named with part numbers and narrator, and sorted into
+  `Author/Title` with their cover, as Audiobookshelf, Jellyfin and Plex
+  read them.
 - Book conversion: turns EPUB, MOBI/AZW3, PDF, FB2/FBZ, Word (DOCX),
   LibreOffice (ODT), text and HTML files into EPUB, AZW3 (Kindle), FB2 or
   PDF after renaming, with the details found or typed in; headings,
@@ -155,7 +160,8 @@ A built-in manual (F1) explains every rule with examples.
 - Movie, TV show, book and comic lookups read the name as the rules above
   them leave it, so a "Replace text" can fix an abbreviation first.
 - Edit any new name by hand right in the preview (double-click or F2).
-- List filter: only the visible files are renamed.
+- List filter: only the visible files are renamed. Besides names, it takes
+  sizes (`>40MB`), dates (`=2024`, `<7d`) and folders (`folder:"Season 2"`).
 - Sort by new name (default) or by any column.
 - Conflicts are caught before renaming (duplicate names, existing files,
   invalid names, characters Windows does not accept).
@@ -163,6 +169,10 @@ A built-in manual (F1) explains every rule with examples.
   If the program or the computer stops halfway through a rename or an
   undo, the next start puts every file back under a real name.
 - Persistent history with **undo**, even after closing the app.
+- Tells Jellyfin, Emby or Plex servers to look again at the library folders
+  where files were renamed, moved or put back (optional; folders read from
+  the server and paired with this computer's, also for servers in a
+  container; only the request and the folder paths are sent).
 - Export the list (current name, new name, folder, status) to CSV, to
   check a big batch in a spreadsheet.
 - Rule presets saved as JSON.
@@ -214,6 +224,11 @@ flatpak install --user https://rafaellgc.github.io/Renome/io.github.rafaellgc.Re
 The downloaded `.flatpak` file (double click, or `flatpak install --user
 Renome_<version>_x86_64.flatpak`) also takes updates from that repository.
 The GNOME runtime it needs comes from Flathub.
+
+The AppImage, Windows and macOS versions look for a new release when they
+open (an option) and can download and install it themselves; each update is
+checked against the project's signature before it is installed. The `.deb`
+and `.rpm` only point to the release page.
 
 ## Layout
 
@@ -268,6 +283,11 @@ The given paths go into the initial list.
   run by hand). The tag also refreshes the signed Flatpak repository on the
   `gh-pages` branch (`flatpak/publish-repo.sh`), signed with the GPG key in
   the `FLATPAK_GPG_KEY` secret.
+- the installers' updates are signed with the key in the
+  `TAURI_SIGNING_PRIVATE_KEY` secret (password in
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`); the release gets a `latest.json`
+  the programs read. A local `npm run tauri build` needs the same two
+  variables, or `-- --no-bundle`.
 
 ## Credits
 

@@ -30,6 +30,12 @@ pub struct AudioTags {
     pub disc_total: Option<u32>,
     pub genre: String,
     pub composer: String,
+    /// The movement's name and number (`MVNM`/`MVIN`, `©mvn`/`©mvi`),
+    /// where audiobook taggers keep the series and the book's place in it.
+    #[serde(default)]
+    pub series: String,
+    #[serde(default)]
+    pub series_index: String,
     /// The release date as far as the tags tell it (`1985-06-01`,
     /// `1985-06`, `1985`).
     pub date: String,
@@ -144,6 +150,10 @@ pub fn probe(path: &Path) -> Option<AudioTags> {
         genre: text_of(&tags, |t| t.genre().map(|s| s.into_owned())),
         composer: text_of(&tags, |t| {
             t.get_string(ItemKey::Composer).map(str::to_string)
+        }),
+        series: text_of(&tags, |t| t.get_string(ItemKey::Movement).map(str::to_string)),
+        series_index: text_of(&tags, |t| {
+            t.get_string(ItemKey::MovementNumber).map(str::to_string)
         }),
         original_year: tags.iter().find_map(|t| {
             let date = t.get_string(ItemKey::OriginalReleaseDate)?;

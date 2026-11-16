@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { DetailColumn, Step } from "./types";
+import type { DetailColumn, MediaServer, Step } from "./types";
 
 export type Lang = "pt" | "en" | "es";
 export type Theme = "light" | "dark" | "system";
@@ -43,6 +43,12 @@ export interface Settings {
   /** SubDL API key (empty: not used). */
   subdlKey: string;
   subsourceKey: string;
+  /** Media servers told about the folders where files were renamed. */
+  servers: MediaServer[];
+  /** Their keys, by server id, as JSON (a secret). */
+  serverKeys: string;
+  /** Look for a new version on GitHub when the program opens. */
+  checkUpdates: boolean;
   /** Rules from the last session (when `rememberRules`). */
   rules: Step[];
   /** Rule sets saved by name, in the order they were saved. */
@@ -78,6 +84,9 @@ const DEFAULTS: Settings = {
   osPassword: "",
   subdlKey: "",
   subsourceKey: "",
+  servers: [],
+  serverKeys: "",
+  checkUpdates: true,
   rules: [],
   ruleSets: [],
   columns: [],
@@ -152,7 +161,7 @@ export function saveSettings() {
 }
 
 /** The settings kept in the system's password store, not in the file. */
-export const SECRET_FIELDS = ["tmdbKey", "comicVineKey", "discogsToken", "metronToken", "googleBooksKey", "gcdEmail", "gcdPassword", "osKey", "osUser", "osPassword", "subdlKey", "subsourceKey"] as const;
+export const SECRET_FIELDS = ["tmdbKey", "comicVineKey", "discogsToken", "metronToken", "googleBooksKey", "gcdEmail", "gcdPassword", "osKey", "osUser", "osPassword", "subdlKey", "subsourceKey", "serverKeys"] as const;
 
 /** Whether the secrets came (the store may wait to be unlocked or
  *  allowed), and where they are kept: `stored` in the password store,

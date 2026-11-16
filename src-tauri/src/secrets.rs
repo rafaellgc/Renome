@@ -13,7 +13,7 @@ use std::sync::Mutex;
 use serde_json::{Map, Value};
 
 /// The settings that are secrets.
-pub const FIELDS: [&str; 12] = [
+pub const FIELDS: [&str; 13] = [
     "tmdbKey",
     "osKey",
     "osUser",
@@ -26,6 +26,7 @@ pub const FIELDS: [&str; 12] = [
     "googleBooksKey",
     "gcdEmail",
     "gcdPassword",
+    "serverKeys",
 ];
 
 /// Tests use a store of their own with `RENOME_SECRETS_SERVICE`.

@@ -40,6 +40,18 @@
     "shortDescription": "Batch file renamer",
     "macOS": {
       "minimumSystemVersion": "11.0"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERDMEIxRUU3NjFENEUyMjMKUldRajR0Umg1eDRMM0ZoTU1hQzhoWVM5US9VbmN1K1VEdnFVYjVHRkVLYkFsMnpjRlhOT21qbkQK",
+      "endpoints": [
+        "https://github.com/rafaellgc/Renome/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

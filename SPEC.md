@@ -128,7 +128,7 @@ before it is read. The preview sends that name to the app
 | Movie (TMDB) | template with `{title}`, `{original}`, `{year}`, `{id}`, `{resolution}`, `{video codec}` (default `{title} ({year}) [tmdbid-{id}]`); what `:` becomes (default ` - `); a folder for each movie; save `.nfo` and poster (optionally fanart and logo) next to renamed videos; show the collection's missing movies. See 2.1 |
 | TV show (TMDB, AniList) | the source (TMDB, or AniList for anime); the show (name, TMDB or AniList id or link; empty: from the files); template with `{show}`, `{original}`, `{year}`, `{season}`, `{episode}`, `{title}`, `{id}`, `{resolution}`, `{video codec}` (as for movies, see 2.1; not in the show folder) (default `{show} ({year}) - S{season}E{episode} - {title}`); what `:` becomes; show and season folders (show folder template, default `{show} ({year}) [tmdbid-{id}]`); save `.nfo` files and images (optionally fanart and logo); show the missing episodes. See 2.2 |
 | Music (tags) | template with `{track}`, `{title}`, `{artist}`, `{album artist}`, `{album}`, `{year}`, `{disc}`, `{genre}`, `{composer}`, `{total tracks}`, `{total discs}`, `{original year}`, `{label}`, `{catalog}`, `{artist sort}`, `{album artist sort}`, `{initial}`, `{format}`, `{bitrate}`, `{sample rate}`, `{bits}` (default `{track} - {title}`); what `:` becomes; disc number in the track on multi-disc albums; fill in from the file name; artist and album folders (default `{album artist}/{album} ({year})`); show the missing tracks. See 2.3 |
-| Book (Open Library) | template with `{author}`, `{authors}`, `{author sort}`, `{initial}`, `{title}`, `{original}`, `{year}`, `{edition year}`, `{publisher}`, `{isbn}`, `{series}`, `{volume}`, `{id}` (default `{author} - {title} ({year})`); what `:` becomes; author and book folders (default `{author}/{title}`); save the cover and `metadata.opf`; write the details inside EPUBs; show the series' missing volumes; convert books and documents to EPUB, AZW3, FB2 or PDF (original kept beside or trashed). See 2.4 and 2.4b |
+| Book (Open Library) | template with `{author}`, `{authors}`, `{author sort}`, `{initial}`, `{title}`, `{original}`, `{year}`, `{edition year}`, `{publisher}`, `{isbn}`, `{series}`, `{volume}`, `{narrator}`, `{part}`, `{id}` (default `{author} - {title} ({year})`); what `:` becomes; author and book folders (default `{author}/{title}`); save the cover and `metadata.opf`; write the details inside EPUBs; show the series' missing volumes; convert books and documents to EPUB, AZW3, FB2 or PDF (original kept beside or trashed); audiobooks too (on). See 2.4, 2.4a and 2.4b |
 | Comic (ComicInfo.xml, GCD, Metron, Comic Vine, MangaDex, AniList, MangaUpdates) | template with `{series}`, `{series year}`, `{number}`, `{volume}`, `{chapter}`, `{title}`, `{year}`, `{count}`, `{publisher}`, `{writer}`, `{artist}`, `{id}` (default `{series} v{volume} #{number} c{chapter} - {title} ({year})`); what `:` becomes; the series (empty: from the files); the catalogue; series folders (default `{series} ({series year})`); series from the folder; write `ComicInfo.xml` into CBZs (or clear it); publishers to leave out; details typed by hand; convert CBR, CB7, CBT and PDF to CBZ (the original kept beside or deleted); show the missing issues. See 2.5 |
 
 Positions count **visible characters** (Unicode graphemes), starting at 1.
@@ -1137,6 +1137,51 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
 - Only the searched title, author and ISBN are sent to Open Library and
   Google Books, and only the ISBN to BrasilAPI. Without the option above the book files are
   never changed.
+
+### 2.4a Audiobooks (`audiobook`)
+
+The book rule's option `audio` (TS only, default on) takes audio files
+(`music::is_audio`, `.m4b` included) as audiobooks.
+
+- `audiobook::group` (command `audiobook_groups`): files of a folder with
+  the same album tag (or none) are one book; a disc folder (`CD1`,
+  `Disc 2`, `music::disc_folder`) counts as its parent (`book_dir`); an
+  `.m4b` without album is a book of its own. Order: disc (tag, else disc
+  folder), track, natural name. Title: album (junk words such as
+  `(Unabridged)`, `[64kbps]`, `audiobook` removed), else the folder name
+  (the file's for one file) read like a book name (`books::guess_name`);
+  author: album artist, artist, else the name; year: tags, else the name;
+  narrator: `{Name}` or `narrated by`/`narrado por`/`read by` in the name,
+  else the composer when it is not the author; series and index: the
+  movement name and number (`MVNM`/`MVIN`, `©mvn`/`©mvi`).
+- The page looks each book up once (its first file, with the name
+  `Author - Title (Year)`), and gives every file of it the match plus
+  `narrator`, `part` (from 1) and `parts` (0 for one file); series from
+  the tags when the catalogue gives none. The details window edits a
+  book's files together. Cover and `metadata.opf` only for the first
+  file. Turning the option off drops the audio matches.
+- `BookMatch.narrator/part/parts`; keys `{narrator}`/`{narrador}`,
+  `{part}`/`{parte}` (two digits, more for 100+ parts). Without `{part}`
+  in the template a multi-file book's names get ` - NN` appended; folder
+  levels never get a part.
+- Folders: the library root is computed from `book_dir`; with audio
+  matches `place_own_folders` counts audio files as the kind and disc
+  folders as sub-levels, so a folder holding only that book (and its disc
+  folders) is left for `Author/Title`; `follow_works` moves the other
+  files of an audiobook's own folder (cover, `.cue`, booklet) along.
+- Options `audioTags`/`audioClean` (TS only, off): after the renames and
+  the book sidecars, command `write_audiobook_tags` writes
+  `tagwrite::audiobook_fields` into each audio file (`tagwrite::write`,
+  backed up in the history like songs' tags): Title `Title - NN` (multi-
+  file), Album, Artist and AlbumArtist (authors), Composer (narrator),
+  Date (year), Genre `Audiobook`, Label (publisher), Language, Comment
+  (synopsis: the choice's, else the Open Library work's), Movement and
+  MovementNumber (series, whole numbers only), Track/TrackTotal (part).
+  `Field::Comment/Movement/MovementNumber` are in `tagwrite::AUDIOBOOK`,
+  not `ALL`: cleaning a song still drops comments; cleaning keeps any
+  field the write itself sets. Cover: the catalogue's (once per book),
+  else the folder's, through `embeddable_cover` (1200 px max, JPEG when
+  resized). `.m4b` is writable (MP4).
 
 ### 2.4b Book conversion (`bookconv`)
 
@@ -2454,7 +2499,7 @@ The window has a side menu: General, Renaming, Online searches, Accounts
 and keys (each service with a key or account typed in marked "set up";
 the menu shows how many of the 7 are) and Shortcuts.
 
-The secrets (TMDB, Google Books, Comic Vine, Discogs, Metron, OpenSubtitles and SubDL keys, GCD and OpenSubtitles user names and passwords)
+The secrets (TMDB, Google Books, Comic Vine, Discogs, Metron, OpenSubtitles, SubDL and media server keys, GCD and OpenSubtitles user names and passwords)
 are not in that file: they go, as one JSON entry (service
 `io.github.rafaellgc.Renome`, account `credentials`), to the system's
 password store (Secret Service on Linux, Credential Manager on Windows,
@@ -2486,6 +2531,39 @@ may be asked about the Keychain again with each version.
 - Ask for confirmation before renaming (on).
 - Turn the rules off after renaming (on).
 - Warn about characters Windows does not accept (on).
+- Look for new versions when opening (`checkUpdates`, on; hidden in the
+  Flatpak): 4 s after start, `update_check` (tauri-plugin-updater, endpoint
+  `releases/latest/download/latest.json`, minisign public key in
+  `tauri.conf.json`; the private key and its password are the CI secrets
+  `TAURI_SIGNING_PRIVATE_KEY`/`_PASSWORD`, and `createUpdaterArtifacts`
+  makes the `.sig` files and `latest.json`). `update::way`: Flatpak
+  (`FLATPAK_ID`) never asks; AppImage (`APPIMAGE`), Windows and macOS
+  install themselves (`update_install`: download with `update-progress`
+  events, signature check, install, restart; Windows installer passive);
+  `.deb`/`.rpm` only show the footer button, which opens the release page.
+  A bad signature is `updateSignature` and nothing is installed.
+- Media servers (tab "Media server"; `servers`: id, kind jellyfin/plex,
+  url, `folders` [{libraryId, library, server path, local path, on}];
+  keys in the secret `serverKeys`, JSON by id; `src-tauri/src/mediaserver.rs`).
+  "Read the libraries": Jellyfin `GET /Library/VirtualFolders`, Plex
+  `GET /library/sections` (JSON); a server path that is a folder here is
+  paired with itself, otherwise the user picks the local folder; folders
+  already paired keep their pair and on/off. After a rename or an undo,
+  `server_tell` gets the from/to paths of every operation:
+  `mediaserver::plan` takes their parent folders (the nearest one still
+  there), keeps those inside a paired folder that is on (the deepest
+  one), maps them to the server's path (`\` when the server path is
+  Windows-like), drops folders inside another one told about, groups
+  them by library; Jellyfin `POST /Library/Media/Updated`
+  {Updates:[{Path, UpdateType:"Modified"}]}, Plex
+  `GET /library/sections/{key}/refresh?path=…`; on any other answer than
+  success/401/403/no connection, the whole library (Jellyfin
+  `POST /Items/{id}/Refresh?Recursive=true`, Plex
+  `/library/sections/{key}/refresh`). Headers: Jellyfin
+  `Authorization: MediaBrowser Token="…"` and `X-Emby-Token`, Plex
+  `X-Plex-Token`. The notice says "<server>: told about N folder(s)" or
+  why not (`srvOffline`, `srvTimeout`, `srvAddress`, `srvRefused`,
+  `srvAnswer: <status>`); nothing when no folder was in a library.
 - Online searches: keep the answers for 1 day, 7 days (default), 30
   days, 6 months, or not at all (`cacheDays`), with the space they take
   and Clear. The answers (raw response bodies of TMDB, MusicBrainz,

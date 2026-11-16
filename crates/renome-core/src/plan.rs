@@ -108,6 +108,11 @@ pub struct View {
     /// Another folder the files go to, moved or copied.
     #[serde(default)]
     pub send_to: Option<SendTo>,
+    /// The release's advertisements go to the system's trash once the
+    /// files are moved, with their old folder when nothing else is left
+    /// in it (not when copying).
+    #[serde(default)]
+    pub trash_ads: bool,
 }
 
 /// Two files given the same name, or a name another file has and keeps:
@@ -261,6 +266,10 @@ pub struct PreviewItem {
     /// old folder, with what else does not go with the movie.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub release_junk: bool,
+    /// A release's advertisement that goes to the trash (see
+    /// [`View::trash_ads`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub to_trash: bool,
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -279,6 +288,11 @@ pub struct Preview {
     pub conflicts: usize,
     /// Old folders renamed for what stays in them.
     pub left_folders: Vec<LeftFolder>,
+    /// The release's advertisements to send to the trash after the moves,
+    /// where they are then (see [`View::trash_ads`]), and old folders left
+    /// with nothing else, sent whole (see [`trash_leftovers`]).
+    pub trash: Vec<PathBuf>,
+    pub trash_folders: Vec<PathBuf>,
     /// The files are copied, not moved (see [`SendTo`]).
     #[serde(skip)]
     pub copy: bool,
@@ -746,7 +760,8 @@ fn send_rest(items: &mut [PreviewItem], files: &[FileEntry], to: &SendTo) {
         .iter()
         .map(|f| (f.path.as_path(), f.base.as_path()))
         .collect();
-    for i in items.iter_mut().filter(|i| i.dest.is_none()) {
+    // The release's advertisements stay where they were.
+    for i in items.iter_mut().filter(|i| i.dest.is_none() && !i.release_junk) {
         let rel = base
             .get(i.path.as_path())
             .and_then(|b| i.dir.strip_prefix(b).ok())
@@ -771,6 +786,16 @@ fn send_rest(items: &mut [PreviewItem], files: &[FileEntry], to: &SendTo) {
         i.folder = (!levels.is_empty()).then(|| levels.join("/"));
         i.dest = Some(dest);
     }
+}
+
+/// A book told apart from others: its authors and title.
+fn book_key(m: &BookMatch) -> String {
+    format!("{}\0{}", m.authors.join("\0"), m.title).to_lowercase()
+}
+
+fn is_audio_path(p: &Path) -> bool {
+    p.extension()
+        .is_some_and(|e| crate::music::is_audio(&e.to_string_lossy()))
 }
 
 /// Files that go with a movie, an episode, a book or a comic found in a
@@ -804,6 +829,8 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
     // names: old stem, new stem and where it goes.
     let mut places: HashMap<PathBuf, Option<Place>> = HashMap::new();
     let mut ids: HashMap<PathBuf, HashSet<u64>> = HashMap::new();
+    // Audiobooks' folders (above disc folders) and their books.
+    let mut audiobooks: HashMap<PathBuf, HashSet<String>> = HashMap::new();
     let mut stems: HashMap<PathBuf, Vec<(String, String, Place)>> = HashMap::new();
     for i in items
         .iter()
@@ -820,6 +847,19 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
                     places.insert(i.dir.clone(), moving);
                 }
             }
+        } else if is_audio_path(&i.path)
+            && let Some(m) = view.books.get(&i.path)
+        {
+            let dir = crate::audiobook::book_dir(&i.dir);
+            audiobooks.entry(dir.clone()).or_default().insert(book_key(m));
+            let moving = i.dest.is_some().then(|| here.clone());
+            match places.get_mut(&dir) {
+                Some(p) if *p != moving => *p = None,
+                Some(_) => {}
+                None => {
+                    places.insert(dir, moving);
+                }
+            }
         }
         let (old, new) = (split_name(&i.original).0, split_name(&i.new_name).0);
         stems
@@ -828,13 +868,32 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
             .push((old.to_string(), new.to_string(), here));
     }
     // Each movie folder's files were added with: the movie's.
-    let added: HashMap<PathBuf, &Path> = items
+    let mut added: HashMap<PathBuf, &Path> = items
         .iter()
         .filter(|i| i.extra.is_none() && view.movies.contains_key(&i.path))
         .filter_map(|i| Some((i.dir.clone(), *base.get(i.path.as_path())?)))
         .collect();
-    // Only a movie's own folder.
+    for i in items.iter().filter(|i| is_audio_path(&i.path) && view.books.contains_key(&i.path)) {
+        if let Some(b) = base.get(i.path.as_path()) {
+            added.insert(crate::audiobook::book_dir(&i.dir), b);
+        }
+    }
+    // Only a movie's own folder, or an audiobook's: every audio file in
+    // it (and in its disc folders) is that book.
     for (dir, place) in places.iter_mut() {
+        if let Some(books) = audiobooks.get(dir) {
+            let own = books.len() == 1
+                && walkdir::WalkDir::new(dir)
+                    .max_depth(2)
+                    .into_iter()
+                    .filter_map(Result::ok)
+                    .filter(|e| !e.file_type().is_dir() && is_audio_path(e.path()))
+                    .all(|e| view.books.get(e.path()).map(book_key).as_ref() == books.iter().next());
+            if !own {
+                *place = None;
+            }
+            continue;
+        }
         let own = ids.get(dir).is_some_and(|s| s.len() == 1)
             && items
                 .iter()
@@ -1406,7 +1465,10 @@ pub fn preview(
         book: view
             .books
             .get(&file.path)
-            .filter(|_| !file.is_dir && crate::ebook::is_book(&file.ext)),
+            .filter(|_| {
+                !file.is_dir
+                    && (crate::ebook::is_book(&file.ext) || crate::music::is_audio(&file.ext))
+            }),
         comic: None,
         comic_folder: None,
         video: if tmdb::is_video(&file.ext) {
@@ -1599,6 +1661,9 @@ pub fn preview(
             PreviewItem {
                 extra,
                 release_junk,
+                to_trash: release_junk
+                    && view.trash_ads
+                    && !view.send_to.as_ref().is_some_and(|s| s.copy),
                 comic_to,
                 sub_fix,
                 sub_extract,
@@ -1666,15 +1731,23 @@ pub fn preview(
     let books: HashMap<&Path, String> = view
         .books
         .iter()
-        .map(|(p, m)| {
-            (
-                p.as_path(),
-                format!("{}\0{}", m.authors.join("\0"), m.title).to_lowercase(),
-            )
-        })
+        .map(|(p, m)| (p.as_path(), book_key(m)))
         .collect();
     if in_place {
-        place_own_folders(&mut items, &books, crate::ebook::is_book, |_| false, view);
+        // With audiobooks, their audio files are the books, and their disc
+        // folders (`CD1`) are inside their own.
+        let audio = view.books.keys().any(|p| is_audio_path(p));
+        if audio {
+            place_own_folders(
+                &mut items,
+                &books,
+                |e| crate::ebook::is_book(e) || crate::music::is_audio(e),
+                |n| crate::music::disc_folder(n).is_some(),
+                view,
+            );
+        } else {
+            place_own_folders(&mut items, &books, crate::ebook::is_book, |_| false, view);
+        }
     }
     if let Some((_, folders)) = music {
         if folders && in_place {
@@ -1811,11 +1884,18 @@ pub fn preview(
         .iter()
         .filter(|i| i.status == Status::Conflict)
         .count();
-    let left_folders = if in_place {
-        left_folders(&items, view)
-    } else {
-        Vec::new()
-    };
+    let (left_folders, trash_folders) = left_folders(&items, view);
+    // Where each advertisement is once its old folder is renamed.
+    let trash = items
+        .iter()
+        .filter(|i| i.to_trash && !trash_folders.iter().any(|f| i.path.starts_with(f)))
+        .map(|i| {
+            left_folders
+                .iter()
+                .find_map(|l| Some(l.to.join(i.path.strip_prefix(&l.from).ok()?)))
+                .unwrap_or_else(|| i.path.clone())
+        })
+        .collect();
     Preview {
         items,
         rule_errors: pipeline.errors,
@@ -1824,6 +1904,8 @@ pub fn preview(
         changed,
         conflicts,
         left_folders,
+        trash,
+        trash_folders,
         copy: copying,
     }
 }
@@ -2040,7 +2122,10 @@ fn place_movie_folders(items: &mut [PreviewItem], view: &View) {
 /// hold files afterwards (extras, a file in conflict, one hidden by the
 /// filter): renamed `<new folder> (<suffix>)`, next to the new one. Without
 /// anything left, the old folder is removed after the move instead.
-fn left_folders(items: &[PreviewItem], view: &View) -> Vec<LeftFolder> {
+///
+/// Also the folders left with only the release's advertisements, when they
+/// go to the trash: sent there whole instead.
+fn left_folders(items: &[PreviewItem], view: &View) -> (Vec<LeftFolder>, Vec<PathBuf>) {
     // Each old folder and the new one its files go to (None: several).
     let mut pairs: Vec<(PathBuf, Option<PathBuf>)> = Vec::new();
     for i in items.iter().filter(|i| i.status == Status::Ok && !i.is_dir) {
@@ -2050,6 +2135,26 @@ fn left_folders(items: &[PreviewItem], view: &View) -> Vec<LeftFolder> {
         let Some(root) = dest.ancestors().nth(folder.split('/').count()) else {
             continue;
         };
+        // Sent to another folder: the movie's own folder it left (the
+        // release's) is named after its new one, where it is.
+        // Copied, nothing leaves it.
+        if let Some(s) = &view.send_to
+            && !i.dir.starts_with(root)
+        {
+            if !s.copy
+                && let Some(m) = view.movies.get(&i.path)
+                && i.extra.is_none()
+                && own_movie_folder(&i.dir, &i.path, m, view)
+            {
+                let to = Some(dest.clone());
+                match pairs.iter_mut().find(|p| p.0 == i.dir) {
+                    Some(p) if p.1 != to => p.1 = None,
+                    Some(_) => {}
+                    None => pairs.push((i.dir.clone(), to)),
+                }
+            }
+            continue;
+        }
         let (Ok(old), Ok(new)) = (i.dir.strip_prefix(root), dest.strip_prefix(root)) else {
             continue;
         };
@@ -2083,6 +2188,12 @@ fn left_folders(items: &[PreviewItem], view: &View) -> Vec<LeftFolder> {
         s => s,
     };
     let mut left = Vec::new();
+    let mut trash = Vec::new();
+    let ads: HashSet<&Path> = items
+        .iter()
+        .filter(|i| i.to_trash)
+        .map(|i| i.path.as_path())
+        .collect();
     for (from, to) in pairs {
         let Some(name) = to.as_ref().and_then(|t| t.file_name()) else {
             continue;
@@ -2105,8 +2216,13 @@ fn left_folders(items: &[PreviewItem], view: &View) -> Vec<LeftFolder> {
             .into_iter()
             .filter_map(Result::ok)
             .filter(|e| !e.file_type().is_dir() && !leaving.contains(e.path()))
+            .filter(|e| !ads.contains(e.path()))
             .count();
         if files == 0 {
+            // Only advertisements left: the folder goes to the trash.
+            if items.iter().any(|i| i.to_trash && i.path.starts_with(&from)) {
+                trash.push(from);
+            }
             continue;
         }
         let Some(up) = from.parent() else { continue };
@@ -2115,7 +2231,42 @@ fn left_folders(items: &[PreviewItem], view: &View) -> Vec<LeftFolder> {
             left.push(LeftFolder { from, to, files });
         }
     }
-    left
+    (left, trash)
+}
+
+/// Sends the release's advertisements to the trash after the moves (see
+/// [`Preview::trash`]): the files that still look like advertisements, and
+/// the folders that hold nothing else (any other file keeps a folder, and
+/// only its advertisements go).
+pub fn trash_leftovers(files: &[PathBuf], folders: &[PathBuf]) -> (Vec<PathBuf>, Vec<(PathBuf, String)>) {
+    let is_ad = |p: &Path| {
+        std::fs::symlink_metadata(p)
+            .is_ok_and(|m| m.is_file() && crate::extras::release_junk(p, m.len()))
+    };
+    let mut ads: Vec<PathBuf> = files.iter().filter(|p| is_ad(p)).cloned().collect();
+    let mut whole = Vec::new();
+    for dir in folders.iter().filter(|d| d.is_dir()) {
+        let inside: Vec<PathBuf> = walkdir::WalkDir::new(dir)
+            .min_depth(1)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|e| !e.file_type().is_dir())
+            .map(|e| e.into_path())
+            .collect();
+        if inside.iter().all(|p| is_ad(p)) {
+            whole.push(dir.clone());
+        } else {
+            ads.extend(inside.into_iter().filter(|p| is_ad(p)));
+        }
+    }
+    let (mut done, mut failed) = (Vec::new(), Vec::new());
+    for p in whole.into_iter().chain(ads) {
+        match crate::files::to_trash(&p) {
+            Ok(()) => done.push(p),
+            Err(e) => failed.push((p, e)),
+        }
+    }
+    (done, failed)
 }
 
 #[cfg(test)]
@@ -3045,6 +3196,55 @@ mod tests {
     }
 
     #[test]
+    fn audiobook_in_disc_folders_with_its_cover() {
+        let d = tempfile::tempdir().unwrap();
+        let book = d.path().join("ecos mp3 64k");
+        fs::create_dir_all(book.join("CD1")).unwrap();
+        fs::create_dir_all(book.join("CD2")).unwrap();
+        let m = |part| crate::books::BookMatch {
+            title: "Ecos".into(),
+            authors: vec!["Lia Marta Quaresma".into()],
+            part,
+            parts: 2,
+            ..Default::default()
+        };
+        let steps = vec![Step {
+            enabled: true,
+            only: String::new(),
+            rule: Rule::Book {
+                template: "{title}".into(),
+                colon: " - ".into(),
+                folders: true,
+                folder_template: "{author}/{title}".into(),
+                cover: false,
+                opf: false,
+                missing: false,
+                convert_to: String::new(),
+            },
+        }];
+        let mut files = entries(&book.join("CD1"), &["faixa 01.mp3"]);
+        files.extend(entries(&book.join("CD2"), &["faixa 01.mp3"]));
+        files.extend(entries(&book, &["cover.jpg"]));
+        for f in &mut files {
+            f.base = book.clone();
+        }
+        let mut view = View::default();
+        view.books.insert(files[0].path.clone(), m(1));
+        view.books.insert(files[1].path.clone(), m(2));
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        let to = d.path().join("Lia Marta Quaresma/Ecos");
+        let dest = |name: &str| {
+            let i = p.items.iter().find(|i| i.path.ends_with(name)).unwrap();
+            i.dest.clone().unwrap_or(i.dir.clone()).join(&i.new_name)
+        };
+        // Out of its old folder and its disc folders, parts numbered, the
+        // cover along.
+        assert_eq!(dest("CD1/faixa 01.mp3"), to.join("Ecos - 1.mp3".replace("1.", "01.")));
+        assert_eq!(dest("CD2/faixa 01.mp3"), to.join("Ecos - 02.mp3"));
+        assert_eq!(dest("cover.jpg"), to.join("cover.jpg"));
+    }
+
+    #[test]
     fn book_into_author_folder() {
         let d = tempfile::tempdir().unwrap();
         let m = crate::books::BookMatch {
@@ -3592,6 +3792,89 @@ mod tests {
             &d.join("The Ash Gardens 2019"),
             &d.join("x/The.Ash.Gardens.2017.mkv")
         ));
+    }
+
+    #[test]
+    fn sent_movie_leaves_its_advertisements_behind() {
+        let d = tempfile::tempdir().unwrap();
+        let m = MovieMatch {
+            extra: Default::default(),
+            id: 7,
+            title: "Os Jardins de Cinza".into(),
+            original_title: "Os Jardins de Cinza".into(),
+            year: Some(2017),
+        };
+        let steps = vec![Step {
+            enabled: true,
+            only: String::new(),
+            rule: Rule::Movie {
+                template: "{title} ({year})".into(),
+                colon: " - ".into(),
+                sidecar: false,
+                fanart: false,
+                folder: true,
+                missing: false,
+                subtitles: false,
+                sub_langs: String::new(),
+                video_tags: false,
+            },
+        }];
+        let release = "Os.Jardins.de.Cinza.2017.1080p.WEB-DL";
+        let downloads = d.path().join("baixando");
+        let old = downloads.join(release);
+        let library = d.path().join("Filmes");
+        fs::create_dir_all(&old).unwrap();
+        fs::create_dir_all(&library).unwrap();
+        // Added by itself: its own folder is its base.
+        let files = entries(&old, &[&format!("{release}.mkv"), "BAIXE MAIS FILMES.url"]);
+        for copy in [false, true] {
+            let mut view = View {
+                leftover_suffix: "additional files".into(),
+                send_to: Some(SendTo { dir: library.clone(), copy }),
+                ..View::default()
+            };
+            view.movies.insert(files[0].path.clone(), m.clone());
+            let p = preview(&files, &steps, &HashMap::new(), &view);
+            let new = library.join("Os Jardins de Cinza (2017)");
+            let ad = p.items.iter().find(|i| i.original == "BAIXE MAIS FILMES.url").unwrap();
+            assert!(ad.release_junk);
+            assert_eq!(ad.target(), old.join("BAIXE MAIS FILMES.url"));
+            assert_eq!(p.items[0].target(), new.join("Os Jardins de Cinza (2017).mkv"));
+            if copy {
+                assert!(p.left_folders.is_empty());
+            } else {
+                assert_eq!(p.left_folders.len(), 1);
+                assert_eq!(
+                    p.left_folders[0].to,
+                    downloads.join("Os Jardins de Cinza (2017) (additional files)")
+                );
+            }
+
+            // To the trash: the folder goes whole, nothing is renamed.
+            view.trash_ads = true;
+            let p = preview(&files, &steps, &HashMap::new(), &view);
+            let ad = p.items.iter().find(|i| i.original == "BAIXE MAIS FILMES.url").unwrap();
+            assert_eq!(ad.to_trash, !copy);
+            assert!(p.left_folders.is_empty());
+            assert!(p.trash.is_empty());
+            assert_eq!(p.trash_folders, if copy { vec![] } else { vec![old.clone()] });
+        }
+        // Something else stays: the folder is renamed, and only the
+        // advertisement goes, from there.
+        fs::write(old.join("notas.odt"), b"x").unwrap();
+        let mut view = View {
+            leftover_suffix: "additional files".into(),
+            send_to: Some(SendTo { dir: library.clone(), copy: false }),
+            trash_ads: true,
+            ..View::default()
+        };
+        view.movies.insert(files[0].path.clone(), m.clone());
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        let left = downloads.join("Os Jardins de Cinza (2017) (additional files)");
+        assert_eq!(p.left_folders.len(), 1);
+        assert_eq!((&p.left_folders[0].to, p.left_folders[0].files), (&left, 1));
+        assert!(p.trash_folders.is_empty());
+        assert_eq!(p.trash, vec![left.join("BAIXE MAIS FILMES.url")]);
     }
 
     #[test]

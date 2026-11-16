@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AlbumLookup, BookTarget, ComicFormat, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, EpisodeLookup, MbCandidate, SongMatch, HistoryEntry, ListedTrack, Lookup, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
+import type { AlbumLookup, BookTarget, ComicFormat, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, EpisodeLookup, MbCandidate, SongMatch, HistoryEntry, ListedTrack, Lookup, AudioBook, ServerCall, ServerLibrary, UpdateFound, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
 
 type Overrides = Record<string, string>;
 
@@ -62,6 +62,7 @@ export const api = {
    *  catalogues that give no covers to programs. */
   seriesCovers: (source: ComicSource, key: string, id: string, comic: ComicMatch) => invoke<string[]>("series_covers", { source, key, id, comic }),
   pictureCards: (paths: string[], max: number) => invoke<PictureCard[]>("picture_cards", { paths, max }),
+  trashLeftovers: (files: string[], folders: string[]) => invoke<{ trashed: string[]; failed: [string, string][] }>("trash_leftovers", { files, folders }),
   trashFiles: (paths: string[]) => invoke<{ trashed: string[]; failed: [string, string][] }>("trash_files", { paths }),
   preview: (steps: Step[], overrides: Overrides, view: View) =>
     invoke<Preview>("preview", { steps, overrides, view }),
@@ -97,6 +98,14 @@ export const api = {
     invoke<{ created: string[]; errors: [string, string][]; remaining: number | null }>("write_subtitles", { auth, historyId, items }),
   osCheck: (auth: SubsAuth) => invoke<number | null>("os_check", { auth }),
   subdlCheck: (key: string) => invoke<void>("subdl_check", { key }),
+  updateCheck: () => invoke<UpdateFound | null>("update_check"),
+  updateInstall: () => invoke<void>("update_install"),
+  updateWay: () => invoke<"itself" | "page" | "system">("update_way"),
+  serverCheck: (server: ServerCall) => invoke<void>("server_check", { server }),
+  serverLibraries: (server: ServerCall) => invoke<ServerLibrary[]>("server_libraries", { server }),
+  /** For each server, how many folders it was told about, or why not. */
+  serverTell: (servers: ServerCall[], changed: string[]) =>
+    invoke<({ Ok: number } | { Err: string })[]>("server_tell", { servers, changed }),
   subsourceCheck: (key: string) => invoke<void>("subsource_check", { key }),
   discogsCheck: (token: string) => invoke<void>("discogs_check", { token }),
   googleBooksKey: (key: string) => invoke<void>("google_books_key", { key }),
@@ -126,6 +135,7 @@ export const api = {
   gcdCheck: (email: string, password: string) => invoke<void>("gcd_check", { email, password }),
   bookLookup: (lang: string, items: { path: string; name: string }[]) =>
     invoke<BookLookup[]>("book_lookup", { lang, items }),
+  audiobookGroups: (paths: string[]) => invoke<AudioBook[]>("audiobook_groups", { paths }),
   bookGuesses: (paths: string[], names: string[]) => invoke<BookGuess[]>("book_guesses", { paths, names }),
   bookSearch: (lang: string, title: string, author: string) =>
     invoke<BookCandidate[]>("book_search", { lang, title, author }),
@@ -138,6 +148,8 @@ export const api = {
   ) => invoke<{ created: string[]; errors: [string, string][] }>("write_book_sidecars", { historyId, items, cover, opf, inFolder }),
   playlistDirs: (dirs: string[]) => invoke<string[]>("playlist_dirs", { dirs }),
   coverDirs: (dirs: string[]) => invoke<string[]>("cover_dirs", { dirs }),
+  writeAudiobookTags: (historyId: string | null, items: unknown[], cover: boolean, clean: boolean) =>
+    invoke<{ written: number; errors: [string, string][] }>("write_audiobook_tags", { historyId, items, cover, clean }),
   writeTags: (historyId: string | null, items: { path: string; song: SongMatch }[], cover: boolean, clean: boolean, coverSize: number) =>
     invoke<{ written: number; errors: [string, string][] }>("write_tags", { historyId, items, cover, clean, coverSize }),
   writeInside: (

@@ -980,8 +980,11 @@ impl Pipeline {
                     {
                         let levels = books::folders(folder_template, m, colon);
                         if !levels.is_empty() {
+                            // An audiobook's disc folders (`CD1`) are the
+                            // book's folder.
+                            let dir = crate::audiobook::book_dir(&ctx.file.dir);
                             moved = Some(Move::Into {
-                                root: books::library_root(&ctx.file.dir, m, &levels),
+                                root: books::library_root(&dir, m, &levels),
                                 folders: levels,
                             });
                         }

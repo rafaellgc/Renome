@@ -35,6 +35,7 @@ pub mod barcode;
 pub mod bookconv;
 pub mod bookmeta;
 pub mod comicbook;
+pub mod audiobook;
 pub mod books;
 pub mod comics;
 pub mod convert;

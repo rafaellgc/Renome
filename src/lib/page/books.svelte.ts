@@ -7,9 +7,9 @@ import { api } from "$lib/api";
 import { authorSpellings } from "$lib/authors";
 import { notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
-import { isBook, splitExt } from "$lib/rules";
+import { isAudio, isBook, splitExt } from "$lib/rules";
 import { tmdbLang } from "$lib/settings.svelte";
-import type { BookCandidate, BookGuess, BookMatch, BookState, BookTarget, EditField } from "$lib/types";
+import type { AudioBook, BookCandidate, BookGuess, BookMatch, BookState, BookTarget, EditField } from "$lib/types";
 import { counts, isEpub, moved, ruleOf, without, type PageCtx, isWritableBook } from "./common";
 
 /** What the rule uses of a chosen book: the edition's publisher and ISBN
@@ -39,8 +39,14 @@ function fromGuess(g: BookGuess): BookMatch {
 }
 const NO_GUESS: BookGuess = { title: "", author: "", year: null, isbns: [], fromFile: false, series: "", seriesIndex: "", publisher: "", language: "" };
 
+/** An audiobook's file: the file its book is looked up by (its first),
+ *  its place among the book's files and what its tags say. */
+interface Part { leader: string; part: number; parts: number; narrator: string; series: string; seriesIndex: string }
+
 export class Books {
   #ctx: PageCtx;
+  /** Audiobooks' files, by path. */
+  parts = $state<Record<string, Part>>({});
   /** Results and choices per file. */
   state = $state<Record<string, BookState>>({});
   /** Books whose details were typed in (over what the catalogue said). */
@@ -56,26 +62,48 @@ export class Books {
   }
 
   rule = $derived.by(() => ruleOf(this.#ctx.steps, "book"));
+  /** The rule takes audiobooks too (unless turned off). */
+  audio = $derived.by(() => {
+    const r = this.rule?.rule;
+    return r?.type === "book" && r.audio !== false;
+  });
+
+  /** A file the rule names: a book, or an audiobook's audio. */
+  takes(name: string) {
+    return isBook(name) || (this.audio && isAudio(name));
+  }
+
+  /** The file an audiobook is looked up, named on its cover and written
+   *  about by (its first); any book is its own. */
+  leads(p: string) {
+    return (this.parts[p]?.leader ?? p) === p;
+  }
   /** Each book's details for naming and writing: chosen (one spelling per
    *  author across the list) or typed in. */
   matches = $derived.by(() => {
-    const raw = Object.entries(this.state).filter(([, b]) => b.choice).map(([p, b]): [string, BookMatch] => [p, bookMatch(b)]);
+    const raw = Object.entries(this.state).filter(([p, b]) => b.choice && (this.audio || !isAudio(p))).map(([p, b]): [string, BookMatch] => [p, bookMatch(b)]);
     const spelling = authorSpellings(raw.flatMap(([, m]) => m.authors));
     const same = (a: string) => spelling.get(a.normalize("NFC")) ?? a.normalize("NFC");
-    return {
-      ...Object.fromEntries(raw.map(([p, m]) => [p, { ...m, title: m.title.normalize("NFC"), authors: [...new Set(m.authors.map(same))] }])),
-      ...this.edits,
-    } as Record<string, BookMatch>;
+    const out: Record<string, BookMatch> = Object.fromEntries(
+      raw.map(([p, m]) => [p, { ...m, title: m.title.normalize("NFC"), authors: [...new Set(m.authors.map(same))] }]),
+    );
+    // An audiobook's files: its book, their part and what their tags say.
+    for (const [p, g] of this.audio ? Object.entries(this.parts) : []) {
+      const m = out[g.leader];
+      if (m && !this.edits[p])
+        out[p] = { ...m, narrator: g.narrator, part: g.part, parts: g.parts, series: m.series || g.series, seriesIndex: m.seriesIndex || g.seriesIndex };
+    }
+    return { ...out, ...this.edits };
   });
   counts = $derived.by(() => counts(this.state, this.#ctx.items));
   /** The books among the rows chosen in the list. */
-  selected = $derived.by(() => this.#ctx.items.filter((i) => this.#ctx.selected.has(i.path) && !i.isDir && isBook(i.original)));
+  selected = $derived.by(() => this.#ctx.items.filter((i) => this.#ctx.selected.has(i.path) && !i.isDir && this.takes(i.original)));
   /** Books whose names are already right but that still get a cover or a
    *  metadata.opf (files that already exist are skipped when writing). */
   metaOnly = $derived.by(() => {
     const r = this.rule?.rule;
     return r?.type === "book" && (r.cover || r.opf)
-      ? this.#ctx.items.filter((i) => i.status === "unchanged" && this.has(i.path) && isBook(i.original))
+      ? this.#ctx.items.filter((i) => i.status === "unchanged" && this.has(i.path) && (isBook(i.original) || (isAudio(i.original) && this.leads(i.path))))
       : [];
   });
   /** Books whose names are already right but whose details get written
@@ -125,7 +153,8 @@ export class Books {
 
   /** A book has details to name and write it with: chosen or typed in. */
   has(p: string) {
-    return !!(this.state[p]?.choice || this.edits[p]);
+    const leader = this.parts[p]?.leader ?? p;
+    return !!(this.state[leader]?.choice || this.edits[p]);
   }
 
   /** A book's details as the window shows them. */
@@ -163,6 +192,29 @@ export class Books {
     return { ...base, bookTo: to, convert: original, ...(pdfPage ? { pdfPage } : {}) };
   }
 
+  /** Whether the rule writes audiobooks' details inside their files. */
+  get audioTags() {
+    const r = this.rule?.rule;
+    return r?.type === "book" && this.audio && !!r.audioTags;
+  }
+
+  /** Audiobook files whose names are already right but that get their
+   *  book's details written (files that already have them are skipped). */
+  tagsOnly = $derived.by(() =>
+    this.audioTags ? this.#ctx.items.filter((i) => i.status === "unchanged" && !i.isDir && isAudio(i.original) && this.has(i.path)) : [],
+  );
+
+  /** What writing an audiobook file's details needs: its book, with this
+   *  file's part. */
+  audioTagItem(key: string, path: string) {
+    const g = this.parts[key];
+    // The catalogue's cover and synopsis are the book's, chosen for its
+    // first file.
+    const item = this.sidecarItem(g?.leader ?? key, path);
+    const m = this.matches[key] ?? item.book;
+    return g ? { ...item, book: { ...m, part: g.part, parts: g.parts, narrator: m.narrator || g.narrator } } : { ...item, book: m };
+  }
+
   /** What the cover and metadata.opf of a book need; `key` is the path before renaming. */
   sidecarItem(key: string, path: string) {
     const typed = this.edits[key];
@@ -180,9 +232,34 @@ export class Books {
   /** Looks up the visible books without a choice yet on Open Library;
    *  books picked with confidence are done, the rest go to the review. */
   async search() {
+    const open = (p: string) => this.state[p]?.status !== "auto" && this.state[p]?.status !== "chosen";
     const items = this.#ctx.items
-      .filter((i) => !i.isDir && isBook(i.original) && this.state[i.path]?.status !== "auto" && this.state[i.path]?.status !== "chosen")
+      .filter((i) => !i.isDir && isBook(i.original) && open(i.path))
       .map((i) => ({ path: i.path, name: splitExt(this.#ctx.readName(i))[0] }));
+    // Audiobooks: their files grouped into books, each looked up once by
+    // what its tags and folder say.
+    const audio = this.audio
+      ? this.#ctx.items.filter((i) => !i.isDir && isAudio(i.original) && open(this.parts[i.path]?.leader ?? i.path)).map((i) => i.path)
+      : [];
+    if (audio.length) {
+      let found: AudioBook[] = [];
+      try {
+        found = await api.audiobookGroups(audio);
+      } catch (e) {
+        await notify({ title: t("rule.book"), text: tError(e) });
+        return;
+      }
+      const next = { ...this.parts };
+      for (const b of found) {
+        const leader = b.paths[0];
+        b.paths.forEach((p, n) => {
+          next[p] = { leader, part: n + 1, parts: b.paths.length > 1 ? b.paths.length : 0, narrator: b.narrator, series: b.series, seriesIndex: b.seriesIndex };
+        });
+        const name = `${b.author ? `${b.author} - ` : ""}${b.title}${b.year ? ` (${b.year})` : ""}`;
+        if (b.title || b.author) items.push({ path: leader, name });
+      }
+      this.parts = next;
+    }
     if (!items.length) {
       this.#ctx.say(t("bookNoFiles"));
       return;
@@ -241,7 +318,9 @@ export class Books {
 
   /** Opens the details window on the books chosen in the list. */
   async openEdit() {
-    const rows = this.selected;
+    // An audiobook's files are edited together.
+    const leaders = new Set(this.selected.map((i) => this.parts[i.path]?.leader).filter(Boolean));
+    const rows = this.#ctx.items.filter((i) => this.selected.includes(i) || (!!this.parts[i.path] && leaders.has(this.parts[i.path].leader)));
     if (!rows.length) return;
     const missing = rows.filter((i) => !this.matches[i.path] && !this.state[i.path]);
     const guessed: Record<string, BookGuess> = {};
@@ -285,20 +364,23 @@ export class Books {
   forget(paths: Set<string> | null) {
     this.state = paths ? without(this.state, paths) : {};
     this.edits = paths ? without(this.edits, paths) : {};
+    this.parts = paths ? without(this.parts, paths) : {};
   }
 
   /** The files renamed: what was found and typed follows them. */
   follow(to: (p: string) => string) {
     this.state = moved(this.state, to);
     this.edits = moved(this.edits, to);
+    this.parts = Object.fromEntries(Object.entries(moved(this.parts, to)).map(([p, g]) => [p, { ...g, leader: to(g.leader) }]));
   }
 
   /** What was found, to put back with Ctrl+Z. */
   snapshot() {
-    return { state: this.state, edits: this.edits };
+    return { state: this.state, edits: this.edits, parts: this.parts };
   }
   restore(s: ReturnType<Books["snapshot"]>) {
     this.state = s.state;
     this.edits = s.edits;
+    this.parts = s.parts;
   }
 }

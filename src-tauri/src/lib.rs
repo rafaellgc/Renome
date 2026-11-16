@@ -24,12 +24,14 @@ mod gcd;
 mod googlebooks;
 mod mangadex;
 mod mangaupdates;
+mod mediaserver;
 mod metron;
 mod musicbrainz;
 mod openlibrary;
 mod secrets;
 mod subtitles;
 mod tmdb;
+mod update;
 
 /// The session's file list. It lives on the Rust side so the whole list
 /// is not sent over on every preview update.
@@ -774,6 +776,20 @@ async fn trash_files(app: AppHandle, paths: Vec<PathBuf>) -> Result<Trashed, Str
     .await
 }
 
+/// Sends a release's advertisements left after the moves to the system's
+/// trash, with their old folders when nothing else is in them.
+#[tauri::command]
+async fn trash_leftovers(app: AppHandle, files: Vec<PathBuf>, folders: Vec<PathBuf>) -> Result<Trashed, String> {
+    in_background(app, move |state| {
+        let (trashed, failed) = renome_core::plan::trash_leftovers(&files, &folders);
+        let mut s = state.session.lock().unwrap();
+        s.files.retain(|f| !trashed.iter().any(|t| f.path.starts_with(t)));
+        drop(s);
+        Trashed { trashed, failed }
+    })
+    .await
+}
+
 /// Renames as they happened, in order: plain renames are looked up at
 /// once; a renamed folder also moves whatever was under it.
 enum Renamed<'a> {
@@ -1110,6 +1126,44 @@ async fn subdl_check(key: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn update_check(app: AppHandle) -> Result<Option<update::Found>, String> {
+    update::check(&app).await
+}
+
+/// How this copy is updated: by itself, from the release page, or by the
+/// system (Flatpak), whose copies do not look for versions.
+#[tauri::command]
+fn update_way() -> update::Way {
+    update::way()
+}
+
+#[tauri::command]
+async fn update_install(app: AppHandle) -> Result<(), String> {
+    update::install(&app).await
+}
+
+#[tauri::command]
+async fn server_check(server: mediaserver::Server) -> Result<(), String> {
+    server.check().await
+}
+
+#[tauri::command]
+async fn server_libraries(server: mediaserver::Server) -> Result<Vec<mediaserver::Library>, String> {
+    server.libraries().await
+}
+
+/// Tells each server about the folders where these files were or went;
+/// for each, how many folders, or why not.
+#[tauri::command]
+async fn server_tell(servers: Vec<mediaserver::Server>, changed: Vec<PathBuf>) -> Vec<Result<usize, String>> {
+    let mut out = Vec::new();
+    for s in &servers {
+        out.push(s.tell(&changed).await);
+    }
+    out
+}
+
+#[tauri::command]
 async fn subsource_check(key: String) -> Result<(), String> {
     subtitles::check_subsource(key).await
 }
@@ -1412,6 +1466,156 @@ async fn write_tags(
             .push((String::new(), format!("err.history: {e}"))),
     }
     // The list reads the new tags.
+    let written: HashSet<PathBuf> = written.into_iter().collect();
+    for f in state.session.lock().unwrap().files.iter_mut() {
+        if written.contains(&f.path) {
+            f.forget_tags();
+        }
+    }
+    Ok(report)
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AudiobookTagJob {
+    path: PathBuf,
+    book: renome_core::books::BookMatch,
+    cover: Option<i64>,
+    /// A cover elsewhere (Google Books), when there is no `cover`.
+    #[serde(default)]
+    cover_url: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    language: String,
+}
+
+/// Writes each audiobook file's details (book, author, narrator, part,
+/// series, synopsis) into its tags and, with `cover`, the book's cover in
+/// place of its pictures; with `clean`, the other tags go. Kept for undo
+/// like `write_tags`. Each cover and synopsis is fetched once per book.
+#[tauri::command]
+async fn write_audiobook_tags(
+    app: AppHandle,
+    history_id: Option<String>,
+    items: Vec<AudiobookTagJob>,
+    cover: bool,
+    clean: bool,
+) -> Result<TagReport, String> {
+    use renome_core::tagwrite;
+    let state = app.state::<AppState>();
+    let mut report = TagReport::default();
+    let items: Vec<AudiobookTagJob> = items
+        .into_iter()
+        .filter(|j| {
+            let ok = tagwrite::writable(&j.path);
+            if !ok {
+                report
+                    .errors
+                    .push((j.path.display().to_string(), "tagsUnsupported".into()));
+            }
+            ok
+        })
+        .collect();
+    if items.is_empty() {
+        return Ok(report);
+    }
+    let own_entry = history_id.is_none();
+    let id = match history_id {
+        Some(id) => id,
+        None => state.history.record_files(&[])?,
+    };
+    let store = state.history.files_dir(&id)?;
+    let mut note = state.history.tagging(&id)?;
+    let mut covers: HashMap<String, Option<Vec<u8>>> = HashMap::new();
+    let mut synopses: HashMap<String, String> = HashMap::new();
+    let total = items.len();
+    let _ = app.emit("book-progress", serde_json::json!({ "done": 0, "total": total }));
+    let mut backups = Vec::new();
+    let mut written = Vec::new();
+    for (done, job) in items.into_iter().enumerate() {
+        let image = if cover {
+            let key = match job.cover {
+                Some(c) => format!("ol:{c}"),
+                None if !job.cover_url.is_empty() => job.cover_url.clone(),
+                // None: the book's folder's own cover, below.
+                None => String::new(),
+            };
+            if !key.is_empty() && !covers.contains_key(&key) {
+                let got = match job.cover {
+                    Some(c) => state.ol.cover(c).await,
+                    None => {
+                        state
+                            .ol
+                            .gb
+                            .cover(&renome_core::books::google_cover(&job.cover_url, 0))
+                            .await
+                    }
+                };
+                covers.insert(key.clone(), got.ok());
+            }
+            covers
+                .get(&key)
+                .cloned()
+                .flatten()
+                .or_else(|| job.path.parent().and_then(folder_cover))
+                .and_then(|b| tagwrite::embeddable_cover(&b, 1200))
+        } else {
+            None
+        };
+        let mut description = job.description.trim().to_string();
+        if description.is_empty() && !job.book.work.is_empty() {
+            if !synopses.contains_key(&job.book.work) {
+                let text = state
+                    .ol
+                    .work(&job.book.work)
+                    .await
+                    .ok()
+                    .and_then(|w| w.description)
+                    .map(|t| t.as_str().trim().to_string())
+                    .unwrap_or_default();
+                synopses.insert(job.book.work.clone(), text);
+            }
+            description = synopses[&job.book.work].clone();
+        }
+        let fields = tagwrite::audiobook_fields(&job.book, &description, &job.language);
+        let (path, store) = (job.path.clone(), store.clone());
+        note.start(&path);
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            tagwrite::write(&path, &fields, image.as_deref(), clean, &store)
+        })
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|r| r);
+        match result {
+            Ok(Some(b)) => {
+                note.done(&b);
+                backups.push(b);
+                written.push(job.path);
+            }
+            Ok(None) => {}
+            Err(e) => report.errors.push((job.path.display().to_string(), e)),
+        }
+        let _ = app.emit(
+            "book-progress",
+            serde_json::json!({ "done": done + 1, "total": total }),
+        );
+    }
+    report.written = backups.len();
+    let saved = if backups.is_empty() {
+        if own_entry {
+            let _ = state.history.delete(&id);
+        }
+        Ok(())
+    } else {
+        state.history.add_tags(&id, backups)
+    };
+    match saved {
+        Ok(()) => note.finish(),
+        Err(e) => report
+            .errors
+            .push((String::new(), format!("err.history: {e}"))),
+    }
     let written: HashSet<PathBuf> = written.into_iter().collect();
     for f in state.session.lock().unwrap().files.iter_mut() {
         if written.contains(&f.path) {
@@ -2363,6 +2567,14 @@ async fn book_search(
 
 /// What each book says about itself (its details and name), as a start
 /// for typing them in; `names` are the names the rule reads (stems).
+/// The audiobooks these audio files make (see [`renome_core::audiobook`]).
+#[tauri::command]
+async fn audiobook_groups(paths: Vec<PathBuf>) -> Vec<renome_core::audiobook::AudioBook> {
+    tauri::async_runtime::spawn_blocking(move || renome_core::audiobook::group(&paths))
+        .await
+        .unwrap_or_default()
+}
+
 #[tauri::command]
 async fn book_guesses(paths: Vec<PathBuf>, names: Vec<String>) -> Vec<renome_core::books::Guess> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -2972,6 +3184,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|_| {
             #[cfg(target_os = "linux")]
             sync_titlebar_buttons();
@@ -3018,6 +3231,7 @@ pub fn run() {
             series_covers,
             remote_image,
             trash_files,
+            trash_leftovers,
             tmdb_collections,
             clear_files,
             move_files,
@@ -3044,12 +3258,20 @@ pub fn run() {
             os_check,
             subdl_check,
             subsource_check,
+            server_check,
+            server_libraries,
+            audiobook_groups,
+            server_tell,
+            update_check,
+            update_install,
+            update_way,
             mb_lookup,
             mb_search,
             mb_choose,
             write_covers,
             write_playlists,
             write_tags,
+            write_audiobook_tags,
             playlist_dirs,
             cover_dirs,
             book_lookup,

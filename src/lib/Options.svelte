@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from "./Icon.svelte";
+  import ServerOptions from "./ServerOptions.svelte";
   import { dialog } from "./modal";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { api } from "./api";
@@ -13,6 +14,7 @@
     ["rename", "sectionRename"],
     ["online", "sectionOnline"],
     ["accounts", "optTabAccounts"],
+    ["server", "sectionServer"],
     ["shortcuts", "sectionShortcuts"],
   ] as const;
   let tab = $state<(typeof TABS)[number][0]>("general");
@@ -25,6 +27,10 @@
   let showKey = $state(false);
   let keyStatus = $state<{ ok: boolean; text: string } | null>(null);
   let testing = $state(false);
+
+  /** The Flatpak is updated by Flatpak: no option for it. */
+  let updateWay = $state<"itself" | "page" | "system">("itself");
+  api.updateWay().then((w) => (updateWay = w)).catch(() => {});
 
   let showDgKey = $state(false);
   let dgStatus = $state<{ ok: boolean; text: string } | null>(null);
@@ -246,6 +252,12 @@
         <input type="checkbox" bind:checked={settings.includeHidden} />
         <span>{t("includeHidden")}<small>{t("includeHiddenHint")}</small></span>
       </label>
+      {#if updateWay !== "system"}
+      <label class="check">
+        <input type="checkbox" bind:checked={settings.checkUpdates} />
+        <span>{t("checkUpdates")}<small>{t("checkUpdatesHint")}</small></span>
+      </label>
+      {/if}
     </section>
       {/if}
       {#if tab === "rename"}
@@ -555,6 +567,7 @@
       </div>
     </section>
 
+
     <p class="stored" class:bad={secrets.ready && secrets.status !== "stored"}>
       {#if !secrets.ready}
         {t("secretsWaiting")}
@@ -567,6 +580,9 @@
         {t("secretsInFile")}
       {/if}
     </p>
+      {/if}
+      {#if tab === "server"}
+        <ServerOptions />
       {/if}
       {#if tab === "shortcuts"}
     <section>

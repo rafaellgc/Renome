@@ -66,7 +66,16 @@ pub enum Field {
     /// Each credited artist on its own (`os vagalumes`, `Rui`).
     Artists,
     AlbumArtists,
+    /// Audiobooks' (see [`AUDIOBOOK`]): the synopsis, and the series and
+    /// the book's number in it, where audiobook programs read them.
+    Comment,
+    Movement,
+    MovementNumber,
 }
+
+/// What audiobooks get beyond a song's fields. Not among [`ALL`]: cleaning
+/// a song still takes its comments away.
+pub const AUDIOBOOK: &[Field] = &[Field::Comment, Field::Movement, Field::MovementNumber];
 
 /// Every field this module writes.
 const ALL: &[Field] = &[
@@ -159,6 +168,9 @@ impl Field {
             Field::WorkId => ItemKey::MusicBrainzWorkId,
             Field::Artists => ItemKey::TrackArtists,
             Field::AlbumArtists => ItemKey::AlbumArtists,
+            Field::Comment => ItemKey::Comment,
+            Field::Movement => ItemKey::Movement,
+            Field::MovementNumber => ItemKey::MovementNumber,
         }
     }
 }
@@ -515,7 +527,7 @@ pub fn temp_of(path: &Path) -> PathBuf {
 pub fn writable(path: &Path) -> bool {
     matches!(
         ext_of(path).as_str(),
-        "mp3" | "flac" | "ogg" | "oga" | "opus" | "m4a"
+        "mp3" | "flac" | "ogg" | "oga" | "opus" | "m4a" | "m4b"
     )
 }
 
@@ -901,6 +913,73 @@ fn set(tag: &mut Tag, f: Field, values: &[String]) {
     }
 }
 
+/// The fields to write in an audiobook's files, from the book chosen for
+/// it: the book as the album, its author as the artist, the narrator as
+/// the composer (where audiobook programs look), the part as the track,
+/// the genre "Audiobook", the synopsis as the comment, the series as the
+/// movement. What the book does not say is left as it is.
+pub fn audiobook_fields(b: &crate::books::BookMatch, description: &str, language: &str) -> Fields {
+    let one = |s: &str| (!s.trim().is_empty()).then(|| vec![s.trim().to_string()]);
+    let authors = b.authors.join(", ");
+    let title = if b.parts > 1 {
+        let width = b.parts.to_string().len().max(2);
+        format!("{} - {:0width$}", b.title, b.part)
+    } else {
+        b.title.clone()
+    };
+    let mut out: Fields = Vec::new();
+    let mut add = |f: Field, v: Option<Vec<String>>| {
+        if let Some(v) = v {
+            out.push((f, v));
+        }
+    };
+    add(Field::Title, one(&title));
+    add(Field::Album, one(&b.title));
+    add(Field::Artist, one(&authors));
+    add(Field::AlbumArtist, one(&authors));
+    add(Field::Composer, one(&b.narrator));
+    add(Field::Date, b.year.map(|y| vec![y.to_string()]));
+    add(Field::Genre, Some(vec!["Audiobook".into()]));
+    add(Field::Label, one(&b.publisher));
+    add(Field::Language, one(language));
+    add(Field::Comment, one(description));
+    add(Field::Movement, one(&b.series));
+    // A whole number: MP3 keeps it as one (`MVIN`).
+    let index = b.series_index.trim();
+    if !index.is_empty() && index.chars().all(|c| c.is_ascii_digit()) {
+        add(Field::MovementNumber, one(index));
+    }
+    if b.parts > 1 {
+        add(Field::Track, Some(vec![b.part.to_string()]));
+        add(Field::TrackTotal, Some(vec![b.parts.to_string()]));
+    }
+    out
+}
+
+/// A cover to put inside audio files: at most `size` pixels on its long
+/// side (a JPEG then), as it is when already that small.
+pub fn embeddable_cover(data: &[u8], size: u32) -> Option<Vec<u8>> {
+    let img = image::load_from_memory(data).ok()?;
+    let small = img.width().max(img.height()) <= size;
+    let plain = matches!(
+        image::guess_format(data),
+        Ok(image::ImageFormat::Jpeg | image::ImageFormat::Png)
+    );
+    if small && plain {
+        return Some(data.to_vec());
+    }
+    let img = if small {
+        img
+    } else {
+        img.resize(size, size, image::imageops::FilterType::Lanczos3)
+    };
+    let mut out = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 90)
+        .encode_image(&img.to_rgb8())
+        .ok()?;
+    Some(out)
+}
+
 /// Keeps `data` in `store`, named by its content (a cover shared by an
 /// album's songs is kept once); returns the name.
 fn keep(data: &[u8], store: &Path) -> Result<String, String> {
@@ -943,7 +1022,13 @@ pub fn write(
         let mut changed = false;
         if clean {
             let tag_type = tag.tag_type();
-            let ours = |k: &ItemKey| kept(*k);
+            // Kept too: what this write puts in (an audiobook's synopsis),
+            // and an MP3's label, read back as its publisher (`TPUB`).
+            let ours = |k: &ItemKey| {
+                kept(*k)
+                    || fields.iter().any(|(f, _)| f.key() == *k)
+                    || (tag_type == TagType::Id3v2 && *k == ItemKey::Publisher)
+            };
             for item in tag.items().filter(|i| !ours(&i.key())) {
                 let Some(key) = item.key().map_key(tag_type) else {
                     continue;
@@ -1320,13 +1405,17 @@ mod tests {
     fn every_field_comes_back_and_goes() {
         let mut wrong = Vec::new();
         for name in FORMATS {
-            for &f in ALL {
+            for &f in ALL.iter().chain(AUDIOBOOK) {
                 let d = tempfile::tempdir().unwrap();
                 let p = d.path().join(name);
                 fs::copy(Path::new("tests/fixtures").join(name), &p).unwrap();
                 let store = d.path().join("s");
                 let value = match f {
-                    Field::Track | Field::TrackTotal | Field::Disc | Field::DiscTotal => "7",
+                    Field::Track
+                    | Field::TrackTotal
+                    | Field::Disc
+                    | Field::DiscTotal
+                    | Field::MovementNumber => "7",
                     Field::Date | Field::OriginalDate => "1999",
                     _ => "Zq9value",
                 };
@@ -1359,6 +1448,56 @@ mod tests {
             }
         }
         assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    #[test]
+    fn audiobook_details_and_cover() {
+        let book = crate::books::BookMatch {
+            title: "Ecos".into(),
+            authors: vec!["Lia Marta Quaresma".into()],
+            year: Some(2019),
+            publisher: "Casa Azul".into(),
+            series: "Vozes".into(),
+            series_index: "2".into(),
+            narrator: "Tomé Rocha".into(),
+            part: 3,
+            parts: 12,
+            ..Default::default()
+        };
+        let fields = audiobook_fields(&book, "Uma sinopse.", "por");
+        let get = |f: Field| fields.iter().find(|(x, _)| *x == f).map(|(_, v)| v[0].clone());
+        assert_eq!(get(Field::Title).as_deref(), Some("Ecos - 03"));
+        assert_eq!(get(Field::Composer).as_deref(), Some("Tomé Rocha"));
+        assert_eq!(get(Field::TrackTotal).as_deref(), Some("12"));
+        let mut cover = Vec::new();
+        image::DynamicImage::ImageRgb8(image::RgbImage::new(1600, 2400))
+            .write_to(&mut std::io::Cursor::new(&mut cover), image::ImageFormat::Png)
+            .unwrap();
+        let small = embeddable_cover(&cover, 1200).unwrap();
+        let img = image::load_from_memory(&small).unwrap();
+        assert_eq!((img.width(), img.height()), (800, 1200));
+        for name in ["song.mp3", "song.m4a"] {
+            let d = tempfile::tempdir().unwrap();
+            // An .m4b is an .m4a by another name.
+            let p = d.path().join(name.replace("m4a", "m4b"));
+            fs::copy(Path::new("tests/fixtures").join(name), &p).unwrap();
+            let store = d.path().join("s");
+            let b = write(&p, &fields, Some(&small), true, &store).unwrap().unwrap();
+            let t = crate::music::read(&p).unwrap();
+            assert_eq!((t.album.as_str(), t.composer.as_str()), ("Ecos", "Tomé Rocha"), "{p:?}");
+            assert_eq!((t.series.as_str(), t.series_index.as_str()), ("Vozes", "2"), "{p:?}");
+            let comment = || {
+                let f = lofty::read_from_path(&p).unwrap();
+                f.primary_tag()
+                    .and_then(|t| t.get_string(ItemKey::Comment))
+                    .map(str::to_string)
+            };
+            assert_eq!(comment().as_deref(), Some("Uma sinopse."), "{p:?}: kept by cleaning");
+            let again = write(&p, &fields, Some(&small), true, &store).unwrap();
+            assert!(again.is_none(), "{p:?}: cleaned twice");
+            restore(&b, &store).unwrap();
+            assert_ne!(comment().as_deref(), Some("Uma sinopse."), "{p:?}");
+        }
     }
 
     #[test]
