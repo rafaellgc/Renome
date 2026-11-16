@@ -63,6 +63,11 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.38.0" date="2026-11-16">
+      <description>
+        <p>Renome can tell Jellyfin, Emby and Plex which library folders changed after a rename. It checks for new versions and installs them itself (not in the Flatpak, which updates through Flathub). The book rule organizes audiobooks and can write the book's details and cover inside their files. Release advertisements stay out of the library and can go to the Trash.</p>
+      </description>
+    </release>
     <release version="0.37.0" date="2026-11-16">
       <description>
         <p>The list filter and a rule's "only in files" can pick files by size, by modification date, by how long ago they were modified and by the folders they are in. A rule's "only in files" is kept when rules are loaded again. The size and date columns are as wide as their text.</p>
