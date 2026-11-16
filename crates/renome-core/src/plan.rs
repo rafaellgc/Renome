@@ -1231,7 +1231,7 @@ pub fn preview(
         Some((from_name, _)) => {
             let visible: Vec<&FileEntry> = files
                 .iter()
-                .filter(|f| filter.matches(&f.file_name()))
+                .filter(|f| filter.takes(f))
                 .collect();
             let mut tags: Vec<(PathBuf, AudioTags)> = Vec::new();
             let mut paths: Vec<&Path> = Vec::new();
@@ -1259,7 +1259,7 @@ pub fn preview(
     let mut per_folder: HashMap<&Path, usize> = HashMap::new();
     let shown: Vec<(usize, usize, &FileEntry)> = files
         .iter()
-        .filter(|f| filter.matches(&f.file_name()))
+        .filter(|f| filter.takes(f))
         .filter(|f| !view.identical_only || view.identical.contains_key(&f.path))
         .filter(|f| !view.alike_only || view.alike.contains_key(&f.path))
         .filter(|f| !view.similar_only || view.similar.contains_key(&f.path))
@@ -1379,7 +1379,7 @@ pub fn preview(
                     shown
                         .iter()
                         .map(|&(_, _, f)| f)
-                        .filter(|f| o.matches(&f.file_name())),
+                        .filter(|f| o.takes(f)),
                 )
             })
         })

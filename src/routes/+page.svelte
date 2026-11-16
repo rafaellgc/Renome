@@ -610,7 +610,7 @@
     // All off is how rules are left after renaming (an option), not a
     // choice: a saved set opened like that comes back on.
     const allOff = saved && kept.length > 0 && kept.every((s) => !s.enabled);
-    return kept.map((s) => newStep(s.rule, allOff || s.enabled));
+    return kept.map((s) => newStep(s.rule, allOff || s.enabled, s.only));
   }
 
   function moveStep(i: number, delta: -1 | 1) {

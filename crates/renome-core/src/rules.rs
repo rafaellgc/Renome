@@ -898,13 +898,12 @@ impl Pipeline {
         let mut moved = None;
         let mut stem = ctx.file.stem.clone();
         let mut ext = ctx.file.ext.clone();
-        let name = ctx.file.file_name();
         let all = *ctx;
         for (i, (step, only)) in self.steps.iter().zip(&self.only).enumerate() {
             if to_lookup && step.is_lookup() {
                 break;
             }
-            if only.as_ref().is_some_and(|f| !f.matches(&name)) {
+            if only.as_ref().is_some_and(|f| !f.takes(ctx.file)) {
                 continue;
             }
             // Counted among the files the step takes.

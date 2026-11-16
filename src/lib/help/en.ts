@@ -36,6 +36,10 @@ export const en: Section[] = [
   <li>In quotes, looks for the whole phrase: <code>"breaking bad"</code>.</li>
   <li>With <code>-</code> in front, hides what matches: <code>-*.srt</code> hides subtitles; <code>*.mkv -sample</code> shows the .mkv files except samples.</li>
   <li>Case and accents do not matter: <code>cafe</code> finds "Café".</li>
+  <li><b>Size</b>: <code>&gt;700MB</code> shows files larger than 700 MB; <code>&lt;100MB</code>, smaller ones. Units: B, KB, MB, GB and TB, as in the Size column. For decimals, use a dot: <code>&lt;1.5GB</code>. Spaces are fine: <code>&gt; 40 MB</code> works the same.</li>
+  <li><b>Modification date</b> (the Modified column), as a year, month or day, always year first: <code>=2024</code> (in 2024), <code>&gt;=2024-06</code> (from June 2024 on), <code>&lt;2024-05-12</code> (before 12 May 2024). <code>&gt;2024</code> means from 2025 on.</li>
+  <li>Size and date add to the rest, and all must hold: <code>*.mkv &gt;1GB</code> shows only the .mkv files over 1 GB; <code>&gt;=2024-01 &lt;2024-07</code>, the first half of 2024. With <code>-</code> in front, it turns round: <code>-&lt;100MB</code> hides the small ones.</li>
+  <li>Folders in the list have no size: a size filter hides them. The date is the file's, not when a photo was taken.</li>
 </ul>
 
 <h4>Sorting and arranging</h4>
@@ -67,7 +71,7 @@ export const en: Section[] = [
   <li><b>Pasting a link</b>: when the search by name does not find the right one, paste the link to its page in the catalogue into the search field of the choice window, and that very item comes. Movie: TMDB or IMDb link, or the <code>tt…</code> code. TV show: TMDB id or link, IMDb link, or AniList id/link. Book: an ISBN or the Open Library link. Album (in the album field): the release's MusicBrainz or Discogs link. Comic: the series' link in the catalogue the rule uses (Comic Vine, also an issue's; GCD; MangaDex; AniList; MangaUpdates). Limitations: on Metron only the address with the series' number works (not the one with its name); a link from a catalogue other than the rule's is refused; a number alone is read as a title (only for TV shows is it an id).</li>
 </ul>
 <h4>Only on files</h4>
-<p>At the end of each text rule (replace, number, case, list…) there is the <b>Only on files</b> field. Empty, the rule applies to all files. With something typed, as in the list's filter (<code>srt</code>, <code>*.mkv</code>, <code>holiday</code>, <code>-trailer</code>), it only acts on the files whose current name matches; the others pass it by unchanged. Example: case only on subtitles, with <code>srt</code>. The rules by kind of file (movie, TV show, music…) don't have the field, since they already pick their files.</p>
+<p>At the end of each text rule (replace, number, case, list…) there is the <b>Only on files</b> field. Empty, the rule applies to all files. With something typed, as in the list's filter (<code>srt</code>, <code>*.mkv</code>, <code>holiday</code>, <code>-trailer</code>, <code>&gt;700MB</code>, <code>&gt;=2024</code>), it only acts on the files that match; the others pass it by unchanged. Example: case only on subtitles, with <code>srt</code>. The rules by kind of file (movie, TV show, music…) don't have the field, since they already pick their files.</p>
 <h4>Apply to</h4>
 <p>Several rules ask where to act:</p>
 <ul>

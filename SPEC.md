@@ -27,8 +27,14 @@ This document describes **what** the program does, not **how**.
   patterns (`*.jpg`), the rest look for the text in the name (`holiday`);
   `"quoted words"` look for the phrase; a term starting with `-` hides
   the names it matches (`-*.srt`); case and accents are ignored; `[`,
-  `{` and the like are literal. Only visible files are renamed, and
-  numbering only counts them.
+  `{` and the like are literal. Terms starting with `>`, `<`, `>=`, `<=`
+  or `=` are conditions on the file, all of which must hold besides the
+  name: a size with its unit (`>700MB`, `<1.5GB`; B/KB/MB/GB/TB, powers
+  of 1024, as the list shows sizes; folders never match one) or the
+  modification date as a year, month or day (`>=2024`, `<2024-06`,
+  `=2024-05-12`; local time; `>2024` is from 2025 on); `-` before one
+  negates it; anything else after the sign is `invalidFilter`. Only
+  visible files are renamed, and numbering only counts them.
 - Files can be passed on the command line (`renome file1 file2 folder/`).
 - Columns: current name, new name, folder, size, modification date (size
   and date are hidden in narrow windows).
@@ -88,7 +94,7 @@ optionally act only on the extension or on the full name.
 
 Each text rule (not the rules by kind of file) has an "Only on files"
 filter (`Step::only`, the list filter's syntax: `srt`, `*.mkv`,
-`-trailer`), matched against the file's current name on disk: files it
+`-trailer`), matched against the file's current name on disk, size and date: files it
 does not take pass that rule by unchanged. An invalid one is the rule's
 error (`invalidFilter`).
 

@@ -36,6 +36,10 @@ export const pt: Section[] = [
   <li>Entre aspas, procura a frase inteira: <code>"breaking bad"</code>.</li>
   <li>Com <code>-</code> na frente, esconde o que combina: <code>-*.srt</code> esconde as legendas; <code>*.mkv -sample</code> mostra os .mkv, menos as amostras.</li>
   <li>Maiúsculas e acentos não importam: <code>ferias</code> encontra "Férias".</li>
+  <li><b>Tamanho</b>: <code>&gt;700MB</code> mostra os arquivos maiores que 700 MB; <code>&lt;100MB</code>, os menores. Unidades: B, KB, MB, GB e TB, como na coluna Tamanho. Com casas decimais, use ponto: <code>&lt;1.5GB</code>. Espaços não atrapalham: <code>&gt; 40 MB</code> vale o mesmo.</li>
+  <li><b>Data de modificação</b> (a da coluna Modificado), como ano, mês ou dia, sempre o ano primeiro: <code>=2024</code> (em 2024), <code>&gt;=2024-06</code> (de junho de 2024 em diante), <code>&lt;2024-05-12</code> (antes de 12 de maio de 2024). <code>&gt;2024</code> quer dizer de 2025 em diante.</li>
+  <li>Tamanho e data se somam ao resto, e todos precisam valer: <code>*.mkv &gt;1GB</code> mostra só os .mkv acima de 1 GB; <code>&gt;=2024-01 &lt;2024-07</code>, o primeiro semestre de 2024. Com <code>-</code> na frente, vira o contrário: <code>-&lt;100MB</code> esconde os pequenos.</li>
+  <li>Pastas na lista não têm tamanho: um filtro de tamanho as esconde. A data é a do arquivo, não a de quando uma foto foi tirada.</li>
 </ul>
 
 <h4>Ordenar e organizar</h4>
@@ -67,7 +71,7 @@ export const pt: Section[] = [
   <li><b>Colar um link</b>: quando a busca por nome não acha o certo, cole no campo de busca da janela de escolha o link da página no catálogo, e vem exatamente aquele item. Filme: link do TMDB ou do IMDb, ou o código <code>tt…</code>. Série: ID ou link do TMDB, link do IMDb, ou ID/link do AniList. Livro: um ISBN ou o link do Open Library. Álbum (no campo do álbum): link do lançamento no MusicBrainz ou no Discogs. Quadrinho: link da série no catálogo escolhido na regra (Comic Vine, também de uma edição; GCD; MangaDex; AniList; MangaUpdates). Limitações: no Metron, só o endereço com o número da série serve (o com o nome, não); um link de outro catálogo que não o da regra é recusado; um número sozinho é lido como título (só na série vale como ID).</li>
 </ul>
 <h4>Só nos arquivos</h4>
-<p>No fim de cada regra de texto (substituir, numerar, maiúsculas, lista…) há o campo <b>Só nos arquivos</b>. Vazio, a regra vale para todos. Com algo escrito, do mesmo jeito que no filtro da lista (<code>srt</code>, <code>*.mkv</code>, <code>férias</code>, <code>-trailer</code>), ela só age nos arquivos cujo nome atual combina; os outros passam por ela sem mudar. Exemplo: maiúsculas só nas legendas, com <code>srt</code>. As regras por tipo de arquivo (filme, série, música…) não têm o campo, porque já escolhem os arquivos delas.</p>
+<p>No fim de cada regra de texto (substituir, numerar, maiúsculas, lista…) há o campo <b>Só nos arquivos</b>. Vazio, a regra vale para todos. Com algo escrito, do mesmo jeito que no filtro da lista (<code>srt</code>, <code>*.mkv</code>, <code>férias</code>, <code>-trailer</code>, <code>&gt;700MB</code>, <code>&gt;=2024</code>), ela só age nos arquivos que combinam; os outros passam por ela sem mudar. Exemplo: maiúsculas só nas legendas, com <code>srt</code>. As regras por tipo de arquivo (filme, série, música…) não têm o campo, porque já escolhem os arquivos delas.</p>
 <h4>Aplicar em</h4>
 <p>Várias regras perguntam onde agir:</p>
 <ul>

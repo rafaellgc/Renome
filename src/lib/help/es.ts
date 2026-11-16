@@ -36,6 +36,10 @@ export const es: Section[] = [
   <li>Entre comillas, busca la frase completa: <code>"breaking bad"</code>.</li>
   <li>Con <code>-</code> delante, oculta lo que coincide: <code>-*.srt</code> oculta los subtítulos; <code>*.mkv -sample</code> muestra los .mkv, salvo las muestras.</li>
   <li>Mayúsculas y acentos no importan: <code>cancion</code> encuentra "Canción".</li>
+  <li><b>Tamaño</b>: <code>&gt;700MB</code> muestra los archivos de más de 700 MB; <code>&lt;100MB</code>, los menores. Unidades: B, KB, MB, GB y TB, como en la columna Tamaño. Con decimales, use punto: <code>&lt;1.5GB</code>. Los espacios no molestan: <code>&gt; 40 MB</code> vale igual.</li>
+  <li><b>Fecha de modificación</b> (la de la columna Modificado), como año, mes o día, siempre el año primero: <code>=2024</code> (en 2024), <code>&gt;=2024-06</code> (desde junio de 2024), <code>&lt;2024-05-12</code> (antes del 12 de mayo de 2024). <code>&gt;2024</code> quiere decir desde 2025.</li>
+  <li>Tamaño y fecha se suman al resto, y todos deben cumplirse: <code>*.mkv &gt;1GB</code> muestra solo los .mkv de más de 1 GB; <code>&gt;=2024-01 &lt;2024-07</code>, el primer semestre de 2024. Con <code>-</code> delante, se invierte: <code>-&lt;100MB</code> oculta los pequeños.</li>
+  <li>Las carpetas de la lista no tienen tamaño: un filtro de tamaño las oculta. La fecha es la del archivo, no la de cuándo se tomó una foto.</li>
 </ul>
 
 <h4>Ordenar y organizar</h4>
@@ -67,7 +71,7 @@ export const es: Section[] = [
   <li><b>Pegar un enlace</b>: cuando la búsqueda por nombre no encuentra el correcto, pegue en el campo de búsqueda de la ventana de elección el enlace de la página en el catálogo, y viene exactamente ese elemento. Película: enlace de TMDB o IMDb, o el código <code>tt…</code>. Serie: ID o enlace de TMDB, enlace de IMDb, o ID/enlace de AniList. Libro: un ISBN o el enlace de Open Library. Álbum (en el campo del álbum): enlace del lanzamiento en MusicBrainz o Discogs. Cómic: enlace de la serie en el catálogo elegido en la regla (Comic Vine, también de un número; GCD; MangaDex; AniList; MangaUpdates). Limitaciones: en Metron solo sirve la dirección con el número de la serie (no la del nombre); un enlace de un catálogo distinto al de la regla se rechaza; un número solo se lee como título (solo en la serie vale como ID).</li>
 </ul>
 <h4>Solo en los archivos</h4>
-<p>Al final de cada regla de texto (reemplazar, numerar, mayúsculas, lista…) está el campo <b>Solo en los archivos</b>. Vacío, la regla vale para todos. Con algo escrito, igual que en el filtro de la lista (<code>srt</code>, <code>*.mkv</code>, <code>vacaciones</code>, <code>-trailer</code>), solo actúa en los archivos cuyo nombre actual coincide; los demás pasan sin cambios. Ejemplo: mayúsculas solo en los subtítulos, con <code>srt</code>. Las reglas por tipo de archivo (película, serie, música…) no tienen el campo, porque ya eligen sus archivos.</p>
+<p>Al final de cada regla de texto (reemplazar, numerar, mayúsculas, lista…) está el campo <b>Solo en los archivos</b>. Vacío, la regla vale para todos. Con algo escrito, igual que en el filtro de la lista (<code>srt</code>, <code>*.mkv</code>, <code>vacaciones</code>, <code>-trailer</code>, <code>&gt;700MB</code>, <code>&gt;=2024</code>), solo actúa en los archivos que coinciden; los demás pasan sin cambios. Ejemplo: mayúsculas solo en los subtítulos, con <code>srt</code>. Las reglas por tipo de archivo (película, serie, música…) no tienen el campo, porque ya eligen sus archivos.</p>
 <h4>Aplicar a</h4>
 <p>Varias reglas preguntan dónde actuar:</p>
 <ul>

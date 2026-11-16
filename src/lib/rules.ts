@@ -239,9 +239,9 @@ export function oneLookup(steps: Step[]): { steps: Step[]; dropped: RuleType[] }
   return { steps: kept, dropped };
 }
 
-export function newStep(rule: Rule, enabled = true): Step {
+export function newStep(rule: Rule, enabled = true, only = ""): Step {
   const full = { ...newRule(rule.type), ...rule } as Rule;
-  return { id: `s${Date.now().toString(36)}${counter++}`, enabled, rule: full };
+  return { id: `s${Date.now().toString(36)}${counter++}`, enabled, rule: full, ...(only ? { only } : {}) };
 }
 
 /** Series that could hold issue `highest` first: one with fewer issues
