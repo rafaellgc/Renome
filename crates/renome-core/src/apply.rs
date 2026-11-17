@@ -1309,6 +1309,11 @@ impl History {
         out
     }
 
+    /// What an entry renamed (what is left to undo, when partly undone).
+    pub fn operations(&self, id: &str) -> Result<Vec<Operation>, String> {
+        Ok(self.read(id)?.ops)
+    }
+
     /// A history entry for files created without any rename (metadata for
     /// movies whose names were already right), so undo deletes them.
     pub fn record_files(&self, paths: &[PathBuf]) -> Result<String, String> {

@@ -2606,8 +2606,16 @@ may be asked about the Keychain again with each version.
 
 ## 8. Command line (`renome-cli`) — planned
 
-Status: specification, to be built in phases (shared crate, basic
-commands, each lookup rule, extras, documentation). Everything the window
+Status: being built in phases (shared crate, basic commands, each lookup
+rule, extras, documentation). Done: `crates/renome-services` (catalogues,
+keys, cache, data folders, the rename lock; the window's work reports
+through a `Host`), `renome_core::catalog`, and `crates/renome-cli` with
+`preview`/`apply` for the rules that need no catalogue (text rules,
+photo), `undo`, `history`, `sets`, `rules`, `options`, `keys`, `cache`,
+`completions`; its texts are the page's (`i18n.ts`, read at build time)
+plus its own in `text.rs`. Next: the lookup rules (movie, series, music,
+book and audiobook, comic) and what runs after the renames, then
+`servers`, `duplicates`, `update`, `manual`, man pages, packaging. Everything the window
 does is reachable from here, with the same code: the flows that lived in
 the page (automatic choices, audiobook groups, what runs after the
 renames) move into Rust, used by the window and by `renome-cli` alike.

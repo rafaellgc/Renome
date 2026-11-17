@@ -147,23 +147,7 @@ async fn undo_list(app: AppHandle) -> Result<Option<Overrides>, String> {
     .await
 }
 
-/// The user's own folders (home, Downloads, Videos…), never taken for a
-/// show's folder to rename.
-fn protected_dirs() -> Vec<PathBuf> {
-    [
-        dirs::home_dir(),
-        dirs::download_dir(),
-        dirs::desktop_dir(),
-        dirs::document_dir(),
-        dirs::video_dir(),
-        dirs::audio_dir(),
-        dirs::picture_dir(),
-        dirs::public_dir(),
-    ]
-    .into_iter()
-    .flatten()
-    .collect()
-}
+use renome_services::protected_dirs;
 
 /// Runs `work` away from the window's thread (commands without `async`
 /// run on it and freeze the window while they last).
@@ -832,6 +816,8 @@ async fn apply(
     let emitter = app.clone();
     in_background(app, move |state| {
         let _disk = state.busy_disk.lock().unwrap();
+        // Not while the command line renames.
+        let _lock = renome_services::RenameLock::take(|| ()).ok();
         let mut s = state.session.lock().unwrap();
         view.identical = s.identical.clone();
         view.alike = s.alike.clone();
@@ -2938,6 +2924,8 @@ async fn undo(app: AppHandle, id: String) -> Result<ApplyReport, String> {
             stop: &stop,
         };
         let tags = |done: usize, total: usize| tell("tags", done as u64, total as u64);
+        // Not while the command line renames.
+        let _lock = renome_services::RenameLock::take(|| ()).ok();
         let report = state.history.undo_with(&id, &hooks, &tags)?;
         let s = &mut *state.session.lock().unwrap();
         refresh_renamed(&mut s.files, &report);
@@ -3001,7 +2989,7 @@ fn load_preset(path: PathBuf) -> Result<Vec<serde_json::Value>, String> {
 
 /// The settings file is read and written whole by the settings and the
 /// secrets apart: one at a time.
-static SETTINGS_FILE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+use renome_services::SETTINGS_FILE;
 
 /// Saved settings; `None` on first run. The format is defined by the UI.
 /// Secrets come apart ([`load_secrets`]), unless the file still has them.
@@ -3040,40 +3028,9 @@ async fn save_settings(mut settings: Value) -> Result<(), String> {
 /// saved there while it did not answer, so the newest) move to the store.
 #[tauri::command]
 async fn load_secrets() -> serde_json::Value {
-    tauri::async_runtime::spawn_blocking(|| {
-        let mut stored = match secrets::read() {
-            secrets::Read::Found(m) => m,
-            secrets::Read::Refused => return serde_json::json!({ "status": "refused" }),
-            secrets::Read::Missing => return serde_json::json!({ "status": "missing" }),
-        };
-        let _file = SETTINGS_FILE.lock().unwrap();
-        let mut file = read_settings_file();
-        let old = file
-            .as_ref()
-            .and_then(Value::as_object)
-            .map(secrets::of)
-            .unwrap_or_default();
-        if !old.is_empty() {
-            for (k, v) in old {
-                if v.as_str().is_some_and(|s| !s.is_empty()) {
-                    stored.insert(k, v);
-                }
-            }
-            if secrets::write(&stored)
-                && let Some(obj) = file.as_mut().and_then(Value::as_object_mut)
-            {
-                for k in secrets::FIELDS {
-                    obj.remove(k);
-                }
-                if let Some(f) = &file {
-                    write_settings_file(f).ok();
-                }
-            }
-        }
-        serde_json::json!({ "status": "stored", "secrets": stored })
-    })
-    .await
-    .unwrap_or_else(|_| serde_json::json!({ "status": "refused" }))
+    tauri::async_runtime::spawn_blocking(renome_services::load_secrets)
+        .await
+        .unwrap_or_else(|_| serde_json::json!({ "status": "refused" }))
 }
 
 /// Saves the secrets in the system's password store; in the settings
@@ -3081,28 +3038,9 @@ async fn load_secrets() -> serde_json::Value {
 /// holds stays as it is). Whether the store took them.
 #[tauri::command]
 async fn save_secrets(secrets: serde_json::Map<String, Value>) -> Result<bool, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let secrets = secrets::of(&secrets);
-        let stored = secrets::write(&secrets);
-        let _file = SETTINGS_FILE.lock().unwrap();
-        let mut file = read_settings_file().unwrap_or_else(|| Value::Object(Default::default()));
-        if let Some(obj) = file.as_object_mut() {
-            for k in secrets::FIELDS {
-                obj.remove(k);
-            }
-            if !stored {
-                obj.extend(
-                    secrets
-                        .into_iter()
-                        .filter(|(_, v)| v.as_str().is_some_and(|s| !s.is_empty())),
-                );
-            }
-        }
-        write_settings_file(&file)?;
-        Ok(stored)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || renome_services::save_secrets(secrets))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// System language (`pt_BR.UTF-8` → `pt`), from the locale variables.

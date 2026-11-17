@@ -151,3 +151,116 @@ pub fn keep<T: for<'de> serde::Deserialize<'de>>(
     ANSWERS.put(service, question, body);
     Ok(v)
 }
+
+/// The settings file is read and written whole by the settings and the
+/// secrets apart: one at a time.
+pub static SETTINGS_FILE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// The secrets (keys, tokens, accounts): from the system's password store,
+/// with those still in the settings file moved there. `{status:
+/// "stored", secrets}`, or `{status: "refused" | "missing"}` when the
+/// store did not answer or there is none (then they are in the file).
+pub fn load_secrets() -> Value {
+    let mut stored = match secrets::read() {
+        secrets::Read::Found(m) => m,
+        secrets::Read::Refused => return serde_json::json!({ "status": "refused" }),
+        secrets::Read::Missing => return serde_json::json!({ "status": "missing" }),
+    };
+    let _file = SETTINGS_FILE.lock().unwrap();
+    let mut file = read_settings_file();
+    let old = file
+        .as_ref()
+        .and_then(Value::as_object)
+        .map(secrets::of)
+        .unwrap_or_default();
+    if !old.is_empty() {
+        for (k, v) in old {
+            if v.as_str().is_some_and(|s| !s.is_empty()) {
+                stored.insert(k, v);
+            }
+        }
+        if secrets::write(&stored)
+            && let Some(obj) = file.as_mut().and_then(Value::as_object_mut)
+        {
+            for k in secrets::FIELDS {
+                obj.remove(k);
+            }
+            if let Some(f) = &file {
+                write_settings_file(f).ok();
+            }
+        }
+    }
+    serde_json::json!({ "status": "stored", "secrets": stored })
+}
+
+/// Saves the secrets in the system's password store; in the settings
+/// file when the store does not take them (or was not read: then what it
+/// holds stays as it is). Whether the store took them.
+pub fn save_secrets(secrets: serde_json::Map<String, Value>) -> Result<bool, String> {
+    let secrets = secrets::of(&secrets);
+    let stored = secrets::write(&secrets);
+    let _file = SETTINGS_FILE.lock().unwrap();
+    let mut file = read_settings_file().unwrap_or_else(|| Value::Object(Default::default()));
+    if let Some(obj) = file.as_object_mut() {
+        for k in secrets::FIELDS {
+            obj.remove(k);
+        }
+        if !stored {
+            obj.extend(
+                secrets
+                    .into_iter()
+                    .filter(|(_, v)| v.as_str().is_some_and(|s| !s.is_empty())),
+            );
+        }
+    }
+    write_settings_file(&file)?;
+    Ok(stored)
+}
+
+/// The user's own folders (home, Downloads, Desktop…): never renamed or
+/// moved, even when added to the list.
+pub fn protected_dirs() -> Vec<PathBuf> {
+    [
+        dirs::home_dir(),
+        dirs::download_dir(),
+        dirs::desktop_dir(),
+        dirs::document_dir(),
+        dirs::video_dir(),
+        dirs::audio_dir(),
+        dirs::picture_dir(),
+        dirs::public_dir(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+/// Held while files are renamed or put back, by the window or the command
+/// line, so the two never do it at the same time (`renome.lock` beside
+/// the History). Released when dropped.
+pub struct RenameLock(#[allow(dead_code)] std::fs::File);
+
+impl RenameLock {
+    /// Waits for the other to finish, telling `waiting` once if it has to.
+    pub fn take(waiting: impl FnOnce()) -> Result<Self, String> {
+        let path = history_dir().with_file_name("renome.lock");
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        }
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .map_err(|e| e.to_string())?;
+        match file.try_lock() {
+            Ok(()) => Ok(Self(file)),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                waiting();
+                file.lock().map_err(|e| e.to_string())?;
+                Ok(Self(file))
+            }
+            Err(std::fs::TryLockError::Error(e)) => Err(e.to_string()),
+        }
+    }
+}

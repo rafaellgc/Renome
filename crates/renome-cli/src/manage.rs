@@ -1,0 +1,860 @@
+//! The commands that look after things rather than rename: undo and the
+//! History, rule sets, the rules' options, the Options, keys and the
+//! answers cache.
+
+use std::path::Path;
+
+use clap::ArgMatches;
+use renome_core::catalog::{self, Kind};
+use serde_json::{Map, Value, json};
+
+use crate::Exit;
+use crate::out;
+use crate::rulespec;
+use crate::text::{lang, t};
+
+fn the_history() -> renome_core::History {
+    renome_core::History::new(renome_services::history_dir())
+}
+
+/// What a rename left halfway is put right first, as the window does when
+/// it opens.
+pub fn recover() {
+    let r = the_history().recover();
+    if r.restored + r.renamed > 0 {
+        out::note(&t(
+            "recovered",
+            &[("restored", &r.restored), ("renamed", &r.renamed)],
+        ));
+    }
+}
+
+pub fn undo(m: &ArgMatches) -> Result<Exit, String> {
+    recover();
+    let h = the_history();
+    let id = match m.get_one::<String>("id").map(String::as_str) {
+        Some(id) if id != "last" => id.to_string(),
+        _ => match h.list().into_iter().find(|e| !e.undone) {
+            Some(e) => e.id,
+            None => {
+                out::note(&t("nothingToUndo", &[]));
+                return Ok(Exit::Done);
+            }
+        },
+    };
+    if !h.list().iter().any(|e| e.id == id) {
+        return Err(t("noEntry", &[("id", &id)]));
+    }
+    let _lock = renome_services::RenameLock::take(|| out::note(&t("waitingWindow", &[])))?;
+    let progress = |done: u64, total: u64| {
+        if !out::quiet() && total > 0 {
+            eprint!("\r{}%", done * 100 / total);
+        }
+    };
+    let hooks = renome_core::apply::Hooks {
+        progress: &progress,
+        stop: &|| false,
+    };
+    let report = h.undo_with(&id, &hooks, &|_, _| {})?;
+    if out::json() {
+        let failed: Vec<Value> = report
+            .errors
+            .iter()
+            .map(|e| json!({ "path": e.from, "to": e.to, "error": e.detail }))
+            .collect();
+        println!(
+            "{}",
+            json!({ "restored": report.done.len(), "failed": failed })
+        );
+    } else {
+        out::note(&out::green(&t("undoneN", &[("n", &report.done.len())])));
+        for e in &report.errors {
+            out::error(&format!(
+                "{} → {}: {}",
+                out::path(&e.from),
+                out::path(&e.to),
+                e.detail
+            ));
+        }
+    }
+    Ok(if report.errors.is_empty() {
+        Exit::Done
+    } else {
+        Exit::Failed
+    })
+}
+
+pub fn history(m: &ArgMatches) -> Result<Exit, String> {
+    recover();
+    let h = the_history();
+    match m.subcommand() {
+        Some(("show", s)) => {
+            let id = s.get_one::<String>("id").unwrap();
+            let ops = h.operations(id).map_err(|_| t("noEntry", &[("id", id)]))?;
+            if ops.is_empty() && !out::json() {
+                out::note(&t("undone", &[]));
+            }
+            if out::json() {
+                println!("{}", serde_json::to_string_pretty(&ops).unwrap_or_default());
+            } else {
+                // By folder, as the list shows them; the whole new path
+                // when the file went to another folder.
+                let mut last: Option<std::path::PathBuf> = None;
+                for op in ops {
+                    let dir = op.from.parent().map(Path::to_path_buf).unwrap_or_default();
+                    if last.as_ref() != Some(&dir) {
+                        println!("{}", out::bold(&out::path(&dir)));
+                        last = Some(dir.clone());
+                    }
+                    let name = |p: &Path| {
+                        p.file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default()
+                    };
+                    let to = if op.to.parent() == Some(dir.as_path()) {
+                        name(&op.to)
+                    } else {
+                        out::path(&op.to)
+                    };
+                    println!("  {} → {}", name(&op.from), out::green(&to));
+                }
+            }
+        }
+        Some(("delete", s)) => {
+            let id = s.get_one::<String>("id").unwrap();
+            h.delete(id).map_err(|_| t("noEntry", &[("id", id)]))?;
+            out::note(&t("entryDeleted", &[("id", id)]));
+        }
+        Some(("clear", _)) => {
+            let n = h.clear()?;
+            out::note(&t("historyCleared", &[("n", &n)]));
+        }
+        _ => {
+            let list = h.list();
+            if out::json() {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&list).unwrap_or_default()
+                );
+            } else if list.is_empty() {
+                out::note(&t("historyEmpty", &[]));
+            } else {
+                for e in list {
+                    let state = if e.undone {
+                        out::dim(&t("undone", &[]))
+                    } else if e.reverted > 0 {
+                        t("partlyUndone", &[("n", &e.reverted), ("total", &e.count)])
+                    } else {
+                        String::new()
+                    };
+                    println!(
+                        "{}  {}  {}  {}",
+                        out::bold(&e.id),
+                        e.created.format("%Y-%m-%d %H:%M:%S"),
+                        t("files", &[("n", &e.count)]),
+                        state
+                    );
+                }
+            }
+        }
+    }
+    Ok(Exit::Done)
+}
+
+/// The options file as it is now, to change and save.
+fn settings_now() -> Value {
+    renome_services::read_settings_file().unwrap_or_else(|| Value::Object(Map::new()))
+}
+
+fn save_settings(settings: &Value) -> Result<(), String> {
+    let _file = renome_services::SETTINGS_FILE.lock().unwrap();
+    renome_services::write_settings_file(settings)
+}
+
+fn sets_of(settings: &mut Value) -> &mut Vec<Value> {
+    let obj = settings.as_object_mut().expect("settings object");
+    let sets = obj
+        .entry("ruleSets")
+        .or_insert_with(|| Value::Array(vec![]));
+    if !sets.is_array() {
+        *sets = Value::Array(vec![]);
+    }
+    sets.as_array_mut().unwrap()
+}
+
+fn same_name(set: &Value, name: &str) -> bool {
+    set.get("name")
+        .and_then(Value::as_str)
+        .is_some_and(|n| n.to_lowercase() == name.to_lowercase())
+}
+
+pub fn sets(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> {
+    match m.subcommand() {
+        Some(("show", s)) => {
+            let name = s.get_one::<String>("name").unwrap();
+            let set = rulespec::find_set(settings.as_ref(), name)
+                .ok_or_else(|| t("noSet", &[("name", name)]))?;
+            if out::json() {
+                println!("{}", serde_json::to_string_pretty(set).unwrap_or_default());
+            } else {
+                let steps =
+                    rulespec::steps(&[rulespec::Source::Set(name.clone())], settings.as_ref())?;
+                for step in &steps {
+                    println!("-r {}", shell_quote(&spec_of(step)));
+                }
+            }
+        }
+        Some(("save", s)) => {
+            let name = s.get_one::<String>("name").unwrap().trim().to_string();
+            let sources = crate::sources(s);
+            if sources.is_empty() {
+                return Err(t("noRules", &[]));
+            }
+            let steps = rulespec::steps(&sources, settings.as_ref())?;
+            rulespec::check_together(&steps)?;
+            put_set(&name, steps, s.get_flag("replace"))?;
+        }
+        Some(("export", s)) => {
+            let name = s.get_one::<String>("name").unwrap();
+            let set = rulespec::find_set(settings.as_ref(), name)
+                .ok_or_else(|| t("noSet", &[("name", name)]))?;
+            // As the window saves a preset: the list of steps.
+            let text =
+                serde_json::to_string_pretty(set.get("steps").unwrap_or(&Value::Array(vec![])))
+                    .unwrap_or_default();
+            match s.get_one::<String>("file").map(String::as_str) {
+                Some("-") | None => println!("{text}"),
+                Some(file) => std::fs::write(file, text).map_err(|e| e.to_string())?,
+            }
+        }
+        Some(("import", s)) => {
+            let file = s.get_one::<String>("file").unwrap();
+            let name = s.get_one::<String>("name").cloned().unwrap_or_else(|| {
+                Path::new(file)
+                    .file_stem()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            });
+            let steps =
+                rulespec::steps(&[rulespec::Source::File(file.clone())], settings.as_ref())?;
+            rulespec::check_together(&steps)?;
+            put_set(name.trim(), steps, s.get_flag("replace"))?;
+        }
+        Some(("delete", s)) => {
+            let name = s.get_one::<String>("name").unwrap();
+            let mut now = settings_now();
+            let sets = sets_of(&mut now);
+            let before = sets.len();
+            sets.retain(|set| !same_name(set, name));
+            if sets.len() == before {
+                return Err(t("noSet", &[("name", name)]));
+            }
+            save_settings(&now)?;
+            out::note(&t("setDeleted", &[("name", name)]));
+        }
+        Some(("rename", s)) => {
+            let from = s.get_one::<String>("name").unwrap();
+            let to = s.get_one::<String>("new").unwrap().trim().to_string();
+            let mut now = settings_now();
+            let sets = sets_of(&mut now);
+            if sets
+                .iter()
+                .any(|set| same_name(set, &to) && !same_name(set, from))
+            {
+                return Err(t("setExists", &[("name", &to)]));
+            }
+            let set = sets
+                .iter_mut()
+                .find(|set| same_name(set, from))
+                .ok_or_else(|| t("noSet", &[("name", from)]))?;
+            set["name"] = Value::from(to.clone());
+            save_settings(&now)?;
+            out::note(&t("setRenamed", &[("from", from), ("to", &to)]));
+        }
+        _ => {
+            let sets = settings
+                .as_ref()
+                .and_then(|s| s.get("ruleSets")?.as_array().cloned())
+                .unwrap_or_default();
+            if out::json() {
+                let list: Vec<Value> = sets
+                    .iter()
+                    .map(|s| json!({ "name": s["name"], "rules": s["steps"].as_array().map_or(0, Vec::len) }))
+                    .collect();
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&list).unwrap_or_default()
+                );
+            } else {
+                for s in &sets {
+                    let n = s["steps"].as_array().map_or(0, Vec::len);
+                    println!(
+                        "{}  {}",
+                        out::bold(s["name"].as_str().unwrap_or_default()),
+                        out::dim(&t("ruleSetCount", &[("n", &n)]))
+                    );
+                }
+            }
+        }
+    }
+    Ok(Exit::Done)
+}
+
+fn put_set(name: &str, steps: Vec<Value>, replace: bool) -> Result<(), String> {
+    let mut now = settings_now();
+    let sets = sets_of(&mut now);
+    let n = steps.len();
+    let set = json!({ "name": name, "steps": steps });
+    match sets.iter().position(|s| same_name(s, name)) {
+        Some(_) if !replace => return Err(t("setExists", &[("name", &name)])),
+        Some(at) => sets[at] = set,
+        None => sets.push(set),
+    }
+    save_settings(&now)?;
+    out::note(&t("setSaved", &[("name", &name), ("n", &n)]));
+    Ok(())
+}
+
+/// A step written back as `TYPE:option=value,…`, with only the options
+/// that differ from their defaults.
+fn spec_of(step: &Value) -> String {
+    let rule = step
+        .get("rule")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let kind = rule.get("type").and_then(Value::as_str).unwrap_or_default();
+    let Some(spec) = catalog::rule(kind) else {
+        return kind.to_string();
+    };
+    let mut parts = Vec::new();
+    for opt in spec.options {
+        let Some(v) = rule.get(opt.name) else {
+            continue;
+        };
+        if *v == catalog::default_value(opt, lang()) {
+            continue;
+        }
+        let text = match (v, opt.kind) {
+            (Value::Bool(true), _) => {
+                parts.push(opt.name.to_string());
+                continue;
+            }
+            (Value::Bool(false), _) => "no".to_string(),
+            (Value::String(s), Kind::Choice(list)) => list
+                .iter()
+                .find(|c| c.value == s)
+                .map_or(s.clone(), |c| c.word().to_string()),
+            (Value::String(s), _) => s.replace('\n', "\\n"),
+            (other, _) => other.to_string(),
+        };
+        parts.push(format!("{}={}", opt.name, quote_value(&text)));
+    }
+    if let Some(only) = step
+        .get("only")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    {
+        parts.push(format!("only={}", quote_value(only)));
+    }
+    if step.get("enabled") == Some(&Value::Bool(false)) {
+        parts.push("off".into());
+    }
+    if parts.is_empty() {
+        kind.to_string()
+    } else {
+        format!("{kind}:{}", parts.join(","))
+    }
+}
+
+fn quote_value(v: &str) -> String {
+    if v.is_empty() || v.contains([',', '"', '\'']) || v.starts_with(' ') || v.ends_with(' ') {
+        format!("\"{}\"", v.replace('\\', "\\\\").replace('"', "\\\""))
+    } else {
+        v.to_string()
+    }
+}
+
+fn shell_quote(s: &str) -> String {
+    if s.chars()
+        .all(|c| c.is_alphanumeric() || "-_:=,./".contains(c))
+    {
+        s.to_string()
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
+}
+
+pub fn rules(m: &ArgMatches) -> Result<Exit, String> {
+    let Some(kind) = m.get_one::<String>("type") else {
+        if out::json() {
+            let list: Vec<Value> = catalog::RULES
+                .iter()
+                .map(|r| json!({ "type": r.kind, "name": t(&r.label(), &[]), "options": r.options.iter().map(|o| o.name).collect::<Vec<_>>() }))
+                .collect();
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&list).unwrap_or_default()
+            );
+            return Ok(Exit::Done);
+        }
+        println!("{}", t("rulesTitle", &[]));
+        for r in catalog::RULES {
+            println!("  {:<12} {}", out::bold(r.kind), t(&r.label(), &[]));
+        }
+        return Ok(Exit::Done);
+    };
+    let spec = catalog::rule(kind).ok_or_else(|| t("unknownRule", &[("name", kind)]))?;
+    if out::json() {
+        let options: Vec<Value> = spec
+            .options
+            .iter()
+            .map(|o| {
+                json!({
+                    "name": o.name,
+                    "old": o.old,
+                    "kind": rulespec::kind_text(&o.kind),
+                    "default": catalog::default_value(o, lang()),
+                    "label": t(o.label, &[]),
+                    "hint": o.hint.map(|h| t(h, &[])),
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &json!({ "type": spec.kind, "name": t(&spec.label(), &[]), "options": options })
+            )
+            .unwrap_or_default()
+        );
+        return Ok(Exit::Done);
+    }
+    println!("{} ({})", out::bold(&t(&spec.label(), &[])), spec.kind);
+    if let Some(h) = spec.hint {
+        println!("{}", t(h, &[]));
+    }
+    println!();
+    println!("{}:", t("ruleOptions", &[]));
+    for o in spec.options {
+        let def = catalog::default_value(o, lang());
+        let def = match def {
+            Value::String(s) => match o.kind {
+                Kind::Choice(list) => list
+                    .iter()
+                    .find(|c| c.value == s)
+                    .map_or(s.clone(), |c| c.word().to_string()),
+                _ if s.is_empty() || s.starts_with(' ') || s.ends_with(' ') => format!("\"{s}\""),
+                _ => s,
+            },
+            Value::Bool(b) => (if b { "yes" } else { "no" }).to_string(),
+            other => other.to_string(),
+        };
+        let was = o
+            .old
+            .map(|old| format!(" ({} {old})", t("wasNamed", &[])))
+            .unwrap_or_default();
+        println!("  {}{}", out::bold(o.name), out::dim(&was));
+        println!("      {}", t(o.label, &[]));
+        if let Some(h) = o.hint {
+            println!("      {}", out::dim(&t(h, &[])));
+        }
+        println!(
+            "      {} · {}: {}",
+            rulespec::kind_text(&o.kind),
+            t("defaultIs", &[]),
+            def
+        );
+    }
+    println!();
+    println!("{}", t("everyRule", &[]));
+    Ok(Exit::Done)
+}
+
+/// The Options the command line shows: key, kind, default, label key and
+/// whether only the window uses it.
+const OPTIONS: &[(&str, Kind, catalog::Default, &str, bool)] = &[
+    (
+        "lang",
+        Kind::Choice(&[
+            renome_core::catalog::Choice {
+                value: "pt",
+                word: "",
+                label: "language",
+            },
+            renome_core::catalog::Choice {
+                value: "en",
+                word: "",
+                label: "language",
+            },
+            renome_core::catalog::Choice {
+                value: "es",
+                word: "",
+                label: "language",
+            },
+        ]),
+        catalog::Default::Text("en"),
+        "language",
+        false,
+    ),
+    (
+        "includeHidden",
+        Kind::Bool,
+        catalog::Default::Bool(false),
+        "includeHidden",
+        false,
+    ),
+    (
+        "warnWindows",
+        Kind::Bool,
+        catalog::Default::Bool(true),
+        "warnWindows",
+        false,
+    ),
+    (
+        "numberClashes",
+        Kind::Bool,
+        catalog::Default::Bool(false),
+        "numberClashes",
+        false,
+    ),
+    (
+        "tmdbLang",
+        Kind::Text,
+        catalog::Default::Text(""),
+        "tmdbLangLabel",
+        false,
+    ),
+    (
+        "cacheDays",
+        Kind::IntChoice(&[0, 1, 7, 30, 180]),
+        catalog::Default::Int(7),
+        "cacheDays",
+        false,
+    ),
+    (
+        "checkUpdates",
+        Kind::Bool,
+        catalog::Default::Bool(true),
+        "checkUpdates",
+        false,
+    ),
+    (
+        "theme",
+        Kind::Choice(&[
+            renome_core::catalog::Choice {
+                value: "light",
+                word: "",
+                label: "themeLight",
+            },
+            renome_core::catalog::Choice {
+                value: "dark",
+                word: "",
+                label: "themeDark",
+            },
+            renome_core::catalog::Choice {
+                value: "system",
+                word: "",
+                label: "themeSystem",
+            },
+        ]),
+        catalog::Default::Text("system"),
+        "theme",
+        true,
+    ),
+    (
+        "textSize",
+        Kind::Choice(&[
+            renome_core::catalog::Choice {
+                value: "normal",
+                word: "",
+                label: "textSizeNormal",
+            },
+            renome_core::catalog::Choice {
+                value: "large",
+                word: "",
+                label: "textSizeLarge",
+            },
+            renome_core::catalog::Choice {
+                value: "larger",
+                word: "",
+                label: "textSizeLarger",
+            },
+        ]),
+        catalog::Default::Text("normal"),
+        "textSize",
+        true,
+    ),
+    (
+        "confirmApply",
+        Kind::Bool,
+        catalog::Default::Bool(true),
+        "confirmApply",
+        true,
+    ),
+    (
+        "disableRulesAfterApply",
+        Kind::Bool,
+        catalog::Default::Bool(true),
+        "disableAfterApply",
+        true,
+    ),
+    (
+        "rememberRules",
+        Kind::Bool,
+        catalog::Default::Bool(true),
+        "rememberRules",
+        true,
+    ),
+    (
+        "showMissing",
+        Kind::Bool,
+        catalog::Default::Bool(true),
+        "showMissingHint",
+        true,
+    ),
+];
+
+pub fn options(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> {
+    let find = |name: &str| {
+        let want = catalog::squash(name);
+        OPTIONS
+            .iter()
+            .find(|(k, ..)| catalog::squash(k) == want)
+            .ok_or_else(|| t("unknownSetting", &[("name", &name)]))
+    };
+    let value_of = |key: &'static str, default: catalog::Default| -> Value {
+        settings
+            .as_ref()
+            .and_then(|s| s.get(key).cloned())
+            .unwrap_or_else(|| {
+                catalog::default_value(
+                    &catalog::Opt {
+                        name: key,
+                        old: None,
+                        kind: Kind::Text,
+                        default,
+                        label: "",
+                        hint: None,
+                    },
+                    lang(),
+                )
+            })
+    };
+    match m.subcommand() {
+        Some(("get", s)) => {
+            let (key, _, default, ..) = find(s.get_one::<String>("option").unwrap())?;
+            let v = value_of(key, *default);
+            println!(
+                "{}",
+                if out::json() {
+                    v.to_string()
+                } else {
+                    v.as_str().map_or(v.to_string(), str::to_string)
+                }
+            );
+        }
+        Some(("set", s)) => {
+            let (key, kind, ..) = find(s.get_one::<String>("option").unwrap())?;
+            let raw = s.get_one::<String>("value").unwrap();
+            let spec = catalog::RuleSpec {
+                kind: "options",
+                hint: None,
+                whole_name: false,
+                options: &[],
+            };
+            let opt = catalog::Opt {
+                name: key,
+                old: None,
+                kind: *kind,
+                default: catalog::Default::Text(""),
+                label: "",
+                hint: None,
+            };
+            let v = typed(&spec, &opt, raw)?;
+            let mut now = settings_now();
+            now[*key] = v.clone();
+            save_settings(&now)?;
+            out::note(&t("settingSaved", &[("name", key), ("value", &v)]));
+        }
+        Some(("reset", s)) => {
+            let (key, ..) = find(s.get_one::<String>("option").unwrap())?;
+            let mut now = settings_now();
+            if let Some(obj) = now.as_object_mut() {
+                obj.remove(*key);
+            }
+            save_settings(&now)?;
+            out::note(&t("settingSaved", &[("name", key), ("value", &"—")]));
+        }
+        _ => {
+            let mut list = Vec::new();
+            for (key, kind, default, label, window) in OPTIONS {
+                let v = value_of(key, *default);
+                if out::json() {
+                    list.push(json!({ "name": key, "value": v, "windowOnly": window, "label": t(label, &[]) }));
+                } else {
+                    let tag = if *window {
+                        out::dim(&format!(" ({})", t("windowOnly", &[])))
+                    } else {
+                        String::new()
+                    };
+                    println!(
+                        "{} = {}{}",
+                        out::bold(key),
+                        v.as_str().map_or(v.to_string(), str::to_string),
+                        tag
+                    );
+                    println!(
+                        "    {} · {}",
+                        out::dim(&t(label, &[])),
+                        out::dim(&rulespec::kind_text(kind))
+                    );
+                }
+            }
+            if out::json() {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&list).unwrap_or_default()
+                );
+            }
+        }
+    }
+    Ok(Exit::Done)
+}
+
+/// A value typed for an option, checked against its kind.
+fn typed(rule: &catalog::RuleSpec, opt: &catalog::Opt, raw: &str) -> Result<Value, String> {
+    let step = rulespec::parse_value(rule, opt, raw)?;
+    Ok(step)
+}
+
+/// The keys the command line names, and the option each is saved as.
+const KEYS: &[(&str, &str)] = &[
+    ("tmdb", "tmdbKey"),
+    ("google-books", "googleBooksKey"),
+    ("comicvine", "comicVineKey"),
+    ("metron", "metronToken"),
+    ("discogs", "discogsToken"),
+    ("opensubtitles-key", "osKey"),
+    ("opensubtitles-user", "osUser"),
+    ("opensubtitles-password", "osPassword"),
+    ("subdl", "subdlKey"),
+    ("subsource", "subsourceKey"),
+    ("gcd-email", "gcdEmail"),
+    ("gcd-password", "gcdPassword"),
+];
+
+/// The secrets and whether they come from the system's store.
+fn secrets() -> Result<(Map<String, Value>, bool), String> {
+    let loaded = renome_services::load_secrets();
+    match loaded.get("status").and_then(Value::as_str) {
+        Some("stored") => Ok((
+            loaded
+                .get("secrets")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default(),
+            true,
+        )),
+        Some("missing") => Ok((
+            renome_services::read_settings_file()
+                .and_then(|s| s.as_object().map(renome_services::secrets::of))
+                .unwrap_or_default(),
+            false,
+        )),
+        _ => Err(t("keyStoreRefused", &[])),
+    }
+}
+
+pub fn keys(m: &ArgMatches) -> Result<Exit, String> {
+    let find = |name: &str| {
+        let want = catalog::squash(name);
+        KEYS.iter()
+            .find(|(k, field)| catalog::squash(k) == want || catalog::squash(field) == want)
+            .ok_or_else(|| t("unknownKey", &[("name", &name)]))
+    };
+    match m.subcommand() {
+        Some(("set", s)) => {
+            let (name, field) = find(s.get_one::<String>("key").unwrap())?;
+            let value = if s.get_flag("stdin") {
+                let mut v = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut v)
+                    .map_err(|e| e.to_string())?;
+                v.trim().to_string()
+            } else {
+                rpassword::prompt_password(t("keyPrompt", &[("name", name)]))
+                    .map_err(|e| e.to_string())?
+                    .trim()
+                    .to_string()
+            };
+            let (mut all, _) = secrets()?;
+            all.insert((*field).into(), Value::from(value));
+            let stored = renome_services::save_secrets(all)?;
+            out::note(&t(
+                if stored { "keyStored" } else { "keyInFile" },
+                &[("name", name)],
+            ));
+        }
+        Some(("delete", s)) => {
+            let (name, field) = find(s.get_one::<String>("key").unwrap())?;
+            let (mut all, _) = secrets()?;
+            all.insert((*field).into(), Value::from(""));
+            renome_services::save_secrets(all)?;
+            out::note(&t("keyDeleted", &[("name", name)]));
+        }
+        _ => {
+            let (all, in_store) = secrets()?;
+            let where_ = t(
+                if in_store {
+                    "keyWhereStore"
+                } else {
+                    "keyWhereFile"
+                },
+                &[],
+            );
+            let mut list = Vec::new();
+            for (name, field) in KEYS {
+                let set = all
+                    .get(*field)
+                    .and_then(Value::as_str)
+                    .is_some_and(|v| !v.is_empty());
+                if out::json() {
+                    list.push(json!({ "name": name, "set": set, "store": set && in_store }));
+                } else if set {
+                    println!(
+                        "{:<24} {} {}",
+                        name,
+                        out::green(&t("keySetHere", &[])),
+                        out::dim(&where_)
+                    );
+                } else {
+                    println!("{:<24} {}", name, out::dim(&t("keyUnset", &[])));
+                }
+            }
+            if out::json() {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&list).unwrap_or_default()
+                );
+            }
+        }
+    }
+    Ok(Exit::Done)
+}
+
+pub fn cache(m: &ArgMatches) -> Result<Exit, String> {
+    match m.subcommand() {
+        Some(("clear", _)) => {
+            renome_services::ANSWERS.clear();
+            out::note(&t("cacheCleared", &[]));
+        }
+        _ => {
+            let size = renome_services::ANSWERS.size();
+            if out::json() {
+                println!("{}", json!({ "bytes": size }));
+            } else {
+                println!("{}", t("cacheSizeIs", &[("size", &out::size(size))]));
+            }
+        }
+    }
+    Ok(Exit::Done)
+}
