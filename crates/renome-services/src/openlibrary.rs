@@ -336,20 +336,20 @@ impl Client {
 
 #[derive(Deserialize)]
 pub struct LookupItem {
-    path: PathBuf,
+    pub path: PathBuf,
     /// File name without extension.
-    name: String,
+    pub name: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Lookup {
-    path: PathBuf,
-    guess: Guess,
-    candidates: Vec<Candidate>,
+    pub path: PathBuf,
+    pub guess: Guess,
+    pub candidates: Vec<Candidate>,
     /// The first candidate is a safe automatic choice.
-    auto: bool,
-    error: Option<String>,
+    pub auto: bool,
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -436,17 +436,17 @@ pub async fn lookup(
 #[serde(rename_all = "camelCase")]
 pub struct SidecarItem {
     /// The renamed book.
-    path: PathBuf,
-    book: BookMatch,
-    cover: Option<i64>,
+    pub path: PathBuf,
+    pub book: BookMatch,
+    pub cover: Option<i64>,
     /// A cover elsewhere (Google Books), when there is no `cover`.
     #[serde(default)]
-    cover_url: String,
+    pub cover_url: String,
     /// A description from elsewhere, when Open Library has none.
     #[serde(default)]
-    description: String,
+    pub description: String,
     #[serde(default)]
-    language: String,
+    pub language: String,
 }
 
 /// Saves the cover and `metadata.opf` of each book: in a book's own folder

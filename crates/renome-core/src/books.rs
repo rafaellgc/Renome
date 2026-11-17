@@ -1624,8 +1624,96 @@ pub fn opf(m: &BookMatch, c: &Candidate, work: &Work, cover: Option<&str>) -> St
     o
 }
 
+/// One author's key across spellings: first name's initial and surname
+/// (`C. S. Moraes`, `C.S. Moraes` and `C. S. MORAES` are one author, and
+/// so are `Rita Prado` and `Rita J. Prado`); `Surname, First` read as
+/// `First Surname`. Empty when the name has no letters or digits.
+pub fn author_key(name: &str) -> String {
+    let words_of = |s: &str| -> Vec<String> {
+        crate::text::strip_accents(s)
+            .to_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .map(str::to_string)
+            .collect()
+    };
+    let words = match name.find(',') {
+        Some(at) if at > 0 => {
+            let mut w = words_of(&name[at + 1..]);
+            w.extend(words_of(&name[..at]));
+            w
+        }
+        _ => words_of(name),
+    };
+    match (words.first(), words.last()) {
+        (Some(first), Some(last)) => format!("{} {last}", first.chars().next().unwrap_or_default()),
+        _ => String::new(),
+    }
+}
+
+/// The spelling each author gets across the books of a list (so one
+/// author's books get one name and one folder): the most common one, not
+/// in capitals when there is another; accents composed.
+pub fn author_spellings(names: &[String]) -> std::collections::HashMap<String, String> {
+    use std::collections::HashMap;
+    let shouting = |s: &str| s.chars().any(char::is_alphabetic) && s == s.to_uppercase();
+    let mut seen: Vec<(String, Vec<(String, usize)>)> = Vec::new();
+    for raw in names {
+        let name = crate::text::nfc(raw);
+        let key = author_key(&name);
+        if key.is_empty() {
+            continue;
+        }
+        let at = match seen.iter().position(|(k, _)| *k == key) {
+            Some(at) => at,
+            None => {
+                seen.push((key, Vec::new()));
+                seen.len() - 1
+            }
+        };
+        let counts = &mut seen[at].1;
+        match counts.iter_mut().find(|(n, _)| *n == name) {
+            Some(c) => c.1 += 1,
+            None => counts.push((name, 1)),
+        }
+    }
+    let mut out = HashMap::new();
+    for (_, counts) in seen {
+        let mut sorted = counts.clone();
+        sorted.sort_by(|a, b| shouting(&a.0).cmp(&shouting(&b.0)).then(b.1.cmp(&a.1)));
+        let best = sorted[0].0.clone();
+        for (name, _) in counts {
+            out.insert(name, best.clone());
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn one_spelling_per_author() {
+        assert_eq!(author_key("C. S. Moraes"), author_key("C.S. MORAES"));
+        assert_eq!(author_key("Rita Prado"), author_key("Rita J. Prado"));
+        assert_eq!(author_key("Prado, Rita"), author_key("Rita Prado"));
+        assert_eq!(
+            author_key("Luís de Quevedo"),
+            author_key("Luis Vaz de Quevedo")
+        );
+        let names: Vec<String> = [
+            "C. S. MORAES",
+            "C. S. Moraes",
+            "C.S. Moraes",
+            "C. S. Moraes",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let s = author_spellings(&names);
+        assert_eq!(s["C. S. MORAES"], "C. S. Moraes");
+        assert_eq!(s["C.S. Moraes"], "C. S. Moraes");
+    }
     use super::*;
 
     fn doc(work: &str, title: &str, author: &str, editions: u32, ed_title: &str) -> Doc {

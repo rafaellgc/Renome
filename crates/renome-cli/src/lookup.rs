@@ -946,6 +946,7 @@ pub enum Found {
     Movies(Movies),
     Series(Series),
     Music(Box<Music>),
+    Books(Box<Books>),
 }
 
 impl Found {
@@ -955,6 +956,7 @@ impl Found {
             Found::Movies(m) => m.chosen.contains_key(path),
             Found::Series(s) => s.chosen.contains_key(path),
             Found::Music(m) => m.chosen.contains_key(path),
+            Found::Books(b) => b.chosen.contains_key(path),
         }
     }
 
@@ -962,6 +964,7 @@ impl Found {
     pub fn wanted(&self, ext: &str) -> bool {
         match self {
             Found::Music(_) => renome_core::music::is_audio(ext),
+            Found::Books(_) => renome_core::ebook::is_book(ext),
             _ => renome_core::tmdb::is_video(ext),
         }
     }
@@ -1266,6 +1269,508 @@ pub async fn after_music(
                 }
                 Err(e) => out::error(&crate::text::error_text(&e)),
             }
+        }
+    }
+    notes
+}
+
+/// One file of an audiobook: its book's first file and its place.
+#[derive(Clone)]
+struct Part {
+    leader: PathBuf,
+    part: u32,
+    parts: u32,
+    narrator: String,
+    series: String,
+    series_index: String,
+}
+
+/// What the book rule found and chose.
+pub struct Books {
+    pub ol: renome_services::openlibrary::Client,
+    /// What each book (and audiobook's first file) was guessed as, and
+    /// the one chosen.
+    found: HashMap<PathBuf, (renome_core::books::Guess, renome_core::books::Candidate)>,
+    parts: HashMap<PathBuf, Part>,
+    /// Each file's book, as the rule names it.
+    pub chosen: HashMap<PathBuf, renome_core::books::BookMatch>,
+}
+
+fn book_match(
+    g: &renome_core::books::Guess,
+    c: &renome_core::books::Candidate,
+) -> renome_core::books::BookMatch {
+    let mut extra = renome_core::fields::Extra::new();
+    let language = if c.exact || g.language.is_empty() {
+        c.language.clone()
+    } else {
+        g.language.clone()
+    };
+    if !language.is_empty() {
+        extra.insert("language".into(), language);
+    }
+    if let Some(p) = c.pages {
+        extra.insert("pages".into(), p.to_string());
+    }
+    renome_core::books::BookMatch {
+        work: c.work.clone(),
+        title: c.title.clone(),
+        original_title: c.original_title.clone(),
+        authors: c.authors.clone(),
+        year: c.year,
+        edition_year: if c.exact { c.edition_year } else { None },
+        publisher: if c.exact {
+            c.publisher.clone()
+        } else {
+            g.publisher.clone()
+        },
+        isbn: if c.exact {
+            c.isbn.clone()
+        } else {
+            g.isbns.first().cloned().unwrap_or_default()
+        },
+        series: g.series.clone(),
+        series_index: g.series_index.clone(),
+        extra,
+        ..Default::default()
+    }
+}
+
+fn book_line(c: &renome_core::books::Candidate) -> String {
+    let mut details = Vec::new();
+    if let Some(y) = c.year {
+        details.push(y.to_string());
+    }
+    if !c.publisher.is_empty() {
+        details.push(c.publisher.clone());
+    }
+    if c.editions > 0 {
+        details.push(t("bookEditions", &[("n", &c.editions)]));
+    }
+    format!(
+        "{} — {}{}",
+        c.title,
+        c.authors.join(", "),
+        out::dim(&format!(" ({})", details.join(", ")))
+    )
+}
+
+/// Looks up the books (and, with `audiobooks`, the audio files grouped
+/// into books) on Open Library and Google Books, the doubtful ones asked.
+pub async fn books(
+    preview: &Preview,
+    rule: &Value,
+    settings: Option<&Value>,
+    ask: &Ask,
+) -> Result<Books, String> {
+    use renome_services::openlibrary as ol;
+    let lang = settings
+        .and_then(|s| s.get("tmdbLang")?.as_str())
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| match lang() {
+            "pt" => "pt-BR".into(),
+            "es" => "es-ES".into(),
+            _ => "en-US".into(),
+        });
+    let client = ol::Client::default();
+    if let Some(key) = renome_services::load_secrets()
+        .get("secrets")
+        .and_then(|s| s.get("googleBooksKey"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    {
+        client.gb.set_key(key);
+    }
+    let ext_of = |name: &str| {
+        Path::new(name)
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_default()
+    };
+    let mut items: Vec<ol::LookupItem> = preview
+        .items
+        .iter()
+        .filter(|i| !i.is_dir && renome_core::ebook::is_book(&ext_of(&i.original)))
+        .map(|i| {
+            let name = i.lookup_name.clone().unwrap_or_else(|| i.original.clone());
+            let name = Path::new(&name)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or(name);
+            ol::LookupItem {
+                path: i.path.clone(),
+                name,
+            }
+        })
+        .collect();
+    let mut parts = HashMap::new();
+    if rule
+        .get("audiobooks")
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
+    {
+        let audio: Vec<PathBuf> = preview
+            .items
+            .iter()
+            .filter(|i| !i.is_dir && renome_core::music::is_audio(&ext_of(&i.original)))
+            .map(|i| i.path.clone())
+            .collect();
+        if !audio.is_empty() {
+            let groups = tokio::task::spawn_blocking(move || renome_core::audiobook::group(&audio))
+                .await
+                .unwrap_or_default();
+            for b in groups {
+                let leader = b.paths[0].clone();
+                let count = b.paths.len() as u32;
+                for (n, p) in b.paths.iter().enumerate() {
+                    parts.insert(
+                        p.clone(),
+                        Part {
+                            leader: leader.clone(),
+                            part: n as u32 + 1,
+                            parts: if count > 1 { count } else { 0 },
+                            narrator: b.narrator.clone(),
+                            series: b.series.clone(),
+                            series_index: b.series_index.clone(),
+                        },
+                    );
+                }
+                if !b.title.is_empty() || !b.author.is_empty() {
+                    let author = if b.author.is_empty() {
+                        String::new()
+                    } else {
+                        format!("{} - ", b.author)
+                    };
+                    let year = b.year.map(|y| format!(" ({y})")).unwrap_or_default();
+                    items.push(ol::LookupItem {
+                        path: leader,
+                        name: format!("{author}{}{year}", b.title),
+                    });
+                }
+            }
+        }
+    }
+    let mut out_books = Books {
+        ol: ol::Client::default(),
+        found: HashMap::new(),
+        parts,
+        chosen: HashMap::new(),
+    };
+    if items.is_empty() {
+        return Ok(out_books);
+    }
+    let found = ol::lookup(&Cli, &client, &lang, items).await;
+    if let Some(failed) = found.iter().find_map(|f| f.error.clone())
+        && found
+            .iter()
+            .all(|f| f.error.is_some() || (f.guess.title.is_empty() && f.guess.isbns.is_empty()))
+    {
+        return Err(crate::text::error_text(&failed));
+    }
+    let mut answered: HashMap<(String, String), Option<renome_core::books::Candidate>> =
+        HashMap::new();
+    for f in found {
+        let pick = if let Some(text) = ask.picks.get(&f.path) {
+            book_search(&client, &lang, text).await?.into_iter().next()
+        } else if f.auto {
+            f.candidates.first().cloned()
+        } else if ask.choose == Choose::Ask && std::io::stdin().is_terminal() {
+            let key = (f.guess.title.clone(), f.guess.author.clone());
+            match answered.get(&key) {
+                Some(p) => p.clone(),
+                None => {
+                    let p = choose_book(&client, &lang, &f.path, &f.guess, f.candidates).await?;
+                    answered.insert(key, p.clone());
+                    p
+                }
+            }
+        } else {
+            None
+        };
+        if let Some(c) = pick {
+            out_books.found.insert(f.path, (f.guess, c));
+        }
+    }
+    // One spelling per author across the list.
+    let raw: Vec<(PathBuf, renome_core::books::BookMatch)> = out_books
+        .found
+        .iter()
+        .map(|(p, (g, c))| (p.clone(), book_match(g, c)))
+        .collect();
+    let names: Vec<String> = raw.iter().flat_map(|(_, m)| m.authors.clone()).collect();
+    let spelling = renome_core::books::author_spellings(&names);
+    for (p, mut m) in raw {
+        m.title = renome_core::text::nfc(&m.title);
+        let mut authors: Vec<String> = Vec::new();
+        for a in &m.authors {
+            let a = renome_core::text::nfc(a);
+            let a = spelling.get(&a).cloned().unwrap_or(a);
+            if !authors.contains(&a) {
+                authors.push(a);
+            }
+        }
+        m.authors = authors;
+        out_books.chosen.insert(p, m);
+    }
+    // An audiobook's files take its first file's book, with their part.
+    for (p, g) in out_books.parts.clone() {
+        if let Some(m) = out_books.chosen.get(&g.leader).cloned() {
+            let mut m = m;
+            m.narrator = g.narrator.clone();
+            m.part = g.part;
+            m.parts = g.parts;
+            if m.series.is_empty() {
+                m.series = g.series.clone();
+            }
+            if m.series_index.is_empty() {
+                m.series_index = g.series_index.clone();
+            }
+            out_books.chosen.insert(p, m);
+        }
+    }
+    out_books.ol = client;
+    Ok(out_books)
+}
+
+/// A book searched by the person: an ISBN or a link, else `title / author`.
+async fn book_search(
+    client: &renome_services::openlibrary::Client,
+    lang: &str,
+    text: &str,
+) -> Result<Vec<renome_core::books::Candidate>, String> {
+    if let Some(link) = renome_core::links::parse(text.trim()) {
+        return client
+            .by_link(&link, lang)
+            .await
+            .map_err(|e| crate::text::error_text(&e));
+    }
+    let (title, author) = text.split_once(" / ").unwrap_or((text, ""));
+    let guess = renome_core::books::Guess {
+        title: title.trim().into(),
+        author: author.trim().into(),
+        from_file: true,
+        ..Default::default()
+    };
+    Ok(client
+        .find(&guess, lang)
+        .await
+        .map_err(|e| crate::text::error_text(&e))?
+        .0)
+}
+
+async fn choose_book(
+    client: &renome_services::openlibrary::Client,
+    lang: &str,
+    path: &Path,
+    guess: &renome_core::books::Guess,
+    mut candidates: Vec<renome_core::books::Candidate>,
+) -> Result<Option<renome_core::books::Candidate>, String> {
+    let title = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let looked = if guess.author.is_empty() {
+        guess.title.clone()
+    } else {
+        format!("{} / {}", guess.title, guess.author)
+    };
+    loop {
+        let lines: Vec<String> = candidates.iter().map(book_line).collect();
+        match ask_one(&title, &looked, &lines) {
+            Pick::Number(n) => return Ok(Some(candidates.remove(n))),
+            Pick::Skip => return Ok(None),
+            Pick::Stop => return Err(t("searchStopped", &[])),
+            Pick::Search(text) => match book_search(client, lang, &text).await {
+                Ok(c) => candidates = c,
+                Err(e) => out::error(&e),
+            },
+        }
+    }
+}
+
+/// After the renames: cover and `metadata.opf`, the details and cover
+/// inside audiobooks, the details inside EPUB/AZW3/FB2 (and polishing),
+/// the conversions.
+pub async fn after_books(
+    rule: &Value,
+    books: &Books,
+    preview: &Preview,
+    report: &renome_core::ApplyReport,
+    history: &renome_core::History,
+) -> Vec<String> {
+    use renome_services::openlibrary as ol;
+    let mut notes = Vec::new();
+    let on = |k: &str| rule.get(k).and_then(Value::as_bool).unwrap_or(false);
+    let recorded = report.done.is_empty() || report.history_id.is_some();
+    if !recorded {
+        return notes;
+    }
+    let ext_of = |p: &Path| {
+        p.extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_default()
+    };
+    let is_book = |p: &Path| renome_core::ebook::is_book(&ext_of(p));
+    let is_audio = |p: &Path| renome_core::music::is_audio(&ext_of(p));
+    let leads = |p: &PathBuf| books.parts.get(p).is_none_or(|g| &g.leader == p);
+    // Renamed files, and those whose names were already right.
+    let mut pairs: Vec<(PathBuf, PathBuf)> = report
+        .done
+        .iter()
+        .map(|op| (op.from.clone(), op.to.clone()))
+        .collect();
+    pairs.extend(
+        preview
+            .items
+            .iter()
+            .filter(|i| i.status == renome_core::Status::Unchanged && !i.is_dir)
+            .map(|i| (i.path.clone(), i.path.clone())),
+    );
+    let book_to: HashMap<&PathBuf, renome_core::bookconv::Target> = preview
+        .items
+        .iter()
+        .filter_map(|i| Some((&i.path, i.book_to?)))
+        .collect();
+    // What a file's book is, with what came from the catalogue alongside.
+    let detail = |from: &PathBuf| -> Option<(
+        renome_core::books::BookMatch,
+        &renome_core::books::Candidate,
+        String,
+    )> {
+        let m = books.chosen.get(from)?.clone();
+        let leader = books.parts.get(from).map_or(from, |g| &g.leader);
+        let (g, c) = books.found.get(leader)?;
+        let language = if c.exact {
+            c.language.clone()
+        } else {
+            g.language.clone()
+        };
+        Some((m, c, language))
+    };
+    if on("cover") || on("metadataOpf") {
+        let items: Vec<ol::SidecarItem> = pairs
+            .iter()
+            .filter(|(from, to)| is_book(to) || (is_audio(to) && leads(from)))
+            .filter_map(|(from, to)| {
+                let (book, c, language) = detail(from)?;
+                Some(ol::SidecarItem {
+                    path: to.clone(),
+                    book,
+                    cover: c.cover,
+                    cover_url: c.cover_url.clone(),
+                    description: c.description.clone(),
+                    language,
+                })
+            })
+            .collect();
+        if !items.is_empty() {
+            let mut r = ol::sidecars(
+                &Cli,
+                &books.ol,
+                items,
+                on("cover"),
+                on("metadataOpf"),
+                on("folders"),
+            )
+            .await;
+            renome_services::after::record_created(history, report.history_id.clone(), &mut r);
+            if !r.created.is_empty() {
+                notes.push(t("sidecarsN", &[("n", &r.created.len())]));
+            }
+            for (file, why) in r.errors {
+                out::error(&format!("{file}: {}", crate::text::error_text(&why)));
+            }
+        }
+    }
+    if on("audioTags")
+        && rule
+            .get("audiobooks")
+            .and_then(Value::as_bool)
+            .unwrap_or(true)
+    {
+        let items: Vec<renome_services::after::AudiobookTagJob> = pairs
+            .iter()
+            .filter(|(_, to)| is_audio(to))
+            .filter_map(|(from, to)| {
+                let (book, c, language) = detail(from)?;
+                Some(renome_services::after::AudiobookTagJob {
+                    path: to.clone(),
+                    book,
+                    cover: c.cover,
+                    cover_url: c.cover_url.clone(),
+                    description: c.description.clone(),
+                    language,
+                })
+            })
+            .collect();
+        if !items.is_empty() {
+            match renome_services::after::audiobook_tags(
+                &Cli,
+                history,
+                &books.ol,
+                report.history_id.clone(),
+                items,
+                true,
+                on("audioClean"),
+            )
+            .await
+            {
+                Ok((r, _)) => {
+                    notes.push(t("audioTagsN", &[("n", &r.written)]));
+                    for (file, why) in r.errors {
+                        out::error(&format!("{file}: {}", crate::text::error_text(&why)));
+                    }
+                }
+                Err(e) => out::error(&crate::text::error_text(&e)),
+            }
+        }
+    }
+    // Inside the books: details, polishing, conversions.
+    let polish = (on("epub3") || on("shrinkImages"))
+        .then(|| serde_json::json!({ "epub3": on("epub3"), "shrink": on("shrinkImages") }));
+    let original = rule
+        .get("original")
+        .and_then(Value::as_str)
+        .unwrap_or("keep");
+    let mut jobs: Vec<renome_services::after::InsideJob> = Vec::new();
+    for (from, to) in &pairs {
+        let mut job = serde_json::json!({ "path": to });
+        let details = detail(from);
+        if let Some((book, _, language)) = &details {
+            job["book"] = serde_json::to_value(book).unwrap_or_default();
+            job["language"] = Value::from(language.clone());
+        }
+        if let Some(target) = book_to.get(from) {
+            job["bookTo"] = serde_json::to_value(target).unwrap_or_default();
+            job["convert"] = Value::from(original);
+        } else {
+            let writable =
+                renome_core::inside::book_writable(to) || renome_core::bookmeta::writable(to);
+            let epub = matches!(ext_of(to).as_str(), "epub" | "kepub");
+            let writes = on("writeEpub") && details.is_some() && writable;
+            if epub && let Some(p) = &polish {
+                job["polish"] = p.clone();
+            } else if !writes {
+                continue;
+            }
+            if !writes {
+                job.as_object_mut().map(|o| o.remove("book"));
+            }
+        }
+        if let Ok(j) = serde_json::from_value(job) {
+            jobs.push(j);
+        }
+    }
+    if !jobs.is_empty() {
+        match renome_services::after::inside(&Cli, history, report.history_id.clone(), jobs).await {
+            Ok(o) => {
+                notes.push(t("insideN", &[("n", &o.report.written)]));
+                for (file, why) in o.report.errors {
+                    out::error(&format!("{file}: {}", crate::text::error_text(&why)));
+                }
+            }
+            Err(e) => out::error(&crate::text::error_text(&e)),
         }
     }
     notes
