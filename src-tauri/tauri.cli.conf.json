@@ -1,0 +1,26 @@
+{
+  "build": {
+    "beforeBuildCommand": "npm run build && node scripts/cli-bin.js"
+  },
+  "bundle": {
+    "externalBin": ["binaries/renome-cli"],
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/share/man/man1": "../target/cli-extra/man",
+          "/usr/share/bash-completion/completions/renome-cli": "../target/cli-extra/bash/renome-cli",
+          "/usr/share/zsh/vendor-completions/_renome-cli": "../target/cli-extra/zsh/_renome-cli",
+          "/usr/share/fish/vendor_completions.d/renome-cli.fish": "../target/cli-extra/fish/renome-cli.fish"
+        }
+      },
+      "rpm": {
+        "files": {
+          "/usr/share/man/man1": "../target/cli-extra/man",
+          "/usr/share/bash-completion/completions/renome-cli": "../target/cli-extra/bash/renome-cli",
+          "/usr/share/zsh/site-functions/_renome-cli": "../target/cli-extra/zsh/_renome-cli",
+          "/usr/share/fish/vendor_completions.d/renome-cli.fish": "../target/cli-extra/fish/renome-cli.fish"
+        }
+      }
+    }
+  }
+}
