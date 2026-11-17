@@ -88,9 +88,8 @@ pub fn parse(specs: &[String], keys: &[&str]) -> Result<Edits, String> {
     for spec in specs {
         let cut = spec
             .char_indices()
-            .filter(|(i, c)| *c == ':' && starts_field(&spec[i + 1..]))
+            .rfind(|(i, c)| *c == ':' && starts_field(&spec[i + 1..]))
             .map(|(i, _)| i)
-            .last()
             .ok_or_else(|| t("badEdit", &[("spec", spec), ("keys", &keys.join(", "))]))?;
         let path = std::path::absolute(&spec[..cut]).map_err(|e| e.to_string())?;
         let rest = &spec[cut + 1..];
