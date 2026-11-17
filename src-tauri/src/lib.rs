@@ -2989,8 +2989,11 @@ fn save_text(path: PathBuf, text: String) -> Result<(), String> {
 #[tauri::command]
 fn load_preset(path: PathBuf) -> Result<Vec<serde_json::Value>, String> {
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let steps: Vec<serde_json::Value> =
+    let mut steps: Vec<serde_json::Value> =
         serde_json::from_str(&text).map_err(|e| format!("invalidPreset: {e}"))?;
+    for step in &mut steps {
+        renome_core::catalog::migrate_step(step);
+    }
     serde_json::from_value::<Vec<Step>>(serde_json::Value::Array(steps.clone()))
         .map_err(|e| format!("invalidPreset: {e}"))?;
     Ok(steps)

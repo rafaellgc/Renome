@@ -65,7 +65,7 @@ export class Books {
   /** The rule takes audiobooks too (unless turned off). */
   audio = $derived.by(() => {
     const r = this.rule?.rule;
-    return r?.type === "book" && r.audio !== false;
+    return r?.type === "book" && r.audiobooks !== false;
   });
 
   /** A file the rule names: a book, or an audiobook's audio. */
@@ -102,7 +102,7 @@ export class Books {
    *  metadata.opf (files that already exist are skipped when writing). */
   metaOnly = $derived.by(() => {
     const r = this.rule?.rule;
-    return r?.type === "book" && (r.cover || r.opf)
+    return r?.type === "book" && (r.cover || r.metadataOpf)
       ? this.#ctx.items.filter((i) => i.status === "unchanged" && this.has(i.path) && (isBook(i.original) || (isAudio(i.original) && this.leads(i.path))))
       : [];
   });

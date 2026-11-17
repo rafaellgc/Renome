@@ -71,7 +71,7 @@ export class Series {
   /** Episodes whose names are already right but that still get metadata. */
   metaOnly = $derived.by(() => {
     const r = this.rule?.rule;
-    return r?.type === "series" && r.sidecar && r.source !== "anilist"
+    return r?.type === "series" && r.nfo && r.source !== "anilist"
       ? this.#ctx.items.filter((i) => i.status === "unchanged" && this.matches[i.path] && isVideo(i.original))
       : [];
   });

@@ -11,7 +11,7 @@ export type BookTarget = "" | "epub" | "azw3" | "fb2" | "pdf";
 export type Rule =
   | { type: "replace"; find: string; replace: string; caseSensitive: boolean; firstOnly: boolean; target: Target }
   | { type: "regex"; pattern: string; replace: string; caseSensitive: boolean; firstOnly: boolean; target: Target }
-  | { type: "case"; mode: CaseMode; target: Target; keep?: string }
+  | { type: "case"; mode: CaseMode; target: Target; keepWords?: string }
   | {
       type: "insert";
       source: "text" | "now" | "modified" | "taken" | "folder";
@@ -20,7 +20,7 @@ export type Rule =
     }
   | { type: "number"; template: string; start: number; step: number; digits: number; perFolder: boolean; pairs?: boolean }
   | { type: "remove"; allSpaces: boolean; extraSpaces: boolean; accents: boolean; digits: boolean; chars: string; leadingNumber: boolean; maxLength: number; target: Target }
-  | { type: "convert"; mojibake: boolean; latin: boolean; web: "" | "-" | "_"; splitWords?: boolean; target: Target }
+  | { type: "convert"; mojibake: boolean; transliterate: boolean; webSafe: "" | "-" | "_"; splitWords?: boolean; target: Target }
   | {
       type: "removeRange";
       from: Bound; fromPosition: number; fromText: string;
@@ -32,7 +32,7 @@ export type Rule =
   | { type: "rearrange"; separator: string; order: string; target: Target }
   | { type: "list"; names: string; pairs?: boolean }
   | {
-      type: "movie"; template: string; colon: string; sidecar: boolean; fanart: boolean; folder: boolean; missing: boolean;
+      type: "movie"; template: string; colonAs: string; nfo: boolean; backdrop: boolean; folder: boolean; missing: boolean;
       /** Download subtitles in `subLangs` (`pt-BR, en`) with the rename. */
       subtitles?: boolean; subLangs?: string;
       /** Title, date and cover written inside MKV and MP4 videos. */
@@ -46,35 +46,35 @@ export type Rule =
       videoTracks?: boolean;
     }
   | {
-      type: "series"; template: string; colon: string; show: string;
-      folders: boolean; folderTemplate: string; sidecar: boolean; fanart: boolean; missing: boolean;
+      type: "series"; template: string; colonAs: string; show: string;
+      folders: boolean; folderTemplate: string; nfo: boolean; backdrop: boolean; missing: boolean;
       subtitles?: boolean; subLangs?: string;
       videoTags?: boolean; videoClean?: boolean; videoTracks?: boolean;
       /** Where shows are looked up (TMDB when not set). */
       source?: "tmdb" | "anilist";
     }
   | {
-      type: "music"; template: string; colon: string; discPrefix: boolean; fromName: boolean;
-      folders: boolean; folderTemplate: string; cover: boolean; playlist: boolean; listen: boolean; writeTags: boolean; embedCover: boolean; coverSize: number; cleanTags: boolean; missing: boolean;
+      type: "music"; template: string; colonAs: string; discPrefix: boolean; fromName: boolean;
+      folders: boolean; folderTemplate: string; cover: boolean; playlist: boolean; identifyBySound: boolean; writeTags: boolean; embedCover: boolean; coverSize: number; cleanTags: boolean; missing: boolean;
     }
   | {
-      type: "book"; template: string; colon: string; folders: boolean; folderTemplate: string; cover: boolean; opf: boolean; writeEpub?: boolean; missing: boolean; convertTo?: BookTarget; original?: "keep" | "delete";
+      type: "book"; template: string; colonAs: string; folders: boolean; folderTemplate: string; cover: boolean; metadataOpf: boolean; writeEpub?: boolean; missing: boolean; convertTo?: BookTarget; original?: "keep" | "delete";
       /** The reader the books are for (window only: marks formats it does not open; PDF pages its screen's size). */
-      model?: string; anyProgram?: boolean;
+      model?: string; otherReaderApps?: boolean;
       /** EPUB 2 brought to EPUB 3; large pictures made smaller. */
       epub3?: boolean; shrinkImages?: boolean;
       /** Audiobooks too (audio files; off: books only). */
-      audio?: boolean;
+      audiobooks?: boolean;
       /** The book's details and cover written inside audiobooks' files;
        *  with `audioClean`, their other tags go. */
       audioTags?: boolean; audioClean?: boolean;
     }
-  | { type: "comic"; template: string; colon: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; byFolder: boolean; writeInfo?: boolean; cleanInfo?: boolean; convert?: boolean; original?: "keep" | "delete"; drawPages?: boolean; pageSize?: number; missing: boolean; barcode?: boolean; skipPublishers?: string; ebook?: ComicFormat; device?: ComicDevice; model?: string;
+  | { type: "comic"; template: string; colonAs: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; seriesByFolder: boolean; writeInfo?: boolean; cleanInfo?: boolean; convert?: boolean; original?: "keep" | "delete"; drawPdfPages?: boolean; pageSize?: number; missing: boolean; barcode?: boolean; skipPublishers?: string; ebook?: ComicFormat; device?: ComicDevice; model?: string;
       /** The reader opens more formats with another reading program on it (KOReader, an app). */
-      anyProgram?: boolean; crop?: boolean; split?: boolean;
+      otherReaderApps?: boolean; crop?: boolean; split?: boolean;
       /** Screen of a custom reader. */
       width?: number; height?: number;
-      numbers?: boolean; spread?: ComicSpread; contrast?: boolean; upscale?: boolean; greys16?: boolean; soften?: boolean; webtoon?: boolean;
+      cropPageNumbers?: boolean; spread?: ComicSpread; contrast?: boolean; upscale?: boolean; sixteenGreys?: boolean; reduceRainbow?: boolean; webtoon?: boolean;
       /** One series' comics in one folder joined into a volume. */
       join?: boolean;
       /** Books larger than this (MB) made in parts; 0: no limit. */

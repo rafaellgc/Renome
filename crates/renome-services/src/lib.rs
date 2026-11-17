@@ -60,10 +60,22 @@ pub fn settings_path() -> PathBuf {
         .join("settings.json")
 }
 
-/// The options as saved, if they can be read.
+/// The options as saved, if they can be read, with the remembered rules
+/// and the rule sets brought up to date (see [`renome_core::catalog`]).
 pub fn read_settings_file() -> Option<Value> {
     let text = std::fs::read_to_string(settings_path()).ok()?;
-    serde_json::from_str(&text).ok()
+    let mut settings: Value = serde_json::from_str(&text).ok()?;
+    migrate_settings(&mut settings);
+    Some(settings)
+}
+
+/// Rules saved with old option names take the new ones.
+pub fn migrate_settings(settings: &mut Value) {
+    for key in ["rules", "ruleSets"] {
+        if let Some(v) = settings.get_mut(key) {
+            renome_core::catalog::migrate_steps(v);
+        }
+    }
 }
 
 /// Saves the options whole.

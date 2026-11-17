@@ -140,7 +140,7 @@ export function newRule(type: RuleType): Rule {
     case "regex":
       return { type, pattern: "", replace: "", caseSensitive: false, firstOnly: false, target: "name" };
     case "case":
-      return { type, mode: "titleSmart", target: "name", keep: "" };
+      return { type, mode: "titleSmart", target: "name", keepWords: "" };
     case "insert":
       return { type, source: "text", text: "", dateFormat: "%Y-%m-%d", fallback: true, at: "start", position: 1 };
     case "number":
@@ -148,7 +148,7 @@ export function newRule(type: RuleType): Rule {
     case "remove":
       return { type, allSpaces: false, extraSpaces: true, accents: false, digits: false, chars: "", leadingNumber: false, maxLength: 0, target: "name" };
     case "convert":
-      return { type, mojibake: true, latin: false, web: "", splitWords: false, target: "name" };
+      return { type, mojibake: true, transliterate: false, webSafe: "", splitWords: false, target: "name" };
     case "removeRange":
       return { type, from: "text", fromPosition: 1, fromText: "", to: "text", toPosition: 1, toText: "", inclusive: true };
     case "charAt":
@@ -160,19 +160,19 @@ export function newRule(type: RuleType): Rule {
     case "list":
       return { type, names: "" };
     case "movie":
-      return { type, template: MOVIE_TEMPLATE[settings.lang], colon: " - ", sidecar: false, fanart: false, folder: false, missing: true };
+      return { type, template: MOVIE_TEMPLATE[settings.lang], colonAs: " - ", nfo: false, backdrop: false, folder: false, missing: true };
     case "series":
       return {
-        type, template: SERIES_TEMPLATE[settings.lang], colon: " - ", show: "",
-        folders: false, folderTemplate: SHOW_FOLDER[settings.lang], sidecar: false, fanart: false, missing: true, source: "tmdb",
+        type, template: SERIES_TEMPLATE[settings.lang], colonAs: " - ", show: "",
+        folders: false, folderTemplate: SHOW_FOLDER[settings.lang], nfo: false, backdrop: false, missing: true, source: "tmdb",
       };
     case "music": {
       const [template, folderTemplate] = MUSIC_TEMPLATE[settings.lang];
-      return { type, template, colon: " - ", discPrefix: true, fromName: false, folders: false, folderTemplate, cover: false, playlist: false, listen: true, writeTags: false, embedCover: true, coverSize: 1200, cleanTags: true, missing: true };
+      return { type, template, colonAs: " - ", discPrefix: true, fromName: false, folders: false, folderTemplate, cover: false, playlist: false, identifyBySound: true, writeTags: false, embedCover: true, coverSize: 1200, cleanTags: true, missing: true };
     }
     case "book": {
       const [template, folderTemplate] = BOOK_TEMPLATE[settings.lang];
-      return { type, template, colon: " - ", folders: false, folderTemplate, cover: false, opf: false, writeEpub: false, missing: true, convertTo: "", original: "keep", audio: true };
+      return { type, template, colonAs: " - ", folders: false, folderTemplate, cover: false, metadataOpf: false, writeEpub: false, missing: true, convertTo: "", original: "keep", audiobooks: true };
     }
     case "photo": {
       const p = PHOTO_TEMPLATES[settings.lang];
@@ -182,7 +182,7 @@ export function newRule(type: RuleType): Rule {
       return { type, toSrt: false, utf8: true, ads: false, hearing: false, shiftMs: 0, fpsFrom: 0, fpsTo: 0, extract: false, extractLangs: "", original: "keep" };
     case "comic": {
       const [template, folderTemplate] = COMIC_TEMPLATE[settings.lang];
-      return { type, template, colon: " - ", series: "", source: "gcd", folders: false, folderTemplate, byFolder: false, writeInfo: false, cleanInfo: false, convert: false, original: "keep", drawPages: true, pageSize: 2400, missing: true, barcode: false, skipPublishers: "", ebook: "", device: "kindle-pw", crop: true, split: true };
+      return { type, template, colonAs: " - ", series: "", source: "gcd", folders: false, folderTemplate, seriesByFolder: false, writeInfo: false, cleanInfo: false, convert: false, original: "keep", drawPdfPages: true, pageSize: 2400, missing: true, barcode: false, skipPublishers: "", ebook: "", device: "kindle-pw", crop: true, split: true };
     }
   }
 }

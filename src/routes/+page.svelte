@@ -749,14 +749,14 @@
         }
       }
       const recorded = !r.done.length || !!r.historyId;
-      if (recorded && rule?.type === "movie" && rule.sidecar) {
+      if (recorded && rule?.type === "movie" && rule.nfo) {
         const items = r.done
           .filter((op) => movies.state[op.from]?.choice && isVideo(op.to))
           .map((op) => ({ path: op.to, id: movies.state[op.from].choice!.id }))
           .concat(meta);
         if (items.length) {
           movies.progress = { done: 0, total: items.length, kind: "save" };
-          saved += await writeMeta(() => api.writeSidecars(settings.tmdbKey, tmdbLang(), r.historyId, items, rule.fanart, rule.folder));
+          saved += await writeMeta(() => api.writeSidecars(settings.tmdbKey, tmdbLang(), r.historyId, items, rule.backdrop, rule.folder));
         }
       }
       const mrule = music.rule?.rule;
@@ -808,7 +808,7 @@
         }
       }
       const brule = books.rule?.rule;
-      if (recorded && brule?.type === "book" && (brule.cover || brule.opf)) {
+      if (recorded && brule?.type === "book" && (brule.cover || brule.metadataOpf)) {
         const items = r.done
           .filter((op) => books.has(op.from) && (isBook(op.to) || (isAudio(op.to) && books.leads(op.from))))
           .map((op) => books.sidecarItem(op.from, op.to))
@@ -816,7 +816,7 @@
         if (items.length) {
           books.progress = { done: 0, total: items.length, kind: "save" };
           try {
-            saved += await writeMeta(() => api.writeBookSidecars(r.historyId, $state.snapshot(items), brule.cover, brule.opf, brule.folders));
+            saved += await writeMeta(() => api.writeBookSidecars(r.historyId, $state.snapshot(items), brule.cover, brule.metadataOpf, brule.folders));
           } finally {
             books.progress = null;
           }
@@ -897,7 +897,7 @@
         }
       }
       const srule = tv.rule?.rule;
-      if (recorded && srule?.type === "series" && srule.sidecar && srule.source !== "anilist") {
+      if (recorded && srule?.type === "series" && srule.nfo && srule.source !== "anilist") {
         const items = r.done
           .filter((op) => tv.matches[op.from] && isVideo(op.to))
           .map((op) => tv.sidecarItem(op.from, op.to))
@@ -905,7 +905,7 @@
         if (items.length) {
           movies.progress = { done: 0, total: items.length, kind: "saveTv" };
           saved += await writeMeta(() =>
-            api.writeTvSidecars(settings.tmdbKey, tmdbLang(), r.historyId, items, srule.fanart, srule.folders),
+            api.writeTvSidecars(settings.tmdbKey, tmdbLang(), r.historyId, items, srule.backdrop, srule.folders),
           );
         }
       }
@@ -1765,7 +1765,7 @@
                 }
               : undefined}
             summary={step.rule.type === "music" && step.enabled && music.untagged
-              ? t(step.rule.listen ? "musicUntaggedListenN" : "musicUntaggedN", { n: music.untagged })
+              ? t(step.rule.identifyBySound ? "musicUntaggedListenN" : "musicUntaggedN", { n: music.untagged })
               : step.rule.type === "photo" && step.enabled && undatedCount
                 ? t("photoUndatedN", { n: undatedCount })
                 : step.rule.type === "list" && step.rule.names.trim()

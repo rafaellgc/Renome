@@ -120,7 +120,7 @@ function upgradeRules(steps: Step[]) {
     if (OLD_COMIC_TEMPLATES[s.rule.template]) s.rule.template = OLD_COMIC_TEMPLATES[s.rule.template];
     // Rules from before there was a choice of catalogue.
     s.rule.source ??= "comicvine";
-    s.rule.byFolder ??= false;
+    s.rule.seriesByFolder ??= false;
   }
 }
 

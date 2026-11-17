@@ -114,7 +114,7 @@ export class Music {
     const settled = new Set(this.albums.filter((a) => a.status === "auto" || a.status === "chosen").flatMap((a) => a.files));
     const paths = this.#ctx.items
       // Songs without a title can still be identified by their sound.
-      .filter((i) => !i.isDir && (!i.untagged || rule.listen) && isAudio(i.original) && !settled.has(i.path))
+      .filter((i) => !i.isDir && (!i.untagged || rule.identifyBySound) && isAudio(i.original) && !settled.has(i.path))
       .map((i) => i.path);
     if (!paths.length) {
       this.#ctx.say(t("mbNoFiles"));
@@ -122,7 +122,7 @@ export class Music {
     }
     this.progress = { done: 0, total: 0, kind: "search" };
     try {
-      const found = await api.mbLookup(paths, rule.fromName, rule.listen);
+      const found = await api.mbLookup(paths, rule.fromName, rule.identifyBySound);
       if (!found.length) {
         this.#ctx.say(t("mbNoFiles"));
         return;

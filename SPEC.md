@@ -93,6 +93,12 @@ until it is removed; the subtitle rule goes in once ("already in the
 list") and not with music, book, comic or photo, either way ("does not go
 with …"); a preset or remembered set with more keeps the first and says
 which were left out (`blockedBy`/`oneLookup` in `rules.ts`).
+Every rule type and option (name, kind, default by language, the old
+name it is still read under, the keys of its label and hint in
+`i18n.ts`) is listed in `renome_core::catalog`; saved rules, rule sets and
+preset files are brought up to date when read (`migrate_steps`, applied by
+`read_settings_file` and `load_preset`), so the page only sees the current
+names.
 Each rule can be turned on/off, reordered and removed; a rule turned off
 is locked (no option changes, no searches) until turned on. The preview updates
 live. Rule sets are kept by name in the settings (`ruleSets`: name and steps,
@@ -1146,7 +1152,7 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
 
 ### 2.4a Audiobooks (`audiobook`)
 
-The book rule's option `audio` (TS only, default on) takes audio files
+The book rule's option `audiobooks` (TS only, default on) takes audio files
 (`music::is_audio`, `.m4b` included) as audiobooks.
 
 - `audiobook::group` (command `audiobook_groups`): files of a folder with
@@ -1196,7 +1202,7 @@ The book rule's option `audio` (TS only, default on) takes audio files
   only, "Any" by default): the reader the books are for, from the comic
   rule's list (`readers.ts`, without sizes); formats it does not open as
   it comes are marked in the menu and warned about (not hidden),
-  `anyProgram` takes that away; with PDF its screen sets the page size. Files taking part: book
+  `otherReaderApps` takes that away; with PDF its screen sets the page size. Files taking part: book
   extensions plus `docx`, `odt`, `rtf`, `txt`, `html`, `htm`, `xhtml`,
   `htmlz`, `fbz`. `FileEntry::book_source` caches what the content is
   (`bookconv::source_of`: magic bytes, zip member names, XML root) and
@@ -1544,7 +1550,7 @@ The book rule's option `audio` (TS only, default on) takes audio files
   (off by default), with "The
   original file": keep beside (default) or delete; "PDF pages that are
   not just a picture": draw them (default) or leave such PDFs as they are
-  (`drawPages`; then only PDFs with no page to draw are offered, and one
+  (`drawPdfPages`; then only PDFs with no page to draw are offered, and one
   found to need drawing when converting fails with `pdfDrawn`); "Size of
   drawn pages": 1600, 2400 (default) or 3200 (`pageSize`, the long side
   of a drawn page with no picture). A converted PDF's row has `drawn`
@@ -1716,12 +1722,12 @@ The book rule's option `audio` (TS only, default on) takes audio files
   PDF, EPUB; Supernote EPUB, CBZ, PDF, FB2; tolino EPUB, CBZ, PDF,
   without CBZ before 2024; Xteink X3/X4 EPUB; Boox, Android readers,
   tablets and phones EPUB, CBZ, PDF, AZW3, FB2) stay choosable, marked in
-  the menu and with a warning naming the best one; `anyProgram` (window
+  the menu and with a warning naming the best one; `otherReaderApps` (window
   only: KOReader or an app on it) takes the marks away. Presets are saved and loaded as the window sends them (checked
   against `Step`), so options only the window reads stay. `crop`
-  (default on), `numbers`, `spread` (`keep`|`split`|`rotate`|`both`;
+  (default on), `cropPageNumbers`, `spread` (`keep`|`split`|`rotate`|`both`;
   older presets' `split: false` = keep, else split), `contrast` (UI
-  default on), `upscale`, `greys16`, `soften`, `webtoon`, `join`,
+  default on), `upscale`, `sixteenGreys`, `reduceRainbow`, `webtoon`, `join`,
   `maxMb` (0, 50, 200, 400), `original` keep|delete. A comic file that
   is a CBZ or that the CBZ conversion can read (CBR, CB7, CBT, a PDF of
   pictures, or one it may draw) is named with the format's extension in
@@ -1742,7 +1748,7 @@ The book rule's option `audio` (TS only, default on) takes audio files
   left); crop: on an 800 px grey copy, the edges' mean says the margin
   colour (≥200 white, ≤55 black, else no crop), rows with ≥ max(2,
   0.5%) pixels and columns (within those rows) differing by >48 are
-  content; with `numbers`, the last (and first) block of content rows,
+  content; with `cropPageNumbers`, the last (and first) block of content rows,
   apart from the rest by ≥ 1% of margin rows, ≤ 4% tall and ≤ 1/6 wide,
   is dropped; 1% kept around; applied when it keeps ≥ ¼ each way and
   cuts something. Webtoon: an image taller than 1.5 pages (page = width ×
@@ -1755,11 +1761,11 @@ The book rule's option `audio` (TS only, default on) takes audio files
   (Catmull-Rom) when smaller both ways. Grey devices: grey. `contrast`:
   levels from the 0.5% and 99.5% luma percentiles (skipped when < 32
   apart), gamma 1.2 on ink screens (1.0 else), one curve on every
-  channel. `soften` on colour ink screens: separable 1-4-6-4-1 blur. A
+  channel. `reduceRainbow` on colour ink screens: separable 1-4-6-4-1 blur. A
   JPEG with no change (geometry, tones) is kept byte for byte (unless a
   grey device gets a colour page); else JPEG q85, retried at q72 when it
   exceeds by 10% the page's share (by area) of the source bytes; with
-  `greys16` on grey screens except Scribes/colour Kindles (blank PNG
+  `sixteenGreys` on grey screens except Scribes/colour Kindles (blank PNG
   pages there), quantised to 16 levels (×17) as a 4-bit grey PNG, kept
   when smaller than the JPEG. Unreadable pages are left out.
 - Book: fixed layout, one chapter per picture (`picture_page`, viewport

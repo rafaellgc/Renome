@@ -67,7 +67,7 @@ export class Movies {
    *  images (files that already exist are skipped when writing). */
   metaOnly = $derived.by(() => {
     const r = this.rule?.rule;
-    return r?.type === "movie" && r.sidecar
+    return r?.type === "movie" && r.nfo
       ? this.#ctx.items.filter((i) => i.status === "unchanged" && this.state[i.path]?.choice && isVideo(i.original))
       : [];
   });

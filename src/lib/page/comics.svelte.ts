@@ -135,7 +135,7 @@ export class Comics {
     /** The issue's details go along (to write them, or for an e-book). */
     const want = details ?? (r?.type === "comic" && !!r.writeInfo);
     const original = r?.type === "comic" && r.convert && convert ? (r.original ?? "keep") : undefined;
-    const pdf = r?.type === "comic" ? { draw: r.drawPages !== false, size: r.pageSize ?? 2400, info: !!r.writeInfo } : undefined;
+    const pdf = r?.type === "comic" ? { draw: r.drawPdfPages !== false, size: r.pageSize ?? 2400, info: !!r.writeInfo } : undefined;
     const fresh = r?.type === "comic" && !!r.cleanInfo;
     // Typed in: no page in a catalogue.
     if (r?.type === "comic" && want && this.edits[key]) return { path, comic: this.edits[key], web: "", manga: false, convert: original, pdf, fresh };
@@ -172,12 +172,12 @@ export class Comics {
         width: r.width ?? 0,
         height: r.height ?? 0,
         crop: r.crop ?? true,
-        numbers: r.numbers ?? false,
+        numbers: r.cropPageNumbers ?? false,
         spread: r.spread ?? (r.split === false ? "keep" : "split"),
         contrast: r.contrast ?? true,
         upscale: r.upscale ?? false,
-        greys16: r.greys16 ?? false,
-        soften: r.soften ?? false,
+        greys16: r.sixteenGreys ?? false,
+        soften: r.reduceRainbow ?? false,
         webtoon: r.webtoon ?? false,
         join: r.join ?? false,
         maxMb: r.maxMb ?? 0,
@@ -223,7 +223,7 @@ export class Comics {
       const owns = await api.comicGuesses(
         files.map((f) => f.path),
         files.map((f) => (f.lookupName ? (f.isDir ? f.lookupName : splitExt(f.lookupName)[0]) : null)),
-        !!rule.byFolder,
+        !!rule.seriesByFolder,
       );
       const run = this.#ctx.stopRun;
       // On Metron, a barcode tells the issue itself.
@@ -416,7 +416,7 @@ export class Comics {
       const got = await api.comicGuesses(
         missing.map((i) => i.path),
         missing.map((i) => (i.lookupName ? (i.isDir ? i.lookupName : splitExt(i.lookupName)[0]) : null)),
-        r?.type === "comic" && !!r.byFolder,
+        r?.type === "comic" && !!r.seriesByFolder,
       );
       missing.forEach((i, n) => (guessed[i.path] = got[n]));
     }

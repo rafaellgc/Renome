@@ -137,6 +137,7 @@ pub enum Rule {
         /// Words (in any case) that stay as they were in the name, whatever
         /// the mode (`swat` keeps `SWAT`).
         #[serde(default)]
+        #[serde(rename = "keepWords", alias = "keep")]
         keep: String,
     },
     Insert {
@@ -195,10 +196,12 @@ pub enum Rule {
         mojibake: bool,
         /// Cyrillic and Greek in Latin letters (`Кино` → `Kino`).
         #[serde(default)]
+        #[serde(rename = "transliterate", alias = "latin")]
         latin: bool,
         /// A name any server takes, with this between words (`-`, `_`);
         /// empty: off.
         #[serde(default)]
+        #[serde(rename = "webSafe", alias = "web")]
         web: String,
         /// Words written together apart (`DougCantDance` → `Doug Cant Dance`).
         #[serde(default)]
@@ -264,12 +267,15 @@ pub enum Rule {
         template: String,
         /// What `:` in titles becomes.
         #[serde(default = "colon")]
+        #[serde(rename = "colonAs", alias = "colon")]
         colon: String,
         /// Write `.nfo` and poster next to renamed videos.
         #[serde(default)]
+        #[serde(rename = "nfo", alias = "sidecar")]
         sidecar: bool,
         /// Also the backdrop image and the title logo.
         #[serde(default)]
+        #[serde(rename = "backdrop", alias = "fanart")]
         fanart: bool,
         /// Moves each file into a folder with the new name.
         #[serde(default)]
@@ -296,6 +302,7 @@ pub enum Rule {
         /// `{show}`, `{year}`, `{season}`, `{episode}`, `{title}`…
         template: String,
         #[serde(default = "colon")]
+        #[serde(rename = "colonAs", alias = "colon")]
         colon: String,
         /// The show to look for, as typed (used by the app, not here).
         #[serde(default)]
@@ -308,9 +315,11 @@ pub enum Rule {
         folder_template: String,
         /// Write `.nfo` files and images (used by the app, not here).
         #[serde(default)]
+        #[serde(rename = "nfo", alias = "sidecar")]
         sidecar: bool,
         /// Also backdrop and logo (used by the app, not here).
         #[serde(default)]
+        #[serde(rename = "backdrop", alias = "fanart")]
         fanart: bool,
         /// Lists the aired episodes missing from the seasons the files
         /// cover (used by the app, not here).
@@ -333,6 +342,7 @@ pub enum Rule {
         /// `{track}`, `{title}`, `{artist}`, `{album}`…
         template: String,
         #[serde(default = "colon")]
+        #[serde(rename = "colonAs", alias = "colon")]
         colon: String,
         /// `1-01` on albums with more than one disc.
         #[serde(default = "yes")]
@@ -354,6 +364,7 @@ pub enum Rule {
         playlist: bool,
         /// Identify songs by their sound on AcoustID (used by the app).
         #[serde(default = "yes")]
+        #[serde(rename = "identifyBySound", alias = "listen")]
         listen: bool,
         /// Write the release's details into the songs' tags (used by the app).
         #[serde(default)]
@@ -381,6 +392,7 @@ pub enum Rule {
         /// `{author}`, `{title}`, `{year}`, `{series}`, `{volume}`…
         template: String,
         #[serde(default = "colon")]
+        #[serde(rename = "colonAs", alias = "colon")]
         colon: String,
         /// Moves each book into folders made from `folder_template`.
         #[serde(default)]
@@ -393,6 +405,7 @@ pub enum Rule {
         cover: bool,
         /// Write a `metadata.opf` file (used by the app).
         #[serde(default)]
+        #[serde(rename = "metadataOpf", alias = "opf")]
         opf: bool,
         /// Lists the volumes missing between a series' books (used by the
         /// app).
@@ -412,6 +425,7 @@ pub enum Rule {
         /// `{series}`, `{number}`, `{volume}`, `{chapter}`, `{year}`…
         template: String,
         #[serde(default = "colon")]
+        #[serde(rename = "colonAs", alias = "colon")]
         colon: String,
         /// The series to look for, as typed (used by the app, not here).
         #[serde(default)]
@@ -428,6 +442,7 @@ pub enum Rule {
         folder_template: String,
         /// The series is the name of the folder each file is in.
         #[serde(default)]
+        #[serde(rename = "seriesByFolder", alias = "byFolder")]
         by_folder: bool,
         /// Lists the issues missing from the series the files are from
         /// (used by the app, not here).
@@ -441,6 +456,7 @@ pub enum Rule {
         /// PDF pages that are not just a picture are drawn; else such PDFs
         /// are not converted.
         #[serde(default = "yes")]
+        #[serde(rename = "drawPdfPages", alias = "drawPages")]
         draw_pages: bool,
         /// The long side, in pixels, of a drawn page with no picture (used
         /// by the app).
