@@ -1167,6 +1167,42 @@ const CLI: &[(&str, [&str; 3])] = &[
         ],
     ),
     (
+        "cmdManual",
+        [
+            "Mostra o manual (o mesmo da janela)",
+            "Shows the manual (the window's)",
+            "Muestra el manual (el de la ventana)",
+        ],
+    ),
+    (
+        "argTopic",
+        [
+            "Capítulo: o código (movie, series…) ou o começo do título; sem ele, o índice",
+            "Chapter: its code (movie, series…) or the start of its title; without it, the index",
+            "Capítulo: su código (movie, series…) o el comienzo del título; sin él, el índice",
+        ],
+    ),
+    (
+        "argManualAll",
+        ["O manual inteiro", "The whole manual", "El manual entero"],
+    ),
+    (
+        "manualHow",
+        [
+            "Para ler um capítulo: renome-cli manual CÓDIGO",
+            "To read a chapter: renome-cli manual CODE",
+            "Para leer un capítulo: renome-cli manual CÓDIGO",
+        ],
+    ),
+    (
+        "noManualTopic",
+        [
+            "O manual não tem o capítulo \"{topic}\".",
+            "The manual has no chapter \"{topic}\".",
+            "El manual no tiene el capítulo \"{topic}\".",
+        ],
+    ),
+    (
         "epTypeHint",
         [
             "digite S01E05 (ou 1x05, S01E05-06) para escolher outro",

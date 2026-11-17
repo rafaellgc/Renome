@@ -4,6 +4,7 @@
 mod duplicates;
 mod lookup;
 mod manage;
+mod manual;
 mod missing;
 mod out;
 mod rulespec;
@@ -76,6 +77,7 @@ fn main() -> ExitCode {
         Some(("options", m)) => manage::options(m, settings),
         Some(("keys", m)) => manage::keys(m),
         Some(("cache", m)) => manage::cache(m),
+        Some(("manual", m)) => manual::command(m),
         Some(("update", m)) => update::command(m),
         Some(("duplicates", m)) => duplicates::command(m, settings.as_ref()),
         Some(("servers", m)) => tokio::runtime::Runtime::new()
@@ -537,6 +539,17 @@ pub fn cli() -> Command {
                 .about(t("cmdUpdate", &[]))
                 .subcommand(Command::new("check").about(t("updCheck", &[])))
                 .subcommand(Command::new("install").about(t("updInstall", &[]))),
+        )
+        .subcommand(
+            Command::new("manual")
+                .about(t("cmdManual", &[]))
+                .arg(Arg::new("topic").help(t("argTopic", &[])))
+                .arg(
+                    Arg::new("all")
+                        .long("all")
+                        .help(t("argManualAll", &[]))
+                        .action(ArgAction::SetTrue),
+                ),
         )
         .subcommand(
             Command::new("cache")

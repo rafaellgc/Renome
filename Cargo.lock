@@ -4159,6 +4159,7 @@ dependencies = [
  "serde_json",
  "tar",
  "tempfile",
+ "terminal_size",
  "tokio",
 ]
 
