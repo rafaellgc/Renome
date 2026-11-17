@@ -63,9 +63,14 @@
   </requires>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.38.1" date="2026-11-17">
+      <description>
+        <p>The current name, new name and folder columns can be widened by dragging their header's edge, for the moment only. Texts agree with the count ("1 book that has"). On Windows the cache no longer shares the program's folder.</p>
+      </description>
+    </release>
     <release version="0.38.0" date="2026-11-16">
       <description>
-        <p>Renome can tell Jellyfin, Emby and Plex which library folders changed after a rename. It checks for new versions and installs them itself (not in the Flatpak, which updates through Flathub). The book rule organizes audiobooks and can write the book's details and cover inside their files. Release advertisements stay out of the library and can go to the Trash.</p>
+        <p>Renome can tell Jellyfin, Emby and Plex which library folders changed after a rename. It checks for new versions and installs them itself (not in the Flatpak, which Flatpak updates). The book rule organizes audiobooks and can write the book's details and cover inside their files. Release advertisements stay out of the library and can go to the Trash.</p>
       </description>
     </release>
     <release version="0.37.0" date="2026-11-16">
