@@ -483,7 +483,7 @@ mod tests {
 
     #[test]
     fn asks_the_server() {
-        tauri::async_runtime::block_on(asks());
+        tokio::runtime::Runtime::new().unwrap().block_on(asks());
     }
 
     async fn asks() {

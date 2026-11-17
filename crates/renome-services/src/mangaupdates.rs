@@ -225,7 +225,7 @@ mod live {
         if std::env::var("RENOME_LIVE").is_err() {
             return;
         }
-        tauri::async_runtime::block_on(async {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
             let al = crate::anilist::Client::default();
             let found = al.search("Sousou no Frieren", None).await.unwrap();
             println!(
@@ -300,7 +300,7 @@ mod live_links {
         if std::env::var("RENOME_LIVE").is_err() {
             return;
         }
-        tauri::async_runtime::block_on(async {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
             let Some(Link::MangaUpdates(id)) =
                 parse("https://www.mangaupdates.com/series/pb8uwds/one-piece")
             else {

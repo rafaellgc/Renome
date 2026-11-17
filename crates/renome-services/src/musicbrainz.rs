@@ -7,13 +7,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use crate::Host;
 use renome_core::acoustid::Heard;
 use renome_core::music::{self, AudioTags};
 use renome_core::musicbrainz::{
     self as mb, AlbumQuery, Candidate, Release, Search, Song, SongMatch,
 };
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
 
 const API: &str = "https://musicbrainz.org/ws/2";
 const COVERS: &str = "https://coverartarchive.org";
@@ -222,8 +222,8 @@ struct Progress {
     kind: Option<&'static str>,
 }
 
-fn progress(app: &AppHandle, done: usize, total: usize, kind: Option<&'static str>) {
-    let _ = app.emit("mb-progress", Progress { done, total, kind });
+fn progress(host: &dyn Host, done: usize, total: usize, kind: Option<&'static str>) {
+    crate::report(host, "mb-progress", Progress { done, total, kind });
 }
 
 /// The songs among `files` grouped in albums, with album-wide details agreed.
@@ -276,15 +276,16 @@ pub struct Services<'a> {
 /// (AcoustID); for such an album, what was heard counts when it picks a
 /// release for some of its songs, else the search's candidates stay.
 pub async fn lookup(
-    app: &AppHandle,
+    host: &dyn Host,
     s: &Services<'_>,
     albums: Vec<Vec<Song>>,
     unnamed: Vec<Song>,
     listen: bool,
 ) -> Vec<AlbumLookup> {
     // What is not looked up before Stop is left out: it is still to do.
-    let stopped = crate::stop_signal(app);
-    let looked = by_tags(app, s, albums, &stopped).await;
+    let stop = host.stop_signal();
+    let stopped = move || stop();
+    let looked = by_tags(host, s, albums, &stopped).await;
     if !listen || stopped() {
         return looked.into_iter().map(|(a, _)| a).collect();
     }
@@ -304,7 +305,7 @@ pub async fn lookup(
         return out;
     }
     let mut all: Vec<Song> = pending.iter().flat_map(|(_, s)| s.clone()).collect();
-    let (heard, error) = hear(app, s, &mut all, &stopped).await;
+    let (heard, error) = hear(host, s, &mut all, &stopped).await;
     let recordings: HashMap<PathBuf, Vec<String>> =
         all.into_iter().map(|(p, t)| (p, t.recordings)).collect();
     let mut releases = HashMap::new();
@@ -318,7 +319,7 @@ pub async fn lookup(
         for (p, t) in &mut songs {
             t.recordings = recordings.get(p).cloned().unwrap_or_default();
         }
-        let groups = by_sound(app, s, &songs, &heard, &error, &mut releases, &stopped).await;
+        let groups = by_sound(host, s, &songs, &heard, &error, &mut releases, &stopped).await;
         match by_name {
             Some(a) if !a.candidates.is_empty() && groups.iter().all(|g| g.choice.is_none()) => {
                 out.push(a)
@@ -331,13 +332,13 @@ pub async fn lookup(
 
 /// The lookups by tags, each with its songs.
 async fn by_tags(
-    app: &AppHandle,
+    host: &dyn Host,
     s: &Services<'_>,
     albums: Vec<Vec<Song>>,
     stopped: &impl Fn() -> bool,
 ) -> Vec<(AlbumLookup, Vec<Song>)> {
     let total = albums.len();
-    progress(app, 0, total, None);
+    progress(host, 0, total, None);
     let mut out = Vec::new();
     for (done, songs) in albums.into_iter().enumerate() {
         if stopped() {
@@ -400,7 +401,7 @@ async fn by_tags(
         found.error = result.err();
         found.candidates.truncate(12);
         out.push((found, songs));
-        progress(app, done + 1, total, None);
+        progress(host, done + 1, total, None);
     }
     out
 }
@@ -409,13 +410,13 @@ async fn by_tags(
 /// the recordings it was heard as. Also returns the error that stopped the
 /// listening, if any.
 async fn hear(
-    app: &AppHandle,
+    host: &dyn Host,
     s: &Services<'_>,
     songs: &mut [Song],
     stopped: &impl Fn() -> bool,
 ) -> (HashMap<PathBuf, Heard>, Option<String>) {
     let total = songs.len();
-    progress(app, 0, total, Some("listen"));
+    progress(host, 0, total, Some("listen"));
     let mut heard = HashMap::new();
     let mut error = None;
     for (done, (path, tags)) in songs.iter_mut().enumerate() {
@@ -426,7 +427,7 @@ async fn hear(
             Some(_) => None,
             None => {
                 let p = path.clone();
-                tauri::async_runtime::spawn_blocking(move || renome_core::fingerprint::of(&p))
+                tokio::task::spawn_blocking(move || renome_core::fingerprint::of(&p))
                     .await
                     .ok()
                     .flatten()
@@ -451,7 +452,7 @@ async fn hear(
                 .insert(path.clone(), h.recordings.clone());
         }
         heard.insert(path.clone(), h);
-        progress(app, done + 1, total, Some("listen"));
+        progress(host, done + 1, total, Some("listen"));
     }
     (heard, error)
 }
@@ -461,7 +462,7 @@ async fn hear(
 /// keeps those fetched. After Stop, no more releases are fetched: the
 /// albums heard go to the review with their candidates.
 async fn by_sound(
-    app: &AppHandle,
+    host: &dyn Host,
     s: &Services<'_>,
     songs: &[Song],
     heard: &HashMap<PathBuf, Heard>,
@@ -522,7 +523,7 @@ async fn by_sound(
         found.extend(groups);
     }
     let total = found.len();
-    progress(app, 0, total, None);
+    progress(host, 0, total, None);
     let mut out = Vec::new();
     for (done, f) in found.into_iter().enumerate() {
         let album: Vec<Song> = f
@@ -580,7 +581,7 @@ async fn by_sound(
         }
         lookup.candidates.truncate(12);
         out.push(lookup);
-        progress(app, done + 1, total, None);
+        progress(host, done + 1, total, None);
     }
     out
 }
@@ -663,14 +664,14 @@ pub fn has_cover(dir: &std::path::Path) -> bool {
 /// Saves each album's front cover as `cover.jpg` in its folder, unless the
 /// folder already has a cover (see [`has_cover`]).
 pub async fn covers(
-    app: &AppHandle,
+    host: &dyn Host,
     client: &Client,
     dg: &crate::discogs::Client,
     items: Vec<CoverItem>,
 ) -> crate::tmdb::SidecarReport {
     let mut report = crate::tmdb::SidecarReport::default();
     let total = items.len();
-    progress(app, 0, total, None);
+    progress(host, 0, total, None);
     for (done, item) in items.into_iter().enumerate() {
         if !has_cover(&item.dir) {
             let path = item.dir.join("cover.jpg");
@@ -683,7 +684,7 @@ pub async fn covers(
                 Err(e) => report.errors.push((item.dir.display().to_string(), e)),
             }
         }
-        progress(app, done + 1, total, None);
+        progress(host, done + 1, total, None);
     }
     report
 }

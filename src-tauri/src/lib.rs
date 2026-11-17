@@ -16,22 +16,13 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-mod acoustid;
-mod anilist;
-mod comicvine;
-mod discogs;
-mod gcd;
-mod googlebooks;
-mod mangadex;
-mod mangaupdates;
-mod mediaserver;
-mod metron;
-mod musicbrainz;
-mod openlibrary;
-mod secrets;
-mod subtitles;
-mod tmdb;
 mod update;
+
+use renome_services::{
+    ANSWERS, acoustid, anilist, cache_days, cache_root, comicvine, discogs, drop_old_cache, gcd,
+    mangadex, mangaupdates, mediaserver, metron, musicbrainz, openlibrary, read_settings_file,
+    secrets, subtitles, tmdb, write_settings_file,
+};
 
 /// The session's file list. It lives on the Rust side so the whole list
 /// is not sent over on every preview update.
@@ -96,64 +87,6 @@ struct AppState {
 }
 
 type Overrides = HashMap<PathBuf, String>;
-
-/// The catalogues' answers kept on disk (see [`renome_core::answers`]);
-/// how long comes from the settings (`cacheDays`, 7 by default).
-pub(crate) static ANSWERS: std::sync::LazyLock<renome_core::answers::Store> =
-    std::sync::LazyLock::new(|| {
-        let dir = cache_root().join("answers");
-        renome_core::answers::Store::new(dir, cache_days(read_settings_file().as_ref()))
-    });
-
-/// Where the program keeps what it can always fetch or work out again.
-/// On Windows not `%LOCALAPPDATA%\renome`: the installer puts the program
-/// itself in `%LOCALAPPDATA%\Renome`, the same folder there, so clearing
-/// the cache would take the program with it. The app's own data folder is
-/// used instead, which the uninstaller offers to delete.
-fn cache_root() -> PathBuf {
-    let base = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
-    if cfg!(windows) {
-        base.join("io.github.rafaellgc.Renome").join("cache")
-    } else {
-        base.join("renome")
-    }
-}
-
-/// Windows: the cache once kept beside the installed program goes. Only
-/// the names the program wrote there, never the folder.
-fn drop_old_cache() {
-    if cfg!(windows)
-        && let Some(old) = dirs::cache_dir().map(|d| d.join("renome"))
-    {
-        let _ = std::fs::remove_dir_all(old.join("answers"));
-        let _ = std::fs::remove_file(old.join("pictures"));
-    }
-}
-
-fn cache_days(settings: Option<&Value>) -> u32 {
-    settings
-        .and_then(|s| s.get("cacheDays")?.as_u64())
-        .map_or(7, |d| d.min(365) as u32)
-}
-
-/// A kept answer, read as `T`.
-pub(crate) fn kept<T: for<'de> serde::Deserialize<'de>>(
-    service: &str,
-    question: &str,
-) -> Option<T> {
-    serde_json::from_slice(&ANSWERS.get(service, question)?).ok()
-}
-
-/// Keeps an answer and reads it as `T`.
-pub(crate) fn keep<T: for<'de> serde::Deserialize<'de>>(
-    service: &str,
-    question: &str,
-    body: &[u8],
-) -> Result<T, String> {
-    let v = serde_json::from_slice(body).map_err(|e| e.to_string())?;
-    ANSWERS.put(service, question, body);
-    Ok(v)
-}
 
 /// The bytes the kept answers take.
 #[tauri::command]
@@ -427,6 +360,20 @@ fn stop_signal(app: &AppHandle) -> impl Fn() -> bool + Send + Sync + 'static {
     let app = app.clone();
     let run = app.state::<AppState>().stop_run.load(Ordering::SeqCst);
     move || app.state::<AppState>().stop_run.load(Ordering::SeqCst) != run
+}
+
+/// The window as the host of the shared work: reports become events for
+/// the page, Stop is the page's button.
+#[derive(Clone)]
+struct Gui(AppHandle);
+
+impl renome_services::Host for Gui {
+    fn report(&self, event: &str, payload: Value) {
+        let _ = self.0.emit(event, payload);
+    }
+    fn stop_signal(&self) -> std::sync::Arc<dyn Fn() -> bool + Send + Sync> {
+        std::sync::Arc::new(stop_signal(&self.0))
+    }
 }
 
 /// Stops the searches under way (see [`stop_signal`]).
@@ -957,7 +904,7 @@ async fn tmdb_lookup(
     items: Vec<tmdb::LookupItem>,
 ) -> Result<Vec<tmdb::Lookup>, String> {
     let client = tmdb::Client::new(&key, &lang);
-    Ok(tmdb::lookup(&app, &client, items).await)
+    Ok(tmdb::lookup(&Gui(app.clone()), &client, items).await)
 }
 
 /// The collections the chosen movies belong to, for those missing.
@@ -1089,7 +1036,7 @@ async fn write_sidecars(
     in_folder: bool,
 ) -> Result<tmdb::SidecarReport, String> {
     let client = tmdb::Client::new(&key, &lang);
-    let mut report = tmdb::sidecars(&app, &client, items, fanart, in_folder).await;
+    let mut report = tmdb::sidecars(&Gui(app.clone()), &client, items, fanart, in_folder).await;
     record_created(&app, history_id, &mut report);
     Ok(report)
 }
@@ -1107,7 +1054,7 @@ async fn write_tv_sidecars(
     folders: bool,
 ) -> Result<tmdb::SidecarReport, String> {
     let client = tmdb::Client::new(&key, &lang);
-    let mut report = tmdb::tv_sidecars(&app, &client, items, fanart, folders).await;
+    let mut report = tmdb::tv_sidecars(&Gui(app.clone()), &client, items, fanart, folders).await;
     record_created(&app, history_id, &mut report);
     Ok(report)
 }
@@ -1121,7 +1068,7 @@ async fn subs_search(
     items: Vec<subtitles::Item>,
 ) -> subtitles::Search {
     let stop = stop_signal(&app);
-    subtitles::search(&app, auth, &langs, items, stop).await
+    subtitles::search(&Gui(app.clone()), auth, &langs, items, stop).await
 }
 
 /// Downloads the subtitles chosen beside the renamed videos and records
@@ -1134,7 +1081,7 @@ async fn write_subtitles(
     items: Vec<subtitles::Write>,
 ) -> subtitles::Written {
     let stop = stop_signal(&app);
-    let mut out = subtitles::write(&app, auth, items, stop).await;
+    let mut out = subtitles::write(&Gui(app.clone()), auth, items, stop).await;
     let mut report = tmdb::SidecarReport {
         created: std::mem::take(&mut out.created),
         errors: std::mem::take(&mut out.errors),
@@ -1267,7 +1214,7 @@ async fn mb_lookup(
         acoustid: &state.acoustid,
         heard: &state.heard,
     };
-    Ok(musicbrainz::lookup(&app, &services, albums, unnamed, listen).await)
+    Ok(musicbrainz::lookup(&Gui(app.clone()), &services, albums, unnamed, listen).await)
 }
 
 /// A search typed in the album review, on MusicBrainz or Discogs.
@@ -1348,7 +1295,7 @@ async fn write_covers(
     items: Vec<musicbrainz::CoverItem>,
 ) -> Result<tmdb::SidecarReport, String> {
     let state = app.state::<AppState>();
-    let mut report = musicbrainz::covers(&app, &state.mb, &state.dg, items).await;
+    let mut report = musicbrainz::covers(&Gui(app.clone()), &state.mb, &state.dg, items).await;
     record_created(&app, history_id, &mut report);
     Ok(report)
 }
@@ -2607,7 +2554,7 @@ async fn book_lookup(
     items: Vec<openlibrary::LookupItem>,
 ) -> Result<Vec<openlibrary::Lookup>, String> {
     let ol = &app.state::<AppState>().ol;
-    Ok(openlibrary::lookup(&app, ol, &lang, items).await)
+    Ok(openlibrary::lookup(&Gui(app.clone()), ol, &lang, items).await)
 }
 
 /// A search typed in the book review.
@@ -2889,7 +2836,8 @@ async fn write_book_sidecars(
     in_folder: bool,
 ) -> Result<tmdb::SidecarReport, String> {
     let ol = &app.state::<AppState>().ol;
-    let mut report = openlibrary::sidecars(&app, ol, items, cover, opf, in_folder).await;
+    let mut report =
+        openlibrary::sidecars(&Gui(app.clone()), ol, items, cover, opf, in_folder).await;
     record_created(&app, history_id, &mut report);
     Ok(report)
 }
@@ -3046,27 +2994,6 @@ fn load_preset(path: PathBuf) -> Result<Vec<serde_json::Value>, String> {
     serde_json::from_value::<Vec<Step>>(serde_json::Value::Array(steps.clone()))
         .map_err(|e| format!("invalidPreset: {e}"))?;
     Ok(steps)
-}
-
-fn settings_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("renome")
-        .join("settings.json")
-}
-
-fn read_settings_file() -> Option<Value> {
-    let text = std::fs::read_to_string(settings_path()).ok()?;
-    serde_json::from_str(&text).ok()
-}
-
-fn write_settings_file(settings: &Value) -> Result<(), String> {
-    let path = settings_path();
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    }
-    let text = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
-    std::fs::write(path, text).map_err(|e| e.to_string())
 }
 
 /// The settings file is read and written whole by the settings and the
@@ -3230,10 +3157,7 @@ pub fn run() {
         ANSWERS.purge();
     });
 
-    let history_dir = dirs::data_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("renome")
-        .join("history");
+    let history_dir = renome_services::history_dir();
 
     // Paths given on the command line go into the initial list.
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();

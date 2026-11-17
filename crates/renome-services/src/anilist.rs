@@ -54,7 +54,7 @@ fn net_error(e: reqwest::Error) -> String {
 }
 
 /// Words without accents or case, to compare titles.
-pub(crate) fn fold(s: &str) -> String {
+pub fn fold(s: &str) -> String {
     renome_core::text::strip_accents(&s.to_lowercase())
         .split(|c: char| !c.is_alphanumeric())
         .filter(|w| !w.is_empty())
@@ -65,7 +65,7 @@ pub(crate) fn fold(s: &str) -> String {
 /// The title to name by: the one the file already has, when it is one of
 /// the series' titles (a translation the reader knows), else the English
 /// one, else the main one (often in romaji).
-pub(crate) fn pick_title(query: &str, main: &[&str], others: &[&str]) -> String {
+pub fn pick_title(query: &str, main: &[&str], others: &[&str]) -> String {
     let q = fold(query);
     main.iter()
         .chain(others)
@@ -587,12 +587,7 @@ impl Client {
 
     /// Asks AniList a question, two seconds apart at least, keeping the
     /// answer.
-    pub(crate) async fn ask(
-        &self,
-        query: &str,
-        vars: Value,
-        question: &str,
-    ) -> Result<Value, String> {
+    pub async fn ask(&self, query: &str, vars: Value, question: &str) -> Result<Value, String> {
         let mut last = self.last.lock().await;
         if let Some(t) = *last {
             tokio::time::sleep(Duration::from_millis(2000).saturating_sub(t.elapsed())).await;

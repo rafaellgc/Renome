@@ -9,10 +9,10 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use crate::Host;
 use renome_core::subtitles::{self as subs, Candidate, Lang, Source};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::{AppHandle, Emitter};
 
 const OS_API: &str = "https://api.opensubtitles.com/api/v1";
 const SUBDL_API: &str = "https://api.subdl.com/api/v1";
@@ -739,7 +739,7 @@ struct Progress {
 /// Searches each video on the sources with a key, for the languages not
 /// there yet. Stops between videos when asked.
 pub async fn search(
-    app: &AppHandle,
+    host: &dyn Host,
     auth: Auth,
     langs: &str,
     items: Vec<Item>,
@@ -764,7 +764,7 @@ pub async fn search(
         ..Search::default()
     };
     let total = items.len();
-    let _ = app.emit("subs-progress", Progress { done: 0, total });
+    crate::report(host, "subs-progress", Progress { done: 0, total });
     for (i, item) in items.into_iter().enumerate() {
         if stop() {
             break;
@@ -848,7 +848,7 @@ pub async fn search(
             inside,
             candidates,
         });
-        let _ = app.emit("subs-progress", Progress { done: i + 1, total });
+        crate::report(host, "subs-progress", Progress { done: i + 1, total });
     }
     if let Some(os) = os.filter(|_| os_ok) {
         out.remaining = os.remaining().await;
@@ -884,7 +884,7 @@ const TRIES: usize = 3;
 /// Downloads the subtitles beside the renamed videos (a name taken is
 /// never replaced). When OpenSubtitles' quota runs out, SubDL's are tried.
 pub async fn write(
-    app: &AppHandle,
+    host: &dyn Host,
     auth: Auth,
     items: Vec<Write>,
     stop: impl Fn() -> bool,
@@ -926,7 +926,7 @@ pub async fn write(
     }
     let total = items.iter().map(|i| i.langs.len()).sum();
     let mut done = 0;
-    let _ = app.emit("subs-progress", Progress { done, total });
+    crate::report(host, "subs-progress", Progress { done, total });
     'items: for item in items {
         let name = item
             .path
@@ -1053,7 +1053,7 @@ pub async fn write(
                 ));
             }
             done += 1;
-            let _ = app.emit("subs-progress", Progress { done, total });
+            crate::report(host, "subs-progress", Progress { done, total });
         }
     }
     out

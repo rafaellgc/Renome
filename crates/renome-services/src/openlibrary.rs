@@ -6,12 +6,12 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use crate::Host;
 use futures_util::{StreamExt, stream};
 use renome_core::books::{self, AuthorPage, BookMatch, Candidate, Guess, Query, SearchPage, Work};
 use renome_core::ebook;
 use renome_core::links::Link;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
 
 use crate::tmdb::{SidecarReport, write_new};
 
@@ -361,12 +361,12 @@ struct Progress {
 /// Reads each book's details, then looks them up, a few at a time. Files
 /// with the same guess (one book in several formats) share one search.
 pub async fn lookup(
-    app: &AppHandle,
+    host: &dyn Host,
     client: &Client,
     lang: &str,
     items: Vec<LookupItem>,
 ) -> Vec<Lookup> {
-    let guesses: Vec<(PathBuf, Guess)> = tauri::async_runtime::spawn_blocking(move || {
+    let guesses: Vec<(PathBuf, Guess)> = tokio::task::spawn_blocking(move || {
         items
             .into_iter()
             .map(|i| {
@@ -386,9 +386,10 @@ pub async fn lookup(
             unique.push(g.clone());
         }
     }
-    let stopped = crate::stop_signal(app);
+    let stop = host.stop_signal();
+    let stopped = move || stop();
     let total = unique.len();
-    let _ = app.emit("book-progress", Progress { done: 0, total });
+    crate::report(host, "book-progress", Progress { done: 0, total });
     let mut done = 0;
     let mut found: HashMap<usize, Result<(Vec<Candidate>, bool), String>> = HashMap::new();
     let mut tasks = stream::iter(unique.clone().into_iter().enumerate())
@@ -397,7 +398,7 @@ pub async fn lookup(
     while let Some((i, r)) = tasks.next().await {
         found.insert(i, r);
         done += 1;
-        let _ = app.emit("book-progress", Progress { done, total });
+        crate::report(host, "book-progress", Progress { done, total });
         if stopped() {
             break;
         }
@@ -453,7 +454,7 @@ pub struct SidecarItem {
 /// name. Files already there are kept, so one book in several formats gets
 /// them once.
 pub async fn sidecars(
-    app: &AppHandle,
+    host: &dyn Host,
     client: &Client,
     items: Vec<SidecarItem>,
     cover: bool,
@@ -462,7 +463,7 @@ pub async fn sidecars(
 ) -> SidecarReport {
     let total = items.len();
     let mut report = SidecarReport::default();
-    let _ = app.emit("book-progress", Progress { done: 0, total });
+    crate::report(host, "book-progress", Progress { done: 0, total });
     let name = |p: &Path| {
         p.file_name()
             .unwrap_or_default()
@@ -525,7 +526,7 @@ pub async fn sidecars(
                 Err(e) => report.errors.push((name(&opf_path), e)),
             }
         }
-        let _ = app.emit("book-progress", Progress { done: i + 1, total });
+        crate::report(host, "book-progress", Progress { done: i + 1, total });
     }
     report
 }

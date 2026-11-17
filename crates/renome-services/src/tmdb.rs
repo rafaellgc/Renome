@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::Host;
 use futures_util::{StreamExt, stream};
 use renome_core::files::split_name;
 use renome_core::tmdb::{self, Candidate, Details, Guess, SearchResult};
@@ -13,7 +14,6 @@ use renome_core::tv::{
     ShowQuery, TvDetails, TvResult,
 };
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
 
 const API: &str = "https://api.themoviedb.org/3";
 
@@ -494,7 +494,7 @@ pub async fn collections(client: &Client, ids: Vec<u64>, sets: bool) -> MovieSet
     MovieSets { of, sets, extras }
 }
 
-pub async fn lookup(app: &AppHandle, client: &Client, items: Vec<LookupItem>) -> Vec<Lookup> {
+pub async fn lookup(host: &dyn Host, client: &Client, items: Vec<LookupItem>) -> Vec<Lookup> {
     let mut guesses: Vec<(PathBuf, Guess)> = items
         .into_iter()
         .map(|i| (i.path, tmdb::guess(&i.name)))
@@ -518,9 +518,10 @@ pub async fn lookup(app: &AppHandle, client: &Client, items: Vec<LookupItem>) ->
             unique.push(g.clone());
         }
     }
-    let stopped = crate::stop_signal(app);
+    let stop = host.stop_signal();
+    let stopped = move || stop();
     let total = unique.len();
-    let _ = app.emit("tmdb-progress", Progress { done: 0, total });
+    crate::report(host, "tmdb-progress", Progress { done: 0, total });
     let mut done = 0;
     let mut found: HashMap<usize, Result<(Vec<Candidate>, bool), String>> = HashMap::new();
     let mut tasks = stream::iter(unique.clone().into_iter().enumerate())
@@ -532,7 +533,7 @@ pub async fn lookup(app: &AppHandle, client: &Client, items: Vec<LookupItem>) ->
     while let Some((i, r)) = tasks.next().await {
         found.insert(i, r);
         done += 1;
-        let _ = app.emit("tmdb-progress", Progress { done, total });
+        crate::report(host, "tmdb-progress", Progress { done, total });
         if stopped() {
             break;
         }
@@ -573,7 +574,7 @@ pub struct TvItem {
 
 impl TvItem {
     /// The name to read numbers from: no extension, no subtitle language.
-    pub(crate) fn stem(&self) -> &str {
+    pub fn stem(&self) -> &str {
         if self.is_dir {
             return &self.name;
         }
@@ -581,7 +582,7 @@ impl TvItem {
         &stem[..stem.len() - tmdb::subtitle_suffix(stem, ext).len()]
     }
 
-    pub(crate) fn folder(&self) -> PathBuf {
+    pub fn folder(&self) -> PathBuf {
         self.path
             .parent()
             .map(Path::to_path_buf)
@@ -593,9 +594,9 @@ impl TvItem {
 #[serde(rename_all = "camelCase")]
 pub struct ShowSearch {
     /// What was searched for (guessed from the files when nothing was typed).
-    pub(crate) query: String,
-    pub(crate) candidates: Vec<Candidate>,
-    pub(crate) auto: bool,
+    pub query: String,
+    pub candidates: Vec<Candidate>,
+    pub auto: bool,
 }
 
 /// Searches for the show typed, or for the one the files are named after.
@@ -664,7 +665,7 @@ pub struct TvFile {
 
 #[derive(Serialize)]
 pub struct TvLookup {
-    pub(crate) show: Show,
+    pub show: Show,
     files: Vec<TvFile>,
 }
 
@@ -682,7 +683,7 @@ pub async fn lookup_episodes(
 
 /// Each file's episode of a show; files named after another show are left
 /// out.
-pub(crate) fn files_of(show: Show, items: &[TvItem], typed: &str) -> TvLookup {
+pub fn files_of(show: Show, items: &[TvItem], typed: &str) -> TvLookup {
     // How long each video plays, by folder and name; a subtitle takes its
     // video's, so both get the same episodes.
     let lengths: HashMap<(PathBuf, String), f64> = items
@@ -757,7 +758,7 @@ fn sibling(video: &Path, suffix: &str) -> PathBuf {
 /// Writes `.nfo`, poster and (optionally) backdrop next to each video.
 /// Existing files are never overwritten.
 pub async fn sidecars(
-    app: &AppHandle,
+    host: &dyn Host,
     client: &Client,
     items: Vec<SidecarItem>,
     fanart: bool,
@@ -765,7 +766,7 @@ pub async fn sidecars(
 ) -> SidecarReport {
     let total = items.len();
     let mut report = SidecarReport::default();
-    let _ = app.emit("tmdb-progress", Progress { done: 0, total });
+    crate::report(host, "tmdb-progress", Progress { done: 0, total });
     // Two videos of one movie (an .mkv and an .mp4) share its folder's
     // images: the first to come writes them, the other leaves them.
     let claimed = std::sync::Mutex::new(std::collections::HashSet::new());
@@ -835,7 +836,7 @@ pub async fn sidecars(
         report.created.extend(created);
         report.errors.extend(errors);
         done += 1;
-        let _ = app.emit("tmdb-progress", Progress { done, total });
+        crate::report(host, "tmdb-progress", Progress { done, total });
     }
     report
 }
@@ -864,7 +865,7 @@ enum Source {
 /// folder. `folders`: the files were just moved into `Show/Season NN`.
 /// Existing files are never overwritten.
 pub async fn tv_sidecars(
-    app: &AppHandle,
+    host: &dyn Host,
     client: &Client,
     items: Vec<TvSidecarItem>,
     fanart: bool,
@@ -885,7 +886,8 @@ pub async fn tv_sidecars(
     let mut seasons: Vec<(u64, u16)> = items.iter().map(|i| (i.id, i.season)).collect();
     seasons.sort_unstable();
     seasons.dedup();
-    let _ = app.emit(
+    crate::report(
+        host,
         "tmdb-progress",
         Progress {
             done: 0,
@@ -994,7 +996,7 @@ pub async fn tv_sidecars(
     }
 
     let total = jobs.len();
-    let _ = app.emit("tmdb-progress", Progress { done: 0, total });
+    crate::report(host, "tmdb-progress", Progress { done: 0, total });
     let mut tasks = stream::iter(jobs)
         .map(|(path, source)| async move {
             let data = match source {
@@ -1012,13 +1014,13 @@ pub async fn tv_sidecars(
             Err(e) => report.errors.push((name(&path), e)),
         }
         done += 1;
-        let _ = app.emit("tmdb-progress", Progress { done, total });
+        crate::report(host, "tmdb-progress", Progress { done, total });
     }
     report
 }
 
 /// Creates the file only if it does not exist yet.
-pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
     use std::io::Write;
     let mut f = std::fs::OpenOptions::new()
         .write(true)
