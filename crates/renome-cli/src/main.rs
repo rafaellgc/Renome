@@ -3,6 +3,7 @@
 
 mod lookup;
 mod manage;
+mod missing;
 mod out;
 mod rulespec;
 mod run;
@@ -192,6 +193,12 @@ pub fn cli() -> Command {
             Arg::new("all")
                 .long("all")
                 .help(t("argAll", &[]))
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("missing")
+                .long("missing")
+                .help(t("argMissing", &[]))
                 .action(ArgAction::SetTrue),
         )
         .arg(

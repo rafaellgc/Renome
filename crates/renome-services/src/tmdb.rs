@@ -414,18 +414,18 @@ struct RawPart {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MovieSet {
-    id: u64,
-    name: String,
-    parts: Vec<SetPart>,
+    pub id: u64,
+    pub name: String,
+    pub parts: Vec<SetPart>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetPart {
-    id: u64,
-    title: String,
+    pub id: u64,
+    pub title: String,
     /// `YYYY-MM-DD`, empty when not known.
-    release_date: String,
+    pub release_date: String,
 }
 
 /// Each movie's collection (`None`: it is in none) and the collections.

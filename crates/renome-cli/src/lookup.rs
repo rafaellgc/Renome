@@ -27,6 +27,8 @@ pub enum Choose {
 /// What the person asked for the lookups.
 pub struct Ask {
     pub choose: Choose,
+    /// What is missing is wanted (`--missing`): collections asked too.
+    pub missing: bool,
     /// `--pick PATH=ID`, by full path.
     pub picks: HashMap<PathBuf, String>,
 }
@@ -114,6 +116,8 @@ pub struct Movies {
     pub key: String,
     pub lang: String,
     pub chosen: HashMap<PathBuf, MovieMatch>,
+    /// The collections the movies are in (with `--missing`).
+    pub sets: Option<tmdb::MovieSets>,
 }
 
 /// Looks up the movies of the list (videos, their subtitles and folders,
@@ -221,8 +225,9 @@ pub async fn movies(
         v.dedup();
         v
     };
-    let sets = tmdb::collections(&client, ids, false).await;
-    let extras: HashMap<u64, renome_core::fields::Extra> = sets.extras.into_iter().collect();
+    let mut sets = tmdb::collections(&client, ids, ask.missing).await;
+    let extras: HashMap<u64, renome_core::fields::Extra> =
+        std::mem::take(&mut sets.extras).into_iter().collect();
     let chosen = chosen
         .into_iter()
         .map(|(p, c)| {
@@ -243,6 +248,7 @@ pub async fn movies(
         key,
         lang: tmdb_lang,
         chosen,
+        sets: ask.missing.then_some(sets),
     })
 }
 
@@ -538,6 +544,8 @@ pub struct Series {
     pub lang: String,
     pub anime: bool,
     pub chosen: HashMap<PathBuf, renome_core::tv::EpisodeMatch>,
+    /// The shows fetched, with their episodes.
+    pub shows: Vec<renome_core::tv::Show>,
     /// Files whose show could not be told.
     pub loose: usize,
 }
@@ -674,6 +682,7 @@ pub async fn series(
         lang: tmdb_lang.clone(),
         anime,
         chosen: HashMap::new(),
+        shows: Vec::new(),
         loose: 0,
     };
     if all.is_empty() {
@@ -741,6 +750,13 @@ pub async fn series(
             tmdb::lookup_episodes(&client, show.id, group, &typed_or).await
         }
         .map_err(|e| crate::text::error_text(&e))?;
+        if !out_series
+            .shows
+            .iter()
+            .any(|s| s.id == look.show.id && s.source == look.show.source)
+        {
+            out_series.shows.push(look.show.clone());
+        }
         let mut answered: HashMap<String, Option<Vec<renome_core::tv::Key>>> = HashMap::new();
         for f in look.files {
             let found = f.found;
@@ -983,6 +999,12 @@ pub struct Music {
     pub chosen: HashMap<PathBuf, renome_core::musicbrainz::SongMatch>,
     /// Each album chosen: its folder (before renaming) and release.
     pub albums: Vec<(PathBuf, String)>,
+    /// Each album's folder, its release's tracks and its songs.
+    pub tracklists: Vec<(
+        PathBuf,
+        Vec<renome_core::musicbrainz::ListedTrack>,
+        Vec<PathBuf>,
+    )>,
 }
 
 fn mb_line(c: &renome_core::musicbrainz::Candidate) -> String {
@@ -1070,6 +1092,7 @@ pub async fn music(
     let mut out_music = Music {
         chosen: HashMap::new(),
         albums: Vec::new(),
+        tracklists: Vec::new(),
         mb: mbs::Client::default(),
         dg: renome_services::discogs::Client::default(),
     };
@@ -1082,6 +1105,11 @@ pub async fn music(
                 out_music.chosen.insert(p.clone(), m.clone());
             }
             out_music.albums.push((album.dir.clone(), c.id.clone()));
+            out_music.tracklists.push((
+                album.dir.clone(),
+                album.tracks.clone(),
+                album.files.clone(),
+            ));
             continue;
         } else if ask.choose == Choose::Ask && std::io::stdin().is_terminal() {
             choose_album(&mb, &dg, &album).await?
@@ -1103,6 +1131,9 @@ pub async fn music(
         for (p, m) in chosen.matches {
             out_music.chosen.insert(p, m);
         }
+        out_music
+            .tracklists
+            .push((album.dir.clone(), chosen.tracks, album.files.clone()));
         out_music.albums.push((album.dir.clone(), id));
     }
     out_music.mb = mb;
@@ -1857,9 +1888,20 @@ pub async fn after_subtitles(
     notes
 }
 
+/// A comic series looked up: its details, its issues (none for a manga
+/// catalogue), and its files' issue ids with their own details.
+pub type ComicSeries = (
+    renome_core::comics::Volume,
+    Vec<renome_core::comics::Issue>,
+    Vec<(String, renome_core::comics::ComicMatch)>,
+);
+
 /// What the comic rule found and chose.
 pub struct Comics {
     pub chosen: HashMap<PathBuf, renome_core::comics::ComicMatch>,
+    /// Each series looked up: its details, its issues (none for a manga
+    /// catalogue), and its files' issue ids with their own details.
+    pub listed: Vec<ComicSeries>,
     /// Each matched file's catalogue page and whether it is a manga
     /// catalogue's (for `ComicInfo.xml`).
     web: HashMap<PathBuf, (String, bool)>,
@@ -2097,6 +2139,7 @@ pub async fn comics(
         .collect();
     let mut out_comics = Comics {
         chosen: HashMap::new(),
+        listed: Vec::new(),
         web: HashMap::new(),
     };
     if files.is_empty() {
@@ -2119,6 +2162,7 @@ pub async fn comics(
         })
         .collect();
     let mut coded: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    let mut out_comics_listed = Vec::new();
     let mut take =
         |path: &PathBuf, m: renome_core::comics::ComicMatch, web: String, manga: bool| {
             out_comics.chosen.insert(path.clone(), m);
@@ -2322,6 +2366,14 @@ pub async fn comics(
             {
                 volume = merge_volume(volume, full.volume);
             }
+            out_comics_listed.push((
+                volume.clone(),
+                Vec::new(),
+                members
+                    .iter()
+                    .filter_map(|&i| owns[i].clone().map(|o| (String::new(), o)))
+                    .collect(),
+            ));
             for &i in &members {
                 if let Some(own) = &owns[i] {
                     take(
@@ -2339,6 +2391,7 @@ pub async fn comics(
             .await
             .map_err(|e| crate::text::error_text(&e))?;
         let volume = merge_volume(volume, res.volume.clone());
+        let mut held: Vec<(String, renome_core::comics::ComicMatch)> = Vec::new();
         for (n, &i) in members.iter().enumerate() {
             let Some(own) = &owns[i] else { continue };
             let chapter_only = own.number.is_empty() && !own.chapter.is_empty();
@@ -2355,6 +2408,9 @@ pub async fn comics(
             if !issue_id.is_empty() && issue.is_none() {
                 continue;
             }
+            if !issue_id.is_empty() {
+                held.push((issue_id.clone(), own.clone()));
+            }
             take(
                 &files[i].path,
                 with_issue(own, &volume, issue),
@@ -2362,7 +2418,9 @@ pub async fn comics(
                 false,
             );
         }
+        out_comics_listed.push((volume, res.issues, held));
     }
+    out_comics.listed = out_comics_listed;
     Ok(out_comics)
 }
 
@@ -2747,4 +2805,18 @@ pub async fn download_subtitles(
         out::error(&format!("{file}: {}", crate::text::error_text(&why)));
     }
     notes
+}
+
+impl Books {
+    /// Each book's (and audiobook's first file's) guess and choice.
+    pub fn guesses(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            &PathBuf,
+            &(renome_core::books::Guess, renome_core::books::Candidate),
+        ),
+    > {
+        self.found.iter()
+    }
 }

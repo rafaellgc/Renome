@@ -909,6 +909,15 @@ const CLI: &[(&str, [&str; 3])] = &[
         ],
     ),
     (
+        "argMissing",
+        [
+            "Lista também o que falta: episódios, edições, faixas, filmes da coleção, volumes",
+            "Also lists what is missing: episodes, issues, tracks, collection movies, volumes",
+            "Lista también lo que falta: episodios, números, pistas, películas de la colección, volúmenes",
+        ],
+    ),
+    ("missingTitle", ["Faltando", "Missing", "Faltan"]),
+    (
         "epTypeHint",
         [
             "digite S01E05 (ou 1x05, S01E05-06) para escolher outro",

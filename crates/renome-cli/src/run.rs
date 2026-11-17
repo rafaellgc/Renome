@@ -170,6 +170,10 @@ pub fn preview_or_apply(
             out::note(&out::yellow(&t("leftDoubtful", &[("n", &doubtful)])));
         }
     }
+    let missing = match &found {
+        Some(f) if m.get_flag("missing") => crate::missing::of(f, &preview),
+        _ => Vec::new(),
+    };
     if let Some(e) = &preview.filter_error {
         return Err(format!("{}: {e}", t("invalidFilter", &[])));
     }
@@ -183,7 +187,7 @@ pub fn preview_or_apply(
         out::note(&t("csvSaved", &[]));
     }
     if !apply {
-        show(&preview, m.get_flag("all"));
+        show(&preview, m.get_flag("all"), &missing);
         return Ok(if preview.conflicts > 0 {
             Exit::Doubts
         } else {
@@ -191,7 +195,7 @@ pub fn preview_or_apply(
         });
     }
     if !out::json() {
-        show(&preview, m.get_flag("all"));
+        show(&preview, m.get_flag("all"), &missing);
     }
     // Nothing to rename: what runs after the renames may still have work
     // (subtitles fixed, details written, .nfo made for files already named
@@ -387,7 +391,11 @@ fn ask_of(m: &ArgMatches) -> Result<crate::lookup::Ask, String> {
             id.to_string(),
         );
     }
-    Ok(crate::lookup::Ask { choose, picks })
+    Ok(crate::lookup::Ask {
+        choose,
+        picks,
+        missing: m.get_flag("missing"),
+    })
 }
 
 /// `--name PATH=NAME`, by the file's full path.
@@ -428,7 +436,7 @@ pub fn ask(question: &str) -> bool {
 
 /// The list: one line per changed file (all with `all`), grouped by
 /// folder, then the totals.
-fn show(p: &Preview, all: bool) {
+fn show(p: &Preview, all: bool, missing: &[crate::missing::Missing]) {
     if out::json() {
         let items: Vec<Value> = p
             .items
@@ -443,6 +451,7 @@ fn show(p: &Preview, all: bool) {
                 "totals": { "files": p.total, "changed": p.changed, "conflicts": p.conflicts },
                 "trash": p.trash,
                 "trashFolders": p.trash_folders,
+                "missing": missing,
             }))
             .unwrap_or_default()
         );
@@ -501,6 +510,31 @@ fn show(p: &Preview, all: bool) {
         totals.push(out::dim(&t("unchangedN", &[("n", &unchanged)])));
     }
     out::note(&totals.join(" · "));
+    if !missing.is_empty() {
+        println!();
+        println!(
+            "{}",
+            out::bold(&format!("{} ({})", t("missingTitle", &[]), missing.len()))
+        );
+        let mut group = "";
+        for x in missing {
+            if x.group != group {
+                println!("  {}", out::bold(&x.group));
+                group = &x.group;
+            }
+            let title = if x.title.is_empty() {
+                String::new()
+            } else {
+                format!(" · {}", x.title)
+            };
+            let date = if x.date.is_empty() {
+                String::new()
+            } else {
+                out::dim(&format!(" ({})", x.date))
+            };
+            println!("    {}{title}{date}", out::yellow(&x.code));
+        }
+    }
 }
 
 /// A problem's name as the page's texts call it (`problem.<name>`).
