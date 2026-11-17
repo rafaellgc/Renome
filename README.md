@@ -234,6 +234,8 @@ and `.rpm` only point to the release page.
 
 ```
 crates/renome-core/   pure Rust core (rules, preview, apply, history) + tests
+crates/renome-services/  what the window and the command line share: catalogues, keys, cache, after-rename steps
+crates/renome-cli/    the command line (renome-cli) + integration tests
 src-tauri/            Tauri app: commands that expose the core to the UI
 src/                  SvelteKit UI (SPA)
 ```
@@ -266,11 +268,36 @@ distrobox enter renome-dev
 
 ## Command line
 
+Everything the window does is also in `renome-cli`, a second program in
+every package that shares the window's rules, lookups, options, keys,
+saved sets and History (a rename made in the terminal can be undone in
+the window):
+
+```sh
+renome-cli preview ~/Videos/Shows -r series            # look first, nothing changes
+renome-cli apply ~/Music/new -r music --yes            # tags, covers, playlists as in the window
+renome-cli apply . -r 'replace:find=_,replace= ' -r case
+renome-cli apply ~/Books --set "My library" --choose auto --json
+renome-cli undo
+renome-cli rules number                               # a rule's options and defaults
+renome-cli manual cli                                 # the manual's chapter, in the terminal
+```
+
+It is `renome-cli` with the `.deb` and `.rpm` (with man pages and
+bash/zsh/fish completions), `./Renome.AppImage cli …`, `flatpak run
+--command=renome-cli io.github.rafaellgc.Renome …`, `renome-cli.exe` in the
+Windows install folder and `Renome.app/Contents/MacOS/renome-cli` on macOS.
+Doubtful lookups ask in the terminal (`--choose ask|auto|skip`, `--pick
+PATH=ID`); `--json` and exit codes (0 done, 1 failed, 2 doubts or
+conflicts left, 3 wrong use, 130 stopped) are for scripts. Messages
+follow `--lang pt|en|es`; command and option names are English. See
+[SPEC.md §8](SPEC.md) and the manual's "Command line" chapter.
+
+The window's program also takes paths, which go into its initial list:
+
 ```sh
 renome ~/Pictures/trip file1.txt file2.txt
 ```
-
-The given paths go into the initial list.
 
 ## Builds and releases
 

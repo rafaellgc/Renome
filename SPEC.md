@@ -2604,21 +2604,19 @@ may be asked about the Keychain again with each version.
   left today), SubDL key (Test: a search); each with a Test button. A line
   says whether they are in the system's password store or in the file.
 
-## 8. Command line (`renome-cli`) — planned
+## 8. Command line (`renome-cli`)
 
-Status: being built in phases (shared crate, basic commands, each lookup
-rule, extras, documentation). Done: `crates/renome-services` (catalogues,
-keys, cache, data folders, the rename lock; the window's work reports
-through a `Host`), `renome_core::catalog`, and `crates/renome-cli` with
-`preview`/`apply` for the rules that need no catalogue (text rules,
-photo), `undo`, `history`, `sets`, `rules`, `options`, `keys`, `cache`,
-`completions`; its texts are the page's (`i18n.ts`, read at build time)
-plus its own in `text.rs`. Next: the lookup rules (movie, series, music,
-book and audiobook, comic) and what runs after the renames, then
-`servers`, `duplicates`, `update`, `manual`, man pages, packaging. Everything the window
-does is reachable from here, with the same code: the flows that lived in
-the page (automatic choices, audiobook groups, what runs after the
-renames) move into Rust, used by the window and by `renome-cli` alike.
+Status: built. `crates/renome-services` holds what the window and the
+command line share (catalogues, keys, cache, data folders, the rename
+lock, what runs after the renames; the window's work reports through a
+`Host`), `renome_core::catalog` the rules' options, and
+`crates/renome-cli` the program: every command below, the lookup rules
+with their choices, `--edit`, `--missing`, Ctrl+C, the manual, man pages
+and completions, in every package. Its texts are the page's (`i18n.ts`)
+and the manual's (`src/lib/help`), read at build time, plus its own in
+`text.rs`. Not done: an option in the Windows installer to add it to
+`PATH` (the manual gives the PowerShell line; NSIS cannot safely edit a
+long `PATH`).
 
 ### 8.1 The program
 
@@ -2627,10 +2625,16 @@ renames) move into Rust, used by the window and by `renome-cli` alike.
   inside the AppImage (`Renome.AppImage cli …` runs it; the window's
   program hands over when its first argument is `cli`), in the Flatpak
   (`flatpak run --command=renome-cli io.github.rafaellgc.Renome`), the
-  Windows install folder (the installer offers to add it to the user's
-  `PATH`) and `Renome.app/Contents/MacOS/` (the manual gives the link to
-  make in `/usr/local/bin`). The window's program on Windows has no
-  console, hence the second executable.
+  Windows install folder (the manual gives the PowerShell line that adds
+  it to the user's `PATH`) and `Renome.app/Contents/MacOS/` (the manual
+  gives the link to make in `/usr/local/bin`). The window's program on
+  Windows has no console, hence the second executable. The package
+  builds pass `src-tauri/tauri.cli.conf.json` (Tauri's `externalBin`;
+  `scripts/cli-bin.js` builds it, lipo-joined for the universal Mac, and
+  makes the man pages and bash/zsh/fish completions the `.deb`/`.rpm`
+  install); plain `cargo build` and `tauri dev` do without it.
+- `RENOME_DIR`: options, History and cache in that one folder instead of
+  the system's places (the integration tests; a profile kept apart).
 - Same data as the window: `settings.json` (options, saved rule sets,
   servers), the keys in the system's password store (same service), the
   history (undo works across both), the answers cache. A file lock
@@ -2651,12 +2655,14 @@ the common ones; every command has `--help` with examples.
 Global options: `--lang pt|en|es` (default: the options' language, else
 the system's), `--json` (machine output on stdout, messages on stderr),
 `--color auto|always|never` (also `NO_COLOR`), `-q/--quiet`,
-`-v/--verbose`, `--no-server` (do not tell media servers).
+`--no-server` (do not tell media servers). Help headings and the help and
+version flags follow `--lang` too.
 
 Exit codes: 0 done (or nothing to do), 1 failed (some files not renamed:
-listed), 2 conflicts or doubtful matches left unresolved (nothing
-renamed), 3 wrong use (unknown rule, option, value), 130 stopped (Ctrl+C:
-what was renamed stays in the History).
+listed), 2 conflicts or doubtful matches left unresolved (`apply` renamed
+what was certain; with `--strict` nothing), 3 wrong use (unknown rule,
+option, value), 130 stopped (Ctrl+C: what was renamed stays in the
+History).
 
 ### 8.3 Files
 
@@ -2734,8 +2740,11 @@ English in every language; messages, help and descriptions follow
   SubSource, GCD (email, password). `set` reads the value from the
   terminal without showing it, or from stdin (`--stdin`); values are
   never printed, `list` says only which are set and where.
-- `servers [list|add jellyfin|plex URL|remove ID|libraries ID|pair ID LIBRARY-PATH LOCAL-PATH|on|off …|test ID]`
-  (key through `keys set server:ID`).
+- `servers [list|add jellyfin|plex URL|remove ID|libraries ID|pair ID SERVER-PATH LOCAL-PATH|on ID SERVER-PATH|off ID SERVER-PATH|test ID]`:
+  `add` asks for the key without showing it (or `--stdin`), keeps it in
+  the password store (`serverKeys`, as the window) and reads the
+  libraries, pairing the folders that exist here; `libraries` reads them
+  again keeping the pairs.
 - `duplicates PATHS… [--identical] [--similar] [--repeated]`: the groups
   the window's footer filters show (identical copies, similar pictures,
   repeated songs and works), best marked; `--trash PATH…` sends chosen
@@ -2746,8 +2755,11 @@ English in every language; messages, help and descriptions follow
   AppImage, Windows and macOS; points to the page for `.deb`/`.rpm`; the
   Flatpak says Flatpak updates it). The signature is checked as in the
   window.
-- `completions bash|zsh|fish|powershell` and `manual [TOPIC]` (the
-  manual's chapter as text). Man pages are made at build time.
+- `completions bash|zsh|fish|powershell` and `manual [TOPIC] [--all]`
+  (the index, or a chapter by its code or the start of its title, as
+  text wrapped to the terminal). Man pages: the hidden `manpages DIR`
+  writes `renome-cli.1` and one page per command; the packages call it
+  with `--lang en`.
 
 ### 8.6 Lookups and choices
 
@@ -2757,25 +2769,43 @@ as the window's search button does, then:
   doubtful file opens the same choice the window's review shows, as a
   numbered list with the details the cards show (year, original title,
   author, editions, publisher…). Keys: a number picks, Enter the first,
-  `s` skips the file, `/TEXT` searches again with other words, `l` pastes
-  a link or id, `?` help, `q` stops (nothing renamed). Series and comics
+  `s` skips the file, other text (or `/TEXT`, `l LINK`) searches again
+  with those words or that link or id, `?` help, `q` stops (nothing
+  renamed). Series and comics
   ask for the show or series first, then only the doubtful episodes or
   issues; music asks for the album and edition; books for the book.
-- `--choose auto`: only what the window would pick by itself; doubtful
-  files are left as they are and listed (exit 2 with `--strict`).
+- `--choose auto` (the default without a terminal): only what the window
+  would pick by itself; doubtful files are left as they are and counted
+  (exit 2).
 - `--choose skip`: no lookups for doubtful files at all.
 - `--pick PATH=ID`, repeatable: forces a match (`tmdb:4242`,
   `tmdb-tv:1399/S02E05`, `mb:<release id>`, `discogs:<id>`,
   `ol:OL123W`, `isbn:…`, `anilist:…`, `metron:…`, `gcd:…`,
-  `comicvine:…`, `mangadex:…`); for a show or series
-  `--show NAME|ID` (the rule's "Show") applies to all its files.
+  `comicvine:…`, `mangadex:…`), a catalogue link or a title; for a show
+  the rule's own `show` option (`-r series:show=…`) applies to all its
+  files, and a pick on a group's first file to the whole group.
 - `--edit PATH:KEY=VALUE,…`, repeatable: the window's details editors
   (book, comic, song tags, photo date): fills or corrects fields of that
-  file's match by hand.
-- `--listen` (music): identify untagged songs by sound (the rule's
-  option), `--stop-after N` stops searching after N files.
-- Searches print their progress on stderr; Ctrl+C stops them (what was
-  found stays chosen) and asks whether to go on.
+  file's match, or of what the file says about itself, with the window's
+  rules (a retyped book or comic loses its catalogue id, a song moved to
+  another album its release's, a typed year drops the edition's). The
+  path ends at the last `:` before a field name and a comma starts a
+  field only before `KEY=`, so paths and values keep theirs. Fields:
+  music `title, artist, albumArtist, genre, album, year, track,
+  trackTotal, disc, discTotal`; book `title, authors (; between), year,
+  publisher, language, series, seriesIndex, isbn`; comic `series,
+  seriesYear, volume, number, title, year, publisher, writer, artist`;
+  photo `date` (`2018-03-27[ 14:30]`, empty clears) or `day, month,
+  year, hour, minute`.
+- Identifying songs by sound is the music rule's own option
+  (`identifyBySound`).
+- Searches print their progress on stderr. The first Ctrl+C stops them
+  (the services ask the host's stop signal, as for the window's Stop
+  button; what was found stays chosen, the remaining choices are
+  skipped) and asks whether to go on with what was found; during the
+  renames it stops there (what was renamed stays in the History, the
+  later steps are not done). A second one, or one while a question waits,
+  ends the program (130).
 
 ### 8.7 Output
 
@@ -2792,6 +2822,10 @@ follow the language; JSON keys are English and stable.
 `--help` on every command, `renome-cli manual`, man pages
 (`renome-cli.1`, one per command), completions, a "Command line"
 chapter in the manual (pt/en/es, with its limitations), README and this
-section kept current. Integration tests run `renome-cli` on fixtures
-against the fake services (`RENOME_*_API`), in CI on Linux, Windows and
-macOS.
+section kept current. `crates/renome-cli/tests/cli.rs` runs the program
+offline in a profile of its own (`RENOME_DIR`): preview/apply/undo, rule
+order and names by hand, usage errors, sets, options, photo dates by
+hand, identical copies, the manual and help in each language; CI runs it
+on Linux, Windows and macOS. The lookups were tried by hand against the
+fake services (`RENOME_*_API`) and real MusicBrainz; tests for them
+against a fake server are still to come.
