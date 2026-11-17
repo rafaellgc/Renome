@@ -2545,7 +2545,9 @@ may be asked about the Keychain again with each version.
   `TAURI_SIGNING_PRIVATE_KEY`/`_PASSWORD`, and `createUpdaterArtifacts`
   makes the `.sig` files and `latest.json`). `update::way`: Flatpak
   (`FLATPAK_ID`) never asks; AppImage (`APPIMAGE`), Windows and macOS
-  install themselves (`update_install`: the update the check found, asked
+  install themselves (a confirmation in three short paragraphs: what
+  happens, whether the rules come back (`rememberRules`) and that the
+  file list starts empty, where the news is; then `update_install`: the update the check found, asked
   again only when none is kept; download with `update-progress` events,
   the footer without a percentage until the first bytes; signature check,
   install, restart; Windows installer passive);

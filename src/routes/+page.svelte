@@ -1047,7 +1047,14 @@
       await notify({ title: t("updateTitle", { v: u.version }), text: t("updateBusy") });
       return;
     }
-    const ok = await confirm({ title: t("updateTitle", { v: u.version }), text: t("updateText"), ok: t("updateInstall"), cancel: t("cancel") });
+    const rules = settings.rememberRules ? t("updateRulesKept") : t("updateRulesLost", { opt: t("rememberRules") });
+    const list = preview.total ? ` ${t("updateListEmpty")}` : "";
+    const ok = await confirm({
+      title: t("updateTitle", { v: u.version }),
+      text: `${t("updateText", { v: u.version })}\n\n${rules}${list}\n\n${t("updateNews")}`,
+      ok: t("updateInstall"),
+      cancel: t("cancel"),
+    });
     if (!ok) return;
     // -1 until the first bytes arrive: no percentage to show yet.
     updating = -1;
