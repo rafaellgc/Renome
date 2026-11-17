@@ -6,6 +6,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 fn main() {
+    static_vcruntime::metabuild();
     let i18n = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src/lib/i18n.ts");
     println!("cargo::rerun-if-changed={}", i18n.display());
     let text = std::fs::read_to_string(&i18n).expect("src/lib/i18n.ts");
