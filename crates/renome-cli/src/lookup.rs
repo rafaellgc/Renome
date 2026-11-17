@@ -942,7 +942,7 @@ pub async fn after_series(
 pub enum Found {
     Movies(Movies),
     Series(Series),
-    Music(Music),
+    Music(Box<Music>),
 }
 
 impl Found {

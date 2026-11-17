@@ -689,6 +689,9 @@ pub async fn covers(
     report
 }
 
+/// Songs and their tags.
+pub type Songs = Vec<(PathBuf, AudioTags)>;
+
 /// The songs' own tags in the list (with the name filled in, as the music
 /// rule does, and the recordings they were heard as): those with a title
 /// in their tags, and those without (a title from the file name is only a
@@ -697,7 +700,7 @@ pub fn songs_of(
     files: &[&renome_core::FileEntry],
     heard: &HashMap<PathBuf, Vec<String>>,
     from_name: bool,
-) -> (Vec<(PathBuf, AudioTags)>, Vec<(PathBuf, AudioTags)>) {
+) -> (Songs, Songs) {
     let (mut named, mut unnamed) = (Vec::new(), Vec::new());
     for f in files {
         let Some(mut t) = renome_core::rules::song_tags(f, from_name)

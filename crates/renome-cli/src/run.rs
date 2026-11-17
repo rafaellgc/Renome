@@ -129,7 +129,7 @@ pub fn preview_or_apply(
             Some("music") => {
                 let f = rt.block_on(crate::lookup::music(&files, &first, rule, &ask))?;
                 view.songs = f.chosen.clone();
-                crate::lookup::Found::Music(f)
+                crate::lookup::Found::Music(Box::new(f))
             }
             _ => {
                 let f = rt.block_on(crate::lookup::series(&first, rule, settings, &ask))?;
