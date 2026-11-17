@@ -208,6 +208,14 @@ pub fn preview_or_apply(
             }
         });
     }
+    // Stopped during the searches: on with what was found, if wanted.
+    if crate::stop::requested() {
+        if !(std::io::stdin().is_terminal() && ask(&format!("{} [s/N] ", t("goOnAfterStop", &[]))))
+        {
+            return Ok(Exit::Stopped);
+        }
+        crate::stop::reset();
+    }
     let preview = renome_core::preview(&files, &steps, &overrides, &view);
     if let Some(found) = &found {
         let doubtful = preview
@@ -300,6 +308,12 @@ pub fn preview_or_apply(
             out::note(&note);
         }
     }
+    // Stopped while renaming: what was renamed stays (and can be undone);
+    // nothing else is done.
+    if crate::stop::requested() {
+        out::note(&t("stoppedRenaming", &[]));
+        return Ok(Exit::Stopped);
+    }
     if let Some(rule) = steps_json
         .iter()
         .find(|s| {
@@ -374,7 +388,7 @@ fn rename(
     };
     let hooks = renome_core::apply::Hooks {
         progress: &progress,
-        stop: &|| false,
+        stop: &crate::stop::requested,
     };
     let report = history.apply_with(&ops, &hooks);
     if shown.get() {
@@ -485,7 +499,7 @@ pub fn ask(question: &str) -> bool {
     eprint!("{question}");
     let _ = std::io::stderr().flush();
     let mut answer = String::new();
-    if std::io::stdin().lock().read_line(&mut answer).is_err() {
+    if crate::stop::asking(|| std::io::stdin().lock().read_line(&mut answer)).is_err() {
         return false;
     }
     matches!(

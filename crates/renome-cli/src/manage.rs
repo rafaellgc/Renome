@@ -758,6 +758,59 @@ const KEYS: &[(&str, &str)] = &[
     ("gcd-password", "gcdPassword"),
 ];
 
+/// What the Options' Test button of a service says: its answer, or the
+/// error as the window words it.
+async fn test_key(name: &str, get: &dyn Fn(&str) -> String) -> Result<String, String> {
+    use renome_services::{comicvine, discogs, gcd, googlebooks, metron, subtitles, tmdb};
+    let need = |field: &str| {
+        let v = get(field);
+        if v.is_empty() {
+            Err(t("keyUnsetTest", &[("name", &name)]))
+        } else {
+            Ok(v)
+        }
+    };
+    let ok = t("tmdbKeyOk", &[]);
+    let done = match name {
+        "tmdb" => tmdb::Client::new(&need("tmdbKey")?, "en-US").check().await,
+        "google-books" => {
+            googlebooks::Client::default()
+                .check(&need("googleBooksKey")?)
+                .await
+        }
+        "comicvine" => {
+            comicvine::Client::default()
+                .check(&need("comicVineKey")?)
+                .await
+        }
+        "metron" => metron::Client::default().check(&need("metronToken")?).await,
+        "discogs" => {
+            discogs::Client::default()
+                .check(&need("discogsToken")?)
+                .await
+        }
+        "subdl" => subtitles::check_subdl(need("subdlKey")?).await,
+        "subsource" => subtitles::check_subsource(need("subsourceKey")?).await,
+        n if n.starts_with("gcd") => {
+            gcd::Client::default()
+                .check(&need("gcdEmail")?, &need("gcdPassword")?)
+                .await
+        }
+        _ => {
+            let auth: subtitles::Auth = serde_json::from_value(json!({
+                "osKey": need("osKey")?, "osUser": get("osUser"), "osPassword": get("osPassword"),
+            }))
+            .map_err(|e| e.to_string())?;
+            return match subtitles::check_os(auth).await {
+                Ok(Some(n)) => Ok(t("osAccountOk", &[("n", &n)])),
+                Ok(None) => Ok(ok),
+                Err(e) => Err(crate::text::error_text(&e)),
+            };
+        }
+    };
+    done.map(|()| ok).map_err(|e| crate::text::error_text(&e))
+}
+
 /// The secrets and whether they come from the system's store.
 fn secrets() -> Result<(Map<String, Value>, bool), String> {
     let loaded = renome_services::load_secrets();
@@ -808,6 +861,20 @@ pub fn keys(m: &ArgMatches) -> Result<Exit, String> {
                 if stored { "keyStored" } else { "keyInFile" },
                 &[("name", name)],
             ));
+        }
+        Some(("test", s)) => {
+            let (name, _) = find(s.get_one::<String>("key").unwrap())?;
+            let (all, _) = secrets()?;
+            let get = |f: &str| {
+                all.get(f)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string()
+            };
+            let rt = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
+            let ok = rt.block_on(test_key(name, &get))?;
+            out::note(&out::green(&ok));
         }
         Some(("delete", s)) => {
             let (name, field) = find(s.get_one::<String>("key").unwrap())?;

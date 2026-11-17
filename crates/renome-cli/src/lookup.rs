@@ -78,7 +78,7 @@ impl Host for Cli {
         let _ = std::io::stderr().flush();
     }
     fn stop_signal(&self) -> Arc<dyn Fn() -> bool + Send + Sync> {
-        Arc::new(|| false)
+        Arc::new(crate::stop::requested)
     }
     fn sender(&self) -> renome_services::Sender {
         Arc::new(|event, payload| Cli.report(event, payload))
@@ -489,6 +489,10 @@ enum Pick {
 /// A list of choices for one file, in the terminal: its name, what was
 /// looked for, the options (at most nine), and the keys.
 fn ask_one(title: &str, looked: &str, options: &[String]) -> Pick {
+    // Stopped: the remaining doubts stay as they are.
+    if crate::stop::requested() {
+        return Pick::Skip;
+    }
     loop {
         eprintln!();
         eprintln!("{}", out::bold(title));
@@ -504,7 +508,7 @@ fn ask_one(title: &str, looked: &str, options: &[String]) -> Pick {
         eprint!("{} ", t("chooseKeys", &[]));
         let _ = std::io::stderr().flush();
         let mut line = String::new();
-        if std::io::stdin().lock().read_line(&mut line).unwrap_or(0) == 0 {
+        if crate::stop::asking(|| std::io::stdin().lock().read_line(&mut line).unwrap_or(0)) == 0 {
             return Pick::Stop;
         }
         match line.trim() {
@@ -708,6 +712,9 @@ pub async fn series(
     }
     let mut picked_shows: HashMap<String, Candidate> = HashMap::new();
     for group in groups {
+        if crate::stop::requested() {
+            break;
+        }
         if let Some(first) = group.first()
             && let Some(pick) = ask.picks.get(&first.path)
         {
@@ -2241,6 +2248,9 @@ pub async fn comics(
         }
     }
     for (k, query, members) in groups {
+        if crate::stop::requested() {
+            break;
+        }
         let group_owns: Vec<renome_core::comics::ComicMatch> =
             members.iter().filter_map(|&i| owns[i].clone()).collect();
         if !series_only(&source)

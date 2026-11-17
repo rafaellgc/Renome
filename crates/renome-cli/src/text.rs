@@ -1234,6 +1234,46 @@ const CLI: &[(&str, [&str; 3])] = &[
             "--edit necesita una regla de música, libro, cómic o foto.",
         ],
     ),
+    (
+        "keysTest",
+        [
+            "Testa uma chave ou conta, como o botão Testar das Opções",
+            "Tests a key or account, as the Options' Test button",
+            "Prueba una clave o cuenta, como el botón Probar de las Opciones",
+        ],
+    ),
+    (
+        "keyUnsetTest",
+        [
+            "{name} não está definida (renome-cli keys set {name}).",
+            "{name} is not set (renome-cli keys set {name}).",
+            "{name} no está definida (renome-cli keys set {name}).",
+        ],
+    ),
+    (
+        "stopping",
+        [
+            "Parando… (Ctrl+C de novo encerra)",
+            "Stopping… (Ctrl+C again quits)",
+            "Deteniendo… (Ctrl+C de nuevo termina)",
+        ],
+    ),
+    (
+        "goOnAfterStop",
+        [
+            "Busca interrompida. Continuar com o que foi achado?",
+            "Search stopped. Go on with what was found?",
+            "Búsqueda detenida. ¿Seguir con lo encontrado?",
+        ],
+    ),
+    (
+        "stoppedRenaming",
+        [
+            "Renomeação interrompida: o que já foi renomeado está no Histórico (renome-cli undo desfaz); tags, legendas e o resto não foram feitos.",
+            "Renaming stopped: what was renamed is in the History (renome-cli undo undoes it); tags, subtitles and the rest were not done.",
+            "Renombrado detenido: lo ya renombrado está en el Historial (renome-cli undo lo deshace); etiquetas, subtítulos y lo demás no se hicieron.",
+        ],
+    ),
     ("helpUsage", ["Uso", "Usage", "Uso"]),
     ("helpCommands", ["Comandos", "Commands", "Comandos"]),
     ("helpCommand", ["comando", "command", "comando"]),

@@ -11,6 +11,7 @@ mod out;
 mod rulespec;
 mod run;
 mod servers;
+mod stop;
 mod text;
 mod update;
 
@@ -25,6 +26,8 @@ pub enum Exit {
     Failed,
     Doubts,
     Usage,
+    /// Ctrl+C: what was done stays done (and in the History).
+    Stopped,
 }
 
 impl From<Exit> for ExitCode {
@@ -34,6 +37,7 @@ impl From<Exit> for ExitCode {
             Exit::Failed => 1,
             Exit::Doubts => 2,
             Exit::Usage => 3,
+            Exit::Stopped => 130,
         })
     }
 }
@@ -68,6 +72,7 @@ fn main() -> ExitCode {
         }
     };
     out::setup(&matches);
+    stop::install();
     let result = match matches.subcommand() {
         Some(("preview", m)) => run::preview_or_apply(m, settings.as_ref(), false),
         Some(("apply", m)) => run::preview_or_apply(m, settings.as_ref(), true),
@@ -529,6 +534,11 @@ fn commands() -> Command {
                 .subcommand(
                     Command::new("delete")
                         .about(t("keysDelete", &[]))
+                        .arg(key_name()),
+                )
+                .subcommand(
+                    Command::new("test")
+                        .about(t("keysTest", &[]))
                         .arg(key_name()),
                 ),
         )
