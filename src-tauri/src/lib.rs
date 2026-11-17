@@ -101,12 +101,34 @@ type Overrides = HashMap<PathBuf, String>;
 /// how long comes from the settings (`cacheDays`, 7 by default).
 pub(crate) static ANSWERS: std::sync::LazyLock<renome_core::answers::Store> =
     std::sync::LazyLock::new(|| {
-        let dir = dirs::cache_dir()
-            .unwrap_or_else(std::env::temp_dir)
-            .join("renome")
-            .join("answers");
+        let dir = cache_root().join("answers");
         renome_core::answers::Store::new(dir, cache_days(read_settings_file().as_ref()))
     });
+
+/// Where the program keeps what it can always fetch or work out again.
+/// On Windows not `%LOCALAPPDATA%\renome`: the installer puts the program
+/// itself in `%LOCALAPPDATA%\Renome`, the same folder there, so clearing
+/// the cache would take the program with it. The app's own data folder is
+/// used instead, which the uninstaller offers to delete.
+fn cache_root() -> PathBuf {
+    let base = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
+    if cfg!(windows) {
+        base.join("io.github.rafaellgc.Renome").join("cache")
+    } else {
+        base.join("renome")
+    }
+}
+
+/// Windows: the cache once kept beside the installed program goes. Only
+/// the names the program wrote there, never the folder.
+fn drop_old_cache() {
+    if cfg!(windows)
+        && let Some(old) = dirs::cache_dir().map(|d| d.join("renome"))
+    {
+        let _ = std::fs::remove_dir_all(old.join("answers"));
+        let _ = std::fs::remove_file(old.join("pictures"));
+    }
+}
 
 fn cache_days(settings: Option<&Value>) -> u32 {
     settings
@@ -474,7 +496,11 @@ async fn find_identical(app: AppHandle) -> Result<Option<Copies>, String> {
         let all: Vec<Vec<PathBuf>> = songs
             .iter()
             .cloned()
-            .chain(works.iter().map(|g| g.items.iter().map(|i| i.path.clone()).collect()))
+            .chain(
+                works
+                    .iter()
+                    .map(|g| g.items.iter().map(|i| i.path.clone()).collect()),
+            )
             .collect();
         s.alike = by_group(&all);
         let read: HashMap<&PathBuf, &FileEntry> = files.iter().map(|f| (&f.path, f)).collect();
@@ -779,11 +805,16 @@ async fn trash_files(app: AppHandle, paths: Vec<PathBuf>) -> Result<Trashed, Str
 /// Sends a release's advertisements left after the moves to the system's
 /// trash, with their old folders when nothing else is in them.
 #[tauri::command]
-async fn trash_leftovers(app: AppHandle, files: Vec<PathBuf>, folders: Vec<PathBuf>) -> Result<Trashed, String> {
+async fn trash_leftovers(
+    app: AppHandle,
+    files: Vec<PathBuf>,
+    folders: Vec<PathBuf>,
+) -> Result<Trashed, String> {
     in_background(app, move |state| {
         let (trashed, failed) = renome_core::plan::trash_leftovers(&files, &folders);
         let mut s = state.session.lock().unwrap();
-        s.files.retain(|f| !trashed.iter().any(|t| f.path.starts_with(t)));
+        s.files
+            .retain(|f| !trashed.iter().any(|t| f.path.starts_with(t)));
         drop(s);
         Trashed { trashed, failed }
     })
@@ -1148,14 +1179,19 @@ async fn server_check(server: mediaserver::Server) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn server_libraries(server: mediaserver::Server) -> Result<Vec<mediaserver::Library>, String> {
+async fn server_libraries(
+    server: mediaserver::Server,
+) -> Result<Vec<mediaserver::Library>, String> {
     server.libraries().await
 }
 
 /// Tells each server about the folders where these files were or went;
 /// for each, how many folders, or why not.
 #[tauri::command]
-async fn server_tell(servers: Vec<mediaserver::Server>, changed: Vec<PathBuf>) -> Vec<Result<usize, String>> {
+async fn server_tell(
+    servers: Vec<mediaserver::Server>,
+    changed: Vec<PathBuf>,
+) -> Vec<Result<usize, String>> {
     let mut out = Vec::new();
     for s in &servers {
         out.push(s.tell(&changed).await);
@@ -1530,7 +1566,10 @@ async fn write_audiobook_tags(
     let mut covers: HashMap<String, Option<Vec<u8>>> = HashMap::new();
     let mut synopses: HashMap<String, String> = HashMap::new();
     let total = items.len();
-    let _ = app.emit("book-progress", serde_json::json!({ "done": 0, "total": total }));
+    let _ = app.emit(
+        "book-progress",
+        serde_json::json!({ "done": 0, "total": total }),
+    );
     let mut backups = Vec::new();
     let mut written = Vec::new();
     for (done, job) in items.into_iter().enumerate() {
@@ -1731,7 +1770,11 @@ fn volume_groups(items: Vec<InsideJob>) -> (Vec<InsideJob>, Vec<Vec<InsideJob>>)
 /// its own format, as the history then says), then the volume is made
 /// beside them, a new file (with its parts, when too large) that undo
 /// deletes. Errors: the file and why.
-async fn join_volume(app: &AppHandle, id: &str, group: Vec<InsideJob>) -> Result<Vec<PathBuf>, (String, String)> {
+async fn join_volume(
+    app: &AppHandle,
+    id: &str,
+    group: Vec<InsideJob>,
+) -> Result<Vec<PathBuf>, (String, String)> {
     use renome_core::{comicbook, convert};
     let state = app.state::<AppState>();
     let first = &group[0];
@@ -1741,7 +1784,11 @@ async fn join_volume(app: &AppHandle, id: &str, group: Vec<InsideJob>) -> Result
         first.manga,
         first.pdf,
     );
-    let dir = first.path.parent().map(Path::to_path_buf).unwrap_or_default();
+    let dir = first
+        .path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default();
     let mut issues: Vec<(String, comicbook::Issue)> = Vec::new();
     for j in &group {
         let fail = |e: &str| (j.path.display().to_string(), e.to_string());
@@ -1802,11 +1849,13 @@ async fn join_volume(app: &AppHandle, id: &str, group: Vec<InsideJob>) -> Result
     ));
     let issues: Vec<comicbook::Issue> = issues.into_iter().map(|(_, i)| i).collect();
     let shown = out.display().to_string();
-    tauri::async_runtime::spawn_blocking(move || comicbook::join(&issues, to, o, manga, pdf, &out, &title))
-        .await
-        .map_err(|e| (shown.clone(), e.to_string()))?
-        .map(|j| j.files)
-        .map_err(|e| (shown, e))
+    tauri::async_runtime::spawn_blocking(move || {
+        comicbook::join(&issues, to, o, manga, pdf, &out, &title)
+    })
+    .await
+    .map_err(|e| (shown.clone(), e.to_string()))?
+    .map(|j| j.files)
+    .map_err(|e| (shown, e))
 }
 
 /// Makes the book of `job` (renamed `.pdf`) into a PDF: its page is
@@ -1831,9 +1880,11 @@ async fn print_book(
         .map_or(print::Page::A5, |(w, h)| print::Page::screen(w, h));
     let prep = {
         let (path, work) = (path.clone(), work.clone());
-        tauri::async_runtime::spawn_blocking(move || print::prepare(&path, values.as_ref(), &work, page))
-            .await
-            .map_err(|e| e.to_string())??
+        tauri::async_runtime::spawn_blocking(move || {
+            print::prepare(&path, values.as_ref(), &work, page)
+        })
+        .await
+        .map_err(|e| e.to_string())??
     };
     if let Err(e) = print_to_pdf(app, &prep.html, &prep.pdf, page).await {
         let _ = std::fs::remove_dir_all(&prep.dir);
@@ -2103,14 +2154,7 @@ async fn write_inside(
                         v.push((renome_core::comicbook::FALLBACK_LANGUAGE, system_language()));
                     }
                     return renome_core::comicbook::convert(
-                        &path,
-                        to,
-                        job.ebook,
-                        &v,
-                        job.manga,
-                        original,
-                        job.pdf,
-                        &store,
+                        &path, to, job.ebook, &v, job.manga, original, job.pdf, &store,
                     )
                     .map(|d| {
                         made.lock().unwrap().extend(d.parts);
@@ -2178,7 +2222,8 @@ async fn write_inside(
                 // Named `.cbz` (or `.epub`…) to be converted, it could not
                 // be: its own extension back.
                 let back = if comic_ebook {
-                    convert::kind(&job_path).map(|k| renome_core::comicbook::original_of(&job_path, k))
+                    convert::kind(&job_path)
+                        .map(|k| renome_core::comicbook::original_of(&job_path, k))
                 } else if book_converting {
                     renome_core::bookconv::beside(&job_path).filter(|b| *b != job_path)
                 } else if converting {
@@ -2219,7 +2264,9 @@ async fn write_inside(
     if !made.is_empty()
         && let Err(e) = state.history.add_created(&id, &made)
     {
-        report.errors.push((String::new(), format!("err.history: {e}")));
+        report
+            .errors
+            .push((String::new(), format!("err.history: {e}")));
     }
     let saved = if backups.is_empty() {
         if own_entry && made.is_empty() {
@@ -2277,7 +2324,11 @@ async fn write_video_tags(
     options: VideoTagOptions,
 ) -> Result<TagReport, String> {
     use renome_core::videotags;
-    let VideoTagOptions { cover, clean, tracks } = options;
+    let VideoTagOptions {
+        cover,
+        clean,
+        tracks,
+    } = options;
     let opt = videotags::Options { clean, tracks };
     let state = app.state::<AppState>();
     let mut report = TagReport::default();
@@ -2291,7 +2342,9 @@ async fn write_video_tags(
         .filter(|i| {
             let ok = videotags::writable(&i.path);
             if !ok {
-                report.errors.push((name(&i.path), "videoUnsupported".into()));
+                report
+                    .errors
+                    .push((name(&i.path), "videoUnsupported".into()));
             }
             ok
         })
@@ -2300,7 +2353,10 @@ async fn write_video_tags(
         return Ok(report);
     }
     let total = items.len();
-    let _ = app.emit("inside-progress", serde_json::json!({ "done": 0, "total": total }));
+    let _ = app.emit(
+        "inside-progress",
+        serde_json::json!({ "done": 0, "total": total }),
+    );
     let client = tmdb::Client::new(&key, &lang);
     let metas = tmdb::video_meta(&client, &items, cover).await;
     let own_entry = history_id.is_none();
@@ -2325,10 +2381,12 @@ async fn write_video_tags(
         };
         note.start(&item.path);
         let (path, store) = (item.path.clone(), store.clone());
-        let r = tauri::async_runtime::spawn_blocking(move || videotags::write(&path, &meta, &opt, &store))
-            .await
-            .map_err(|e| e.to_string())
-            .and_then(|r| r);
+        let r = tauri::async_runtime::spawn_blocking(move || {
+            videotags::write(&path, &meta, &opt, &store)
+        })
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|r| r);
         match r {
             Ok(Some(edit)) => {
                 let b = renome_core::tagwrite::Backup {
@@ -2357,7 +2415,9 @@ async fn write_video_tags(
     };
     match saved {
         Ok(()) => note.finish(),
-        Err(e) => report.errors.push((String::new(), format!("err.history: {e}"))),
+        Err(e) => report
+            .errors
+            .push((String::new(), format!("err.history: {e}"))),
     }
     Ok(report)
 }
@@ -2464,7 +2524,11 @@ async fn subtitle_tools(
             let app2 = app.clone();
             let r = tauri::async_runtime::spawn_blocking(move || {
                 let tell = |at: u64, size: u64| {
-                    let part = if size > 0 { at as f64 / size as f64 } else { 0.0 };
+                    let part = if size > 0 {
+                        at as f64 / size as f64
+                    } else {
+                        0.0
+                    };
                     let _ = app2.emit(
                         "subtools-progress",
                         serde_json::json!({ "done": done, "total": total, "part": part }),
@@ -2500,7 +2564,9 @@ async fn subtitle_tools(
     }
     match saved {
         Ok(()) => note.finish(),
-        Err(e) => report.errors.push((String::new(), format!("err.history: {e}"))),
+        Err(e) => report
+            .errors
+            .push((String::new(), format!("err.history: {e}"))),
     }
     let changed: HashSet<PathBuf> = changed.into_iter().collect();
     for f in state.session.lock().unwrap().files.iter_mut() {
@@ -3159,7 +3225,10 @@ fn sync_titlebar_buttons() {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Answers too old to use go, out of the way of the start.
-    std::thread::spawn(|| ANSWERS.purge());
+    std::thread::spawn(|| {
+        drop_old_cache();
+        ANSWERS.purge();
+    });
 
     let history_dir = dirs::data_dir()
         .unwrap_or_else(std::env::temp_dir)
@@ -3196,10 +3265,7 @@ pub fn run() {
             hashes: Mutex::default(),
             covers: tokio::sync::Mutex::new(HashMap::new()),
             pictures: Mutex::new(renome_core::similar::PictureCache::in_file(
-                dirs::cache_dir()
-                    .unwrap_or_else(std::env::temp_dir)
-                    .join("renome")
-                    .join("pictures"),
+                cache_root().join("pictures"),
             )),
             identical_run: AtomicU64::new(0),
             busy_disk: Mutex::new(()),

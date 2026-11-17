@@ -2570,7 +2570,10 @@ may be asked about the Keychain again with each version.
   AcoustID, Discogs, Open Library, the GCD, Comic Vine, Metron, MangaDex,
   AniList and MangaUpdates; not
   images, not failures, never the key and account checks) are kept one
-  file each in the user's cache folder (`~/.cache/renome/answers/<service>/`),
+  file each in the user's cache folder (`~/.cache/renome/answers/<service>/`;
+  on Windows `%LOCALAPPDATA%\io.github.rafaellgc.Renome\cache\answers`, since
+  the installer puts the program in `%LOCALAPPDATA%\Renome`, the same folder
+  as `renome` there; the old `answers` and `pictures` are deleted at start),
   named by a hash of the question (path, query and language, without keys
   or passwords), written whole (`.part`, then renamed), and their age is
   the file's date. TMDB's are kept at most 6 months (its terms), AniList's

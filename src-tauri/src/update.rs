@@ -50,11 +50,22 @@ struct Progress {
 
 fn error(e: &tauri_plugin_updater::Error) -> String {
     match e {
-        tauri_plugin_updater::Error::Minisign(_) | tauri_plugin_updater::Error::SignatureUtf8(_) => {
-            "updateSignature".into()
-        }
+        tauri_plugin_updater::Error::Minisign(_)
+        | tauri_plugin_updater::Error::SignatureUtf8(_) => "updateSignature".into(),
         _ => format!("updateFailed: {e}"),
     }
+}
+
+/// The version the last check found, kept for the install so it does not
+/// have to ask GitHub again.
+static FOUND: std::sync::Mutex<Option<tauri_plugin_updater::Update>> = std::sync::Mutex::new(None);
+
+async fn ask(app: &AppHandle) -> Result<Option<tauri_plugin_updater::Update>, String> {
+    app.updater()
+        .map_err(|e| error(&e))?
+        .check()
+        .await
+        .map_err(|e| error(&e))
 }
 
 /// The newer version, if there is one.
@@ -63,16 +74,13 @@ pub async fn check(app: &AppHandle) -> Result<Option<Found>, String> {
     if way == Way::System {
         return Ok(None);
     }
-    let update = app
-        .updater()
-        .map_err(|e| error(&e))?
-        .check()
-        .await
-        .map_err(|e| error(&e))?;
-    Ok(update.map(|u| Found {
-        version: u.version,
+    let update = ask(app).await?;
+    let found = update.as_ref().map(|u| Found {
+        version: u.version.clone(),
         way,
-    }))
+    });
+    *FOUND.lock().unwrap_or_else(|e| e.into_inner()) = update;
+    Ok(found)
 }
 
 /// Downloads the newer version, checks its signature, installs it and
@@ -81,14 +89,13 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
     if way() != Way::Itself {
         return Err("updateFailed".into());
     }
-    let Some(update) = app
-        .updater()
-        .map_err(|e| error(&e))?
-        .check()
-        .await
-        .map_err(|e| error(&e))?
-    else {
-        return Ok(());
+    let kept = FOUND.lock().unwrap_or_else(|e| e.into_inner()).take();
+    let update = match kept {
+        Some(u) => u,
+        None => match ask(app).await? {
+            Some(u) => u,
+            None => return Ok(()),
+        },
     };
     let mut done = 0u64;
     update

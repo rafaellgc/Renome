@@ -259,7 +259,9 @@ pub struct Options {
 
 /// A template that names where the photo was taken.
 pub fn names_place(template: &str) -> bool {
-    PLACE_KEYS.iter().any(|k| template.contains(&format!("{{{k}}}")))
+    PLACE_KEYS
+        .iter()
+        .any(|k| template.contains(&format!("{{{k}}}")))
 }
 
 const PLACE_KEYS: [&str; 9] = [
@@ -566,11 +568,7 @@ mod tests {
     fn place_from_gps() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("IMG_0001.jpg");
-        std::fs::copy(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/gps.jpg"),
-            &p,
-        )
-        .unwrap();
+        std::fs::copy("tests/fixtures/gps.jpg", &p).unwrap();
         let f = FileEntry::from_path(&p, &std::fs::metadata(&p).unwrap()).unwrap();
         let (lat, lon) = f.photo_inside().unwrap().gps.unwrap();
         assert!((lat + 23.536).abs() < 1e-3 && (lon + 46.456).abs() < 1e-3);
@@ -603,7 +601,10 @@ mod tests {
         assert_eq!(folders("{país}/{cidade}", &s), ["País", "Cidade"]);
         // Without a place: the separators around it go.
         s.place = None;
-        assert_eq!(expand("{ano}-{mês}-{dia} ({cidade})", &s, "", false), "2019-05-12");
+        assert_eq!(
+            expand("{ano}-{mês}-{dia} ({cidade})", &s, "", false),
+            "2019-05-12"
+        );
         assert!(folders("{ano}/{cidade}", &s) == ["2019"]);
         assert!(names_place("{year}/{country}") && !names_place("{ano}/{mês}"));
     }

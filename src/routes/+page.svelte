@@ -1049,7 +1049,8 @@
     }
     const ok = await confirm({ title: t("updateTitle", { v: u.version }), text: t("updateText"), ok: t("updateInstall"), cancel: t("cancel") });
     if (!ok) return;
-    updating = 0;
+    // -1 until the first bytes arrive: no percentage to show yet.
+    updating = -1;
     const off = await listen<{ done: number; total: number | null }>("update-progress", (e) => {
       if (e.payload.total) updating = Math.min(100, Math.floor((e.payload.done / e.payload.total) * 100));
     });
@@ -1902,7 +1903,7 @@
     <span class="notice">{notice}</span>
     {#if update}
       <button class="link update" title={t(update.way === "page" ? "updatePageHint" : "updateHint")} disabled={updating !== null} onclick={installUpdate}>
-        {updating !== null ? t("updateDownloading", { p: updating }) : t("updateAvailable", { v: update.version })}
+        {updating === null ? t("updateAvailable", { v: update.version }) : updating < 0 ? t("updateStarting") : t("updateDownloading", { p: updating })}
       </button>
     {/if}
     <button class="link" title={t("donateHint")} onclick={() => openUrl("https://ko-fi.com/rafaellgc")}><Icon name="heart" size={13} />{t("donate")}</button>
