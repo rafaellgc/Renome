@@ -1,6 +1,7 @@
 //! `renome-cli`: Renome from the terminal. The same rules, lookups,
 //! history and options as the window, with the same code (see SPEC §8).
 
+mod duplicates;
 mod lookup;
 mod manage;
 mod missing;
@@ -74,6 +75,7 @@ fn main() -> ExitCode {
         Some(("options", m)) => manage::options(m, settings),
         Some(("keys", m)) => manage::keys(m),
         Some(("cache", m)) => manage::cache(m),
+        Some(("duplicates", m)) => duplicates::command(m, settings.as_ref()),
         Some(("servers", m)) => tokio::runtime::Runtime::new()
             .map_err(|e| e.to_string())
             .and_then(|rt| servers::command(m, &rt)),
@@ -478,6 +480,57 @@ pub fn cli() -> Command {
                 .subcommand(Command::new("test").about(t("srvTest", &[])).arg(id()))
         })
         .subcommand(
+            Command::new("duplicates")
+                .about(t("cmdDuplicates", &[]))
+                .arg(paths().required(false).required_unless_present("trash"))
+                .arg(
+                    Arg::new("identical")
+                        .long("identical")
+                        .help(t("argIdentical", &[]))
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("repeated")
+                        .long("repeated")
+                        .help(t("argRepeated", &[]))
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("similar")
+                        .long("similar")
+                        .help(t("argSimilar", &[]))
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("trash")
+                        .long("trash")
+                        .help(t("argTrash", &[]))
+                        .num_args(1..)
+                        .value_name("PATH")
+                        .value_parser(clap::value_parser!(std::path::PathBuf))
+                        .value_hint(clap::ValueHint::FilePath),
+                )
+                .arg(
+                    Arg::new("yes")
+                        .short('y')
+                        .long("yes")
+                        .help(t("argYes", &[]))
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("hidden")
+                        .long("hidden")
+                        .help(t("argHidden", &[]))
+                        .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("no-recursive")
+                        .long("no-recursive")
+                        .help(t("argNoRecursive", &[]))
+                        .action(ArgAction::SetTrue),
+                ),
+        )
+        .subcommand(
             Command::new("cache")
                 .about(t("cmdCache", &[]))
                 .subcommand(Command::new("size").about(t("cacheSize", &[])))
@@ -517,4 +570,16 @@ pub fn sources(m: &ArgMatches) -> Vec<rulespec::Source> {
     }
     found.sort_by_key(|(i, _)| *i);
     found.into_iter().map(|(_, s)| s).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_commands_are_well_defined() {
+        let _turn = crate::text::TEST_LANG.lock().unwrap_or_else(|e| e.into_inner());
+        for lang in ["pt", "en", "es"] {
+            crate::text::set_lang(lang);
+            super::cli().debug_assert();
+        }
+    }
 }

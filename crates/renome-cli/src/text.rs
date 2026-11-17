@@ -1078,6 +1078,46 @@ const CLI: &[(&str, [&str; 3])] = &[
         ],
     ),
     (
+        "cmdDuplicates",
+        [
+            "Cópias idênticas, a mesma música ou obra repetida, fotos parecidas",
+            "Identical copies, the same song or work twice, pictures that look alike",
+            "Copias idénticas, la misma canción u obra repetida, fotos parecidas",
+        ],
+    ),
+    (
+        "argIdentical",
+        [
+            "Cópias idênticas (byte a byte)",
+            "Identical copies (byte for byte)",
+            "Copias idénticas (byte a byte)",
+        ],
+    ),
+    (
+        "argRepeated",
+        [
+            "A mesma música, filme, episódio, quadrinho ou livro em vários arquivos (a melhor marcada com ★)",
+            "The same song, movie, episode, comic or book in several files (the best marked ★)",
+            "La misma canción, película, episodio, cómic o libro en varios archivos (la mejor marcada con ★)",
+        ],
+    ),
+    (
+        "argSimilar",
+        [
+            "Fotos parecidas (mais lento)",
+            "Pictures that look alike (slower)",
+            "Fotos parecidas (más lento)",
+        ],
+    ),
+    (
+        "argTrash",
+        [
+            "Manda estes arquivos para a Lixeira (sem desfazer pelo Histórico)",
+            "Sends these files to the Trash (not undone from the History)",
+            "Envía estos archivos a la Papelera (sin deshacer desde el Historial)",
+        ],
+    ),
+    (
         "epTypeHint",
         [
             "digite S01E05 (ou 1x05, S01E05-06) para escolher outro",
@@ -1326,7 +1366,7 @@ mod tests {
 
     #[test]
     fn page_texts_are_read() {
-        let _turn = TEST_LANG.lock().unwrap();
+        let _turn = TEST_LANG.lock().unwrap_or_else(|e| e.into_inner());
         set_lang("pt");
         assert_eq!(raw("rule.replace"), "Substituir texto");
         assert!(has("renamedN"));
