@@ -76,6 +76,9 @@ impl Host for Cli {
     fn stop_signal(&self) -> Arc<dyn Fn() -> bool + Send + Sync> {
         Arc::new(|| false)
     }
+    fn sender(&self) -> renome_services::Sender {
+        Arc::new(|event, payload| Cli.report(event, payload))
+    }
 }
 
 /// The TMDB key and the language of its titles, from the options.

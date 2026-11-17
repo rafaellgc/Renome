@@ -28,6 +28,9 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// A report sender that can go to another thread.
+pub type Sender = Arc<dyn Fn(&str, Value) + Send + Sync>;
+
 /// Whoever runs the work: hears its progress and says when to stop.
 pub trait Host: Send + Sync {
     /// A report, named as the page's events are (`tmdb-progress`, …).
@@ -35,6 +38,20 @@ pub trait Host: Send + Sync {
     /// A check that turns true once the person asks to stop the work
     /// begun when it was made.
     fn stop_signal(&self) -> Arc<dyn Fn() -> bool + Send + Sync>;
+    /// [`Host::report`] that can be taken along into work on another
+    /// thread.
+    fn sender(&self) -> Sender;
+    /// Prints a book's page (`html`) to `pdf`, on pages of this size.
+    /// Only the window can (its web view prints); elsewhere, `pdfPrint`.
+    fn print_pdf(
+        &self,
+        html: PathBuf,
+        pdf: PathBuf,
+        page: renome_core::bookconv::print::Page,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + '_>> {
+        let _ = (html, pdf, page);
+        Box::pin(async { Err("pdfPrint".to_string()) })
+    }
 }
 
 /// Sends a report made of any serializable value.
@@ -47,6 +64,9 @@ pub struct Quiet;
 
 impl Host for Quiet {
     fn report(&self, _: &str, _: Value) {}
+    fn sender(&self) -> Sender {
+        Arc::new(|_, _| {})
+    }
     fn stop_signal(&self) -> Arc<dyn Fn() -> bool + Send + Sync> {
         Arc::new(|| false)
     }
@@ -264,4 +284,19 @@ impl RenameLock {
             Err(std::fs::TryLockError::Error(e)) => Err(e.to_string()),
         }
     }
+}
+
+/// System language (`pt_BR.UTF-8` → `pt`), from the locale variables.
+pub fn system_language() -> String {
+    ["LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"]
+        .iter()
+        .filter_map(|v| std::env::var(v).ok())
+        .find(|v| !v.is_empty() && v != "C" && v != "POSIX")
+        .map(|v| {
+            v.chars()
+                .take_while(|c| c.is_ascii_alphabetic())
+                .collect::<String>()
+                .to_lowercase()
+        })
+        .unwrap_or_default()
 }
