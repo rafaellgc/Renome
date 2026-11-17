@@ -186,7 +186,14 @@ pub fn preview_or_apply(
     if !out::json() {
         show(&preview, m.get_flag("all"));
     }
-    if preview.changed == 0 {
+    // Nothing to rename: what runs after the renames may still have work
+    // (subtitles fixed, details written, .nfo made for files already named
+    // right), as in the window.
+    let extra_work = lookup_rule.is_some()
+        || steps_json.iter().any(|s| {
+            rulespec::kind_of(s) == "subtitle" && s.get("enabled") != Some(&Value::Bool(false))
+        });
+    if preview.changed == 0 && !extra_work {
         if out::json() {
             println!(
                 "{}",
@@ -213,11 +220,29 @@ pub fn preview_or_apply(
         }
     }
     crate::manage::recover();
-    let (exit, report) = rename(
-        &preview,
-        m.get_one::<PathBuf>("to").is_some(),
-        m.get_flag("copy"),
-    )?;
+    let (exit, report) = if preview.changed == 0 {
+        (Exit::Done, renome_core::ApplyReport::default())
+    } else {
+        rename(
+            &preview,
+            m.get_one::<PathBuf>("to").is_some(),
+            m.get_flag("copy"),
+        )?
+    };
+    if let Some(rule) = steps_json
+        .iter()
+        .find(|s| {
+            rulespec::kind_of(s) == "subtitle" && s.get("enabled") != Some(&Value::Bool(false))
+        })
+        .map(|s| &s["rule"])
+    {
+        let history = renome_core::History::new(renome_services::history_dir());
+        for note in runtime()?.block_on(crate::lookup::after_subtitles(
+            rule, &preview, &report, &history,
+        )) {
+            out::note(&note);
+        }
+    }
     if let (Some(rule), Some(found)) = (&lookup_rule, &found) {
         let history = renome_core::History::new(renome_services::history_dir());
         let notes = match found {

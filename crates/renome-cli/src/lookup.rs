@@ -59,6 +59,7 @@ impl Host for Cli {
             ("book-progress", _) => "olSearching",
             ("subs-progress", _) => "subsSearching",
             ("inside-progress", _) => "insideWriting",
+            ("subtools-progress", _) => "subToolsWorking",
             _ => "",
         };
         let what = crate::text::t(key, &[("done", &done), ("total", &total)]);
@@ -1772,6 +1773,82 @@ pub async fn after_books(
             }
             Err(e) => out::error(&crate::text::error_text(&e)),
         }
+    }
+    notes
+}
+
+/// After the renames, the subtitle rule's work: subtitles fixed where
+/// they are (or made SubRip), text tracks taken out of videos.
+pub async fn after_subtitles(
+    rule: &Value,
+    preview: &Preview,
+    report: &renome_core::ApplyReport,
+    history: &renome_core::History,
+) -> Vec<String> {
+    let mut notes = Vec::new();
+    if !(report.done.is_empty() || report.history_id.is_some()) {
+        return notes;
+    }
+    let to: HashMap<&PathBuf, &PathBuf> = report.done.iter().map(|op| (&op.from, &op.to)).collect();
+    let jobs: Vec<renome_services::after::SubJob> = preview
+        .items
+        .iter()
+        .filter(|i| i.status != renome_core::Status::Conflict)
+        .filter(|i| to.contains_key(&i.path) || i.status == renome_core::Status::Unchanged)
+        .filter_map(|i| {
+            let fix = i.sub_fix.as_ref().is_some_and(|f| !f.no_fps);
+            let extract = i.sub_extract > 0;
+            (fix || extract).then(|| renome_services::after::SubJob {
+                path: to.get(&i.path).map_or(i.path.clone(), |p| (*p).clone()),
+                fix,
+                extract,
+            })
+        })
+        .collect();
+    if jobs.is_empty() {
+        return notes;
+    }
+    let tools: renome_core::subtext::Tools =
+        serde_json::from_value(rule.clone()).unwrap_or_default();
+    let original = match rule.get("original").and_then(Value::as_str) {
+        Some("delete") => renome_core::convert::Original::Delete,
+        _ => renome_core::convert::Original::Keep,
+    };
+    let langs = if rule
+        .get("extract")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        rule.get("extractLangs")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    } else {
+        String::new()
+    };
+    match renome_services::after::subtitle_tools(
+        &Cli,
+        history,
+        report.history_id.clone(),
+        jobs,
+        tools,
+        original,
+        langs,
+    )
+    .await
+    {
+        Ok((r, _)) => {
+            if r.written > 0 {
+                notes.push(t("subToolsN", &[("n", &r.written)]));
+            }
+            if r.created > 0 {
+                notes.push(t("subToolsM", &[("n", &r.created)]));
+            }
+            for (file, why) in r.errors {
+                out::error(&format!("{file}: {}", crate::text::error_text(&why)));
+            }
+        }
+        Err(e) => out::error(&crate::text::error_text(&e)),
     }
     notes
 }
