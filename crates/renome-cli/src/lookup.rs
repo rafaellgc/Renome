@@ -57,6 +57,7 @@ impl Host for Cli {
             ("mb-progress", "save") => "coversWriting",
             ("mb-progress", _) => "mbSearching",
             ("book-progress", _) => "olSearching",
+            ("subs-progress", "save") => "subsWriting",
             ("subs-progress", _) => "subsSearching",
             ("inside-progress", _) => "insideWriting",
             ("subtools-progress", _) => "subToolsWorking",
@@ -2586,6 +2587,164 @@ pub async fn after_comics(
             }
         }
         Err(e) => out::error(&crate::text::error_text(&e)),
+    }
+    notes
+}
+
+/// After the renames, with the movie or series rule's `subtitles`: each
+/// matched video's subtitles in the rule's languages searched and the
+/// best one per language downloaded beside it (as the window's review
+/// picks them), unless it already has one beside or inside.
+pub async fn download_subtitles(
+    rule: &Value,
+    found: &Found,
+    preview: &Preview,
+    report: &renome_core::ApplyReport,
+    history: &renome_core::History,
+    settings: Option<&Value>,
+) -> Vec<String> {
+    use renome_services::subtitles as subs;
+    let mut notes = Vec::new();
+    if !rule
+        .get("subtitles")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || !(report.done.is_empty() || report.history_id.is_some())
+    {
+        return notes;
+    }
+    let langs = rule
+        .get("subLangs")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let secrets = renome_services::load_secrets();
+    let secret = |k: &str| {
+        secrets
+            .get("secrets")
+            .and_then(|s| s.get(k))
+            .or_else(|| settings.and_then(|s| s.get(k)))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    };
+    let auth = subs::Auth {
+        os_key: secret("osKey"),
+        os_user: secret("osUser"),
+        os_password: secret("osPassword"),
+        subdl_key: secret("subdlKey"),
+        subsource_key: secret("subsourceKey"),
+        tmdb_key: secret("tmdbKey"),
+    };
+    if auth.os_key.is_empty()
+        && auth.subdl_key.is_empty()
+        && (auth.subsource_key.is_empty() || auth.tmdb_key.is_empty())
+    {
+        out::error(&t("subsNeedKey", &[]));
+        return notes;
+    }
+    let to: HashMap<&PathBuf, &PathBuf> = report.done.iter().map(|op| (&op.from, &op.to)).collect();
+    let video = |p: &Path| {
+        p.extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .is_some_and(|e| renome_core::tmdb::is_video(&e))
+    };
+    let mut items: Vec<subs::Item> = Vec::new();
+    let mut episode_of: HashMap<PathBuf, (u32, u32)> = HashMap::new();
+    for i in &preview.items {
+        if i.is_dir
+            || !video(&i.path)
+            || !(to.contains_key(&i.path) || i.status == renome_core::Status::Unchanged)
+        {
+            continue;
+        }
+        match found {
+            Found::Movies(m) => {
+                if let Some(c) = m.chosen.get(&i.path) {
+                    items.push(subs::Item {
+                        path: i.path.clone(),
+                        tmdb: c.id,
+                        season: None,
+                        episode: None,
+                    });
+                }
+            }
+            Found::Series(s) => {
+                if let Some(e) = s
+                    .chosen
+                    .get(&i.path)
+                    .filter(|e| e.source.is_empty() && e.episodes.len() == 1)
+                {
+                    let (season, episode) = (u32::from(e.season), u32::from(e.episodes[0]));
+                    episode_of.insert(i.path.clone(), (season, episode));
+                    items.push(subs::Item {
+                        path: i.path.clone(),
+                        tmdb: e.id,
+                        season: Some(season),
+                        episode: Some(episode),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    if items.is_empty() {
+        return notes;
+    }
+    let searched = subs::search(&Cli, auth.clone(), &langs, items, || false).await;
+    for e in &searched.errors {
+        out::error(&crate::text::error_text(e));
+    }
+    let order = |l: &str| {
+        searched
+            .langs
+            .iter()
+            .position(|x| x == l)
+            .unwrap_or(usize::MAX)
+    };
+    let writes: Vec<subs::Write> = searched
+        .found
+        .iter()
+        .filter_map(|f| {
+            let mut by_lang: Vec<(String, Vec<renome_core::subtitles::Candidate>)> = Vec::new();
+            for c in &f.candidates {
+                if f.have.contains(&c.lang) || f.inside.contains(&c.lang) {
+                    continue;
+                }
+                match by_lang.iter_mut().find(|(l, _)| *l == c.lang) {
+                    Some((_, list)) => list.push(c.clone()),
+                    None => by_lang.push((c.lang.clone(), vec![c.clone()])),
+                }
+            }
+            if by_lang.is_empty() {
+                return None;
+            }
+            by_lang.sort_by_key(|(l, _)| order(l));
+            let (season, episode) = episode_of
+                .get(&f.path)
+                .map_or((None, None), |(s, e)| (Some(*s), Some(*e)));
+            Some(subs::Write {
+                path: to.get(&f.path).map_or(f.path.clone(), |p| (*p).clone()),
+                season,
+                episode,
+                langs: by_lang.into_iter().map(|(_, l)| l).collect(),
+            })
+        })
+        .collect();
+    if writes.is_empty() {
+        return notes;
+    }
+    let mut written = subs::write(&Cli, auth, writes, || false).await;
+    let mut r = tmdb::SidecarReport {
+        created: std::mem::take(&mut written.created),
+        errors: std::mem::take(&mut written.errors),
+        kept: 0,
+    };
+    renome_services::after::record_created(history, report.history_id.clone(), &mut r);
+    notes.push(t("subsSavedN", &[("n", &r.created.len())]));
+    for (file, why) in r.errors {
+        out::error(&format!("{file}: {}", crate::text::error_text(&why)));
     }
     notes
 }

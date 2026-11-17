@@ -272,6 +272,16 @@ pub fn preview_or_apply(
         for note in notes {
             out::note(&note);
         }
+        if matches!(
+            found,
+            crate::lookup::Found::Movies(_) | crate::lookup::Found::Series(_)
+        ) {
+            for note in runtime()?.block_on(crate::lookup::download_subtitles(
+                rule, found, &preview, &report, &history, settings,
+            )) {
+                out::note(&note);
+            }
+        }
     }
     Ok(exit)
 }
