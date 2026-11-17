@@ -2597,3 +2597,187 @@ may be asked about the Keychain again with each version.
   password (Test: `/infos/formats`, then the login and the downloads
   left today), SubDL key (Test: a search); each with a Test button. A line
   says whether they are in the system's password store or in the file.
+
+## 8. Command line (`renome-cli`) — planned
+
+Status: specification, to be built in phases (shared crate, basic
+commands, each lookup rule, extras, documentation). Everything the window
+does is reachable from here, with the same code: the flows that lived in
+the page (automatic choices, audiobook groups, what runs after the
+renames) move into Rust, used by the window and by `renome-cli` alike.
+
+### 8.1 The program
+
+- A separate executable, `renome-cli` (`renome-cli.exe`), shipped in every
+  package next to the window's program: `/usr/bin` for `.deb`/`.rpm`,
+  inside the AppImage (`Renome.AppImage cli …` runs it; the window's
+  program hands over when its first argument is `cli`), in the Flatpak
+  (`flatpak run --command=renome-cli io.github.rafaellgc.Renome`), the
+  Windows install folder (the installer offers to add it to the user's
+  `PATH`) and `Renome.app/Contents/MacOS/` (the manual gives the link to
+  make in `/usr/local/bin`). The window's program on Windows has no
+  console, hence the second executable.
+- Same data as the window: `settings.json` (options, saved rule sets,
+  servers), the keys in the system's password store (same service), the
+  history (undo works across both), the answers cache. A file lock
+  (`renome.lock` in the data folder) is held while renaming or undoing, by
+  either, so they never rename at the same time; the window reads the
+  history again when it opens the History.
+- A rename left halfway (`.pending`, `.tagging`) is recovered at the start
+  of any command, as the window does.
+- Parsing with `clap` (MIT/Apache); man pages and shell completions made
+  from the same definitions (`clap_mangen`, `clap_complete`).
+
+### 8.2 Pattern
+
+`renome-cli <command> [paths…] [options]`. Commands are verbs or nouns of
+the window's parts; options are long names in English with short forms for
+the common ones; every command has `--help` with examples.
+
+Global options: `--lang pt|en|es` (default: the options' language, else
+the system's), `--json` (machine output on stdout, messages on stderr),
+`--color auto|always|never` (also `NO_COLOR`), `-q/--quiet`,
+`-v/--verbose`, `--no-server` (do not tell media servers).
+
+Exit codes: 0 done (or nothing to do), 1 failed (some files not renamed:
+listed), 2 conflicts or doubtful matches left unresolved (nothing
+renamed), 3 wrong use (unknown rule, option, value), 130 stopped (Ctrl+C:
+what was renamed stays in the History).
+
+### 8.3 Files
+
+Paths are files or folders. A folder adds its files with subfolders, as
+the window's "Folders"; `--no-recursive` only its own files;
+`--folders` adds the given folders themselves, to rename them. `--hidden`
+includes hidden files (default: the option). `--filter EXPR` is the list
+filter (names, `>40MB`, `=2024`, `<7d`, `folder:…`): only what it shows is
+renamed. `--sort name|new|dir|size|modified|<column> [--desc]` sets the
+order numbering follows. `--name PATH=NEW` gives a file its name by hand
+(the double-click edit), repeatable.
+
+### 8.4 Rules
+
+The rules, in the order given, come from:
+- `--set NAME`: a saved rule set (the window's "Sets");
+- `--rules FILE`: a JSON file, as the window exports a set (or a plain
+  list of steps); `-` reads stdin;
+- `--saved`: the rules the window remembered;
+- `-r/--rule SPEC`, repeatable: `TYPE[:KEY=VALUE,…]`.
+
+Rule specs use the rule's own option names (the JSON ones), in camelCase
+or kebab-case, case ignored: `-r replace:find=_,replace=" "`,
+`-r case:mode=titleSmart`, `-r number:template="{name} {n}",digits=3`,
+`-r movie:folder=yes,sidecar=yes,subtitles=yes,sub-langs="pt-BR, en"`.
+Values: text (quotes keep commas and spaces), numbers, `yes/no`
+(`true/false`, `on/off`), the listed words for choices. A key alone means
+yes (`-r remove:accents`). Two keys belong to every rule: `only=FILTER`
+(the card's "Only in files") and `off` (kept but disabled). Options left
+out take the window's defaults in the chosen language (templates
+included). `renome-cli rules` lists the types; `renome-cli rules TYPE`
+lists each option with its kind, default, choices and meaning, and the
+template keys, in the chosen language. Defaults, descriptions and the
+check of every value live in Rust (they leave `rules.ts`), shared with
+the window.
+
+Option names say what the option does. The unclear ones are renamed
+everywhere (window, saved and exported sets, CLI, manual), and the old
+names are still read (and written back with the new ones): `colon` →
+`colonAs`, `latin` → `transliterate`, `web` → `webSafe`, `sidecar` →
+`nfo`, `opf` → `metadataOpf`, `listen` → `identifyBySound`, `keep` →
+`keepWords`, `audio` → `audiobooks`, `greys16` → `sixteenGreys`,
+`soften` → `reduceRainbow`, `numbers` → `cropPageNumbers`, `drawPages`
+→ `drawPdfPages`, `anyProgram` → `otherReaderApps`, `fanart` →
+`backdrop`, `byFolder` → `seriesByFolder`. Command and option names are
+English in every language; messages, help and descriptions follow
+`--lang`.
+
+### 8.5 Commands
+
+- `preview PATHS… RULES`: the list as the window shows it: current name →
+  new name, folder, tags (conflict and why, identical copy, advert →
+  Trash, missing episodes/tracks/issues/volumes/movies with `--missing`),
+  the totals; `--csv FILE` writes "Export list". Lookups run (8.6); nothing
+  is written. Exit 2 when there are conflicts.
+- `apply PATHS… RULES`: preview, then renames after a confirmation
+  (`-y/--yes` skips it; required when stdin is not a terminal), with
+  progress on stderr and the same notice as the window's footer.
+  `--to DIR` moves into another folder, `--to DIR --copy` copies.
+  Everything after the renames runs as in the window (sidecars, covers,
+  playlists, tags, details inside files, conversions, subtitles, the
+  Trash for adverts, the media servers). Conflicts are skipped as in the
+  window; `--strict` renames nothing when any is left.
+- `undo [ID|last]`: undoes an entry of the History (`last` by default),
+  with progress; `--json` lists what came back.
+- `history [list|show ID|delete ID|clear]`.
+- `sets [list|show NAME|save NAME RULES|export NAME [FILE]|import FILE|delete NAME|rename OLD NEW]`.
+- `rules [TYPE]` (8.4).
+- `options [list|get KEY|set KEY VALUE|reset KEY]`: the window's Options
+  (language, hidden files, Windows names, numbered clashes, cache days,
+  TMDB language, look for updates…); interface-only ones (theme, text
+  size, columns) are listed but marked as such.
+- `keys [list|set NAME|delete NAME|test NAME]`: TMDB, Google Books, Comic
+  Vine, Metron, Discogs, OpenSubtitles (key, user, password), SubDL,
+  SubSource, GCD (email, password). `set` reads the value from the
+  terminal without showing it, or from stdin (`--stdin`); values are
+  never printed, `list` says only which are set and where.
+- `servers [list|add jellyfin|plex URL|remove ID|libraries ID|pair ID LIBRARY-PATH LOCAL-PATH|on|off …|test ID]`
+  (key through `keys set server:ID`).
+- `duplicates PATHS… [--identical] [--similar] [--repeated]`: the groups
+  the window's footer filters show (identical copies, similar pictures,
+  repeated songs and works), best marked; `--trash PATH…` sends chosen
+  files to the Trash after a confirmation (not undoable, as in the
+  window).
+- `cache [size|clear]`.
+- `update [check|install]`: as the footer button (installs itself in the
+  AppImage, Windows and macOS; points to the page for `.deb`/`.rpm`; the
+  Flatpak says Flatpak updates it). The signature is checked as in the
+  window.
+- `completions bash|zsh|fish|powershell` and `manual [TOPIC]` (the
+  manual's chapter as text). Man pages are made at build time.
+
+### 8.6 Lookups and choices
+
+The lookup rules (movie, series, music, book and audiobook, comic) search
+as the window's search button does, then:
+- `--choose ask` (default when stdin and stdout are terminals): every
+  doubtful file opens the same choice the window's review shows, as a
+  numbered list with the details the cards show (year, original title,
+  author, editions, publisher…). Keys: a number picks, Enter the first,
+  `s` skips the file, `/TEXT` searches again with other words, `l` pastes
+  a link or id, `?` help, `q` stops (nothing renamed). Series and comics
+  ask for the show or series first, then only the doubtful episodes or
+  issues; music asks for the album and edition; books for the book.
+- `--choose auto`: only what the window would pick by itself; doubtful
+  files are left as they are and listed (exit 2 with `--strict`).
+- `--choose skip`: no lookups for doubtful files at all.
+- `--pick PATH=ID`, repeatable: forces a match (`tmdb:4242`,
+  `tmdb-tv:1399/S02E05`, `mb:<release id>`, `discogs:<id>`,
+  `ol:OL123W`, `isbn:…`, `anilist:…`, `metron:…`, `gcd:…`,
+  `comicvine:…`, `mangadex:…`); for a show or series
+  `--show NAME|ID` (the rule's "Show") applies to all its files.
+- `--edit PATH:KEY=VALUE,…`, repeatable: the window's details editors
+  (book, comic, song tags, photo date): fills or corrects fields of that
+  file's match by hand.
+- `--listen` (music): identify untagged songs by sound (the rule's
+  option), `--stop-after N` stops searching after N files.
+- Searches print their progress on stderr; Ctrl+C stops them (what was
+  found stays chosen) and asks whether to go on.
+
+### 8.7 Output
+
+Human output: one line per changed file (`old → new`, folders shortened
+from the left like the window), grouped by folder, colours for added and
+removed parts when the terminal has them, then the totals and notices.
+`--all` also lists unchanged files. `--json`: one object with `items`
+(path, newPath, status, problem, tags, match), `totals`, `notices`,
+`missing`; for `apply`/`undo` also `historyId` and `failed`. Messages
+follow the language; JSON keys are English and stable.
+
+### 8.8 Documentation and tests
+
+`--help` on every command, `renome-cli manual`, man pages
+(`renome-cli.1`, one per command), completions, a "Command line"
+chapter in the manual (pt/en/es, with its limitations), README and this
+section kept current. Integration tests run `renome-cli` on fixtures
+against the fake services (`RENOME_*_API`), in CI on Linux, Windows and
+macOS.
