@@ -1,6 +1,7 @@
 //! `renome-cli`: Renome from the terminal. The same rules, lookups,
 //! history and options as the window, with the same code (see SPEC §8).
 
+mod lookup;
 mod manage;
 mod out;
 mod rulespec;
@@ -192,6 +193,19 @@ pub fn cli() -> Command {
                 .long("all")
                 .help(t("argAll", &[]))
                 .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("choose")
+                .long("choose")
+                .help(t("argChoose", &[]))
+                .value_parser(["ask", "auto", "skip"]),
+        )
+        .arg(
+            Arg::new("pick")
+                .long("pick")
+                .help(t("argPick", &[]))
+                .action(ArgAction::Append)
+                .value_name("PATH=ID"),
         )
         .arg(
             Arg::new("csv")

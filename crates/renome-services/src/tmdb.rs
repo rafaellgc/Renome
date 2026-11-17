@@ -369,20 +369,20 @@ impl Client {
 
 #[derive(Deserialize)]
 pub struct LookupItem {
-    path: PathBuf,
+    pub path: PathBuf,
     /// File name without extension.
-    name: String,
+    pub name: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Lookup {
-    path: PathBuf,
-    guess: Guess,
-    candidates: Vec<Candidate>,
+    pub path: PathBuf,
+    pub guess: Guess,
+    pub candidates: Vec<Candidate>,
     /// The first candidate is a safe automatic choice.
-    auto: bool,
-    error: Option<String>,
+    pub auto: bool,
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -432,10 +432,10 @@ pub struct SetPart {
 /// Movies whose answer did not come are left out.
 #[derive(Serialize)]
 pub struct MovieSets {
-    of: Vec<(u64, Option<u64>)>,
-    sets: Vec<MovieSet>,
+    pub of: Vec<(u64, Option<u64>)>,
+    pub sets: Vec<MovieSet>,
     /// Each movie's template fields (genre, director…).
-    extras: Vec<(u64, renome_core::fields::Extra)>,
+    pub extras: Vec<(u64, renome_core::fields::Extra)>,
 }
 
 /// The movies' details (the same request the `.nfo` makes, so kept
@@ -736,8 +736,8 @@ pub fn group_shows(items: &[TvItem]) -> ShowGroups {
 #[derive(Deserialize)]
 pub struct SidecarItem {
     /// The renamed video.
-    path: PathBuf,
-    id: u64,
+    pub path: PathBuf,
+    pub id: u64,
 }
 
 #[derive(Serialize, Default)]

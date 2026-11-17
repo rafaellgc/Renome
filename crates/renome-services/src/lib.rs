@@ -7,6 +7,7 @@
 //! line prints them.
 
 pub mod acoustid;
+pub mod after;
 pub mod anilist;
 pub mod comicvine;
 pub mod discogs;

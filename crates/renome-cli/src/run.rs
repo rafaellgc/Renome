@@ -15,8 +15,8 @@ use crate::out;
 use crate::rulespec;
 use crate::text::{lang, t};
 
-/// Rule types that need a catalogue lookup (not in the command line yet).
-const LOOKUPS: [&str; 5] = ["movie", "series", "music", "book", "comic"];
+/// Rule types that need a catalogue lookup not in the command line yet.
+const LOOKUPS: [&str; 4] = ["series", "music", "book", "comic"];
 
 pub fn preview_or_apply(
     m: &ArgMatches,
@@ -102,7 +102,44 @@ pub fn preview_or_apply(
         renome_core::photos::read_all(&list, &|_, _| {});
     }
 
+    // The lookup rule: searched on the list as the rules above it name it,
+    // then the list made again with what was chosen.
+    let movie_rule = steps_json
+        .iter()
+        .find(|s| rulespec::kind_of(s) == "movie" && s.get("enabled") != Some(&Value::Bool(false)))
+        .map(|s| s["rule"].clone());
+    let mut movies = None;
+    if let Some(rule) = &movie_rule {
+        view.trash_ads = rule
+            .get("trashAds")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let first = renome_core::preview(&files, &steps, &overrides, &view);
+        let ask = ask_of(m)?;
+        let found = runtime()?.block_on(crate::lookup::movies(&first, settings, &ask))?;
+        view.movies = found.chosen.clone();
+        movies = Some(found);
+    }
     let preview = renome_core::preview(&files, &steps, &overrides, &view);
+    if let Some(found) = &movies {
+        let doubtful = preview
+            .items
+            .iter()
+            .filter(|i| {
+                let ext = Path::new(&i.original)
+                    .extension()
+                    .map(|e| e.to_string_lossy().to_lowercase())
+                    .unwrap_or_default();
+                renome_core::tmdb::is_video(&ext)
+                    && i.extra.is_none()
+                    && !i.release_junk
+                    && !found.chosen.contains_key(&i.path)
+            })
+            .count();
+        if doubtful > 0 {
+            out::note(&out::yellow(&t("leftDoubtful", &[("n", &doubtful)])));
+        }
+    }
     if let Some(e) = &preview.filter_error {
         return Err(format!("{}: {e}", t("invalidFilter", &[])));
     }
@@ -153,12 +190,29 @@ pub fn preview_or_apply(
         }
     }
     crate::manage::recover();
-    rename(&preview, m.get_flag("copy"))
+    let (exit, report) = rename(
+        &preview,
+        m.get_one::<PathBuf>("to").is_some(),
+        m.get_flag("copy"),
+    )?;
+    if let (Some(rule), Some(found)) = (&movie_rule, &movies) {
+        let history = renome_core::History::new(renome_services::history_dir());
+        for note in runtime()?.block_on(crate::lookup::after_movies(
+            rule, found, &preview, &report, &history,
+        )) {
+            out::note(&note);
+        }
+    }
+    Ok(exit)
 }
 
 /// Runs the plan: the renames, recorded in the History, with progress on
 /// stderr; what failed is listed.
-fn rename(preview: &Preview, copying: bool) -> Result<Exit, String> {
+fn rename(
+    preview: &Preview,
+    sent: bool,
+    copying: bool,
+) -> Result<(Exit, renome_core::ApplyReport), String> {
     let _lock = renome_services::RenameLock::take(|| out::note(&t("waitingWindow", &[])))?;
     let history = renome_core::History::new(renome_services::history_dir());
     let ops = preview.operations();
@@ -203,7 +257,7 @@ fn rename(preview: &Preview, copying: bool) -> Result<Exit, String> {
             json!({ "renamed": report.done.len(), "historyId": report.history_id, "failed": failed })
         );
     } else {
-        let key = match preview.items.iter().any(|i| i.dest.is_some()) {
+        let key = match sent {
             true if copying => "copiedN",
             true => "movedN",
             false => "renamedN",
@@ -218,11 +272,42 @@ fn rename(preview: &Preview, copying: bool) -> Result<Exit, String> {
             ));
         }
     }
-    Ok(if report.errors.is_empty() {
+    let exit = if report.errors.is_empty() {
         Exit::Done
     } else {
         Exit::Failed
-    })
+    };
+    Ok((exit, report))
+}
+
+/// A runtime for the online work.
+fn runtime() -> Result<tokio::runtime::Runtime, String> {
+    tokio::runtime::Runtime::new().map_err(|e| e.to_string())
+}
+
+/// `--choose` and `--pick`: ask in the terminal by default, when there is
+/// one.
+fn ask_of(m: &ArgMatches) -> Result<crate::lookup::Ask, String> {
+    use crate::lookup::Choose;
+    let choose = match m.get_one::<String>("choose").map(String::as_str) {
+        Some("auto") => Choose::Auto,
+        Some("skip") => Choose::Skip,
+        Some(_) => Choose::Ask,
+        None if std::io::stdin().is_terminal() && std::io::stderr().is_terminal() => Choose::Ask,
+        None => Choose::Auto,
+    };
+    let mut picks = HashMap::new();
+    for spec in m.get_many::<String>("pick").into_iter().flatten() {
+        let (path, id) = spec
+            .rsplit_once('=')
+            .ok_or_else(|| t("badPick", &[("spec", spec)]))?;
+        let path = Path::new(path);
+        picks.insert(
+            std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()),
+            id.to_string(),
+        );
+    }
+    Ok(crate::lookup::Ask { choose, picks })
 }
 
 /// `--name PATH=NAME`, by the file's full path.
@@ -286,7 +371,7 @@ fn show(p: &Preview, all: bool) {
     let mut last_dir: Option<&Path> = None;
     let mut unchanged = 0;
     for i in &p.items {
-        if i.status == Status::Unchanged && !all {
+        if i.status == Status::Unchanged && !all && !i.to_trash {
             unchanged += 1;
             continue;
         }
@@ -294,11 +379,21 @@ fn show(p: &Preview, all: bool) {
             println!("{}", out::bold(&out::path(&i.dir)));
             last_dir = Some(i.dir.as_path());
         }
-        let new = match &i.dest {
-            Some(dest) if dest != &i.dir => out::path(&dest.join(&i.new_name)),
+        // Into a folder of the rule's: as the Folder column shows it; sent
+        // elsewhere: the whole path.
+        let new = match (&i.folder, &i.dest) {
+            (Some(folder), _) if !folder.is_empty() => {
+                format!("{folder}{}{}", std::path::MAIN_SEPARATOR, i.new_name)
+            }
+            (_, Some(dest)) if dest != &i.dir => out::path(&dest.join(&i.new_name)),
             _ => i.new_name.clone(),
         };
         match i.status {
+            Status::Unchanged if i.to_trash => println!(
+                "  {}  {}",
+                out::dim(&i.original),
+                out::yellow(&format!("({})", t("junkRowTrash", &[])))
+            ),
             Status::Unchanged => println!("  {}", out::dim(&i.original)),
             Status::Ok => println!("  {} → {}", i.original, out::green(&new)),
             Status::Conflict => {

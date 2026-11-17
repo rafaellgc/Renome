@@ -876,6 +876,54 @@ const CLI: &[(&str, [&str; 3])] = &[
         ["{n} sem mudança", "{n} unchanged", "{n} sin cambio"],
     ),
     ("error", ["Erro", "Error", "Error"]),
+    (
+        "chooseKeys",
+        [
+            "Número (Enter = 1), s pula, /texto busca, q para, ? ajuda:",
+            "Number (Enter = 1), s skips, /text searches, q stops, ? help:",
+            "Número (Enter = 1), s omite, /texto busca, q para, ? ayuda:",
+        ],
+    ),
+    (
+        "chooseHelp",
+        [
+            "  1-9 escolhe · Enter escolhe o primeiro · s deixa este arquivo como está · /título 1999 busca de novo (ou cole um link ou ID) · q para tudo, sem renomear nada",
+            "  1-9 picks · Enter picks the first · s leaves this file as it is · /title 1999 searches again (or paste a link or ID) · q stops everything, renaming nothing",
+            "  1-9 elige · Enter elige el primero · s deja este archivo como está · /título 1999 busca de nuevo (o pegue un enlace o ID) · q lo para todo, sin renombrar nada",
+        ],
+    ),
+    (
+        "argChoose",
+        [
+            "Casos duvidosos das buscas: ask (pergunta no terminal), auto (só o que a janela escolheria sozinha), skip",
+            "Doubtful lookups: ask (in the terminal), auto (only what the window would pick by itself), skip",
+            "Casos dudosos de las búsquedas: ask (pregunta en el terminal), auto (solo lo que la ventana elegiría sola), skip",
+        ],
+    ),
+    (
+        "argPick",
+        [
+            "Força uma escolha: CAMINHO=ID (tmdb:603, um link ou um título)",
+            "Forces a match: PATH=ID (tmdb:603, a link or a title)",
+            "Fuerza una elección: RUTA=ID (tmdb:603, un enlace o un título)",
+        ],
+    ),
+    (
+        "badPick",
+        [
+            "Escolha mal escrita: {spec} (use CAMINHO=ID)",
+            "Badly written pick: {spec} (use PATH=ID)",
+            "Elección mal escrita: {spec} (use RUTA=ID)",
+        ],
+    ),
+    (
+        "leftDoubtful",
+        [
+            "{n} arquivo(s) com dúvida [ficou|ficaram] como [estava|estavam] (use --choose ask ou --pick).",
+            "{n} doubtful file(s) left as they were (use --choose ask or --pick).",
+            "{n} archivo(s) con duda [quedó|quedaron] como [estaba|estaban] (use --choose ask o --pick).",
+        ],
+    ),
 ];
 
 /// A text by its key: the command line's own, else the page's, in the
@@ -1040,6 +1088,30 @@ fn plurals(text: &str, vars: &[(&str, String)]) -> String {
         i += c.len_utf8();
     }
     out
+}
+
+/// An error from the shared code, `code` or `code: detail`, in words (as
+/// the page's `tError`).
+pub fn error_text(raw: &str) -> String {
+    let (code, detail) = raw.split_once(": ").unwrap_or((raw, ""));
+    if raw_has(code) {
+        let text = raw_text(code);
+        if detail.is_empty() {
+            text
+        } else {
+            format!("{text}: {detail}")
+        }
+    } else {
+        raw.to_string()
+    }
+}
+
+fn raw_has(key: &str) -> bool {
+    !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '.') && raw(key) != key
+}
+
+fn raw_text(key: &str) -> String {
+    raw(key)
 }
 
 #[cfg(test)]

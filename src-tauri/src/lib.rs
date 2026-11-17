@@ -18,6 +18,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 mod update;
 
+use renome_services::after::{TagReport, VideoTagOptions};
+
 use renome_services::{
     ANSWERS, acoustid, anilist, cache_days, cache_root, comicvine, discogs, drop_old_cache, gcd,
     mangadex, mangaupdates, mediaserver, metron, musicbrainz, openlibrary, read_settings_file,
@@ -994,19 +996,7 @@ fn tv_groups(items: Vec<tmdb::TvItem>) -> tmdb::ShowGroups {
 /// deletes them; without a rename (names already right), in an entry of
 /// their own.
 fn record_created(app: &AppHandle, history_id: Option<String>, report: &mut tmdb::SidecarReport) {
-    if report.created.is_empty() {
-        return;
-    }
-    let history = &app.state::<AppState>().history;
-    let saved = match history_id {
-        Some(id) => history.add_created(&id, &report.created),
-        None => history.record_files(&report.created).map(|_| ()),
-    };
-    if let Err(e) = saved {
-        report
-            .errors
-            .push((String::new(), format!("err.history: {e}")));
-    }
+    renome_services::after::record_created(&app.state::<AppState>().history, history_id, report);
 }
 
 /// Writes `.nfo` and images next to renamed movies and records them in the
@@ -1021,10 +1011,18 @@ async fn write_sidecars(
     fanart: bool,
     in_folder: bool,
 ) -> Result<tmdb::SidecarReport, String> {
-    let client = tmdb::Client::new(&key, &lang);
-    let mut report = tmdb::sidecars(&Gui(app.clone()), &client, items, fanart, in_folder).await;
-    record_created(&app, history_id, &mut report);
-    Ok(report)
+    let history = &app.state::<AppState>().history;
+    Ok(renome_services::after::movie_sidecars(
+        &Gui(app.clone()),
+        history,
+        &key,
+        &lang,
+        history_id,
+        items,
+        fanart,
+        in_folder,
+    )
+    .await)
 }
 
 /// Writes `.nfo` files and images for renamed episodes and their show, and
@@ -1291,16 +1289,6 @@ struct TagJob {
     /// Where the song is now (after renaming).
     path: PathBuf,
     song: renome_core::musicbrainz::SongMatch,
-}
-
-#[derive(Serialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct TagReport {
-    written: usize,
-    /// PDF pages drawn while converting comics (see `write_inside`).
-    drawn: usize,
-    /// File name and reason.
-    errors: Vec<(String, String)>,
 }
 
 /// Writes each song's release details into its tags (and, with `cover`,
@@ -2228,19 +2216,6 @@ async fn write_inside(
     Ok(report)
 }
 
-/// How details go inside videos: with the pictures, what came in the
-/// video taken out first, the tracks named.
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct VideoTagOptions {
-    #[serde(default)]
-    cover: bool,
-    #[serde(default)]
-    clean: bool,
-    #[serde(default)]
-    tracks: bool,
-}
-
 /// Writes each renamed movie's or episode's details (title, date,
 /// description, genres, cast and crew, show, season, episode and, with
 /// `options.cover`, the poster and the background) inside its video, MKV or MP4,
@@ -2256,103 +2231,17 @@ async fn write_video_tags(
     items: Vec<tmdb::VideoTagItem>,
     options: VideoTagOptions,
 ) -> Result<TagReport, String> {
-    use renome_core::videotags;
-    let VideoTagOptions {
-        cover,
-        clean,
-        tracks,
-    } = options;
-    let opt = videotags::Options { clean, tracks };
-    let state = app.state::<AppState>();
-    let mut report = TagReport::default();
-    let name = |p: &Path| {
-        p.file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default()
-    };
-    let items: Vec<tmdb::VideoTagItem> = items
-        .into_iter()
-        .filter(|i| {
-            let ok = videotags::writable(&i.path);
-            if !ok {
-                report
-                    .errors
-                    .push((name(&i.path), "videoUnsupported".into()));
-            }
-            ok
-        })
-        .collect();
-    if items.is_empty() {
-        return Ok(report);
-    }
-    let total = items.len();
-    let _ = app.emit(
-        "inside-progress",
-        serde_json::json!({ "done": 0, "total": total }),
-    );
-    let client = tmdb::Client::new(&key, &lang);
-    let metas = tmdb::video_meta(&client, &items, cover).await;
-    let own_entry = history_id.is_none();
-    let id = match history_id {
-        Some(id) => id,
-        None => state.history.record_files(&[])?,
-    };
-    let store = state.history.files_dir(&id)?;
-    let mut note = state.history.tagging(&id)?;
-    let stop = stop_signal(&app);
-    let mut backups = Vec::new();
-    for (done, (item, meta)) in items.into_iter().zip(metas).enumerate() {
-        if stop() {
-            break;
-        }
-        let meta = match meta {
-            Ok(m) => m,
-            Err(e) => {
-                report.errors.push((name(&item.path), e));
-                continue;
-            }
-        };
-        note.start(&item.path);
-        let (path, store) = (item.path.clone(), store.clone());
-        let r = tauri::async_runtime::spawn_blocking(move || {
-            videotags::write(&path, &meta, &opt, &store)
-        })
-        .await
-        .map_err(|e| e.to_string())
-        .and_then(|r| r);
-        match r {
-            Ok(Some(edit)) => {
-                let b = renome_core::tagwrite::Backup {
-                    video: Some(edit),
-                    ..renome_core::tagwrite::Backup::empty(&item.path)
-                };
-                note.done(&b);
-                backups.push(b);
-            }
-            Ok(None) => {}
-            Err(e) => report.errors.push((name(&item.path), e)),
-        }
-        let _ = app.emit(
-            "inside-progress",
-            serde_json::json!({ "done": done + 1, "total": total }),
-        );
-    }
-    report.written = backups.len();
-    let saved = if backups.is_empty() {
-        if own_entry {
-            let _ = state.history.delete(&id);
-        }
-        Ok(())
-    } else {
-        state.history.add_tags(&id, backups)
-    };
-    match saved {
-        Ok(()) => note.finish(),
-        Err(e) => report
-            .errors
-            .push((String::new(), format!("err.history: {e}"))),
-    }
-    Ok(report)
+    let history = &app.state::<AppState>().history;
+    renome_services::after::video_tags(
+        &Gui(app.clone()),
+        history,
+        &key,
+        &lang,
+        history_id,
+        items,
+        options,
+    )
+    .await
 }
 
 #[derive(serde::Deserialize)]
