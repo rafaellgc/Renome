@@ -16,7 +16,7 @@ use crate::rulespec;
 use crate::text::{lang, t};
 
 /// Rule types that need a catalogue lookup not in the command line yet.
-const LOOKUPS: [&str; 4] = ["series", "music", "book", "comic"];
+const LOOKUPS: [&str; 3] = ["music", "book", "comic"];
 
 pub fn preview_or_apply(
     m: &ArgMatches,
@@ -104,24 +104,40 @@ pub fn preview_or_apply(
 
     // The lookup rule: searched on the list as the rules above it name it,
     // then the list made again with what was chosen.
-    let movie_rule = steps_json
+    let lookup_rule = steps_json
         .iter()
-        .find(|s| rulespec::kind_of(s) == "movie" && s.get("enabled") != Some(&Value::Bool(false)))
+        .find(|s| {
+            matches!(rulespec::kind_of(s), "movie" | "series")
+                && s.get("enabled") != Some(&Value::Bool(false))
+        })
         .map(|s| s["rule"].clone());
-    let mut movies = None;
-    if let Some(rule) = &movie_rule {
+    let mut found = None;
+    if let Some(rule) = &lookup_rule {
         view.trash_ads = rule
             .get("trashAds")
             .and_then(Value::as_bool)
             .unwrap_or(false);
         let first = renome_core::preview(&files, &steps, &overrides, &view);
         let ask = ask_of(m)?;
-        let found = runtime()?.block_on(crate::lookup::movies(&first, settings, &ask))?;
-        view.movies = found.chosen.clone();
-        movies = Some(found);
+        let rt = runtime()?;
+        found = Some(match rule["type"].as_str() {
+            Some("movie") => {
+                let f = rt.block_on(crate::lookup::movies(&first, settings, &ask))?;
+                view.movies = f.chosen.clone();
+                crate::lookup::Found::Movies(f)
+            }
+            _ => {
+                let f = rt.block_on(crate::lookup::series(&first, rule, settings, &ask))?;
+                view.episodes = f.chosen.clone();
+                if f.loose > 0 {
+                    out::note(&t("tvLoose", &[("n", &f.loose)]));
+                }
+                crate::lookup::Found::Series(f)
+            }
+        });
     }
     let preview = renome_core::preview(&files, &steps, &overrides, &view);
-    if let Some(found) = &movies {
+    if let Some(found) = &found {
         let doubtful = preview
             .items
             .iter()
@@ -133,7 +149,7 @@ pub fn preview_or_apply(
                 renome_core::tmdb::is_video(&ext)
                     && i.extra.is_none()
                     && !i.release_junk
-                    && !found.chosen.contains_key(&i.path)
+                    && !found.has(&i.path)
             })
             .count();
         if doubtful > 0 {
@@ -195,11 +211,17 @@ pub fn preview_or_apply(
         m.get_one::<PathBuf>("to").is_some(),
         m.get_flag("copy"),
     )?;
-    if let (Some(rule), Some(found)) = (&movie_rule, &movies) {
+    if let (Some(rule), Some(found)) = (&lookup_rule, &found) {
         let history = renome_core::History::new(renome_services::history_dir());
-        for note in runtime()?.block_on(crate::lookup::after_movies(
-            rule, found, &preview, &report, &history,
-        )) {
+        let notes = match found {
+            crate::lookup::Found::Movies(f) => runtime()?.block_on(crate::lookup::after_movies(
+                rule, f, &preview, &report, &history,
+            )),
+            crate::lookup::Found::Series(f) => runtime()?.block_on(crate::lookup::after_series(
+                rule, f, &preview, &report, &history,
+            )),
+        };
+        for note in notes {
             out::note(&note);
         }
     }

@@ -909,6 +909,22 @@ const CLI: &[(&str, [&str; 3])] = &[
         ],
     ),
     (
+        "epTypeHint",
+        [
+            "digite S01E05 (ou 1x05, S01E05-06) para escolher outro",
+            "type S01E05 (or 1x05, S01E05-06) to pick another",
+            "escriba S01E05 (o 1x05, S01E05-06) para elegir otro",
+        ],
+    ),
+    (
+        "epTypeBad",
+        [
+            "{text} não é um episódio desta série (use S01E05)",
+            "{text} is not an episode of this show (use S01E05)",
+            "{text} no es un episodio de esta serie (use S01E05)",
+        ],
+    ),
+    (
         "badPick",
         [
             "Escolha mal escrita: {spec} (use CAMINHO=ID)",

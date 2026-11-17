@@ -455,3 +455,490 @@ pub async fn after_movies(
     }
     notes
 }
+
+/// What the person answered to a list of choices.
+enum Pick {
+    Number(usize),
+    Skip,
+    Stop,
+    Search(String),
+}
+
+/// A list of choices for one file, in the terminal: its name, what was
+/// looked for, the options (at most nine), and the keys.
+fn ask_one(title: &str, looked: &str, options: &[String]) -> Pick {
+    loop {
+        eprintln!();
+        eprintln!("{}", out::bold(title));
+        if !looked.is_empty() {
+            eprintln!("  {} {}", t("reviewGuess", &[]), looked);
+        }
+        if options.is_empty() {
+            eprintln!("  {}", out::dim(&t("reviewNoResults", &[])));
+        }
+        for (n, o) in options.iter().enumerate().take(9) {
+            eprintln!("  {}) {}", n + 1, o);
+        }
+        eprint!("{} ", t("chooseKeys", &[]));
+        let _ = std::io::stderr().flush();
+        let mut line = String::new();
+        if std::io::stdin().lock().read_line(&mut line).unwrap_or(0) == 0 {
+            return Pick::Stop;
+        }
+        match line.trim() {
+            "" if !options.is_empty() => return Pick::Number(0),
+            "" | "s" => return Pick::Skip,
+            "q" => return Pick::Stop,
+            "?" => eprintln!("{}", t("chooseHelp", &[])),
+            other => {
+                if let Ok(n) = other.parse::<usize>()
+                    && (1..=options.len().min(9)).contains(&n)
+                {
+                    return Pick::Number(n - 1);
+                }
+                let query = other
+                    .strip_prefix('/')
+                    .or_else(|| other.strip_prefix("l "))
+                    .unwrap_or(other);
+                return Pick::Search(query.trim().to_string());
+            }
+        }
+    }
+}
+
+fn candidate_line(c: &Candidate) -> String {
+    let year = c.year.map(|y| format!(" ({y})")).unwrap_or_default();
+    let original = if !c.original_title.is_empty() && c.original_title != c.title {
+        out::dim(&format!(" — {}", c.original_title))
+    } else {
+        String::new()
+    };
+    format!("{}{year}{original}", c.title)
+}
+
+/// What the series rule found and chose.
+pub struct Series {
+    pub key: String,
+    pub lang: String,
+    pub anime: bool,
+    pub chosen: HashMap<PathBuf, renome_core::tv::EpisodeMatch>,
+    /// Files whose show could not be told.
+    pub loose: usize,
+}
+
+/// An episode's template fields: the show's, its air date and its number
+/// counted from the first episode (specials apart).
+fn episode_extra(
+    show: &renome_core::tv::Show,
+    season: u16,
+    number: u16,
+) -> renome_core::fields::Extra {
+    let mut extra = show.extra.clone();
+    let ep = show
+        .episodes
+        .iter()
+        .find(|e| e.season == season && e.number == number);
+    if let Some(date) = ep.and_then(|e| e.air_date.clone()) {
+        extra.insert("date".into(), date);
+    }
+    if season > 0 && ep.is_some() {
+        let n = show
+            .episodes
+            .iter()
+            .filter(|e| {
+                e.season > 0 && (e.season < season || (e.season == season && e.number <= number))
+            })
+            .count();
+        extra.insert("absolute".into(), n.to_string());
+    }
+    extra
+}
+
+fn episode_match(
+    show: &renome_core::tv::Show,
+    keys: &[renome_core::tv::Key],
+) -> renome_core::tv::EpisodeMatch {
+    renome_core::tv::EpisodeMatch {
+        source: show.source.clone(),
+        id: show.id,
+        show: show.name.clone(),
+        original_show: show.original_name.clone(),
+        year: show.year,
+        season: keys[0].0,
+        episodes: keys.iter().map(|k| k.1).collect(),
+        titles: keys
+            .iter()
+            .map(|k| {
+                show.episodes
+                    .iter()
+                    .find(|e| e.season == k.0 && e.number == k.1)
+                    .map(|e| e.name.clone())
+                    .unwrap_or_default()
+            })
+            .collect(),
+        extra: episode_extra(show, keys[0].0, keys[0].1),
+    }
+}
+
+/// `S01E05`, `1x05`, `S01E05-E06` read as episode keys of the show.
+fn typed_episodes(text: &str, show: &renome_core::tv::Show) -> Option<Vec<renome_core::tv::Key>> {
+    let re = regex_lite(text)?;
+    let (season, first, last) = re;
+    let keys: Vec<renome_core::tv::Key> = (first..=last).map(|n| (season, n)).collect();
+    keys.iter()
+        .all(|k| {
+            show.episodes
+                .iter()
+                .any(|e| e.season == k.0 && e.number == k.1)
+        })
+        .then_some(keys)
+}
+
+/// Season and episode range from `S01E05`, `S1E5-E6`, `1x05`, `1x05-06`.
+fn regex_lite(text: &str) -> Option<(u16, u16, u16)> {
+    let t = text.trim().to_lowercase();
+    let (season, rest) = if let Some(r) = t.strip_prefix('s') {
+        let (s, r) = r.split_once('e')?;
+        (s.parse().ok()?, r.to_string())
+    } else {
+        let (s, r) = t.split_once('x')?;
+        (s.parse().ok()?, r.to_string())
+    };
+    let (a, b) = match rest.split_once('-') {
+        Some((a, b)) => (a.parse().ok()?, b.trim_start_matches('e').parse().ok()?),
+        None => {
+            let a: u16 = rest.parse().ok()?;
+            (a, a)
+        }
+    };
+    (b >= a).then_some((season, a, b))
+}
+
+/// Looks up the episodes of the list's videos and subtitles: the show
+/// typed in the rule (or each show the names and folders tell), asked
+/// when unsure, then each file's episode, the doubtful ones asked.
+pub async fn series(
+    preview: &Preview,
+    rule: &Value,
+    settings: Option<&Value>,
+    ask: &Ask,
+) -> Result<Series, String> {
+    let anime = rule.get("source").and_then(Value::as_str) == Some("anilist");
+    let (key, tmdb_lang) = if anime {
+        (String::new(), String::new())
+    } else {
+        tmdb_access(settings)?
+    };
+    let client = tmdb::Client::new(&key, &tmdb_lang);
+    let anilist = renome_services::anilist::Client::default();
+    let typed = rule
+        .get("show")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let all: Vec<tmdb::TvItem> = preview
+        .items
+        .iter()
+        .filter(|i| {
+            let ext = Path::new(&i.original)
+                .extension()
+                .map(|e| e.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            !i.is_dir && renome_core::tmdb::is_screen(&ext)
+        })
+        .map(|i| tmdb::TvItem {
+            path: i.path.clone(),
+            name: i.lookup_name.clone().unwrap_or_else(|| i.original.clone()),
+            is_dir: false,
+        })
+        .collect();
+    let mut out_series = Series {
+        key: key.clone(),
+        lang: tmdb_lang.clone(),
+        anime,
+        chosen: HashMap::new(),
+        loose: 0,
+    };
+    if all.is_empty() {
+        return Ok(out_series);
+    }
+    let by_path: HashMap<PathBuf, &tmdb::TvItem> =
+        all.iter().map(|i| (i.path.clone(), i)).collect();
+    let mut groups: Vec<Vec<tmdb::TvItem>> = vec![all.clone()];
+    if typed.is_empty() {
+        let g = tmdb::group_shows(&all);
+        out_series.loose = g.loose.len();
+        if !g.groups.is_empty() {
+            groups = g
+                .groups
+                .into_iter()
+                .map(|list| {
+                    list.into_iter()
+                        .filter_map(|p| by_path.get(&p).map(|i| (*i).clone()))
+                        .collect()
+                })
+                .collect();
+        }
+    }
+    let mut picked_shows: HashMap<String, Candidate> = HashMap::new();
+    for group in groups {
+        if let Some(first) = group.first()
+            && let Some(pick) = ask.picks.get(&first.path)
+        {
+            // A show forced for the first file of the group: the whole group.
+            let _ = pick;
+        }
+        let search = if anime {
+            anilist.anime_search(&typed, &group).await
+        } else {
+            tmdb::search_show(&client, &typed, &group).await
+        };
+        let res = match search {
+            Ok(r) => r,
+            Err(e) if e == "tvNoShow" && typed.is_empty() => continue,
+            Err(e) => return Err(crate::text::error_text(&e)),
+        };
+        let show = match picked_shows.get(&res.query) {
+            Some(c) => Some(c.clone()),
+            None => {
+                let c = if res.auto {
+                    res.candidates.first().cloned()
+                } else {
+                    choose_show(&client, &anilist, anime, &res.query, res.candidates, ask).await?
+                };
+                if let Some(c) = &c {
+                    picked_shows.insert(res.query.clone(), c.clone());
+                }
+                c
+            }
+        };
+        let Some(show) = show else { continue };
+        let typed_or = if typed.is_empty() {
+            res.query.clone()
+        } else {
+            typed.clone()
+        };
+        let look = if anime {
+            anilist.anime_lookup(show.id, &group, &typed_or).await
+        } else {
+            tmdb::lookup_episodes(&client, show.id, group, &typed_or).await
+        }
+        .map_err(|e| crate::text::error_text(&e))?;
+        let mut answered: HashMap<String, Option<Vec<renome_core::tv::Key>>> = HashMap::new();
+        for f in look.files {
+            let found = f.found;
+            let keys = if let Some(pick) = ask.picks.get(&f.path) {
+                typed_episodes(pick, &look.show)
+            } else if !found.choice.is_empty() {
+                Some(found.choice.clone())
+            } else if ask.choose == Choose::Ask && std::io::stdin().is_terminal() {
+                let guess = serde_json::to_string(&found.guess).unwrap_or_default();
+                match answered.get(&guess) {
+                    Some(k) => k.clone(),
+                    None => {
+                        let k = choose_episode(&f.path, &look.show, &found)?;
+                        answered.insert(guess, k.clone());
+                        k
+                    }
+                }
+            } else {
+                None
+            };
+            if let Some(keys) = keys.filter(|k| !k.is_empty()) {
+                out_series
+                    .chosen
+                    .insert(f.path, episode_match(&look.show, &keys));
+            }
+        }
+    }
+    Ok(out_series)
+}
+
+/// The show picker, in the terminal.
+async fn choose_show(
+    client: &tmdb::Client,
+    anilist: &renome_services::anilist::Client,
+    anime: bool,
+    query: &str,
+    mut candidates: Vec<Candidate>,
+    ask: &Ask,
+) -> Result<Option<Candidate>, String> {
+    if ask.choose != Choose::Ask || !std::io::stdin().is_terminal() {
+        return Ok(None);
+    }
+    loop {
+        let lines: Vec<String> = candidates.iter().map(candidate_line).collect();
+        match ask_one(&t("showPickTitle", &[]), query, &lines) {
+            Pick::Number(n) => return Ok(Some(candidates.remove(n))),
+            Pick::Skip => return Ok(None),
+            Pick::Stop => return Err(t("searchStopped", &[])),
+            Pick::Search(q) => {
+                let found = if anime {
+                    anilist.anime_search(&q, &[]).await
+                } else {
+                    tmdb::search_show(client, &q, &[]).await
+                };
+                match found {
+                    Ok(r) => candidates = r.candidates,
+                    Err(e) => out::error(&crate::text::error_text(&e)),
+                }
+            }
+        }
+    }
+}
+
+/// A file's episode, in the terminal: the likely ones, or one typed.
+fn choose_episode(
+    path: &Path,
+    show: &renome_core::tv::Show,
+    found: &renome_core::tv::EpisodeLookup,
+) -> Result<Option<Vec<renome_core::tv::Key>>, String> {
+    let label = |keys: &Vec<renome_core::tv::Key>| {
+        keys.iter()
+            .map(|k| {
+                let name = show
+                    .episodes
+                    .iter()
+                    .find(|e| e.season == k.0 && e.number == k.1)
+                    .map(|e| e.name.clone())
+                    .unwrap_or_default();
+                format!("S{:02}E{:02} · {name}", k.0, k.1)
+            })
+            .collect::<Vec<_>>()
+            .join(" + ")
+    };
+    let options: Vec<String> = found.alternatives.iter().map(label).collect();
+    let title = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let looked = format!("{} — {}", show.name, t("epTypeHint", &[]));
+    loop {
+        match ask_one(&title, &looked, &options) {
+            Pick::Number(n) => return Ok(Some(found.alternatives[n].clone())),
+            Pick::Skip => return Ok(None),
+            Pick::Stop => return Err(t("searchStopped", &[])),
+            Pick::Search(text) => match typed_episodes(&text, show) {
+                Some(keys) => return Ok(Some(keys)),
+                None => out::error(&t("epTypeBad", &[("text", &text)])),
+            },
+        }
+    }
+}
+
+/// After the renames: each episode's `.nfo` and images (TMDB shows), and
+/// the details inside the videos.
+pub async fn after_series(
+    rule: &Value,
+    series: &Series,
+    preview: &Preview,
+    report: &renome_core::ApplyReport,
+    history: &renome_core::History,
+) -> Vec<String> {
+    let mut notes = Vec::new();
+    let on = |k: &str| rule.get(k).and_then(Value::as_bool).unwrap_or(false);
+    let recorded = report.done.is_empty() || report.history_id.is_some();
+    if series.anime || !recorded {
+        return notes;
+    }
+    let video = |p: &Path| {
+        p.extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .is_some_and(|e| renome_core::tmdb::is_video(&e))
+    };
+    let mut pairs: Vec<(PathBuf, PathBuf)> = report
+        .done
+        .iter()
+        .map(|op| (op.from.clone(), op.to.clone()))
+        .collect();
+    pairs.extend(
+        preview
+            .items
+            .iter()
+            .filter(|i| i.status == renome_core::Status::Unchanged)
+            .map(|i| (i.path.clone(), i.path.clone())),
+    );
+    let found: Vec<(PathBuf, &renome_core::tv::EpisodeMatch)> = pairs
+        .iter()
+        .filter(|(from, to)| video(to) && series.chosen.contains_key(from))
+        .map(|(from, to)| (to.clone(), &series.chosen[from]))
+        .collect();
+    if on("nfo") && !found.is_empty() {
+        let items = found
+            .iter()
+            .map(|(path, m)| tmdb::TvSidecarItem {
+                path: path.clone(),
+                id: m.id,
+                season: m.season,
+                episodes: m.episodes.clone(),
+                titles: m.titles.clone(),
+            })
+            .collect();
+        let client = tmdb::Client::new(&series.key, &series.lang);
+        let mut r = tmdb::tv_sidecars(&Cli, &client, items, on("backdrop"), on("folders")).await;
+        renome_services::after::record_created(history, report.history_id.clone(), &mut r);
+        if !r.created.is_empty() {
+            notes.push(t("sidecarsN", &[("n", &r.created.len())]));
+        }
+        for (file, why) in r.errors {
+            out::error(&format!("{file}: {}", crate::text::error_text(&why)));
+        }
+    }
+    if on("videoTags") && !found.is_empty() {
+        let items = found
+            .iter()
+            .filter(|(p, _)| renome_core::videotags::writable(p))
+            .map(|(path, m)| tmdb::VideoTagItem {
+                path: path.clone(),
+                movie: None,
+                show: Some(m.id),
+                season: m.season,
+                episodes: m.episodes.clone(),
+            })
+            .collect();
+        let options = renome_services::after::VideoTagOptions {
+            cover: true,
+            clean: on("videoClean"),
+            tracks: on("videoTracks"),
+        };
+        match renome_services::after::video_tags(
+            &Cli,
+            history,
+            &series.key,
+            &series.lang,
+            report.history_id.clone(),
+            items,
+            options,
+        )
+        .await
+        {
+            Ok(r) => {
+                if r.written > 0 {
+                    notes.push(t("insideN", &[("n", &r.written)]));
+                }
+                for (file, why) in r.errors {
+                    out::error(&format!("{file}: {}", crate::text::error_text(&why)));
+                }
+            }
+            Err(e) => out::error(&crate::text::error_text(&e)),
+        }
+    }
+    notes
+}
+
+/// What a lookup rule found and chose.
+pub enum Found {
+    Movies(Movies),
+    Series(Series),
+}
+
+impl Found {
+    /// Whether this file was matched.
+    pub fn has(&self, path: &Path) -> bool {
+        match self {
+            Found::Movies(m) => m.chosen.contains_key(path),
+            Found::Series(s) => s.chosen.contains_key(path),
+        }
+    }
+}

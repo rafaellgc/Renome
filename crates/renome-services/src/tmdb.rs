@@ -563,13 +563,13 @@ pub async fn lookup(host: &dyn Host, client: &Client, items: Vec<LookupItem>) ->
         .collect()
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TvItem {
-    path: PathBuf,
+    pub path: PathBuf,
     /// File name, with extension.
-    name: String,
-    is_dir: bool,
+    pub name: String,
+    pub is_dir: bool,
 }
 
 impl TvItem {
@@ -658,15 +658,15 @@ pub async fn search_show(
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TvFile {
-    path: PathBuf,
+    pub path: PathBuf,
     #[serde(flatten)]
-    found: EpisodeLookup,
+    pub found: EpisodeLookup,
 }
 
 #[derive(Serialize)]
 pub struct TvLookup {
     pub show: Show,
-    files: Vec<TvFile>,
+    pub files: Vec<TvFile>,
 }
 
 /// Fetches the show and finds each file's episode; files named after
@@ -714,9 +714,9 @@ pub fn files_of(show: Show, items: &[TvItem], typed: &str) -> TvLookup {
 #[derive(Serialize)]
 pub struct ShowGroups {
     /// The files of each show.
-    groups: Vec<Vec<PathBuf>>,
+    pub groups: Vec<Vec<PathBuf>>,
     /// Files whose show cannot be told.
-    loose: Vec<PathBuf>,
+    pub loose: Vec<PathBuf>,
 }
 
 /// The files grouped by the show their names (or folders) say.
@@ -844,13 +844,13 @@ pub async fn sidecars(
 #[derive(Deserialize)]
 pub struct TvSidecarItem {
     /// The renamed video.
-    path: PathBuf,
+    pub path: PathBuf,
     /// The show.
-    id: u64,
-    season: u16,
-    episodes: Vec<u16>,
+    pub id: u64,
+    pub season: u16,
+    pub episodes: Vec<u16>,
     /// The titles used in the name.
-    titles: Vec<String>,
+    pub titles: Vec<String>,
 }
 
 /// What goes into a metadata file.
