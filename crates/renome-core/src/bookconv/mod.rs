@@ -411,7 +411,23 @@ pub fn source_of(path: &Path) -> Option<Source> {
         "html" | "htm" | "xhtml" => Some(Source::Html),
         "fb2" => Some(Source::Fb2),
         "djvu" | "djv" | "kfx" => Some(Source::Other),
+        // A text already named for what it is converted to (`.epub`):
+        // known by its content, so it converts and can get its own
+        // extension back.
+        _ if looks_like_text(head) => Some(Source::Txt),
         _ => None,
+    }
+}
+
+/// Text: no zero bytes, and UTF-8 (a character cut at the end of the
+/// sample aside).
+fn looks_like_text(head: &[u8]) -> bool {
+    if head.is_empty() || head.contains(&0) {
+        return false;
+    }
+    match std::str::from_utf8(head) {
+        Ok(_) => true,
+        Err(e) => e.error_len().is_none() && e.valid_up_to() + 4 > head.len(),
     }
 }
 
@@ -968,6 +984,28 @@ fn sample_text(book: &Book) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn text_named_for_its_target_converts_and_gets_its_name_back() {
+        let d = tempfile::tempdir().unwrap();
+        // As the rule leaves it before converting: named `.epub`.
+        let p = d.path().join("Um Texto.epub");
+        std::fs::write(
+            &p,
+            "Capítulo 1\n\nEra uma vez.\n\nCapítulo 2\n\nE continuou.\n",
+        )
+        .unwrap();
+        assert!(matches!(source_of(&p), Some(Source::Txt)));
+        assert_eq!(beside(&p).unwrap(), d.path().join("Um Texto.txt"));
+        let done = convert(&p, Target::Epub, Original::Keep, None).unwrap();
+        assert!(std::fs::read(&p).unwrap().starts_with(b"PK"));
+        assert!(d.path().join("Um Texto.txt").exists());
+        drop(done);
+        // A binary is not taken for text.
+        let b = d.path().join("x.epub");
+        std::fs::write(&b, [0u8, 1, 2, 3, 0xff]).unwrap();
+        assert!(source_of(&b).is_none());
+    }
     use super::*;
 
     const FB2: &str = r#"<?xml version="1.0" encoding="utf-8"?><FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0"><description><title-info><author><first-name>Lia</first-name><last-name>Marta</last-name></author><book-title>Terra Seca</book-title><lang>pt</lang></title-info></description><body><section><title><p>Um</p></title><p>Texto.</p></section></body></FictionBook>"#;
