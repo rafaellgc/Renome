@@ -1020,8 +1020,8 @@ ${ex("Serie.S01E02.720p.WEB.mkv", "Serie S01E02.mkv")}
   <li><b>Linux, pacote .deb ou .rpm</b>: <code>renome-cli</code>, já no caminho do sistema.</li>
   <li><b>AppImage</b>: <code>./Renome.AppImage cli …</code> (a palavra <code>cli</code> antes do comando).</li>
   <li><b>Flatpak</b>: <code>flatpak run --command=renome-cli io.github.rafaellgc.Renome …</code></li>
-  <li><b>Windows</b>: <code>renome-cli.exe</code>, na pasta onde o Renome foi instalado.</li>
-  <li><b>macOS</b>: <code>/Applications/Renome.app/Contents/MacOS/renome-cli</code>.</li>
+  <li><b>Windows</b>: <code>renome-cli.exe</code>, na pasta onde o Renome foi instalado (normalmente <code>%LOCALAPPDATA%\\Renome</code>). Para chamá-lo de qualquer pasta, acrescente essa pasta ao <code>PATH</code> do usuário, uma vez, no PowerShell: <code>[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";$env:LOCALAPPDATA\\Renome", "User")</code> (vale para os terminais abertos depois).</li>
+  <li><b>macOS</b>: <code>/Applications/Renome.app/Contents/MacOS/renome-cli</code>. Para chamá-lo só pelo nome: <code>sudo mkdir -p /usr/local/bin &amp;&amp; sudo ln -s /Applications/Renome.app/Contents/MacOS/renome-cli /usr/local/bin/renome-cli</code>.</li>
 </ul>
 <h4>Ver antes, renomear depois</h4>
 <p><code>renome-cli preview PASTAS -r REGRA</code> mostra o nome atual e o novo, sem mudar nada. <code>renome-cli apply …</code>, com os mesmos argumentos, mostra a lista e pergunta antes de renomear (<code>--yes</code> não pergunta). As regras vêm na ordem em que são escritas:</p>
@@ -1036,6 +1036,7 @@ ${ex("Serie.S01E02.720p.WEB.mkv", "Serie S01E02.mkv")}
 <p>Também como na janela: <code>--filter</code> (o filtro da lista), <code>--sort</code> e <code>--desc</code> (a ordem, que a numeração segue), <code>--to PASTA</code> (mover) e <code>--copy</code> (copiar), <code>--name CAMINHO=NOME</code> (o nome digitado à mão), <code>--folders</code> (renomear as próprias pastas), <code>--hidden</code>, <code>--all</code> (lista também os que não mudam) e <code>--csv ARQUIVO</code> (Exportar lista).</p>
 <h4>Buscas online</h4>
 <p>As regras de filme, série, música, livro e quadrinho buscam nos mesmos catálogos e escolhem sozinhas o que a janela escolheria. Nos casos em dúvida, <code>--choose</code> decide: <code>ask</code> (o padrão no terminal) mostra os candidatos numerados e espera o número; <code>auto</code> fica só com o que é certo; <code>skip</code> nem busca os duvidosos. <code>--pick CAMINHO=ID</code> força uma escolha (<code>tmdb:603</code>, um link do catálogo ou um título). <code>--edit CAMINHO:CAMPO=VALOR,…</code> faz o que a janela <b>Editar os dados</b> faz, por exemplo <code>--edit "livro.epub:title=O Título,authors=Fulano; Beltrano"</code> ou, na regra de foto, <code>--edit "IMG_1.jpg:date=2018-03-27 14:30"</code>; o <code>--help</code> lista os campos de cada regra. <code>--missing</code> lista o que falta (episódios, edições, faixas, filmes da coleção, volumes), como as linhas apagadas da janela.</p>
+<p><kbd>Ctrl</kbd>+<kbd>C</kbd> durante as buscas faz o papel do botão Parar: o que já foi achado fica escolhido, e o programa pergunta se continua com isso. Durante a renomeação, para no ponto em que está: o que já foi renomeado fica no Histórico (e pode ser desfeito), e as etapas seguintes não são feitas. Um segundo <kbd>Ctrl</kbd>+<kbd>C</kbd>, ou um enquanto uma pergunta espera resposta, encerra na hora.</p>
 <p>Depois de renomear, o resto acontece como na janela: tags e capas gravadas, <code>.nfo</code>, listas de reprodução, legendas baixadas, livros convertidos e os servidores de mídia avisados (<code>--no-server</code> não avisa).</p>
 <h4>Os outros comandos</h4>
 <table>
@@ -1043,7 +1044,7 @@ ${ex("Serie.S01E02.720p.WEB.mkv", "Serie S01E02.mkv")}
   <tr><td><code>history</code></td><td>lista, mostra ou apaga entradas do Histórico</td></tr>
   <tr><td><code>sets</code></td><td>lista, mostra, salva, exporta, importa, renomeia e apaga conjuntos</td></tr>
   <tr><td><code>options</code></td><td>lê e muda as Opções (<code>options set lang en</code>)</td></tr>
-  <tr><td><code>keys</code></td><td>guarda as chaves dos serviços no cofre de senhas, sem mostrá-las na tela</td></tr>
+  <tr><td><code>keys</code></td><td>guarda as chaves dos serviços no cofre de senhas, sem mostrá-las na tela; <code>keys test tmdb</code> testa, como o botão Testar</td></tr>
   <tr><td><code>servers</code></td><td>servidores de mídia: adicionar, ler as bibliotecas, parear pastas, testar</td></tr>
   <tr><td><code>duplicates PASTAS</code></td><td>cópias idênticas, a mesma música ou obra repetida (a melhor marcada), <code>--similar</code> fotos parecidas; <code>--trash</code> manda para a Lixeira</td></tr>
   <tr><td><code>update</code></td><td>procura a versão nova; <code>update install</code> instala (AppImage, Windows, macOS)</td></tr>
@@ -1053,7 +1054,7 @@ ${ex("Serie.S01E02.720p.WEB.mkv", "Serie S01E02.mkv")}
 </table>
 <p>Cada comando tem <code>--help</code>. As mensagens seguem o idioma das Opções; <code>--lang en</code> troca só nesta vez.</p>
 <h4>Em scripts</h4>
-<p><code>--json</code> escreve o resultado em JSON (nomes de campos em inglês, que não mudam), <code>--quiet</code> só os erros, <code>--color never</code> sem cores (também com a variável <code>NO_COLOR</code>). O código de saída é <code>0</code> quando deu certo, <code>1</code> quando algum arquivo falhou, <code>2</code> quando sobraram casos em dúvida sem escolha e <code>3</code> para um comando ou regra errados. Sem terminal, <code>apply</code> pede <code>--yes</code>, e sem <code>--choose</code> os casos em dúvida são tratados como <code>auto</code>.</p>
+<p><code>--json</code> escreve o resultado em JSON (nomes de campos em inglês, que não mudam), <code>--quiet</code> só os erros, <code>--color never</code> sem cores (também com a variável <code>NO_COLOR</code>). O código de saída é <code>0</code> quando deu certo, <code>1</code> quando algum arquivo falhou, <code>2</code> quando sobraram casos em dúvida sem escolha e <code>3</code> para um comando ou regra errados, <code>130</code> quando parado com <kbd>Ctrl</kbd>+<kbd>C</kbd>. Sem terminal, <code>apply</code> pede <code>--yes</code>, e sem <code>--choose</code> os casos em dúvida são tratados como <code>auto</code>.</p>
 <p><b>Limitações:</b> converter um livro para <b>PDF</b> precisa da janela (é ela que imprime as páginas); pelo terminal, a conversão para PDF avisa e o livro fica como está. A janela e o terminal nunca renomeiam ao mesmo tempo: um espera o outro terminar. Mas uma Opção mudada pelo terminal enquanto a janela está aberta pode ser desfeita quando a janela fechar, porque ela grava as Opções que tem; mude as Opções com a janela fechada. As escolhas pelo terminal mostram texto, não as capas que a janela compara.</p>`,
   },
 ];
