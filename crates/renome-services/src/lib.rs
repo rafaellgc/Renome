@@ -76,10 +76,21 @@ impl Host for Quiet {
 /// The options file (`settings.json`), shared by the window and the
 /// command line.
 pub fn settings_path() -> PathBuf {
+    if let Some(dir) = own_dir() {
+        return dir.join("config").join("settings.json");
+    }
     dirs::config_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("renome")
         .join("settings.json")
+}
+
+/// `RENOME_DIR`: options, History and cache all inside this folder
+/// instead of the system's places (tests; a profile kept apart).
+fn own_dir() -> Option<PathBuf> {
+    std::env::var_os("RENOME_DIR")
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
 }
 
 /// The options as saved, if they can be read, with the remembered rules
@@ -112,6 +123,9 @@ pub fn write_settings_file(settings: &Value) -> Result<(), String> {
 
 /// Where the History is kept.
 pub fn history_dir() -> PathBuf {
+    if let Some(dir) = own_dir() {
+        return dir.join("data").join("history");
+    }
     dirs::data_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("renome")
@@ -132,6 +146,9 @@ pub static ANSWERS: std::sync::LazyLock<renome_core::answers::Store> =
 /// the cache would take the program with it. The app's own data folder is
 /// used instead, which the uninstaller offers to delete.
 pub fn cache_root() -> PathBuf {
+    if let Some(dir) = own_dir() {
+        return dir.join("cache");
+    }
     let base = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
     if cfg!(windows) {
         base.join("io.github.rafaellgc.Renome").join("cache")
