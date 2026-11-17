@@ -2437,7 +2437,8 @@ On macOS, ⌘ replaces Ctrl. The list is also shown in Options.
 - Counts in texts are written with their plural ending in brackets
   (`{n} arquivo(s)`); `t()` resolves them by the number before them
   (`1 arquivo`, `3 arquivos`), with the irregular words listed in
-  `i18n.ts`.
+  `i18n.ts`; words whose plural is not an ending, and the verbs that agree
+  with the count, as `[singular|plural]` (`que já [tem|têm]`).
 - Every window (`.modal`) uses the `dialog` action (`src/lib/modal.ts`):
   role dialog, focus on open (autofocus or default button, else first
   field, else first button other than close), Tab kept inside, focus
@@ -2538,8 +2539,10 @@ may be asked about the Keychain again with each version.
   `TAURI_SIGNING_PRIVATE_KEY`/`_PASSWORD`, and `createUpdaterArtifacts`
   makes the `.sig` files and `latest.json`). `update::way`: Flatpak
   (`FLATPAK_ID`) never asks; AppImage (`APPIMAGE`), Windows and macOS
-  install themselves (`update_install`: download with `update-progress`
-  events, signature check, install, restart; Windows installer passive);
+  install themselves (`update_install`: the update the check found, asked
+  again only when none is kept; download with `update-progress` events,
+  the footer without a percentage until the first bytes; signature check,
+  install, restart; Windows installer passive);
   `.deb`/`.rpm` only show the footer button, which opens the release page.
   A bad signature is `updateSignature` and nothing is installed.
 - Media servers (tab "Media server"; `servers`: id, kind jellyfin/plex,
