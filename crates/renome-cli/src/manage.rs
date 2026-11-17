@@ -56,6 +56,18 @@ pub fn undo(m: &ArgMatches) -> Result<Exit, String> {
         stop: &|| false,
     };
     let report = h.undo_with(&id, &hooks, &|_, _| {})?;
+    let server_notes = if m.get_flag("no-server") {
+        Vec::new()
+    } else {
+        tokio::runtime::Runtime::new()
+            .map(|rt| {
+                rt.block_on(crate::servers::tell(
+                    renome_services::read_settings_file().as_ref(),
+                    &report.done,
+                ))
+            })
+            .unwrap_or_default()
+    };
     if out::json() {
         let failed: Vec<Value> = report
             .errors
@@ -68,6 +80,9 @@ pub fn undo(m: &ArgMatches) -> Result<Exit, String> {
         );
     } else {
         out::note(&out::green(&t("undoneN", &[("n", &report.done.len())])));
+        for note in server_notes {
+            out::note(&note);
+        }
         for e in &report.errors {
             out::error(&format!(
                 "{} → {}: {}",

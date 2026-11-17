@@ -240,6 +240,11 @@ pub fn preview_or_apply(
             m.get_flag("copy"),
         )?
     };
+    if !m.get_flag("no-server") {
+        for note in runtime()?.block_on(crate::servers::tell(settings, &report.done)) {
+            out::note(&note);
+        }
+    }
     if let Some(rule) = steps_json
         .iter()
         .find(|s| {

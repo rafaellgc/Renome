@@ -7,6 +7,7 @@ mod missing;
 mod out;
 mod rulespec;
 mod run;
+mod servers;
 mod text;
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
@@ -73,6 +74,9 @@ fn main() -> ExitCode {
         Some(("options", m)) => manage::options(m, settings),
         Some(("keys", m)) => manage::keys(m),
         Some(("cache", m)) => manage::cache(m),
+        Some(("servers", m)) => tokio::runtime::Runtime::new()
+            .map_err(|e| e.to_string())
+            .and_then(|rt| servers::command(m, &rt)),
         Some(("completions", m)) => {
             let shell = *m.get_one::<clap_complete::Shell>("shell").unwrap();
             clap_complete::generate(shell, &mut cli(), "renome-cli", &mut std::io::stdout());
@@ -256,6 +260,13 @@ pub fn cli() -> Command {
                 .default_value("auto"),
         )
         .arg(
+            Arg::new("no-server")
+                .long("no-server")
+                .global(true)
+                .help(t("argNoServer", &[]))
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
             Arg::new("quiet")
                 .short('q')
                 .long("quiet")
@@ -407,6 +418,65 @@ pub fn cli() -> Command {
                         .arg(key_name()),
                 ),
         )
+        .subcommand({
+            let id = || Arg::new("id").help(t("argServerId", &[])).required(true);
+            let server_path = || {
+                Arg::new("server")
+                    .help(t("argServerPath", &[]))
+                    .required(true)
+            };
+            Command::new("servers")
+                .about(t("cmdServers", &[]))
+                .subcommand(Command::new("list").about(t("srvList", &[])))
+                .subcommand(
+                    Command::new("add")
+                        .about(t("srvAdd", &[]))
+                        .arg(
+                            Arg::new("kind")
+                                .help(t("argServerKind", &[]))
+                                .required(true)
+                                .value_parser(["jellyfin", "plex"]),
+                        )
+                        .arg(Arg::new("url").help(t("argServerUrl", &[])).required(true))
+                        .arg(
+                            Arg::new("stdin")
+                                .long("stdin")
+                                .help(t("argStdin", &[]))
+                                .action(ArgAction::SetTrue),
+                        ),
+                )
+                .subcommand(Command::new("remove").about(t("srvRemove", &[])).arg(id()))
+                .subcommand(
+                    Command::new("libraries")
+                        .about(t("srvLibraries", &[]))
+                        .arg(id()),
+                )
+                .subcommand(
+                    Command::new("pair")
+                        .about(t("srvPair", &[]))
+                        .arg(id())
+                        .arg(server_path())
+                        .arg(
+                            Arg::new("local")
+                                .help(t("argLocalPath", &[]))
+                                .required(true)
+                                .value_hint(clap::ValueHint::DirPath),
+                        ),
+                )
+                .subcommand(
+                    Command::new("on")
+                        .about(t("srvOn", &[]))
+                        .arg(id())
+                        .arg(server_path()),
+                )
+                .subcommand(
+                    Command::new("off")
+                        .about(t("srvOff", &[]))
+                        .arg(id())
+                        .arg(server_path()),
+                )
+                .subcommand(Command::new("test").about(t("srvTest", &[])).arg(id()))
+        })
         .subcommand(
             Command::new("cache")
                 .about(t("cmdCache", &[]))

@@ -918,6 +918,166 @@ const CLI: &[(&str, [&str; 3])] = &[
     ),
     ("missingTitle", ["Faltando", "Missing", "Faltan"]),
     (
+        "cmdServers",
+        [
+            "Servidores de mídia (Jellyfin, Emby, Plex) avisados das pastas que mudam",
+            "Media servers (Jellyfin, Emby, Plex) told about the folders that change",
+            "Servidores multimedia (Jellyfin, Emby, Plex) avisados de las carpetas que cambian",
+        ],
+    ),
+    (
+        "srvList",
+        [
+            "Lista os servidores e suas pastas",
+            "Lists the servers and their folders",
+            "Lista los servidores y sus carpetas",
+        ],
+    ),
+    (
+        "srvAdd",
+        [
+            "Adiciona um servidor (pede a chave) e lê as bibliotecas",
+            "Adds a server (asks for its key) and reads its libraries",
+            "Añade un servidor (pide la clave) y lee las bibliotecas",
+        ],
+    ),
+    (
+        "srvRemove",
+        [
+            "Remove um servidor",
+            "Removes a server",
+            "Quita un servidor",
+        ],
+    ),
+    (
+        "srvLibraries",
+        [
+            "Lê de novo as bibliotecas (os pares ficam)",
+            "Reads the libraries again (pairs stay)",
+            "Lee de nuevo las bibliotecas (los pares se quedan)",
+        ],
+    ),
+    (
+        "srvPair",
+        [
+            "Pareia uma pasta do servidor com a mesma pasta neste computador",
+            "Pairs a server folder with the same folder on this computer",
+            "Empareja una carpeta del servidor con la misma carpeta en este equipo",
+        ],
+    ),
+    (
+        "srvOn",
+        [
+            "Avisa sobre esta pasta",
+            "Tells about this folder",
+            "Avisa sobre esta carpeta",
+        ],
+    ),
+    (
+        "srvOff",
+        [
+            "Não avisa sobre esta pasta",
+            "Does not tell about this folder",
+            "No avisa sobre esta carpeta",
+        ],
+    ),
+    (
+        "srvTest",
+        [
+            "Testa o endereço e a chave",
+            "Tests the address and key",
+            "Prueba la dirección y la clave",
+        ],
+    ),
+    (
+        "argServerId",
+        [
+            "ID do servidor (veja renome-cli servers list)",
+            "Server ID (see renome-cli servers list)",
+            "ID del servidor (vea renome-cli servers list)",
+        ],
+    ),
+    (
+        "argServerPath",
+        [
+            "A pasta como o servidor a vê",
+            "The folder as the server sees it",
+            "La carpeta como la ve el servidor",
+        ],
+    ),
+    (
+        "argServerKind",
+        [
+            "jellyfin (também Emby) ou plex",
+            "jellyfin (Emby too) or plex",
+            "jellyfin (también Emby) o plex",
+        ],
+    ),
+    (
+        "argServerUrl",
+        [
+            "Endereço, como http://192.168.0.10:8096",
+            "Address, like http://192.168.0.10:8096",
+            "Dirección, como http://192.168.0.10:8096",
+        ],
+    ),
+    (
+        "argLocalPath",
+        [
+            "A mesma pasta neste computador",
+            "The same folder on this computer",
+            "La misma carpeta en este equipo",
+        ],
+    ),
+    (
+        "argNoServer",
+        [
+            "Não avisa os servidores de mídia",
+            "Does not tell the media servers",
+            "No avisa a los servidores multimedia",
+        ],
+    ),
+    (
+        "srvUnpaired",
+        [
+            "sem pasta neste computador (renome-cli servers pair)",
+            "no folder on this computer (renome-cli servers pair)",
+            "sin carpeta en este equipo (renome-cli servers pair)",
+        ],
+    ),
+    (
+        "noServer",
+        [
+            "Não há servidor {id}.",
+            "There is no server {id}.",
+            "No hay ningún servidor {id}.",
+        ],
+    ),
+    (
+        "noServerFolder",
+        [
+            "O servidor não tem a pasta {path}.",
+            "The server has no folder {path}.",
+            "El servidor no tiene la carpeta {path}.",
+        ],
+    ),
+    (
+        "serverRemoved",
+        [
+            "Servidor {id} removido.",
+            "Server {id} removed.",
+            "Servidor {id} quitado.",
+        ],
+    ),
+    (
+        "serverOk",
+        [
+            "O servidor respondeu.",
+            "The server answered.",
+            "El servidor respondió.",
+        ],
+    ),
+    (
         "epTypeHint",
         [
             "digite S01E05 (ou 1x05, S01E05-06) para escolher outro",
