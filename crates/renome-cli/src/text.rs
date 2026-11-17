@@ -1234,6 +1234,27 @@ const CLI: &[(&str, [&str; 3])] = &[
             "--edit necesita una regla de música, libro, cómic o foto.",
         ],
     ),
+    ("helpUsage", ["Uso", "Usage", "Uso"]),
+    ("helpCommands", ["Comandos", "Commands", "Comandos"]),
+    ("helpCommand", ["comando", "command", "comando"]),
+    ("helpArgs", ["Argumentos", "Arguments", "Argumentos"]),
+    ("helpOptions", ["Opções", "Options", "Opciones"]),
+    (
+        "helpHelp",
+        ["Mostra esta ajuda", "Shows this help", "Muestra esta ayuda"],
+    ),
+    (
+        "helpVersion",
+        ["Mostra a versão", "Shows the version", "Muestra la versión"],
+    ),
+    (
+        "helpHelpCmd",
+        [
+            "Mostra a ajuda de um comando",
+            "Shows a command's help",
+            "Muestra la ayuda de un comando",
+        ],
+    ),
     (
         "epTypeHint",
         [

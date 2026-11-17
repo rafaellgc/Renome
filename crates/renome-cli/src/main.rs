@@ -84,6 +84,25 @@ fn main() -> ExitCode {
         Some(("servers", m)) => tokio::runtime::Runtime::new()
             .map_err(|e| e.to_string())
             .and_then(|rt| servers::command(m, &rt)),
+        Some(("help", m)) => {
+            let mut c = cli();
+            let words: Vec<&String> = m
+                .get_many::<String>("command")
+                .map(|v| v.collect())
+                .unwrap_or_default();
+            for w in words {
+                match c.find_subcommand(w) {
+                    Some(sub) => {
+                        c = sub
+                            .clone()
+                            .bin_name(format!("{} {w}", c.get_bin_name().unwrap_or("renome-cli")))
+                    }
+                    None => return Exit::Usage.into(),
+                }
+            }
+            let _ = c.print_help();
+            Ok(Exit::Done)
+        }
         Some(("manpages", m)) => man_pages(m.get_one::<std::path::PathBuf>("dir").unwrap()),
         Some(("completions", m)) => {
             let shell = *m.get_one::<clap_complete::Shell>("shell").unwrap();
@@ -103,6 +122,78 @@ fn main() -> ExitCode {
 
 /// The commands and their options, with help in the language in use.
 pub fn cli() -> Command {
+    localized(commands())
+}
+
+/// clap's own words (Usage, Options, Commands, help, version) in the
+/// language chosen, on every command; `help` is ours, to say it too.
+fn localized(c: Command) -> Command {
+    let template = format!(
+        "{{about-with-newline}}\n{}: {{usage}}\n\n{{all-args}}{{after-help}}",
+        t("helpUsage", &[])
+    );
+    let top = c.get_name() == "renome-cli";
+    let mut c = c
+        .help_template(template)
+        .disable_help_flag(true)
+        .disable_help_subcommand(true)
+        .subcommand_help_heading(t("helpCommands", &[]))
+        .subcommand_value_name(t("helpCommand", &[]).to_uppercase())
+        .arg(
+            Arg::new("help")
+                .short('h')
+                .long("help")
+                .help(t("helpHelp", &[]))
+                .action(ArgAction::Help),
+        )
+        .mut_args(|a| {
+            if a.get_help_heading().is_some() {
+                a
+            } else if a.is_positional() {
+                a.help_heading(t("helpArgs", &[]))
+            } else {
+                a.help_heading(t("helpOptions", &[]))
+            }
+        })
+        .mut_subcommands(localized);
+    if top {
+        c = c
+            .disable_version_flag(true)
+            .arg(
+                Arg::new("version")
+                    .short('V')
+                    .long("version")
+                    .help(t("helpVersion", &[]))
+                    .action(ArgAction::Version)
+                    .help_heading(t("helpOptions", &[])),
+            )
+            .subcommand(
+                Command::new("help")
+                    .about(t("helpHelpCmd", &[]))
+                    .arg(
+                        Arg::new("command")
+                            .num_args(0..)
+                            .help(t("helpCommand", &[]))
+                            .help_heading(t("helpArgs", &[])),
+                    )
+                    .arg(
+                        Arg::new("help")
+                            .short('h')
+                            .long("help")
+                            .help(t("helpHelp", &[]))
+                            .action(ArgAction::Help)
+                            .help_heading(t("helpOptions", &[])),
+                    )
+                    .help_template(format!(
+                        "{{about-with-newline}}\n{}: {{usage}}\n\n{{all-args}}",
+                        t("helpUsage", &[])
+                    )),
+            );
+    }
+    c
+}
+
+fn commands() -> Command {
     let paths = || {
         Arg::new("paths")
             .help(t("argPaths", &[]))
