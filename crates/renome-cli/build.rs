@@ -35,6 +35,25 @@ fn main() {
         }
         writeln!(out, "];").unwrap();
     }
+    // The public key updates are checked against: the window's.
+    let conf = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src-tauri/tauri.conf.json");
+    println!("cargo::rerun-if-changed={}", conf.display());
+    let conf: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&conf).expect("tauri.conf.json")).unwrap();
+    let key = conf["plugins"]["updater"]["pubkey"]
+        .as_str()
+        .expect("updater pubkey");
+    let endpoint = conf["plugins"]["updater"]["endpoints"][0]
+        .as_str()
+        .expect("updater endpoint");
+    let update = format!(
+        "pub static UPDATE_KEY: &str = {key:?};\npub static UPDATE_URL: &str = {endpoint:?};\n"
+    );
+    std::fs::write(
+        Path::new(&std::env::var("OUT_DIR").unwrap()).join("update.rs"),
+        update,
+    )
+    .unwrap();
     let dest = Path::new(&std::env::var("OUT_DIR").unwrap()).join("texts.rs");
     std::fs::write(dest, out).unwrap();
 }

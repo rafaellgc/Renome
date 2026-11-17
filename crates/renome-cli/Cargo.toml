@@ -19,6 +19,12 @@ clap_complete = "4"
 tokio = { version = "1", features = ["rt-multi-thread", "time", "sync"] }
 chrono = "0.4"
 rpassword = "7"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+minisign-verify = "0.3"
+semver = "1"
+flate2 = "1"
+tar = "0.4"
+base64 = "0.22"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -1118,6 +1118,55 @@ const CLI: &[(&str, [&str; 3])] = &[
         ],
     ),
     (
+        "cmdUpdate",
+        [
+            "Procura (e instala) a versão nova do Renome",
+            "Looks for (and installs) a new version of Renome",
+            "Busca (e instala) la versión nueva de Renome",
+        ],
+    ),
+    ("updCheck", ["Só procura", "Only looks", "Solo busca"]),
+    (
+        "updInstall",
+        [
+            "Baixa, confere a assinatura e instala (AppImage, Windows, macOS)",
+            "Downloads, checks the signature and installs (AppImage, Windows, macOS)",
+            "Descarga, comprueba la firma e instala (AppImage, Windows, macOS)",
+        ],
+    ),
+    (
+        "upToDate",
+        [
+            "O Renome {v} é a versão mais nova.",
+            "Renome {v} is the newest version.",
+            "Renome {v} es la versión más nueva.",
+        ],
+    ),
+    (
+        "updateByFlatpak",
+        [
+            "No Flatpak, o próprio Flatpak atualiza o Renome.",
+            "In the Flatpak, Flatpak updates Renome.",
+            "En el Flatpak, el propio Flatpak actualiza Renome.",
+        ],
+    ),
+    (
+        "updateHowCli",
+        [
+            "Para instalar: renome-cli update install",
+            "To install it: renome-cli update install",
+            "Para instalarla: renome-cli update install",
+        ],
+    ),
+    (
+        "updateInstalled",
+        [
+            "Renome {v} instalado. A janela, se estiver aberta, usa a versão nova quando for aberta de novo.",
+            "Renome {v} installed. The window, if open, uses the new version when opened again.",
+            "Renome {v} instalado. La ventana, si está abierta, usa la versión nueva al abrirse de nuevo.",
+        ],
+    ),
+    (
         "epTypeHint",
         [
             "digite S01E05 (ou 1x05, S01E05-06) para escolher outro",

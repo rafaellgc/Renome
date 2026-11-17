@@ -333,7 +333,9 @@ mod tests {
 
     #[test]
     fn written_rules_become_steps() {
-        let _turn = crate::text::TEST_LANG.lock().unwrap_or_else(|e| e.into_inner());
+        let _turn = crate::text::TEST_LANG
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         crate::text::set_lang("en");
         let s = parse(r#"replace:find=_,replace=" ",first-only"#).unwrap();
         let r = &s["rule"];

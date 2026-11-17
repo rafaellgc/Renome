@@ -10,6 +10,7 @@ mod rulespec;
 mod run;
 mod servers;
 mod text;
+mod update;
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use std::process::ExitCode;
@@ -75,6 +76,7 @@ fn main() -> ExitCode {
         Some(("options", m)) => manage::options(m, settings),
         Some(("keys", m)) => manage::keys(m),
         Some(("cache", m)) => manage::cache(m),
+        Some(("update", m)) => update::command(m),
         Some(("duplicates", m)) => duplicates::command(m, settings.as_ref()),
         Some(("servers", m)) => tokio::runtime::Runtime::new()
             .map_err(|e| e.to_string())
@@ -531,6 +533,12 @@ pub fn cli() -> Command {
                 ),
         )
         .subcommand(
+            Command::new("update")
+                .about(t("cmdUpdate", &[]))
+                .subcommand(Command::new("check").about(t("updCheck", &[])))
+                .subcommand(Command::new("install").about(t("updInstall", &[]))),
+        )
+        .subcommand(
             Command::new("cache")
                 .about(t("cmdCache", &[]))
                 .subcommand(Command::new("size").about(t("cacheSize", &[])))
@@ -576,7 +584,9 @@ pub fn sources(m: &ArgMatches) -> Vec<rulespec::Source> {
 mod tests {
     #[test]
     fn the_commands_are_well_defined() {
-        let _turn = crate::text::TEST_LANG.lock().unwrap_or_else(|e| e.into_inner());
+        let _turn = crate::text::TEST_LANG
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         for lang in ["pt", "en", "es"] {
             crate::text::set_lang(lang);
             super::cli().debug_assert();

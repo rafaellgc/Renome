@@ -4143,15 +4143,21 @@ dependencies = [
 name = "renome-cli"
 version = "0.38.1"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "clap",
  "clap_complete",
+ "flate2",
  "libc",
+ "minisign-verify",
  "renome-core",
  "renome-services",
+ "reqwest 0.12.28",
  "rpassword",
+ "semver",
  "serde",
  "serde_json",
+ "tar",
  "tempfile",
  "tokio",
 ]
