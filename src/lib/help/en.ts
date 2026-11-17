@@ -47,6 +47,7 @@ export const en: Section[] = [
 <h4>Sorting and arranging</h4>
 <ul>
   <li>Click a column header to sort; click again to reverse.</li>
+  <li>To read long names, drag the right edge of the <b>Current name</b>, <b>New name</b> or <b>Folder</b> header to widen the column (the list scrolls sideways when it does not fit). It never gets narrower than normal; double-click the edge to bring it back. The width lasts until the list is cleared or the program closed: it is not saved.</li>
   <li>The default order is by <b>New name</b>: the list re-sorts as you change the rules.</li>
   <li>Select with click, <kbd>Ctrl</kbd>+click (several) and <kbd>Shift</kbd>+click (a range).</li>
   <li><b>⤒ ⤓</b> move the selected files up or down, handy to set the numbering. They do not work when sorting by New name.</li>

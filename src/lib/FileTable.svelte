@@ -283,6 +283,70 @@
     return base + extra.reduce((n, c) => n + (c === "taken" ? dateW : MIN[c]), 0) + 8 * (count - 1) + 20;
   });
 
+  /** The name and folder columns made wider by dragging the edge of their
+   *  header, for this list only (never saved; gone when the list is
+   *  cleared): each keeps the width it had as its least. */
+  type Wide = "c-orig" | "c-new" | "c-dir";
+  const WIDE: Wide[] = ["c-orig", "c-new", "c-dir"];
+  const FR: Record<Wide, string> = { "c-orig": "1fr", "c-new": "1.2fr", "c-dir": "0.8fr" };
+  let headEl = $state<HTMLDivElement>();
+  let floor = $state<Record<Wide, number> | null>(null);
+  let wider = $state<Partial<Record<Wide, number>>>({});
+  $effect(() => {
+    if (!items.length) {
+      floor = null;
+      wider = {};
+    }
+  });
+  const widthOf = (c: Wide) => Math.round(headEl?.querySelector(`.thw.${c}`)?.getBoundingClientRect().width ?? 0);
+  function setWidth(c: Wide, w: number) {
+    if (!floor) floor = { "c-orig": widthOf("c-orig"), "c-new": widthOf("c-new"), "c-dir": widthOf("c-dir") };
+    if (Math.round(w) <= floor[c]) unwiden(c);
+    else wider = { ...wider, [c]: Math.round(w) };
+  }
+  function startResize(e: PointerEvent, c: Wide) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const grip = e.currentTarget as HTMLElement;
+    const from = e.clientX;
+    const w0 = wider[c] ?? widthOf(c);
+    grip.setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent) => setWidth(c, w0 + ev.clientX - from);
+    const up = () => {
+      grip.removeEventListener("pointermove", move);
+      grip.removeEventListener("pointerup", up);
+      grip.removeEventListener("pointercancel", up);
+    };
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", up);
+    grip.addEventListener("pointercancel", up);
+  }
+  function resizeKeys(e: KeyboardEvent, c: Wide) {
+    const step = e.shiftKey ? 80 : 24;
+    if (e.key === "ArrowRight") setWidth(c, (wider[c] ?? widthOf(c)) + step);
+    else if (e.key === "ArrowLeft") setWidth(c, (wider[c] ?? widthOf(c)) - step);
+    else if (e.key === "Home") unwiden(c);
+    else return;
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  function unwiden(c: Wide) {
+    const { [c]: _, ...rest } = wider;
+    wider = rest;
+  }
+  const wideVar = (c: Wide) => (floor ? (wider[c] ? `${wider[c]}px` : `minmax(${floor[c]}px, ${FR[c]})`) : undefined);
+  /** With widened columns, the list as wide as they all need. */
+  const tableMin = $derived.by(() => {
+    if (!floor || !Object.keys(wider).length) return minWidth;
+    const f = floor;
+    const wide = winWidth > 1000;
+    const count = (wide ? 6 : 4) + extra.length;
+    const names = WIDE.reduce((n, c) => n + (wider[c] ?? f[c]), 0);
+    const rest = extra.reduce((n, c) => n + (c === "taken" ? dateW : MIN[c]), 0) + (wide ? sizeW + dateW : 0);
+    return Math.max(minWidth, 28 + names + rest + 8 * (count - 1) + 20);
+  });
+
   /** Size and date columns as wide as their text in the font in use (the
    *  system's, which may be wider than the one they were drawn for). */
   let tableEl = $state<HTMLDivElement>();
@@ -330,7 +394,7 @@
 
 <svelte:window bind:innerWidth={winWidth} onkeydown={(e) => { if (columnsMenu && e.key === "Escape") { e.stopPropagation(); columnsMenu = false; } }} />
 
-<div class="table" bind:this={tableEl} style:--extra={extraWidths || undefined} style:--w-size="{sizeW}px" style:--w-date="{dateW}px">
+<div class="table" bind:this={tableEl} style:--extra={extraWidths || undefined} style:--w-orig={wideVar("c-orig")} style:--w-new={wideVar("c-new")} style:--w-dir={wideVar("c-dir")} style:--w-size="{sizeW}px" style:--w-date="{dateW}px">
   {#if columnsMenu}
     <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
     <div class="cols-back" onclick={() => (columnsMenu = false)}></div>
@@ -347,7 +411,7 @@
   {/if}
   <!-- Scrolled sideways with the list when the columns do not fit. -->
   <div class="head-wrap" bind:this={headWrap}>
-  <div class="head" style:min-width={minWidth ? `${minWidth}px` : undefined}>
+  <div class="head" bind:this={headEl} style:min-width={tableMin ? `${tableMin}px` : undefined}>
     <span class="c-status">
       {#if available.length}
       <button class="icon cols" class:on={extra.length > 0} title={t("columnsMenu")} aria-label={t("columnsMenu")} aria-expanded={columnsMenu} onclick={() => (columnsMenu = !columnsMenu)}>
@@ -356,10 +420,31 @@
       {/if}
     </span>
     {#each columns as col (col.key)}
-      <button class="th {col.cls}" class:active={sortKey === col.key} onclick={() => onsort(col.key)}>
-        {t(col.label)}
-        {#if sortKey === col.key}<span class="arrow">{descending ? "▼" : "▲"}</span>{/if}
-      </button>
+      {@const wideCol = WIDE.find((c) => c === col.cls)}
+      <div class="thw {col.cls}">
+        <button class="th {col.cls}" class:active={sortKey === col.key} onclick={() => onsort(col.key)}>
+          {t(col.label)}
+          {#if sortKey === col.key}<span class="arrow">{descending ? "▼" : "▲"}</span>{/if}
+        </button>
+        {#if wideCol}
+          <!-- A focusable separator is a control (a splitter): drag, arrows, Home. -->
+          <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+          <span
+            class="grip"
+            class:on={!!wider[wideCol]}
+            role="separator"
+            aria-orientation="vertical"
+            aria-valuenow={wider[wideCol] ?? floor?.[wideCol] ?? 0}
+            aria-valuemin={floor?.[wideCol] ?? 0}
+            aria-label={t("resizeColumn")}
+            title={t("resizeColumn")}
+            tabindex="0"
+            onpointerdown={(e) => startResize(e, wideCol)}
+            ondblclick={() => unwiden(wideCol)}
+            onkeydown={(e) => resizeKeys(e, wideCol)}
+          ></span>
+        {/if}
+      </div>
     {/each}
   </div>
   </div>
@@ -377,7 +462,7 @@
     aria-multiselectable="true"
     onkeydown={onkeys}
   >
-    <div class="spacer" style:height="{rows.length * ROW}px" style:min-width={minWidth ? `${minWidth}px` : undefined}>
+    <div class="spacer" style:height="{rows.length * ROW}px" style:min-width={tableMin ? `${tableMin}px` : undefined}>
       {#each visible as item, k (keyOf(item))}
         {@const index = start + k}
         {#if isGhost(item)}
@@ -474,7 +559,7 @@
   }
   .head, .row {
     display: grid;
-    grid-template-columns: 28px minmax(140px, 1fr) minmax(160px, 1.2fr) minmax(90px, 0.8fr) var(--extra, ) var(--w-size, 76px) var(--w-date, 120px);
+    grid-template-columns: 28px var(--w-orig, minmax(140px, 1fr)) var(--w-new, minmax(160px, 1.2fr)) var(--w-dir, minmax(90px, 0.8fr)) var(--extra, ) var(--w-size, 76px) var(--w-date, 120px);
     align-items: center;
     gap: 8px;
     padding: 0 10px;
@@ -495,9 +580,33 @@
   }
   /* Narrow windows: size and date give way to the names. */
   @media (max-width: 1000px) {
-    .head, .row { grid-template-columns: 28px minmax(120px, 1fr) minmax(140px, 1.2fr) minmax(80px, 0.6fr) var(--extra, ); }
+    .head, .row { grid-template-columns: 28px var(--w-orig, minmax(120px, 1fr)) var(--w-new, minmax(140px, 1.2fr)) var(--w-dir, minmax(80px, 0.6fr)) var(--extra, ); }
     .c-size, .c-date { display: none; }
   }
+  .thw { position: relative; display: flex; min-width: 0; }
+  .thw .th { flex: 1; min-width: 0; }
+  /* The edge to drag to widen a name or folder column. */
+  .grip {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    right: -7px;
+    width: 9px;
+    z-index: 1;
+    cursor: col-resize;
+    touch-action: none;
+  }
+  .grip::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    left: 4px;
+    width: 1px;
+    background: var(--border);
+  }
+  .grip:hover::after, .grip:focus-visible::after, .grip.on::after { width: 2px; left: 3.5px; background: var(--accent); }
+  .grip:focus-visible { outline: none; }
   .th:hover:not(:disabled) { background: var(--hover); color: var(--text); }
   .th.active { color: var(--accent); }
   .th.c-size, .th.c-date, .th.num { text-align: right; }

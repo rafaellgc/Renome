@@ -47,6 +47,7 @@ export const pt: Section[] = [
 <h4>Ordenar e organizar</h4>
 <ul>
   <li>Clique no título de uma coluna para ordenar; clique de novo para inverter.</li>
+  <li>Para ler nomes compridos, arraste a borda direita do título de <b>Nome atual</b>, <b>Novo nome</b> ou <b>Pasta</b> para alargar a coluna (a lista rola para o lado se não couber). Ela não fica mais estreita que o normal; duplo clique na borda a devolve ao normal. A largura vale só até limpar a lista ou fechar o programa: não fica salva.</li>
   <li>A ordem padrão é por <b>Novo nome</b>: a lista se reorganiza enquanto você mexe nas regras.</li>
   <li>Selecione com clique, <kbd>Ctrl</kbd>+clique (vários) e <kbd>Shift</kbd>+clique (intervalo).</li>
   <li><b>⤒ ⤓</b> movem os selecionados para cima ou para baixo, útil para acertar a numeração. Não funcionam na ordem por Novo nome.</li>

@@ -44,7 +44,13 @@ This document describes **what** the program does, not **how**.
   none of the `-pasta:` ones. Only visible files are renamed, and numbering only counts them.
 - Files can be passed on the command line (`renome file1 file2 folder/`).
 - Columns: current name, new name, folder, size, modification date (size
-  and date are hidden in narrow windows).
+  and date are hidden in narrow windows). The right edge of the current
+  name, new name and folder headers can be dragged (or moved with the
+  arrows when focused; Home or a double-click brings it back) to widen
+  that column: at the first drag the three keep their width as their
+  least (`minmax(width, fr)`), a widened one gets a fixed width, and the
+  list scrolls sideways when they no longer fit. Never saved; dropped
+  when the list is emptied (Clear) and on closing.
   Folders are marked with an icon. In changed rows, what was removed from
   the current name and what was added to the new one are highlighted,
   comparing whole words (letters only inside a word that barely changed,

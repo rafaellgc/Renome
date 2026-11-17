@@ -47,6 +47,7 @@ export const es: Section[] = [
 <h4>Ordenar y organizar</h4>
 <ul>
   <li>Haga clic en el título de una columna para ordenar; otra vez para invertir.</li>
+  <li>Para leer nombres largos, arrastre el borde derecho del título de <b>Nombre actual</b>, <b>Nuevo nombre</b> o <b>Carpeta</b> para ensanchar la columna (la lista se desplaza de lado si no cabe). Nunca queda más estrecha de lo normal; doble clic en el borde la devuelve a lo normal. El ancho dura hasta limpiar la lista o cerrar el programa: no se guarda.</li>
   <li>El orden predeterminado es por <b>Nuevo nombre</b>: la lista se reordena mientras cambia las reglas.</li>
   <li>Seleccione con clic, <kbd>Ctrl</kbd>+clic (varios) y <kbd>Mayús</kbd>+clic (un intervalo).</li>
   <li><b>⤒ ⤓</b> mueven los seleccionados hacia arriba o abajo, útil para ajustar la numeración. No funcionan con el orden por Nuevo nombre.</li>
