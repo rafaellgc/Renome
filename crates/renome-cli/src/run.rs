@@ -16,7 +16,7 @@ use crate::rulespec;
 use crate::text::{lang, t};
 
 /// Rule types that need a catalogue lookup not in the command line yet.
-const LOOKUPS: [&str; 1] = ["comic"];
+const LOOKUPS: [&str; 0] = [];
 
 pub fn preview_or_apply(
     m: &ArgMatches,
@@ -107,8 +107,10 @@ pub fn preview_or_apply(
     let lookup_rule = steps_json
         .iter()
         .find(|s| {
-            matches!(rulespec::kind_of(s), "movie" | "series" | "music" | "book")
-                && s.get("enabled") != Some(&Value::Bool(false))
+            matches!(
+                rulespec::kind_of(s),
+                "movie" | "series" | "music" | "book" | "comic"
+            ) && s.get("enabled") != Some(&Value::Bool(false))
         })
         .map(|s| s["rule"].clone());
     let mut found = None;
@@ -125,6 +127,11 @@ pub fn preview_or_apply(
                 let f = rt.block_on(crate::lookup::movies(&first, settings, &ask))?;
                 view.movies = f.chosen.clone();
                 crate::lookup::Found::Movies(f)
+            }
+            Some("comic") => {
+                let f = rt.block_on(crate::lookup::comics(&first, rule, settings, &ask))?;
+                view.comics = f.chosen.clone();
+                crate::lookup::Found::Comics(Box::new(f))
             }
             Some("book") => {
                 let f = rt.block_on(crate::lookup::books(&first, rule, settings, &ask))?;
@@ -256,6 +263,9 @@ pub fn preview_or_apply(
                 rule, f, &preview, &report, &history,
             )),
             crate::lookup::Found::Books(f) => runtime()?.block_on(crate::lookup::after_books(
+                rule, f, &preview, &report, &history,
+            )),
+            crate::lookup::Found::Comics(f) => runtime()?.block_on(crate::lookup::after_comics(
                 rule, f, &preview, &report, &history,
             )),
         };

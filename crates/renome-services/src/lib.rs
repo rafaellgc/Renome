@@ -9,6 +9,7 @@
 pub mod acoustid;
 pub mod after;
 pub mod anilist;
+pub mod comics;
 pub mod comicvine;
 pub mod discogs;
 pub mod gcd;

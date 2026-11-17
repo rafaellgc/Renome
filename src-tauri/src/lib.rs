@@ -350,6 +350,18 @@ fn stop_signal(app: &AppHandle) -> impl Fn() -> bool + Send + Sync + 'static {
     move || app.state::<AppState>().stop_run.load(Ordering::SeqCst) != run
 }
 
+/// The window's comic catalogues.
+fn sources(state: &AppState) -> renome_services::comics::Sources<'_> {
+    renome_services::comics::Sources {
+        cv: &state.cv,
+        mt: &state.mt,
+        gcd: &state.gcd,
+        md: &state.md,
+        al: &state.al,
+        mu: &state.mu,
+    }
+}
+
 /// Files written: their tags are read again when next needed.
 fn forget_tags_of(state: &AppState, written: Vec<PathBuf>) {
     let written: HashSet<PathBuf> = written.into_iter().collect();
@@ -1695,46 +1707,17 @@ async fn comic_search(
     skip: Option<String>,
 ) -> Result<Vec<renome_core::comics::Volume>, String> {
     let state = app.state::<AppState>();
-    // A link pasted: that series, from the catalogue the rule uses.
-    if let Some(link) = links::parse(&query) {
-        let ours = if source.is_empty() {
-            "gcd"
-        } else {
-            source.as_str()
-        };
-        if link.comic_source() != Some(ours) {
-            return Err("linkOther".into());
-        }
-        let v = match link {
-            Link::ComicVine { issue, id } => {
-                let id = match issue {
-                    true => state.cv.volume_of(&key, &id).await?,
-                    false => id,
-                };
-                state.cv.issues(&key, &id).await?.0
-            }
-            Link::Metron(id) => state.mt.issues(&key, &id).await?.0,
-            Link::Gcd(id) => state.gcd.issues(&id).await?.0,
-            Link::MangaDex(id) => state.md.series(&id, &lang).await?,
-            Link::AniList { id, .. } => state.al.manga(id).await?,
-            Link::MangaUpdates(id) => state.mu.series(&id, "").await?,
-            _ => return Err("linkOther".into()),
-        };
-        return Ok(vec![v]);
-    }
-    let found = match source.as_str() {
-        "comicvine" => state.cv.search(&key, &query, year, &publisher, &lang).await,
-        "metron" => state.mt.search(&key, &query, year, &publisher, &lang).await,
-        "mangadex" => state.md.search(&query, year, &lang).await,
-        "anilist" => state.al.search(&query, year).await,
-        "mangaupdates" => state.mu.search(&query, year).await,
-        _ => state.gcd.search(&query, year, &publisher, &lang).await,
-    }?;
-    // The publishers the rule leaves out.
-    Ok(renome_core::comics::skip_publishers(
-        found,
-        skip.as_deref().unwrap_or_default(),
-    ))
+    sources(&state)
+        .search(
+            &source,
+            &key,
+            &query,
+            year,
+            &publisher,
+            &lang,
+            skip.as_deref().unwrap_or_default(),
+        )
+        .await
 }
 
 /// A series and its issues, and the issue each comic is (by its number).
@@ -1747,29 +1730,9 @@ async fn comic_issues(
     key: String,
     id: String,
     comics: Vec<renome_core::comics::ComicMatch>,
-) -> Result<ComicIssues, String> {
+) -> Result<renome_services::comics::ComicIssues, String> {
     let state = app.state::<AppState>();
-    let (volume, issues) = match source.as_str() {
-        "comicvine" => state.cv.issues(&key, &id).await?,
-        "metron" => state.mt.issues(&key, &id).await?,
-        "mangaupdates" => {
-            let query = comics
-                .first()
-                .map(|c| c.series.as_str())
-                .unwrap_or_default();
-            (state.mu.series(&id, query).await?, Vec::new())
-        }
-        _ => state.gcd.issues(&id).await?,
-    };
-    let found = comics
-        .iter()
-        .map(|m| renome_core::comics::find_issue(m, &issues).map(|i| i.id.clone()))
-        .collect();
-    Ok(ComicIssues {
-        volume,
-        issues,
-        found,
-    })
+    sources(&state).issues(&source, &key, &id, &comics).await
 }
 
 /// The covers, by address, of the comic's issue (or volume) in a series,
@@ -1802,41 +1765,13 @@ async fn series_covers(
         .collect())
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ComicIssues {
-    volume: renome_core::comics::Volume,
-    issues: Vec<renome_core::comics::Issue>,
-    /// The issue of each comic asked about, when its number says it.
-    found: Vec<Option<String>>,
-}
-
 /// The barcodes printed on comics (read in their first and last pages),
 /// a few at a time.
 #[tauri::command]
 async fn comic_barcodes(paths: Vec<PathBuf>) -> Vec<Option<String>> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let workers = std::thread::available_parallelism().map_or(2, |n| n.get().min(6));
-        let next = std::sync::atomic::AtomicUsize::new(0);
-        let out: Mutex<Vec<Option<String>>> = Mutex::new(vec![None; paths.len()]);
-        std::thread::scope(|s| {
-            for _ in 0..workers {
-                s.spawn(|| {
-                    loop {
-                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        let Some(p) = paths.get(i) else { break };
-                        let code = renome_core::barcode::of_comic(p);
-                        if let Ok(mut o) = out.lock() {
-                            o[i] = code;
-                        }
-                    }
-                });
-            }
-        });
-        out.into_inner().unwrap_or_default()
-    })
-    .await
-    .unwrap_or_default()
+    tauri::async_runtime::spawn_blocking(move || renome_services::comics::barcodes(&paths))
+        .await
+        .unwrap_or_default()
 }
 
 /// The issue a barcode belongs to, on Metron.
