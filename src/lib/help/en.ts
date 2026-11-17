@@ -1010,4 +1010,50 @@ ${ex("Show.S01E02.720p.WEB.mkv", "Show S01E02.mkv")}
 </ul>
 <p>Options are stored in <code>~/.config/renome</code> (Linux), <code>%APPDATA%\\renome</code> (Windows) or <code>~/Library/Application Support/renome</code> (macOS). The history is in <code>~/.local/share/renome/history</code> on Linux and in the same folder as the options on the other systems. The kept answers of the searches are in <code>~/.cache/renome/answers</code> (Linux), <code>%LOCALAPPDATA%\\io.github.rafaellgc.Renome\\cache\\answers</code> (Windows) or <code>~/Library/Caches/renome/answers</code> (macOS).</p>`,
   },
+  {
+    id: "cli",
+    title: "Command line",
+    html: `
+<p>Everything the window does can also be done from the terminal, with <code>renome-cli</code>: the same rules, the same lookups, the same Options, keys, saved sets and the same History. A rename made in the terminal can be undone in the window, and the other way round.</p>
+<h4>Where it is</h4>
+<ul>
+  <li><b>Linux, .deb or .rpm package</b>: <code>renome-cli</code>, already on the system path.</li>
+  <li><b>AppImage</b>: <code>./Renome.AppImage cli …</code> (the word <code>cli</code> before the command).</li>
+  <li><b>Flatpak</b>: <code>flatpak run --command=renome-cli io.github.rafaellgc.Renome …</code></li>
+  <li><b>Windows</b>: <code>renome-cli.exe</code>, in the folder Renome was installed to.</li>
+  <li><b>macOS</b>: <code>/Applications/Renome.app/Contents/MacOS/renome-cli</code>.</li>
+</ul>
+<h4>Look first, rename after</h4>
+<p><code>renome-cli preview FOLDERS -r RULE</code> shows the current and the new name, changing nothing. <code>renome-cli apply …</code>, with the same arguments, shows the list and asks before renaming (<code>--yes</code> does not ask). Rules apply in the order they are written:</p>
+<table>
+  <tr><td><code>-r 'replace:find=_,replace= '</code></td><td>one rule: its type, a colon, options separated by commas</td></tr>
+  <tr><td><code>-r case</code></td><td>the type only: options keep their defaults</td></tr>
+  <tr><td><code>--set "My shows"</code></td><td>a set saved in the window</td></tr>
+  <tr><td><code>--rules rules.json</code></td><td>a file exported by the window</td></tr>
+  <tr><td><code>--saved</code></td><td>the rules the window remembered when it closed</td></tr>
+</table>
+<p><code>renome-cli rules</code> lists the types; <code>renome-cli rules number</code> shows a rule's options, each with its default. Every rule also takes <code>only=FILTER</code> (only on the files the filter shows) and <code>off</code>. Option names are in English and the same in every language.</p>
+<p>Also as in the window: <code>--filter</code> (the list's filter), <code>--sort</code> and <code>--desc</code> (the order numbering follows), <code>--to FOLDER</code> (move) and <code>--copy</code> (copy), <code>--name PATH=NAME</code> (a name typed by hand), <code>--folders</code> (rename the folders themselves), <code>--hidden</code>, <code>--all</code> (also lists files that do not change) and <code>--csv FILE</code> (Export list).</p>
+<h4>Online lookups</h4>
+<p>The movie, series, music, book and comic rules search the same catalogues and choose on their own what the window would choose. For doubtful cases, <code>--choose</code> decides: <code>ask</code> (the default in a terminal) shows numbered candidates and waits for the number; <code>auto</code> keeps only what is certain; <code>skip</code> does not even look up the doubtful ones. <code>--pick PATH=ID</code> forces a choice (<code>tmdb:603</code>, a catalogue link or a title). <code>--edit PATH:FIELD=VALUE,…</code> does what the window's <b>Edit details</b> does, for example <code>--edit "book.epub:title=The Title,authors=Someone; Someone Else"</code> or, with the photo rule, <code>--edit "IMG_1.jpg:date=2018-03-27 14:30"</code>; <code>--help</code> lists each rule's fields. <code>--missing</code> lists what is missing (episodes, issues, tracks, collection movies, volumes), like the window's faded rows.</p>
+<p>After renaming, the rest happens as in the window: tags and covers written, <code>.nfo</code> files, playlists, subtitles downloaded, books converted and media servers told (<code>--no-server</code> does not tell them).</p>
+<h4>The other commands</h4>
+<table>
+  <tr><td><code>undo [ID]</code></td><td>undoes the last rename, or the one with that ID</td></tr>
+  <tr><td><code>history</code></td><td>lists, shows or deletes History entries</td></tr>
+  <tr><td><code>sets</code></td><td>lists, shows, saves, exports, imports, renames and deletes sets</td></tr>
+  <tr><td><code>options</code></td><td>reads and changes the Options (<code>options set lang en</code>)</td></tr>
+  <tr><td><code>keys</code></td><td>stores the services' keys in the password store, without showing them on screen</td></tr>
+  <tr><td><code>servers</code></td><td>media servers: add, read the libraries, pair folders, test</td></tr>
+  <tr><td><code>duplicates FOLDERS</code></td><td>identical copies, the same song or work twice (the best marked), <code>--similar</code> pictures that look alike; <code>--trash</code> sends to the Trash</td></tr>
+  <tr><td><code>update</code></td><td>looks for a new version; <code>update install</code> installs it (AppImage, Windows, macOS)</td></tr>
+  <tr><td><code>manual [CHAPTER]</code></td><td>this manual, in the terminal</td></tr>
+  <tr><td><code>cache</code></td><td>size and clearing of the stored answers</td></tr>
+  <tr><td><code>completions bash</code></td><td>Tab completion for bash, zsh, fish or PowerShell</td></tr>
+</table>
+<p>Every command has <code>--help</code>. Messages follow the language in the Options; <code>--lang en</code> changes it for one run.</p>
+<h4>In scripts</h4>
+<p><code>--json</code> writes the result as JSON (field names in English, which do not change), <code>--quiet</code> only the errors, <code>--color never</code> no colours (also with the <code>NO_COLOR</code> variable). The exit code is <code>0</code> when it worked, <code>1</code> when a file failed, <code>2</code> when doubtful cases were left without a choice and <code>3</code> for a wrong command or rule. Without a terminal, <code>apply</code> needs <code>--yes</code>, and without <code>--choose</code> doubtful cases are treated as <code>auto</code>.</p>
+<p><b>Limitations:</b> converting a book to <b>PDF</b> needs the window (it is the window that prints the pages); from the terminal, conversion to PDF says so and the book stays as it is. The window and the terminal never rename at the same time: one waits for the other to finish. But an Option changed from the terminal while the window is open may be undone when the window closes, because it writes the Options it has; change Options with the window closed. Choices in the terminal show text, not the covers the window compares.</p>`,
+  },
 ];

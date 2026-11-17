@@ -1010,4 +1010,50 @@ ${ex("Serie.S01E02.720p.WEB.mkv", "Serie S01E02.mkv")}
 </ul>
 <p>Las opciones se guardan en <code>~/.config/renome</code> (Linux), <code>%APPDATA%\\renome</code> (Windows) o <code>~/Library/Application Support/renome</code> (macOS). El historial está en <code>~/.local/share/renome/history</code> en Linux y en la misma carpeta de las opciones en los demás sistemas. Las respuestas guardadas de las búsquedas están en <code>~/.cache/renome/answers</code> (Linux), <code>%LOCALAPPDATA%\\io.github.rafaellgc.Renome\\cache\\answers</code> (Windows) o <code>~/Library/Caches/renome/answers</code> (macOS).</p>`,
   },
+  {
+    id: "cli",
+    title: "Línea de comandos",
+    html: `
+<p>Todo lo que hace la ventana también se puede hacer desde la terminal, con <code>renome-cli</code>: las mismas reglas, las mismas búsquedas, las mismas Opciones, claves, conjuntos guardados y el mismo Historial. Lo renombrado desde la terminal se puede deshacer en la ventana, y al revés.</p>
+<h4>Dónde está</h4>
+<ul>
+  <li><b>Linux, paquete .deb o .rpm</b>: <code>renome-cli</code>, ya en la ruta del sistema.</li>
+  <li><b>AppImage</b>: <code>./Renome.AppImage cli …</code> (la palabra <code>cli</code> antes del comando).</li>
+  <li><b>Flatpak</b>: <code>flatpak run --command=renome-cli io.github.rafaellgc.Renome …</code></li>
+  <li><b>Windows</b>: <code>renome-cli.exe</code>, en la carpeta donde se instaló Renome.</li>
+  <li><b>macOS</b>: <code>/Applications/Renome.app/Contents/MacOS/renome-cli</code>.</li>
+</ul>
+<h4>Ver antes, renombrar después</h4>
+<p><code>renome-cli preview CARPETAS -r REGLA</code> muestra el nombre actual y el nuevo, sin cambiar nada. <code>renome-cli apply …</code>, con los mismos argumentos, muestra la lista y pregunta antes de renombrar (<code>--yes</code> no pregunta). Las reglas se aplican en el orden en que se escriben:</p>
+<table>
+  <tr><td><code>-r 'replace:find=_,replace= '</code></td><td>una regla: el tipo, dos puntos, opciones separadas por comas</td></tr>
+  <tr><td><code>-r case</code></td><td>solo el tipo: las opciones quedan con su valor por defecto</td></tr>
+  <tr><td><code>--set "Mis series"</code></td><td>un conjunto guardado en la ventana</td></tr>
+  <tr><td><code>--rules reglas.json</code></td><td>un archivo exportado por la ventana</td></tr>
+  <tr><td><code>--saved</code></td><td>las reglas que la ventana recordó al cerrarse</td></tr>
+</table>
+<p><code>renome-cli rules</code> lista los tipos; <code>renome-cli rules number</code> muestra las opciones de una regla, cada una con su valor por defecto. Toda regla acepta también <code>only=FILTRO</code> (solo en los archivos que muestra el filtro) y <code>off</code>. Los nombres de las opciones están en inglés y son los mismos en cualquier idioma.</p>
+<p>También como en la ventana: <code>--filter</code> (el filtro de la lista), <code>--sort</code> y <code>--desc</code> (el orden, que la numeración sigue), <code>--to CARPETA</code> (mover) y <code>--copy</code> (copiar), <code>--name RUTA=NOMBRE</code> (el nombre escrito a mano), <code>--folders</code> (renombrar las propias carpetas), <code>--hidden</code>, <code>--all</code> (lista también los que no cambian) y <code>--csv ARCHIVO</code> (Exportar lista).</p>
+<h4>Búsquedas en línea</h4>
+<p>Las reglas de película, serie, música, libro y cómic buscan en los mismos catálogos y eligen solas lo que elegiría la ventana. En los casos dudosos, <code>--choose</code> decide: <code>ask</code> (el valor por defecto en una terminal) muestra los candidatos numerados y espera el número; <code>auto</code> se queda solo con lo seguro; <code>skip</code> ni siquiera busca los dudosos. <code>--pick RUTA=ID</code> fuerza una elección (<code>tmdb:603</code>, un enlace del catálogo o un título). <code>--edit RUTA:CAMPO=VALOR,…</code> hace lo que hace <b>Editar los datos</b> en la ventana, por ejemplo <code>--edit "libro.epub:title=El Título,authors=Fulano; Mengano"</code> o, con la regla de foto, <code>--edit "IMG_1.jpg:date=2018-03-27 14:30"</code>; <code>--help</code> lista los campos de cada regla. <code>--missing</code> lista lo que falta (episodios, números, pistas, películas de la colección, volúmenes), como las filas atenuadas de la ventana.</p>
+<p>Después de renombrar, el resto ocurre como en la ventana: etiquetas y portadas grabadas, archivos <code>.nfo</code>, listas de reproducción, subtítulos descargados, libros convertidos y los servidores multimedia avisados (<code>--no-server</code> no avisa).</p>
+<h4>Los demás comandos</h4>
+<table>
+  <tr><td><code>undo [ID]</code></td><td>deshace el último renombrado, o el de ese ID</td></tr>
+  <tr><td><code>history</code></td><td>lista, muestra o borra entradas del Historial</td></tr>
+  <tr><td><code>sets</code></td><td>lista, muestra, guarda, exporta, importa, renombra y borra conjuntos</td></tr>
+  <tr><td><code>options</code></td><td>lee y cambia las Opciones (<code>options set lang en</code>)</td></tr>
+  <tr><td><code>keys</code></td><td>guarda las claves de los servicios en el almacén de contraseñas, sin mostrarlas en pantalla</td></tr>
+  <tr><td><code>servers</code></td><td>servidores multimedia: añadir, leer las bibliotecas, emparejar carpetas, probar</td></tr>
+  <tr><td><code>duplicates CARPETAS</code></td><td>copias idénticas, la misma canción u obra repetida (la mejor marcada), <code>--similar</code> fotos parecidas; <code>--trash</code> envía a la Papelera</td></tr>
+  <tr><td><code>update</code></td><td>busca la versión nueva; <code>update install</code> la instala (AppImage, Windows, macOS)</td></tr>
+  <tr><td><code>manual [CAPÍTULO]</code></td><td>este manual, en la terminal</td></tr>
+  <tr><td><code>cache</code></td><td>tamaño y limpieza de las respuestas guardadas</td></tr>
+  <tr><td><code>completions bash</code></td><td>autocompletado con Tab para bash, zsh, fish o PowerShell</td></tr>
+</table>
+<p>Cada comando tiene <code>--help</code>. Los mensajes siguen el idioma de las Opciones; <code>--lang en</code> lo cambia solo esa vez.</p>
+<h4>En scripts</h4>
+<p><code>--json</code> escribe el resultado en JSON (nombres de campos en inglés, que no cambian), <code>--quiet</code> solo los errores, <code>--color never</code> sin colores (también con la variable <code>NO_COLOR</code>). El código de salida es <code>0</code> cuando salió bien, <code>1</code> cuando algún archivo falló, <code>2</code> cuando quedaron casos dudosos sin elección y <code>3</code> para un comando o regla equivocados. Sin terminal, <code>apply</code> pide <code>--yes</code>, y sin <code>--choose</code> los casos dudosos se tratan como <code>auto</code>.</p>
+<p><b>Limitaciones:</b> convertir un libro a <b>PDF</b> necesita la ventana (es ella la que imprime las páginas); desde la terminal, la conversión a PDF lo avisa y el libro queda como está. La ventana y la terminal nunca renombran al mismo tiempo: una espera a que la otra termine. Pero una Opción cambiada desde la terminal con la ventana abierta puede deshacerse cuando la ventana se cierra, porque ella graba las Opciones que tiene; cambie las Opciones con la ventana cerrada. Las elecciones en la terminal muestran texto, no las portadas que compara la ventana.</p>`,
+  },
 ];
