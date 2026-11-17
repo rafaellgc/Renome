@@ -148,21 +148,31 @@ impl Os {
         {
             return Ok((l.base.clone(), Some(l.token.clone())));
         }
-        os_pace().await;
-        let res = self
-            .http
-            .post(format!("{base}/login"))
-            .header("Api-Key", self.auth.os_key.trim())
-            .header("Accept", "application/json")
-            .json(&serde_json::json!({ "username": who.0, "password": who.1 }))
-            .send()
-            .await
-            .map_err(|e| net_error("os", &e))?;
-        let code = res.status().as_u16();
-        let body = res.text().await.map_err(|e| net_error("os", &e))?;
-        if code != 200 {
-            return Err(os_status(code, &body));
-        }
+        // Logins are allowed once a second: a busy answer waits and tries
+        // again, as the other requests do.
+        let mut attempt = 0;
+        let body = loop {
+            os_pace().await;
+            let res = self
+                .http
+                .post(format!("{base}/login"))
+                .header("Api-Key", self.auth.os_key.trim())
+                .header("Accept", "application/json")
+                .json(&serde_json::json!({ "username": who.0, "password": who.1 }))
+                .send()
+                .await
+                .map_err(|e| net_error("os", &e))?;
+            let code = res.status().as_u16();
+            let body = res.text().await.map_err(|e| net_error("os", &e))?;
+            match code {
+                200 => break body,
+                429 | 503 if attempt < 3 => {
+                    attempt += 1;
+                    tokio::time::sleep(Duration::from_secs(1 + attempt)).await;
+                }
+                _ => return Err(os_status(code, &body)),
+            }
+        };
         let v: Value = serde_json::from_str(&body).map_err(|e| format!("osNetwork: {e}"))?;
         let token = v["token"].as_str().unwrap_or_default().to_string();
         // A VIP account is sent to another server.
@@ -1131,12 +1141,13 @@ pub async fn check_os(auth: Auth) -> Result<Option<i64>, String> {
     }
     *LOGIN.lock().unwrap() = None;
     let os = Os { http: http(), auth };
-    // A search costs nothing and needs the key.
+    // A search costs nothing and needs the key; with an account it logs
+    // in first (LOGIN was cleared), so a wrong password shows there too.
+    // Logging in again right after would be refused (once a second).
     os.send(true, "/infos/formats", &[], None).await?;
     if os.auth.os_user.trim().is_empty() {
         return Ok(None);
     }
-    os.session(true).await?;
     Ok(os.remaining().await)
 }
 

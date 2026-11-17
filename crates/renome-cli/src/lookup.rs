@@ -2760,7 +2760,7 @@ pub async fn download_subtitles(
     if items.is_empty() {
         return notes;
     }
-    let searched = subs::search(&Cli, auth.clone(), &langs, items, || false).await;
+    let searched = subs::search(&Cli, auth.clone(), &langs, items, crate::stop::requested).await;
     for e in &searched.errors {
         out::error(&crate::text::error_text(e));
     }
@@ -2803,7 +2803,7 @@ pub async fn download_subtitles(
     if writes.is_empty() {
         return notes;
     }
-    let mut written = subs::write(&Cli, auth, writes, || false).await;
+    let mut written = subs::write(&Cli, auth, writes, crate::stop::requested).await;
     let mut r = tmdb::SidecarReport {
         created: std::mem::take(&mut written.created),
         errors: std::mem::take(&mut written.errors),
@@ -2812,7 +2812,13 @@ pub async fn download_subtitles(
     renome_services::after::record_created(history, report.history_id.clone(), &mut r);
     notes.push(t("subsSavedN", &[("n", &r.created.len())]));
     for (file, why) in r.errors {
-        out::error(&format!("{file}: {}", crate::text::error_text(&why)));
+        let text = format!("{file}: {}", crate::text::error_text(&why));
+        // Saved all the same, maybe out of time: a warning, not an error.
+        if why == "subsLengthKept" {
+            out::note(&out::yellow(&text));
+        } else {
+            out::error(&text);
+        }
     }
     notes
 }

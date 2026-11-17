@@ -87,19 +87,22 @@ pub fn command(m: &ArgMatches, settings: Option<&Value>) -> Result<Exit, String>
     let mut cache = renome_core::HashCache::default();
     let mut p = progress("identicalScanning");
     let identical =
-        renome_core::find_identical(&files, &mut cache, &mut p, &|| false).unwrap_or_default();
+        renome_core::find_identical(&files, &mut cache, &mut p, &crate::stop::requested)
+            .unwrap_or_default();
     let by_group: HashMap<PathBuf, usize> = identical
         .iter()
         .enumerate()
         .flat_map(|(i, g)| g.iter().map(move |p| (p.clone(), i)))
         .collect();
     let songs = if want_repeated {
-        renome_core::alike::same_songs(&files, &by_group, &|| false).unwrap_or_default()
+        renome_core::alike::same_songs(&files, &by_group, &crate::stop::requested)
+            .unwrap_or_default()
     } else {
         vec![]
     };
     let works = if want_repeated {
-        renome_core::repeated::same_works(&files, &by_group, &|| false).unwrap_or_default()
+        renome_core::repeated::same_works(&files, &by_group, &crate::stop::requested)
+            .unwrap_or_default()
     } else {
         vec![]
     };
@@ -113,7 +116,7 @@ pub fn command(m: &ArgMatches, settings: Option<&Value>) -> Result<Exit, String>
             &by_group,
             &mut pictures,
             &mut p,
-            &|| false,
+            &crate::stop::requested,
         )
         .unwrap_or_default();
         pictures.save();
