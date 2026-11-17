@@ -217,8 +217,9 @@ pub fn preview_or_apply(
         crate::stop::reset();
     }
     let preview = renome_core::preview(&files, &steps, &overrides, &view);
+    let mut doubtful = 0;
     if let Some(found) = &found {
-        let doubtful = preview
+        doubtful = preview
             .items
             .iter()
             .filter(|i| {
@@ -251,7 +252,7 @@ pub fn preview_or_apply(
     }
     if !apply {
         show(&preview, m.get_flag("all"), &missing);
-        return Ok(if preview.conflicts > 0 {
+        return Ok(if preview.conflicts > 0 || doubtful > 0 {
             Exit::Doubts
         } else {
             Exit::Done
@@ -274,7 +275,7 @@ pub fn preview_or_apply(
                 json!({ "renamed": 0, "historyId": null, "failed": [] })
             );
         }
-        return Ok(if preview.conflicts > 0 {
+        return Ok(if preview.conflicts > 0 || doubtful > 0 {
             Exit::Doubts
         } else {
             Exit::Done
@@ -360,6 +361,10 @@ pub fn preview_or_apply(
                 out::note(&note);
             }
         }
+    }
+    // Renamed what was certain; conflicts or doubts left say so.
+    if matches!(exit, Exit::Done) && (preview.conflicts > 0 || doubtful > 0) {
+        return Ok(Exit::Doubts);
     }
     Ok(exit)
 }
