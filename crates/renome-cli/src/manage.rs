@@ -812,7 +812,7 @@ async fn test_key(name: &str, get: &dyn Fn(&str) -> String) -> Result<String, St
 }
 
 /// The secrets and whether they come from the system's store.
-fn secrets() -> Result<(Map<String, Value>, bool), String> {
+pub fn secrets() -> Result<(Map<String, Value>, bool), String> {
     let loaded = renome_services::load_secrets();
     match loaded.get("status").and_then(Value::as_str) {
         Some("stored") => Ok((

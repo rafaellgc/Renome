@@ -179,17 +179,26 @@ const current = () => JSON.stringify(SECRET_FIELDS.map((k) => settings[k]));
  *  without a store, those in the settings file hold. */
 export async function loadSecrets() {
   secrets.ready = false;
+  // What the fields held before the store answered: one typed meanwhile
+  // (a slow or locked store) wins over the store's, and is saved below.
+  const before = Object.fromEntries(SECRET_FIELDS.map((k) => [k, settings[k]]));
+  let typed = false;
   try {
     const r = await invoke<{ status: "stored" | "refused" | "missing"; secrets?: Partial<Settings> }>("load_secrets");
-    if (r.secrets) {
-      for (const k of SECRET_FIELDS) if (typeof r.secrets[k] === "string" && r.secrets[k]) settings[k] = r.secrets[k];
+    const got = r.secrets ?? {};
+    for (const k of SECRET_FIELDS) {
+      if (settings[k] !== before[k]) typed = true;
+      else if (typeof got[k] === "string" && got[k]) settings[k] = got[k];
     }
     secrets.status = r.status;
+    // The baseline is what the store holds, so what was typed differs.
+    saved = JSON.stringify(SECRET_FIELDS.map((k) => (typeof got[k] === "string" && got[k] ? got[k] : before[k])));
   } catch {
     secrets.status = "refused";
+    saved = current();
   }
-  saved = current();
   secrets.ready = true;
+  if (typed) await saveSecrets().catch(() => {});
 }
 
 export async function saveSecrets() {

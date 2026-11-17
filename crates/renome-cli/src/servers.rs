@@ -12,28 +12,19 @@ use crate::Exit;
 use crate::out;
 use crate::text::t;
 
+/// The servers' keys (`serverKeys`, a JSON text among the secrets).
 fn keys() -> Map<String, Value> {
-    let loaded = renome_services::load_secrets();
-    let raw = loaded
-        .get("secrets")
-        .and_then(|s| s.get("serverKeys"))
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .or_else(|| {
-            renome_services::read_settings_file()
-                .and_then(|s| s.get("serverKeys")?.as_str().map(str::to_string))
-        })
-        .unwrap_or_else(|| "{}".into());
+    let raw = crate::manage::secrets()
+        .ok()
+        .and_then(|(all, _)| all.get("serverKeys")?.as_str().map(str::to_string))
+        .unwrap_or_default();
     serde_json::from_str(&raw).unwrap_or_default()
 }
 
+/// Sets (or removes) one server's key, keeping every other secret: from
+/// the store, or from the settings file when the system has none.
 fn save_key(id: &str, key: Option<String>) -> Result<(), String> {
-    let loaded = renome_services::load_secrets();
-    let mut all: Map<String, Value> = loaded
-        .get("secrets")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
+    let (mut all, _) = crate::manage::secrets()?;
     let mut k = keys();
     match key {
         Some(v) => k.insert(id.into(), Value::from(v)),
