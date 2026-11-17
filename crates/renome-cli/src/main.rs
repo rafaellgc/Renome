@@ -84,6 +84,7 @@ fn main() -> ExitCode {
         Some(("servers", m)) => tokio::runtime::Runtime::new()
             .map_err(|e| e.to_string())
             .and_then(|rt| servers::command(m, &rt)),
+        Some(("manpages", m)) => man_pages(m.get_one::<std::path::PathBuf>("dir").unwrap()),
         Some(("completions", m)) => {
             let shell = *m.get_one::<clap_complete::Shell>("shell").unwrap();
             clap_complete::generate(shell, &mut cli(), "renome-cli", &mut std::io::stdout());
@@ -574,6 +575,13 @@ pub fn cli() -> Command {
                 .subcommand(Command::new("clear").about(t("cacheClear", &[]))),
         )
         .subcommand(
+            Command::new("manpages").hide(true).arg(
+                Arg::new("dir")
+                    .required(true)
+                    .value_parser(clap::value_parser!(std::path::PathBuf)),
+            ),
+        )
+        .subcommand(
             Command::new("completions")
                 .about(t("cmdCompletions", &[]))
                 .arg(
@@ -583,6 +591,34 @@ pub fn cli() -> Command {
                         .value_parser(clap::value_parser!(clap_complete::Shell)),
                 ),
         )
+}
+
+/// `renome-cli.1` and one page per command (`renome-cli-sets-save.1`), for
+/// the packages; in the language chosen (`--lang en` for them).
+fn man_pages(dir: &std::path::Path) -> Result<Exit, String> {
+    fn write(cmd: &Command, words: &[&str], dir: &std::path::Path) -> Result<(), String> {
+        let name = words.join("-");
+        let cmd = cmd.clone().name(name.clone()).bin_name(words.join(" "));
+        let mut page = Vec::new();
+        clap_mangen::Man::new(cmd.clone())
+            .render(&mut page)
+            .map_err(|e| e.to_string())?;
+        std::fs::write(dir.join(format!("{name}.1")), page).map_err(|e| e.to_string())?;
+        for sub in cmd
+            .get_subcommands()
+            .filter(|s| !s.is_hide_set() && s.get_name() != "help")
+        {
+            let mut next = words.to_vec();
+            next.push(sub.get_name());
+            write(sub, &next, dir)?;
+        }
+        Ok(())
+    }
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let mut root = cli();
+    root.build();
+    write(&root, &["renome-cli"], dir)?;
+    Ok(Exit::Done)
 }
 
 /// The rule sources given, in the order they were typed.
