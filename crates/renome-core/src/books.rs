@@ -2215,10 +2215,7 @@ mod tests {
             "Lia Marta Quaresma - Ecos - 03"
         );
         assert_eq!(book_name("{parte} - {título}", &m, " - "), "03 - Ecos");
-        assert_eq!(
-            book_name("{título} {{narrador}}", &m, " - ").contains("Tomé Rocha"),
-            true
-        );
+        assert!(book_name("{título} {{narrador}}", &m, " - ").contains("Tomé Rocha"));
         let long = BookMatch {
             part: 7,
             parts: 140,

@@ -126,8 +126,8 @@ fn number_clashes(items: &mut [PreviewItem], keys: &mut PathKeys, view: &View) {
         .map(|i| keys.key(&i.path))
         .collect();
     let mut used: HashSet<PathBuf> = HashSet::new();
-    for i in 0..items.len() {
-        if items[i].status != Status::Ok || view.identical.contains_key(&items[i].path) {
+    for item in items.iter_mut() {
+        if item.status != Status::Ok || view.identical.contains_key(&item.path) {
             continue;
         }
         let taken = |keys: &mut PathKeys, used: &HashSet<PathBuf>, target: &Path| {
@@ -135,12 +135,12 @@ fn number_clashes(items: &mut [PreviewItem], keys: &mut PathKeys, view: &View) {
             used.contains(&key)
                 || (std::fs::symlink_metadata(target).is_ok()
                     && !moving.contains(&key)
-                    && !same_file(target, &items[i].path))
+                    && !same_file(target, &item.path))
         };
-        let first = items[i].target();
+        let first = item.target();
         if taken(keys, &used, &first) {
-            let name = items[i].new_name.clone();
-            let (stem, ext) = if items[i].is_dir {
+            let name = item.new_name.clone();
+            let (stem, ext) = if item.is_dir {
                 (name.as_str(), "")
             } else {
                 crate::files::split_name(&name)
@@ -149,12 +149,12 @@ fn number_clashes(items: &mut [PreviewItem], keys: &mut PathKeys, view: &View) {
                 let new = crate::files::join_name(&format!("{stem} ({n})"), ext);
                 let target = first.with_file_name(&new);
                 if !taken(keys, &used, &target) {
-                    items[i].new_name = new;
+                    item.new_name = new;
                     break;
                 }
             }
         }
-        let key = keys.key(&items[i].target());
+        let key = keys.key(&item.target());
         used.insert(key);
     }
 }

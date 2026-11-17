@@ -1166,12 +1166,12 @@ const ARTWORK_EXT: [&str; 5] = ["jpg", "jpeg", "png", "webp", "tbn"];
 /// A new name from a list, without the file's own extension if the line
 /// has it.
 fn list_name(name: &str, ext: &str) -> String {
-    if !ext.is_empty() {
-        if let Some((stem, e)) = name.rsplit_once('.') {
-            if e.eq_ignore_ascii_case(ext) && !stem.is_empty() {
-                return stem.to_string();
-            }
-        }
+    if !ext.is_empty()
+        && let Some((stem, e)) = name.rsplit_once('.')
+        && e.eq_ignore_ascii_case(ext)
+        && !stem.is_empty()
+    {
+        return stem.to_string();
     }
     name.to_string()
 }
