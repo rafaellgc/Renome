@@ -113,6 +113,27 @@ pub fn preview_or_apply(
             ) && s.get("enabled") != Some(&Value::Bool(false))
         })
         .map(|s| s["rule"].clone());
+    // The details typed by hand (--edit), for the lookup rule's editor or
+    // the photo rule's dates.
+    let edit_specs: Vec<String> = m
+        .get_many::<String>("edit")
+        .map(|v| v.cloned().collect())
+        .unwrap_or_default();
+    let has_photo = steps
+        .iter()
+        .any(|s| s.enabled && matches!(s.rule, renome_core::Rule::Photo { .. }));
+    let edit_kind = match lookup_rule.as_ref().and_then(|r| r["type"].as_str()) {
+        Some(k @ ("music" | "book" | "comic")) => k,
+        _ if has_photo => "photo",
+        _ => "",
+    };
+    if !edit_specs.is_empty() && edit_kind.is_empty() {
+        return Err(t("noEditor", &[]));
+    }
+    let edits = crate::edit::parse(&edit_specs, crate::edit::fields_of(edit_kind))?;
+    if edit_kind == "photo" {
+        crate::edit::photo_dates(&edits, &mut view.dates)?;
+    }
     let mut found = None;
     if let Some(rule) = &lookup_rule {
         view.trash_ads = rule
@@ -120,6 +141,23 @@ pub fn preview_or_apply(
             .and_then(Value::as_bool)
             .unwrap_or(false);
         let first = renome_core::preview(&files, &steps, &overrides, &view);
+        let names: HashMap<&PathBuf, String> = first
+            .items
+            .iter()
+            .map(|i| {
+                (
+                    &i.path,
+                    i.lookup_name.clone().unwrap_or_else(|| {
+                        i.path
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .into_owned()
+                    }),
+                )
+            })
+            .collect();
+        let by_path: HashMap<&PathBuf, &FileEntry> = files.iter().map(|f| (&f.path, f)).collect();
         let ask = ask_of(m)?;
         let rt = runtime()?;
         found = Some(match rule["type"].as_str() {
@@ -129,17 +167,34 @@ pub fn preview_or_apply(
                 crate::lookup::Found::Movies(f)
             }
             Some("comic") => {
-                let f = rt.block_on(crate::lookup::comics(&first, rule, settings, &ask))?;
+                let mut f = rt.block_on(crate::lookup::comics(&first, rule, settings, &ask))?;
+                crate::edit::comics(
+                    &edits,
+                    &mut f.chosen,
+                    &names,
+                    rule.get("seriesByFolder")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                );
                 view.comics = f.chosen.clone();
                 crate::lookup::Found::Comics(Box::new(f))
             }
             Some("book") => {
-                let f = rt.block_on(crate::lookup::books(&first, rule, settings, &ask))?;
+                let mut f = rt.block_on(crate::lookup::books(&first, rule, settings, &ask))?;
+                crate::edit::books(&edits, &mut f.chosen, &names);
                 view.books = f.chosen.clone();
                 crate::lookup::Found::Books(Box::new(f))
             }
             Some("music") => {
-                let f = rt.block_on(crate::lookup::music(&files, &first, rule, &ask))?;
+                let mut f = rt.block_on(crate::lookup::music(&files, &first, rule, &ask))?;
+                crate::edit::songs(
+                    &edits,
+                    &mut f.chosen,
+                    &by_path,
+                    rule.get("fromName")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                );
                 view.songs = f.chosen.clone();
                 crate::lookup::Found::Music(Box::new(f))
             }

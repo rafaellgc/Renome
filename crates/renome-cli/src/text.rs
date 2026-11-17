@@ -1203,6 +1203,38 @@ const CLI: &[(&str, [&str; 3])] = &[
         ],
     ),
     (
+        "argEdit",
+        [
+            "Corrige à mão os detalhes de um arquivo, repetível. Campos: música {music}; livro {book}; quadrinho {comic}; foto {photo}",
+            "Corrects a file's details by hand, repeatable. Fields: music {music}; book {book}; comic {comic}; photo {photo}",
+            "Corrige a mano los detalles de un archivo, repetible. Campos: música {music}; libro {book}; cómic {comic}; foto {photo}",
+        ],
+    ),
+    (
+        "badEdit",
+        [
+            "--edit {spec}: escreva CAMINHO:CAMPO=VALOR (campos: {keys}).",
+            "--edit {spec}: write PATH:FIELD=VALUE (fields: {keys}).",
+            "--edit {spec}: escriba RUTA:CAMPO=VALOR (campos: {keys}).",
+        ],
+    ),
+    (
+        "badEditNumber",
+        [
+            "--edit: {key} leva só algarismos, não \"{value}\".",
+            "--edit: {key} takes digits only, not \"{value}\".",
+            "--edit: {key} lleva solo dígitos, no \"{value}\".",
+        ],
+    ),
+    (
+        "noEditor",
+        [
+            "--edit precisa de uma regra de música, livro, quadrinho ou foto.",
+            "--edit needs a music, book, comic or photo rule.",
+            "--edit necesita una regla de música, libro, cómic o foto.",
+        ],
+    ),
+    (
         "epTypeHint",
         [
             "digite S01E05 (ou 1x05, S01E05-06) para escolher outro",

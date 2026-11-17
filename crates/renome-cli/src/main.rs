@@ -2,6 +2,7 @@
 //! history and options as the window, with the same code (see SPEC §8).
 
 mod duplicates;
+mod edit;
 mod lookup;
 mod manage;
 mod manual;
@@ -183,6 +184,21 @@ pub fn cli() -> Command {
                 .help(t("argName", &[]))
                 .action(ArgAction::Append)
                 .value_name("PATH=NAME"),
+        )
+        .arg(
+            Arg::new("edit")
+                .long("edit")
+                .help(t(
+                    "argEdit",
+                    &[
+                        ("music", &edit::SONG.join(", ")),
+                        ("book", &edit::BOOK.join(", ")),
+                        ("comic", &edit::COMIC.join(", ")),
+                        ("photo", &edit::PHOTO.join(", ")),
+                    ],
+                ))
+                .action(ArgAction::Append)
+                .value_name("PATH:KEY=VALUE,…"),
         )
         .arg(
             Arg::new("to")
