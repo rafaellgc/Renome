@@ -16,7 +16,7 @@ use crate::rulespec;
 use crate::text::{lang, t};
 
 /// Rule types that need a catalogue lookup not in the command line yet.
-const LOOKUPS: [&str; 3] = ["music", "book", "comic"];
+const LOOKUPS: [&str; 2] = ["book", "comic"];
 
 pub fn preview_or_apply(
     m: &ArgMatches,
@@ -107,7 +107,7 @@ pub fn preview_or_apply(
     let lookup_rule = steps_json
         .iter()
         .find(|s| {
-            matches!(rulespec::kind_of(s), "movie" | "series")
+            matches!(rulespec::kind_of(s), "movie" | "series" | "music")
                 && s.get("enabled") != Some(&Value::Bool(false))
         })
         .map(|s| s["rule"].clone());
@@ -125,6 +125,11 @@ pub fn preview_or_apply(
                 let f = rt.block_on(crate::lookup::movies(&first, settings, &ask))?;
                 view.movies = f.chosen.clone();
                 crate::lookup::Found::Movies(f)
+            }
+            Some("music") => {
+                let f = rt.block_on(crate::lookup::music(&files, &first, rule, &ask))?;
+                view.songs = f.chosen.clone();
+                crate::lookup::Found::Music(f)
             }
             _ => {
                 let f = rt.block_on(crate::lookup::series(&first, rule, settings, &ask))?;
@@ -146,10 +151,7 @@ pub fn preview_or_apply(
                     .extension()
                     .map(|e| e.to_string_lossy().to_lowercase())
                     .unwrap_or_default();
-                renome_core::tmdb::is_video(&ext)
-                    && i.extra.is_none()
-                    && !i.release_junk
-                    && !found.has(&i.path)
+                found.wanted(&ext) && i.extra.is_none() && !i.release_junk && !found.has(&i.path)
             })
             .count();
         if doubtful > 0 {
@@ -218,6 +220,9 @@ pub fn preview_or_apply(
                 rule, f, &preview, &report, &history,
             )),
             crate::lookup::Found::Series(f) => runtime()?.block_on(crate::lookup::after_series(
+                rule, f, &preview, &report, &history,
+            )),
+            crate::lookup::Found::Music(f) => runtime()?.block_on(crate::lookup::after_music(
                 rule, f, &preview, &report, &history,
             )),
         };

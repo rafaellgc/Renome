@@ -18,7 +18,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 mod update;
 
-use renome_services::after::{TagReport, VideoTagOptions};
+use renome_services::after::{TagJob, TagReport, VideoTagOptions, folder_cover};
 
 use renome_services::{
     ANSWERS, acoustid, anilist, cache_days, cache_root, comicvine, discogs, drop_old_cache, gcd,
@@ -1154,19 +1154,7 @@ fn songs_of(app: &AppHandle, paths: &[PathBuf], from_name: bool) -> (Songs, Song
         .cloned()
         .collect();
     let heard = state.heard.lock().unwrap();
-    let (mut named, mut unnamed) = (Vec::new(), Vec::new());
-    for f in &files {
-        let Some(mut t) = song_tags(f, from_name).or_else(|| any_song_tags(f)) else {
-            continue;
-        };
-        t.recordings = heard.get(&f.path).cloned().unwrap_or_default();
-        if f.audio_tags().is_some_and(|t| !t.title.is_empty()) {
-            named.push((f.path.clone(), t));
-        } else {
-            unnamed.push((f.path.clone(), t));
-        }
-    }
-    (named, unnamed)
+    musicbrainz::songs_of(&files.iter().collect::<Vec<_>>(), &heard, from_name)
 }
 
 /// Groups the songs in albums and looks each one up on MusicBrainz.
@@ -1284,13 +1272,6 @@ async fn write_covers(
     Ok(report)
 }
 
-#[derive(serde::Deserialize)]
-struct TagJob {
-    /// Where the song is now (after renaming).
-    path: PathBuf,
-    song: renome_core::musicbrainz::SongMatch,
-}
-
 /// Writes each song's release details into its tags (and, with `cover`,
 /// the release's front cover in place of its pictures; with `clean`, the
 /// other tags go), keeping what they held in the rename's history entry (or
@@ -1305,123 +1286,19 @@ async fn write_tags(
     clean: bool,
     cover_size: Option<u32>,
 ) -> Result<TagReport, String> {
-    use renome_core::tagwrite;
     let state = app.state::<AppState>();
-    let mut report = TagReport::default();
-    let items: Vec<TagJob> = items
-        .into_iter()
-        .filter(|j| {
-            let ok = tagwrite::writable(&j.path);
-            if !ok {
-                report
-                    .errors
-                    .push((j.path.display().to_string(), "tagsUnsupported".into()));
-            }
-            ok
-        })
-        .collect();
-    if items.is_empty() {
-        return Ok(report);
-    }
-    let own_entry = history_id.is_none();
-    let id = match history_id {
-        Some(id) => id,
-        None => state.history.record_files(&[])?,
-    };
-    let store = state.history.files_dir(&id)?;
-    // Each song noted before and after, for a stop halfway.
-    let mut note = state.history.tagging(&id)?;
-    // One cover per release: the archive's, else the album folder's own.
-    let mut covers: HashMap<String, Option<Vec<u8>>> = HashMap::new();
-    let mut full: HashMap<String, Option<renome_core::musicbrainz::Release>> = HashMap::new();
-    let total = items.len();
-    let _ = app.emit(
-        "mb-progress",
-        serde_json::json!({ "done": 0, "total": total, "kind": "tags" }),
-    );
-    let mut backups = Vec::new();
-    let mut written = Vec::new();
-    for (done, job) in items.into_iter().enumerate() {
-        // Typed in: no release to ask (the folder's cover still counts).
-        let typed = job.song.typed || job.song.release.is_empty();
-        let image = if cover && typed {
-            job.path.parent().and_then(folder_cover)
-        } else if cover {
-            if !covers.contains_key(&job.song.release) {
-                let mut found = musicbrainz::front_cover(
-                    &state.mb,
-                    &state.dg,
-                    &job.song.release,
-                    cover_size.unwrap_or(1200),
-                )
-                .await
-                .ok()
-                .flatten();
-                if found.is_none() {
-                    found = job.path.parent().and_then(folder_cover);
-                }
-                covers.insert(job.song.release.clone(), found);
-            }
-            covers[&job.song.release].clone()
-        } else {
-            None
-        };
-        if !typed && !full.contains_key(&job.song.release) {
-            let r = if renome_core::discogs::is_discogs(&job.song.release) {
-                state.dg.release(&job.song.release).await.ok()
-            } else {
-                state.mb.release_full(&job.song.release).await.ok()
-            };
-            full.insert(job.song.release.clone(), r);
-        }
-        let mut fields = tagwrite::fields_of(&job.song);
-        if let Some(Some(r)) = full.get(&job.song.release).filter(|_| !typed) {
-            // A genre typed in counts over the release's.
-            let typed_genre = !job.song.genre.is_empty();
-            fields.extend(
-                tagwrite::details(r, &job.song.track_id)
-                    .into_iter()
-                    .filter(|(f, _)| !(typed_genre && *f == tagwrite::Field::Genre)),
-            );
-        }
-        let (path, store) = (job.path.clone(), store.clone());
-        note.start(&path);
-        let result = tauri::async_runtime::spawn_blocking(move || {
-            tagwrite::write(&path, &fields, image.as_deref(), clean, &store)
-        })
-        .await
-        .map_err(|e| e.to_string())
-        .and_then(|r| r);
-        match result {
-            Ok(Some(b)) => {
-                note.done(&b);
-                backups.push(b);
-                written.push(job.path);
-            }
-            Ok(None) => {}
-            Err(e) => report.errors.push((job.path.display().to_string(), e)),
-        }
-        let _ = app.emit(
-            "mb-progress",
-            serde_json::json!({ "done": done + 1, "total": total, "kind": "tags" }),
-        );
-    }
-    report.written = backups.len();
-    let saved = if backups.is_empty() {
-        if own_entry {
-            let _ = state.history.delete(&id);
-        }
-        Ok(())
-    } else {
-        state.history.add_tags(&id, backups)
-    };
-    match saved {
-        Ok(()) => note.finish(),
-        // The note stays: the next start puts the songs in the entry.
-        Err(e) => report
-            .errors
-            .push((String::new(), format!("err.history: {e}"))),
-    }
+    let (report, written) = renome_services::after::song_tags(
+        &Gui(app.clone()),
+        &state.history,
+        &state.mb,
+        &state.dg,
+        history_id,
+        items,
+        cover,
+        clean,
+        cover_size,
+    )
+    .await?;
     // The list reads the new tags.
     let written: HashSet<PathBuf> = written.into_iter().collect();
     for f in state.session.lock().unwrap().files.iter_mut() {
@@ -2399,28 +2276,6 @@ async fn subtitle_tools(
     Ok(report)
 }
 
-/// An album folder's own cover image (`cover`, `folder` or `front`).
-fn folder_cover(dir: &Path) -> Option<Vec<u8>> {
-    let rd = std::fs::read_dir(dir).ok()?;
-    let mut found: Vec<PathBuf> = rd
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| {
-            let n = p
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_lowercase();
-            ["cover.", "folder.", "front."]
-                .iter()
-                .any(|s| n.starts_with(s))
-                && (n.ends_with(".jpg") || n.ends_with(".jpeg") || n.ends_with(".png"))
-        })
-        .collect();
-    found.sort();
-    std::fs::read(found.first()?).ok()
-}
-
 /// Reads each book's details and looks it up on Open Library.
 #[tauri::command]
 async fn book_lookup(
@@ -2757,32 +2612,12 @@ async fn write_playlists(
     history_id: Option<String>,
     dirs: Vec<PathBuf>,
 ) -> Result<tmdb::SidecarReport, String> {
-    let mut report = tauri::async_runtime::spawn_blocking(move || {
-        let mut report = tmdb::SidecarReport::default();
-        let mut seen = HashSet::new();
-        let mut kept = HashSet::new();
-        for dir in dirs {
-            let Some((path, text)) = renome_core::playlists::album_playlist(&dir) else {
-                if renome_core::playlists::has_playlist(&dir) {
-                    kept.insert(renome_core::music::album_dir(&dir).to_path_buf());
-                }
-                continue;
-            };
-            if !seen.insert(path.clone()) {
-                continue;
-            }
-            match tmdb::write_new(&path, text.as_bytes()) {
-                Ok(()) => report.created.push(path),
-                Err(e) => report.errors.push((path.display().to_string(), e)),
-            }
-        }
-        report.kept = kept.len();
-        report
+    let app2 = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        renome_services::after::playlists(&app2.state::<AppState>().history, history_id, dirs)
     })
     .await
-    .map_err(|e| e.to_string())?;
-    record_created(&app, history_id, &mut report);
-    Ok(report)
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

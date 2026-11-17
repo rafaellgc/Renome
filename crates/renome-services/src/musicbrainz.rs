@@ -198,19 +198,19 @@ impl Client {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AlbumLookup {
-    files: Vec<PathBuf>,
+    pub files: Vec<PathBuf>,
     /// The folder the album's songs are in (shown in the review).
-    dir: PathBuf,
-    query: AlbumQuery,
-    candidates: Vec<Candidate>,
+    pub dir: PathBuf,
+    pub query: AlbumQuery,
+    pub candidates: Vec<Candidate>,
     /// Picked with confidence.
-    choice: Option<Candidate>,
-    matches: Vec<(PathBuf, SongMatch)>,
+    pub choice: Option<Candidate>,
+    pub matches: Vec<(PathBuf, SongMatch)>,
     /// The chosen release's tracks, for those missing from the album.
-    tracks: Vec<mb::ListedTrack>,
-    error: Option<String>,
+    pub tracks: Vec<mb::ListedTrack>,
+    pub error: Option<String>,
     /// Identified by the songs' sound (AcoustID), not their tags.
-    heard: bool,
+    pub heard: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -590,10 +590,10 @@ async fn by_sound(
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Chosen {
-    matches: Vec<(PathBuf, SongMatch)>,
-    tracks: Vec<mb::ListedTrack>,
+    pub matches: Vec<(PathBuf, SongMatch)>,
+    pub tracks: Vec<mb::ListedTrack>,
     /// How many songs agree in duration with their track.
-    agree: usize,
+    pub agree: usize,
 }
 
 /// A release from MusicBrainz or, by its id, Discogs.
@@ -642,8 +642,8 @@ pub async fn choose(
 #[derive(Deserialize)]
 pub struct CoverItem {
     /// The album's folder after renaming.
-    dir: PathBuf,
-    release: String,
+    pub dir: PathBuf,
+    pub release: String,
 }
 
 /// Whether an album folder has a cover image of its own (`cover`,
@@ -687,4 +687,30 @@ pub async fn covers(
         progress(host, done + 1, total, None);
     }
     report
+}
+
+/// The songs' own tags in the list (with the name filled in, as the music
+/// rule does, and the recordings they were heard as): those with a title
+/// in their tags, and those without (a title from the file name is only a
+/// guess).
+pub fn songs_of(
+    files: &[&renome_core::FileEntry],
+    heard: &HashMap<PathBuf, Vec<String>>,
+    from_name: bool,
+) -> (Vec<(PathBuf, AudioTags)>, Vec<(PathBuf, AudioTags)>) {
+    let (mut named, mut unnamed) = (Vec::new(), Vec::new());
+    for f in files {
+        let Some(mut t) = renome_core::rules::song_tags(f, from_name)
+            .or_else(|| renome_core::rules::any_song_tags(f))
+        else {
+            continue;
+        };
+        t.recordings = heard.get(&f.path).cloned().unwrap_or_default();
+        if f.audio_tags().is_some_and(|t| !t.title.is_empty()) {
+            named.push((f.path.clone(), t));
+        } else {
+            unnamed.push((f.path.clone(), t));
+        }
+    }
+    (named, unnamed)
 }

@@ -45,9 +45,20 @@ impl Host for Cli {
         ) else {
             return;
         };
-        let key = match event {
-            "tmdb-progress" => "tmdbSearching",
-            "inside-progress" => "insideWriting",
+        let kind = payload
+            .get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let key = match (event, kind) {
+            ("tmdb-progress", "save" | "saveTv") => "sidecarsWriting",
+            ("tmdb-progress", _) => "tmdbSearching",
+            ("mb-progress", "listen") => "mbListening",
+            ("mb-progress", "tags") => "tagsWriting",
+            ("mb-progress", "save") => "coversWriting",
+            ("mb-progress", _) => "mbSearching",
+            ("book-progress", _) => "olSearching",
+            ("subs-progress", _) => "subsSearching",
+            ("inside-progress", _) => "insideWriting",
             _ => "",
         };
         let what = crate::text::t(key, &[("done", &done), ("total", &total)]);
@@ -931,6 +942,7 @@ pub async fn after_series(
 pub enum Found {
     Movies(Movies),
     Series(Series),
+    Music(Music),
 }
 
 impl Found {
@@ -939,6 +951,319 @@ impl Found {
         match self {
             Found::Movies(m) => m.chosen.contains_key(path),
             Found::Series(s) => s.chosen.contains_key(path),
+            Found::Music(m) => m.chosen.contains_key(path),
         }
     }
+
+    /// Whether a file of this extension is one the rule looks up.
+    pub fn wanted(&self, ext: &str) -> bool {
+        match self {
+            Found::Music(_) => renome_core::music::is_audio(ext),
+            _ => renome_core::tmdb::is_video(ext),
+        }
+    }
+}
+
+/// What the music rule found and chose.
+pub struct Music {
+    pub mb: renome_services::musicbrainz::Client,
+    pub dg: renome_services::discogs::Client,
+    /// Each song's release and place in it.
+    pub chosen: HashMap<PathBuf, renome_core::musicbrainz::SongMatch>,
+    /// Each album chosen: its folder (before renaming) and release.
+    pub albums: Vec<(PathBuf, String)>,
+}
+
+fn mb_line(c: &renome_core::musicbrainz::Candidate) -> String {
+    let mut details: Vec<String> = Vec::new();
+    for v in [&c.date, &c.country, &c.format, &c.label] {
+        if !v.is_empty() {
+            details.push(v.clone());
+        }
+    }
+    if c.tracks > 0 {
+        details.push(t("albumTracks", &[("n", &c.tracks)]));
+    }
+    format!(
+        "{} — {}{}",
+        c.title,
+        c.artist,
+        out::dim(&format!(" ({})", details.join(", ")))
+    )
+}
+
+/// Looks up the songs' albums on MusicBrainz (Discogs when it finds
+/// nothing and a token is set; by sound with `identifyBySound`), the
+/// doubtful albums asked in the terminal.
+pub async fn music(
+    files: &[renome_core::FileEntry],
+    preview: &Preview,
+    rule: &Value,
+    ask: &Ask,
+) -> Result<Music, String> {
+    use renome_services::musicbrainz as mbs;
+    let from_name = rule
+        .get("fromName")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let listen = rule
+        .get("identifyBySound")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let mb = mbs::Client::default();
+    let dg = renome_services::discogs::Client::default();
+    if let Some(token) = renome_services::load_secrets()
+        .get("secrets")
+        .and_then(|s| s.get("discogsToken"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    {
+        dg.set_token(token);
+    }
+    let acoustid = renome_services::acoustid::Client::default();
+    let heard = std::sync::Mutex::new(HashMap::new());
+    let wanted: std::collections::HashSet<&PathBuf> = preview
+        .items
+        .iter()
+        .filter(|i| {
+            let ext = Path::new(&i.original)
+                .extension()
+                .map(|e| e.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            !i.is_dir && (!i.untagged || listen) && renome_core::music::is_audio(&ext)
+        })
+        .map(|i| &i.path)
+        .collect();
+    let list: Vec<&renome_core::FileEntry> =
+        files.iter().filter(|f| wanted.contains(&f.path)).collect();
+    let (mut named, mut unnamed) = mbs::songs_of(&list, &HashMap::new(), from_name);
+    if !listen {
+        let (guessed, none): (Vec<_>, Vec<_>) =
+            unnamed.into_iter().partition(|(_, t)| !t.title.is_empty());
+        named.extend(guessed);
+        unnamed = none;
+    }
+    let albums = mbs::albums(&named);
+    let services = mbs::Services {
+        mb: &mb,
+        dg: &dg,
+        acoustid: &acoustid,
+        heard: &heard,
+    };
+    let found = mbs::lookup(&Cli, &services, albums, unnamed, listen).await;
+    if let Some(failed) = found.iter().find_map(|f| f.error.clone())
+        && found.iter().all(|f| f.error.is_some())
+    {
+        return Err(crate::text::error_text(&failed));
+    }
+    let mut out_music = Music {
+        chosen: HashMap::new(),
+        albums: Vec::new(),
+        mb: mbs::Client::default(),
+        dg: renome_services::discogs::Client::default(),
+    };
+    for album in found {
+        let forced = album.files.iter().find_map(|p| ask.picks.get(p)).cloned();
+        let id = if let Some(pick) = forced {
+            Some(pick.trim().trim_start_matches("mb:").to_string())
+        } else if let Some(c) = &album.choice {
+            for (p, m) in &album.matches {
+                out_music.chosen.insert(p.clone(), m.clone());
+            }
+            out_music.albums.push((album.dir.clone(), c.id.clone()));
+            continue;
+        } else if ask.choose == Choose::Ask && std::io::stdin().is_terminal() {
+            choose_album(&mb, &dg, &album).await?
+        } else {
+            None
+        };
+        let Some(id) = id else { continue };
+        // The songs as the window gives them to the chosen release.
+        let list: Vec<&renome_core::FileEntry> = files
+            .iter()
+            .filter(|f| album.files.contains(&f.path))
+            .collect();
+        let (songs, unnamed) = mbs::songs_of(&list, &heard.lock().unwrap(), from_name);
+        let mut songs = mbs::albums(&songs).concat();
+        songs.extend(unnamed);
+        let chosen = mbs::choose(&mb, &dg, &id, &songs)
+            .await
+            .map_err(|e| crate::text::error_text(&e))?;
+        for (p, m) in chosen.matches {
+            out_music.chosen.insert(p, m);
+        }
+        out_music.albums.push((album.dir.clone(), id));
+    }
+    out_music.mb = mb;
+    out_music.dg = dg;
+    Ok(out_music)
+}
+
+/// An album's release, in the terminal; a new search by album name (or a
+/// MusicBrainz/Discogs link).
+async fn choose_album(
+    mb: &renome_services::musicbrainz::Client,
+    dg: &renome_services::discogs::Client,
+    album: &renome_services::musicbrainz::AlbumLookup,
+) -> Result<Option<String>, String> {
+    use renome_core::links::{self, Link};
+    let mut candidates = album.candidates.clone();
+    let title = album
+        .dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let looked = format!("{} — {}", album.query.album, album.query.artist);
+    loop {
+        let lines: Vec<String> = candidates.iter().map(mb_line).collect();
+        match ask_one(
+            &format!(
+                "{title} ({})",
+                t("albumFiles", &[("n", &album.files.len())])
+            ),
+            &looked,
+            &lines,
+        ) {
+            Pick::Number(n) => return Ok(Some(candidates[n].id.clone())),
+            Pick::Skip => return Ok(None),
+            Pick::Stop => return Err(t("searchStopped", &[])),
+            Pick::Search(text) => {
+                let found = match links::parse(&text) {
+                    Some(Link::MusicBrainz(id)) => mb
+                        .release(&id)
+                        .await
+                        .map(|r| vec![renome_core::musicbrainz::summary(&r, 1.0)]),
+                    Some(Link::Discogs(id)) => dg
+                        .release(&format!("{}{id}", renome_core::discogs::PREFIX))
+                        .await
+                        .map(|r| vec![renome_core::musicbrainz::summary(&r, 1.0)]),
+                    Some(_) => Err("linkOther".into()),
+                    None => {
+                        mb.search(&renome_core::musicbrainz::AlbumQuery {
+                            album: text.clone(),
+                            ..album.query.clone()
+                        })
+                        .await
+                    }
+                };
+                match found {
+                    Ok(c) => candidates = c,
+                    Err(e) => out::error(&crate::text::error_text(&e)),
+                }
+            }
+        }
+    }
+}
+
+/// After the renames: the album covers, the playlists and the tags.
+pub async fn after_music(
+    rule: &Value,
+    music: &Music,
+    preview: &Preview,
+    report: &renome_core::ApplyReport,
+    history: &renome_core::History,
+) -> Vec<String> {
+    let mut notes = Vec::new();
+    let on = |k: &str| rule.get(k).and_then(Value::as_bool).unwrap_or(false);
+    let recorded = report.done.is_empty() || report.history_id.is_some();
+    if !recorded {
+        return notes;
+    }
+    let to: HashMap<&PathBuf, &PathBuf> = report.done.iter().map(|op| (&op.from, &op.to)).collect();
+    let now = |p: &PathBuf| to.get(p).map_or(p.clone(), |t| (*t).clone());
+    if on("cover") {
+        let mut seen = std::collections::HashSet::new();
+        let items: Vec<renome_services::musicbrainz::CoverItem> = music
+            .albums
+            .iter()
+            .filter_map(|(_, release)| {
+                let first = music.chosen.iter().find(|(_, m)| &m.release == release)?.0;
+                let dir = now(first).parent()?.to_path_buf();
+                seen.insert(dir.clone())
+                    .then(|| renome_services::musicbrainz::CoverItem {
+                        dir,
+                        release: release.clone(),
+                    })
+            })
+            .collect();
+        if !items.is_empty() {
+            let mut r =
+                renome_services::musicbrainz::covers(&Cli, &music.mb, &music.dg, items).await;
+            renome_services::after::record_created(history, report.history_id.clone(), &mut r);
+            if !r.created.is_empty() {
+                notes.push(t("sidecarsN", &[("n", &r.created.len())]));
+            }
+        }
+    }
+    if on("playlist") {
+        let mut dirs: Vec<PathBuf> = music
+            .chosen
+            .keys()
+            .filter_map(|p| now(p).parent().map(Path::to_path_buf))
+            .collect();
+        dirs.sort();
+        dirs.dedup();
+        let r = renome_services::after::playlists(history, report.history_id.clone(), dirs);
+        if !r.created.is_empty() {
+            notes.push(t("sidecarsN", &[("n", &r.created.len())]));
+        }
+        if r.kept > 0 {
+            notes.push(t("playlistsKeptN", &[("n", &r.kept)]));
+        }
+    }
+    if on("writeTags") {
+        let clean = rule
+            .get("cleanTags")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let unchanged: std::collections::HashSet<&PathBuf> = preview
+            .items
+            .iter()
+            .filter(|i| {
+                i.status == renome_core::Status::Unchanged && (i.retag || (clean && i.junk))
+            })
+            .map(|i| &i.path)
+            .collect();
+        let items: Vec<renome_services::after::TagJob> = music
+            .chosen
+            .iter()
+            .filter(|(p, _)| to.contains_key(p) || unchanged.contains(p))
+            .map(|(p, m)| renome_services::after::TagJob {
+                path: now(p),
+                song: m.clone(),
+            })
+            .collect();
+        if !items.is_empty() {
+            let embed = rule
+                .get("embedCover")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            let size = rule
+                .get("coverSize")
+                .and_then(Value::as_u64)
+                .map(|n| n as u32);
+            match renome_services::after::song_tags(
+                &Cli,
+                history,
+                &music.mb,
+                &music.dg,
+                report.history_id.clone(),
+                items,
+                embed,
+                clean,
+                size,
+            )
+            .await
+            {
+                Ok((r, _)) => {
+                    notes.push(t("tagsN", &[("n", &r.written)]));
+                    for (file, why) in r.errors {
+                        out::error(&format!("{file}: {}", crate::text::error_text(&why)));
+                    }
+                }
+                Err(e) => out::error(&crate::text::error_text(&e)),
+            }
+        }
+    }
+    notes
 }
