@@ -543,8 +543,14 @@ mod tests {
     #[test]
     fn words_kept_as_written() {
         let lower = "swat kats - s01e01";
-        assert_eq!(keep_words("SWAT Kats - S01E01", lower, "swat"), "SWAT kats - s01e01");
-        assert_eq!(keep_words("SWAT Kats - S01E01", lower, "sWaT, KATS"), "SWAT Kats - s01e01");
+        assert_eq!(
+            keep_words("SWAT Kats - S01E01", lower, "swat"),
+            "SWAT kats - s01e01"
+        );
+        assert_eq!(
+            keep_words("SWAT Kats - S01E01", lower, "sWaT, KATS"),
+            "SWAT Kats - s01e01"
+        );
         // Only whole words.
         assert_eq!(keep_words("SWAT Kats", "swat kats", "swa"), "swat kats");
         assert_eq!(keep_words("SWAT Kats", "swat kats", ""), "swat kats");
@@ -555,7 +561,10 @@ mod tests {
         assert_eq!(split_glued("DougCantDance"), "Doug Cant Dance");
         assert_eq!(split_glued("HTMLParser"), "HTML Parser");
         assert_eq!(split_glued("S01E02"), "S01E02");
-        assert_eq!(split_glued("Show.S01E02.MyEpisode"), "Show.S01E02.My Episode");
+        assert_eq!(
+            split_glued("Show.S01E02.MyEpisode"),
+            "Show.S01E02.My Episode"
+        );
         assert_eq!(split_glued("Já está certo"), "Já está certo");
         assert_eq!(split_glued("ÁguaViva"), "Água Viva");
     }

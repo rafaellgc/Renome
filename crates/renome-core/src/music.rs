@@ -151,7 +151,9 @@ pub fn probe(path: &Path) -> Option<AudioTags> {
         composer: text_of(&tags, |t| {
             t.get_string(ItemKey::Composer).map(str::to_string)
         }),
-        series: text_of(&tags, |t| t.get_string(ItemKey::Movement).map(str::to_string)),
+        series: text_of(&tags, |t| {
+            t.get_string(ItemKey::Movement).map(str::to_string)
+        }),
         series_index: text_of(&tags, |t| {
             t.get_string(ItemKey::MovementNumber).map(str::to_string)
         }),

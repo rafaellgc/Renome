@@ -139,7 +139,11 @@ impl Server {
         })
     }
 
-    fn request(&self, method: reqwest::Method, path: &str) -> Result<reqwest::RequestBuilder, String> {
+    fn request(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+    ) -> Result<reqwest::RequestBuilder, String> {
         let key = self.key.trim();
         if key.is_empty() {
             return Err("srvRefused".into());
@@ -177,8 +181,13 @@ impl Server {
         };
         match self.kind {
             Kind::Jellyfin => {
-                let res = Self::answer(self.request(reqwest::Method::GET, "/Library/VirtualFolders")?).await?;
-                let list: Vec<JfFolder> = res.json().await.map_err(|_| "srvAnswer: JSON".to_string())?;
+                let res =
+                    Self::answer(self.request(reqwest::Method::GET, "/Library/VirtualFolders")?)
+                        .await?;
+                let list: Vec<JfFolder> = res
+                    .json()
+                    .await
+                    .map_err(|_| "srvAnswer: JSON".to_string())?;
                 Ok(list
                     .into_iter()
                     .filter(|f| !made_by_server(f.kind.as_deref()))
@@ -190,8 +199,12 @@ impl Server {
                     .collect())
             }
             Kind::Plex => {
-                let res = Self::answer(self.request(reqwest::Method::GET, "/library/sections")?).await?;
-                let a: PlexAnswer = res.json().await.map_err(|_| "srvAnswer: JSON".to_string())?;
+                let res =
+                    Self::answer(self.request(reqwest::Method::GET, "/library/sections")?).await?;
+                let a: PlexAnswer = res
+                    .json()
+                    .await
+                    .map_err(|_| "srvAnswer: JSON".to_string())?;
                 Ok(a.container
                     .directory
                     .into_iter()
@@ -225,7 +238,11 @@ impl Server {
                 let mut result = Ok(());
                 for p in paths {
                     let path = format!("/library/sections/{}/refresh", enc(library));
-                    let r = Self::answer(self.request(reqwest::Method::GET, &path)?.query(&[("path", p)])).await;
+                    let r = Self::answer(
+                        self.request(reqwest::Method::GET, &path)?
+                            .query(&[("path", p)]),
+                    )
+                    .await;
                     if r.is_err() {
                         result = r.map(|_| ());
                         break;
@@ -238,13 +255,19 @@ impl Server {
             Err(e) if e.starts_with("srvAnswer") && !library.is_empty() => match self.kind {
                 Kind::Jellyfin => {
                     let path = format!("/Items/{}/Refresh", enc(library));
-                    Self::answer(self.request(reqwest::Method::POST, &path)?.query(&[("Recursive", "true")]))
-                        .await
-                        .map(|_| ())
+                    Self::answer(
+                        self.request(reqwest::Method::POST, &path)?
+                            .query(&[("Recursive", "true")]),
+                    )
+                    .await
+                    .map(|_| ())
                 }
                 Kind::Plex => {
-                    self.send(reqwest::Method::GET, &format!("/library/sections/{}/refresh", enc(library)))
-                        .await
+                    self.send(
+                        reqwest::Method::GET,
+                        &format!("/library/sections/{}/refresh", enc(library)),
+                    )
+                    .await
                 }
             },
             other => other,
@@ -270,7 +293,6 @@ impl Server {
             Kind::Plex => self.send(reqwest::Method::GET, "/library/sections").await,
         }
     }
-
 }
 
 /// A path piece for an address.
@@ -355,8 +377,14 @@ mod tests {
             key: "k".into(),
             folders: Vec::new(),
         };
-        assert_eq!(s("192.168.0.10:32400/").base().unwrap(), "http://192.168.0.10:32400");
-        assert_eq!(s("https://media.casa:8920").base().unwrap(), "https://media.casa:8920");
+        assert_eq!(
+            s("192.168.0.10:32400/").base().unwrap(),
+            "http://192.168.0.10:32400"
+        );
+        assert_eq!(
+            s("https://media.casa:8920").base().unwrap(),
+            "https://media.casa:8920"
+        );
         assert!(s("  ").base().is_err());
     }
 
@@ -382,7 +410,11 @@ mod tests {
                     if let Some(end) = text.find("\r\n\r\n") {
                         let len = text
                             .lines()
-                            .find_map(|l| l.to_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0)))
+                            .find_map(|l| {
+                                l.to_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                            })
                             .unwrap_or(0);
                         if got.len() >= end + 4 + len {
                             break;
@@ -438,7 +470,10 @@ mod tests {
 
         let only_new = [root.join("Novo (2020)/a.mkv"), root.join("Outro/b.mkv")];
         let p = plan(&folders, &only_new);
-        assert_eq!(p["1"], vec!["/data/movies/Novo (2020)", "/data/movies/Outro"]);
+        assert_eq!(
+            p["1"],
+            vec!["/data/movies/Novo (2020)", "/data/movies/Outro"]
+        );
         // Turned off, or not paired: nothing.
         let off = [folder("1", "/data/movies", &root, false)];
         assert!(plan(&off, &only_new).is_empty());
@@ -479,7 +514,10 @@ mod tests {
         let libs = jf.libraries().await.unwrap();
         // Its collections are its own, not a folder of files.
         assert_eq!(libs.len(), 1);
-        assert_eq!((libs[0].id.as_str(), libs[0].name.as_str()), ("f1", "Filmes"));
+        assert_eq!(
+            (libs[0].id.as_str(), libs[0].name.as_str()),
+            ("f1", "Filmes")
+        );
         assert_eq!(libs[0].paths[1].path, "/nowhere/at/all");
         assert!(!libs[0].paths[1].here);
         let req = asked.recv().unwrap();
@@ -488,9 +526,15 @@ mod tests {
         assert_eq!(jf.tell(&changed).await.unwrap(), 1);
         let req = asked.recv().unwrap();
         assert!(req.starts_with("POST /Library/Media/Updated "), "{req}");
-        assert!(req.contains(r#""Path":"/data/movies/Filme (2020)""#), "{req}");
+        assert!(
+            req.contains(r#""Path":"/data/movies/Filme (2020)""#),
+            "{req}"
+        );
         // Nothing in a library: nothing asked.
-        assert_eq!(jf.tell(&[PathBuf::from("/elsewhere/a.jpg")]).await.unwrap(), 0);
+        assert_eq!(
+            jf.tell(&[PathBuf::from("/elsewhere/a.jpg")]).await.unwrap(),
+            0
+        );
         assert!(asked.try_recv().is_err());
 
         // Plex: the section's folder scan with the server's path.
@@ -500,23 +544,45 @@ mod tests {
         );
         let plex = server(Kind::Plex, &url, "tok", folders());
         let libs = plex.libraries().await.unwrap();
-        assert_eq!((libs[0].id.as_str(), libs[0].paths[0].path.as_str()), ("3", "/data/movies"));
+        assert_eq!(
+            (libs[0].id.as_str(), libs[0].paths[0].path.as_str()),
+            ("3", "/data/movies")
+        );
         asked.recv().unwrap();
         assert_eq!(plex.tell(&changed).await.unwrap(), 1);
         let req = asked.recv().unwrap();
-        assert!(req.starts_with("GET /library/sections/lib%201/refresh?path=%2Fdata%2Fmovies%2FFilme+%282020%29 "), "{req}");
+        assert!(
+            req.starts_with(
+                "GET /library/sections/lib%201/refresh?path=%2Fdata%2Fmovies%2FFilme+%282020%29 "
+            ),
+            "{req}"
+        );
         assert!(req.to_lowercase().contains("x-plex-token: tok"));
 
         // Not taken by folder: the whole library, then the error.
         let (url, asked) = fake(404, "");
         let wrong = server(Kind::Jellyfin, &url, "x", folders());
         assert_eq!(wrong.tell(&changed).await.unwrap_err(), "srvAnswer: 404");
-        assert!(asked.recv().unwrap().starts_with("POST /Library/Media/Updated "));
+        assert!(
+            asked
+                .recv()
+                .unwrap()
+                .starts_with("POST /Library/Media/Updated ")
+        );
         let req = asked.recv().unwrap();
-        assert!(req.starts_with("POST /Items/lib%201/Refresh?Recursive=true "), "{req}");
+        assert!(
+            req.starts_with("POST /Items/lib%201/Refresh?Recursive=true "),
+            "{req}"
+        );
 
         let (url, _asked) = fake(401, "");
-        assert_eq!(server(Kind::Plex, &url, "x", vec![]).check().await.unwrap_err(), "srvRefused");
+        assert_eq!(
+            server(Kind::Plex, &url, "x", vec![])
+                .check()
+                .await
+                .unwrap_err(),
+            "srvRefused"
+        );
         let none = server(Kind::Jellyfin, "127.0.0.1:1", "x", vec![]);
         assert_eq!(none.check().await.unwrap_err(), "srvOffline");
     }

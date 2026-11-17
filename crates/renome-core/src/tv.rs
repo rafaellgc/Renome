@@ -1255,11 +1255,20 @@ pub struct SeasonFull {
 
 /// What goes inside an episode's video (or one holding several):
 /// the show's details, and the first episode's with every one's title.
-pub fn video_meta(show: &ShowDetails, season: u16, eps: &[&EpisodeDetails], lang: &str) -> Option<crate::videotags::VideoMeta> {
+pub fn video_meta(
+    show: &ShowDetails,
+    season: u16,
+    eps: &[&EpisodeDetails],
+    lang: &str,
+) -> Option<crate::videotags::VideoMeta> {
     use crate::videotags::{Person, VideoMeta};
     let (lang2, region) = lang.split_once('-').unwrap_or((lang, "US"));
     let first = eps.first()?;
-    let title = eps.iter().filter_map(|e| e.name.clone()).collect::<Vec<_>>().join(" / ");
+    let title = eps
+        .iter()
+        .filter_map(|e| e.name.clone())
+        .collect::<Vec<_>>()
+        .join(" / ");
     let mut directors: Vec<String> = Vec::new();
     let mut writers: Vec<String> = Vec::new();
     for e in eps {
@@ -1295,9 +1304,22 @@ pub fn video_meta(show: &ShowDetails, season: u16, eps: &[&EpisodeDetails], lang
         tagline: show.tagline.clone().unwrap_or_default(),
         certification: cert,
         rating: crate::tmdb::average(first.vote_average),
-        keywords: show.keywords.results.iter().map(|k| k.name.clone()).collect(),
-        studios: show.production_companies.iter().map(|c| c.name.clone()).collect(),
-        network: show.networks.first().map(|n| n.name.clone()).unwrap_or_default(),
+        keywords: show
+            .keywords
+            .results
+            .iter()
+            .map(|k| k.name.clone())
+            .collect(),
+        studios: show
+            .production_companies
+            .iter()
+            .map(|c| c.name.clone())
+            .collect(),
+        network: show
+            .networks
+            .first()
+            .map(|n| n.name.clone())
+            .unwrap_or_default(),
         directors,
         writers,
         cast: show
@@ -1307,16 +1329,27 @@ pub fn video_meta(show: &ShowDetails, season: u16, eps: &[&EpisodeDetails], lang
             .take(20)
             .map(|a| Person {
                 name: a.name.clone(),
-                character: a.roles.first().map(|r| r.character.clone()).unwrap_or_default(),
+                character: a
+                    .roles
+                    .first()
+                    .map(|r| r.character.clone())
+                    .unwrap_or_default(),
             })
             .collect(),
         guests: first
             .guest_stars
             .iter()
             .take(20)
-            .map(|a| Person { name: a.name.clone(), character: a.character.clone() })
+            .map(|a| Person {
+                name: a.name.clone(),
+                character: a.character.clone(),
+            })
             .collect(),
-        trailer: show.videos.trailer(lang2).map(crate::tmdb::youtube).unwrap_or_default(),
+        trailer: show
+            .videos
+            .trailer(lang2)
+            .map(crate::tmdb::youtube)
+            .unwrap_or_default(),
         ..Default::default()
     })
 }
@@ -1675,7 +1708,10 @@ mod tests {
         // As long as one segment.
         assert_eq!(at("Show S01E04", 11.5 * 60.0).choice, vec![(1, 4)]);
         // Already two episodes in the name.
-        assert_eq!(at("Show S01E04-E05", 23.0 * 60.0).choice, vec![(1, 4), (1, 5)]);
+        assert_eq!(
+            at("Show S01E04-E05", 23.0 * 60.0).choice,
+            vec![(1, 4), (1, 5)]
+        );
         // The last segment has only the one before it.
         let r = at("Show S01E06", 23.0 * 60.0);
         assert_eq!(r.alternatives[0], vec![(1, 5), (1, 6)]);
@@ -1966,11 +2002,20 @@ mod tests {
         .unwrap();
         // For inside the video: the show's details and the episode's.
         let m = video_meta(&d, 1, &[&e], "pt-BR").unwrap();
-        assert_eq!((m.show.as_str(), m.original_title.as_str(), m.title.as_str()), ("Breaking Bad & Co", "Breaking Bad", "Episódio 1"));
-        assert_eq!((m.season, m.episode, m.certification.as_str()), (Some(1), Some(1), "BR-16"));
+        assert_eq!(
+            (m.show.as_str(), m.original_title.as_str(), m.title.as_str()),
+            ("Breaking Bad & Co", "Breaking Bad", "Episódio 1")
+        );
+        assert_eq!(
+            (m.season, m.episode, m.certification.as_str()),
+            (Some(1), Some(1), "BR-16")
+        );
         assert_eq!((m.network.as_str(), m.tmdb.as_str()), ("AMC", "tv/1396"));
         assert_eq!(m.directors, ["Vince Gilligan"]);
-        assert_eq!((m.cast[0].character.as_str(), m.guests[0].name.as_str()), ("Walter White", "X"));
+        assert_eq!(
+            (m.cast[0].character.as_str(), m.guests[0].name.as_str()),
+            ("Walter White", "X")
+        );
         assert!(video_meta(&d, 1, &[], "pt-BR").is_none());
         let x = episode_nfo("Breaking Bad", &[&e, &e], &["Piloto".into()]);
         assert_eq!(x.matches("<episodedetails>").count(), 2);

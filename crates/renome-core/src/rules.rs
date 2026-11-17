@@ -1150,8 +1150,16 @@ pub fn pair_split(f: &FileEntry) -> (&str, &str) {
 
 /// A video's pictures as media servers name them (`Episode-thumb.jpg`).
 const ARTWORK: [&str; 10] = [
-    "thumb", "poster", "fanart", "landscape", "banner", "clearlogo", "logo", "clearart",
-    "disc", "backdrop",
+    "thumb",
+    "poster",
+    "fanart",
+    "landscape",
+    "banner",
+    "clearlogo",
+    "logo",
+    "clearart",
+    "disc",
+    "backdrop",
 ];
 const ARTWORK_EXT: [&str; 5] = ["jpg", "jpeg", "png", "webp", "tbn"];
 
@@ -2448,7 +2456,10 @@ mod tests {
             split_words: true,
             target: Target::Name,
         };
-        assert_eq!(run(vec![split], "DougCantDance.mkv", 0), "Doug-Cant-Dance.mkv");
+        assert_eq!(
+            run(vec![split], "DougCantDance.mkv", 0),
+            "Doug-Cant-Dance.mkv"
+        );
     }
 
     #[test]

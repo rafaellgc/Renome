@@ -73,7 +73,10 @@ fn from_name(name: &str) -> (crate::books::Guess, String) {
         s = NARRATOR.replace(&s, " ").into_owned();
     }
     let s = JUNK.replace_all(&s, " ");
-    (crate::books::guess_name(&crate::text::collapse_spaces(&s)), narrator)
+    (
+        crate::books::guess_name(&crate::text::collapse_spaces(&s)),
+        narrator,
+    )
 }
 
 /// A file and its tags.
@@ -84,10 +87,9 @@ type Read = (PathBuf, Option<AudioTags>);
 fn order(a: &Read, b: &Read) -> std::cmp::Ordering {
     let key = |x: &Read| {
         let t = x.1.as_ref();
-        let folder = x
-            .0
-            .parent()
-            .and_then(|d| music::disc_folder(&d.file_name()?.to_string_lossy()));
+        let folder =
+            x.0.parent()
+                .and_then(|d| music::disc_folder(&d.file_name()?.to_string_lossy()));
         (
             t.and_then(|t| t.disc).or(folder).unwrap_or(0),
             t.and_then(|t| t.track).unwrap_or(0),
@@ -105,7 +107,10 @@ fn order(a: &Read, b: &Read) -> std::cmp::Ordering {
 /// a disc folder (`CD1`, `Disc 2`).
 pub fn book_dir(dir: &Path) -> PathBuf {
     match dir.parent() {
-        Some(up) if music::disc_folder(&dir.file_name().unwrap_or_default().to_string_lossy()).is_some() => {
+        Some(up)
+            if music::disc_folder(&dir.file_name().unwrap_or_default().to_string_lossy())
+                .is_some() =>
+        {
             up.to_path_buf()
         }
         _ => dir.to_path_buf(),
@@ -160,9 +165,17 @@ pub fn group(paths: &[PathBuf]) -> Vec<AudioBook> {
             };
             // The folder's name, or the file's for a book in one file.
             let name = if files.len() == 1 {
-                files[0].0.file_stem().unwrap_or_default().to_string_lossy().into_owned()
+                files[0]
+                    .0
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned()
             } else {
-                dir.file_name().unwrap_or_default().to_string_lossy().into_owned()
+                dir.file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned()
             };
             let (guess, named_narrator) = from_name(&name);
             let author = match tag(|t| &t.album_artist) {
@@ -205,7 +218,10 @@ mod tests {
     #[test]
     fn names() {
         let (g, n) = from_name("Lia Marta Quaresma - Ecos (2019) {Tomé Rocha} [64kbps]");
-        assert_eq!((g.author.as_str(), g.title.as_str(), g.year), ("Lia Marta Quaresma", "Ecos", Some(2019)));
+        assert_eq!(
+            (g.author.as_str(), g.title.as_str(), g.year),
+            ("Lia Marta Quaresma", "Ecos", Some(2019))
+        );
         assert_eq!(n, "Tomé Rocha");
         let (g, n) = from_name("Vento Leste (Unabridged) - narrado por Ana Lima");
         assert_eq!(g.title, "Vento Leste");
@@ -248,7 +264,11 @@ mod tests {
         // Disc folders count as the book's; without tags, by name.
         assert_eq!(
             ecos.paths,
-            vec![book.join("CD1/Parte 2.mp3"), book.join("CD1/Parte 10.mp3"), book.join("CD2/Parte 1.mp3")]
+            vec![
+                book.join("CD1/Parte 2.mp3"),
+                book.join("CD1/Parte 10.mp3"),
+                book.join("CD2/Parte 1.mp3")
+            ]
         );
         let other = books.iter().find(|b| b.title == "Outro Livro").unwrap();
         assert_eq!((other.year, other.paths.len()), (Some(2001), 1));

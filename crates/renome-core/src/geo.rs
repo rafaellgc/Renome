@@ -159,7 +159,13 @@ pub fn nearest(lat: f64, lon: f64, lang: Lang) -> Option<Place> {
                 if (y - cy).abs() != r && (x - cx).abs() != r {
                     continue;
                 }
-                let x = if x < -180 { x + 360 } else if x >= 180 { x - 360 } else { x };
+                let x = if x < -180 {
+                    x + 360
+                } else if x >= 180 {
+                    x - 360
+                } else {
+                    x
+                };
                 for &i in p.grid.get(&(y, x)).into_iter().flatten() {
                     let t = &p.towns[i as usize];
                     let d = dist(t).sqrt() / weight(t);
@@ -182,10 +188,10 @@ pub fn nearest(lat: f64, lon: f64, lang: Lang) -> Option<Place> {
         return None;
     }
     let (cc, state) = &p.groups[town.group as usize];
-    let country = p.countries.get(cc).map_or_else(
-        || cc.to_string(),
-        |n| n[lang as usize].to_string(),
-    );
+    let country = p
+        .countries
+        .get(cc)
+        .map_or_else(|| cc.to_string(), |n| n[lang as usize].to_string());
     Some(Place {
         city: town.name.to_string(),
         state: state.to_string(),
@@ -206,7 +212,10 @@ mod tests {
         let paris = nearest(48.8584, 2.2945, Lang::En).unwrap();
         assert_eq!(paris.city, "Paris");
         assert_eq!(paris.country, "France");
-        assert_eq!(nearest(40.4168, -3.7038, Lang::Es).unwrap().country, "España");
+        assert_eq!(
+            nearest(40.4168, -3.7038, Lang::Es).unwrap().country,
+            "España"
+        );
         // Across the date line.
         assert!(nearest(-17.7134, 178.065, Lang::En).is_some());
         // Mid-ocean.

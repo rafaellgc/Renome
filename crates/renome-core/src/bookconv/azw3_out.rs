@@ -12,7 +12,7 @@ use std::io::Write;
 use std::path::Path;
 
 use super::xhtml::{esc, esc_attr};
-use super::{epub_out, Book, Toc};
+use super::{Book, Toc, epub_out};
 
 fn put16(v: &mut Vec<u8>, x: u16) {
     v.extend_from_slice(&x.to_be_bytes());
@@ -40,7 +40,10 @@ fn base32(mut n: u32, width: usize) -> String {
 /// `body` with an `aid` on each element that has none (not on empty ones
 /// such as `img` and `br`), numbered from `next` in base 32.
 fn with_aids(body: &str, next: &mut u32) -> String {
-    const EMPTY: &[&str] = &["img", "br", "hr", "meta", "link", "input", "col", "area", "wbr", "source", "embed", "param"];
+    const EMPTY: &[&str] = &[
+        "img", "br", "hr", "meta", "link", "input", "col", "area", "wbr", "source", "embed",
+        "param",
+    ];
     let tag = regex::Regex::new(r"<([A-Za-z][A-Za-z0-9:-]*)([^<>]*?)(/?)>").unwrap();
     tag.replace_all(body, |c: &regex::Captures| {
         let name = c[1].to_ascii_lowercase();
@@ -56,7 +59,11 @@ fn with_aids(body: &str, next: &mut u32) -> String {
 
 /// An `aid`: a number in base 32, as short as it goes.
 fn aid_of(n: u32) -> String {
-    let digits = if n < 32 { 1 } else { ((32 - n.leading_zeros()) as usize).div_ceil(5) };
+    let digits = if n < 32 {
+        1
+    } else {
+        ((32 - n.leading_zeros()) as usize).div_ceil(5)
+    };
     base32(n, digits)
 }
 
@@ -277,19 +284,69 @@ fn strings_of(list: &[String]) -> (Vec<u8>, Vec<u32>) {
 
 fn locale(lang: &str) -> u32 {
     let code = lang.split('-').next().unwrap_or("").to_ascii_lowercase();
-    LANG_IDS.iter().find(|(c, _)| *c == code).map_or(0, |(_, n)| *n)
+    LANG_IDS
+        .iter()
+        .find(|(c, _)| *c == code)
+        .map_or(0, |(_, n)| *n)
 }
 
 /// Languages by the number a Kindle book's header gives them.
 pub const LANG_IDS: &[(&str, u32)] = &[
-    ("ar", 1), ("bg", 2), ("ca", 3), ("zh", 4), ("cs", 5), ("da", 6), ("de", 7), ("el", 8),
-    ("en", 9), ("es", 10), ("fi", 11), ("fr", 12), ("he", 13), ("hu", 14), ("is", 15),
-    ("it", 16), ("ja", 17), ("ko", 18), ("nl", 19), ("no", 20), ("pl", 21), ("pt", 22),
-    ("ro", 24), ("ru", 25), ("hr", 26), ("sk", 27), ("sq", 28), ("sv", 29), ("th", 30),
-    ("tr", 31), ("ur", 32), ("id", 33), ("uk", 34), ("be", 35), ("sl", 36), ("et", 37),
-    ("lv", 38), ("lt", 39), ("fa", 41), ("vi", 42), ("hy", 43), ("az", 44), ("eu", 45),
-    ("mk", 47), ("af", 54), ("ka", 55), ("hi", 57), ("ms", 62), ("kk", 63), ("sw", 65),
-    ("bn", 69), ("ta", 73), ("te", 74), ("mr", 78), ("gl", 86),
+    ("ar", 1),
+    ("bg", 2),
+    ("ca", 3),
+    ("zh", 4),
+    ("cs", 5),
+    ("da", 6),
+    ("de", 7),
+    ("el", 8),
+    ("en", 9),
+    ("es", 10),
+    ("fi", 11),
+    ("fr", 12),
+    ("he", 13),
+    ("hu", 14),
+    ("is", 15),
+    ("it", 16),
+    ("ja", 17),
+    ("ko", 18),
+    ("nl", 19),
+    ("no", 20),
+    ("pl", 21),
+    ("pt", 22),
+    ("ro", 24),
+    ("ru", 25),
+    ("hr", 26),
+    ("sk", 27),
+    ("sq", 28),
+    ("sv", 29),
+    ("th", 30),
+    ("tr", 31),
+    ("ur", 32),
+    ("id", 33),
+    ("uk", 34),
+    ("be", 35),
+    ("sl", 36),
+    ("et", 37),
+    ("lv", 38),
+    ("lt", 39),
+    ("fa", 41),
+    ("vi", 42),
+    ("hy", 43),
+    ("az", 44),
+    ("eu", 45),
+    ("mk", 47),
+    ("af", 54),
+    ("ka", 55),
+    ("hi", 57),
+    ("ms", 62),
+    ("kk", 63),
+    ("sw", 65),
+    ("bn", 69),
+    ("ta", 73),
+    ("te", 74),
+    ("mr", 78),
+    ("gl", 86),
 ];
 
 /// Writes `book` as an AZW3 file.
@@ -537,7 +594,9 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
             Some((f, i)) => (f.to_string(), Some(i.to_string())),
             None => (href.clone(), None),
         };
-        let Some(&n) = file_no.get(file.as_str()) else { continue };
+        let Some(&n) = file_no.get(file.as_str()) else {
+            continue;
+        };
         let off = id.and_then(|i| ids.get(&(n, i))).copied().unwrap_or(0);
         while open.last().is_some_and(|(d, _)| *d >= depth) {
             open.pop();
@@ -995,7 +1054,11 @@ mod tests {
         let be = |at: usize| u32::from_be_bytes(f[at..at + 4].try_into().unwrap()) as usize;
         let n = u16::from_be_bytes([f[76], f[77]]) as usize;
         let rec = |i: usize| {
-            let end = if i + 1 < n { be(78 + 8 * (i + 1)) } else { f.len() };
+            let end = if i + 1 < n {
+                be(78 + 8 * (i + 1))
+            } else {
+                f.len()
+            };
             &f[be(78 + 8 * i)..end]
         };
         let flis = rec(be(be(78) + 0xD0));
@@ -1019,7 +1082,9 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("n.azw3");
         let mut b = epub_out::tests::sample();
-        let body = |t: &str| format!("<h2 id=\"a\">{t}</h2><p>Texto de {t}.</p><h3 id=\"b\">Sub</h3><p>Mais.</p>");
+        let body = |t: &str| {
+            format!("<h2 id=\"a\">{t}</h2><p>Texto de {t}.</p><h3 id=\"b\">Sub</h3><p>Mais.</p>")
+        };
         b.chapters[0].body = body("Um");
         b.chapters.push(Chapter {
             name: "c0002.xhtml".into(),
@@ -1030,7 +1095,11 @@ mod tests {
         let toc = |t: &str, f: &str| Toc {
             title: t.into(),
             href: format!("{f}#a"),
-            kids: vec![Toc { title: format!("{t}.1"), href: format!("{f}#b"), kids: vec![] }],
+            kids: vec![Toc {
+                title: format!("{t}.1"),
+                href: format!("{f}#b"),
+                kids: vec![],
+            }],
         };
         b.toc = vec![toc("Um", "c0001.xhtml"), toc("Dois", "c0002.xhtml")];
         azw3_out::write(&b, &p).unwrap();
@@ -1038,7 +1107,12 @@ mod tests {
         let names: Vec<(String, Vec<String>)> = r
             .toc
             .iter()
-            .map(|t| (t.title.clone(), t.kids.iter().map(|k| k.title.clone()).collect()))
+            .map(|t| {
+                (
+                    t.title.clone(),
+                    t.kids.iter().map(|k| k.title.clone()).collect(),
+                )
+            })
             .collect();
         assert_eq!(
             names,

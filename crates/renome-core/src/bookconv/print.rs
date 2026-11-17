@@ -37,12 +37,24 @@ pub struct Page {
 
 impl Page {
     /// A5, with book margins.
-    pub const A5: Page = Page { width: 148.0, height: 210.0, top: 16.0, bottom: 18.0, side: 14.0 };
+    pub const A5: Page = Page {
+        width: 148.0,
+        height: 210.0,
+        top: 16.0,
+        bottom: 18.0,
+        side: 14.0,
+    };
 
     /// A reader's screen (mm): narrow margins, the screen has its own.
     pub fn screen(width: f64, height: f64) -> Page {
         let m = (width.min(height) * 0.04).clamp(3.0, 8.0);
-        Page { width, height, top: m, bottom: m, side: m }
+        Page {
+            width,
+            height,
+            top: m,
+            bottom: m,
+            side: m,
+        }
     }
 }
 

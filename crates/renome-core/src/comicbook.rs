@@ -199,7 +199,10 @@ impl Device {
     /// Scribes and the colour Kindles get JPEG only.
     fn png_ok(self) -> bool {
         use Device::*;
-        !matches!(self, KindleScribe | KindleScribe2025 | KindleScribeColor | KindleColor)
+        !matches!(
+            self,
+            KindleScribe | KindleScribe2025 | KindleScribeColor | KindleColor
+        )
     }
 }
 
@@ -362,7 +365,8 @@ fn content_box(g: &GrayImage, numbers: bool) -> Option<(u32, u32, u32, u32)> {
     // counts when a few of its pixels do (specks of dust do not).
     let ink = |v: u8| (i16::from(v) - i16::from(bg)).abs() > 48;
     let row_ink = |y: u32| (0..w).filter(|&x| ink(g.get_pixel(x, y)[0])).count() as u32;
-    let col_ink = |x: u32, y0: u32, y1: u32| (y0..y1).filter(|&y| ink(g.get_pixel(x, y)[0])).count() as u32;
+    let col_ink =
+        |x: u32, y0: u32, y1: u32| (y0..y1).filter(|&y| ink(g.get_pixel(x, y)[0])).count() as u32;
     let min_row = (w / 200).max(2);
     let rows: Vec<bool> = (0..h).map(|y| row_ink(y) >= min_row).collect();
     let mut top = rows.iter().position(|&r| r)? as u32;
@@ -404,7 +408,9 @@ fn content_box(g: &GrayImage, numbers: bool) -> Option<(u32, u32, u32, u32)> {
             top = below;
         }
     }
-    let cols: Vec<bool> = (0..w).map(|x| col_ink(x, top, bottom) >= (h / 200).max(2)).collect();
+    let cols: Vec<bool> = (0..w)
+        .map(|x| col_ink(x, top, bottom) >= (h / 200).max(2))
+        .collect();
     let left = cols.iter().position(|&c| c)? as u32;
     let right = cols.iter().rposition(|&c| c)? as u32 + 1;
     let (cw, ch) = (right - left, bottom - top);
@@ -510,7 +516,11 @@ fn softened(img: DynamicImage) -> DynamicImage {
                     acc[c] += u32::from(p[c]) * k;
                 }
             }
-            image::Rgb([(acc[0] / 16) as u8, (acc[1] / 16) as u8, (acc[2] / 16) as u8])
+            image::Rgb([
+                (acc[0] / 16) as u8,
+                (acc[1] / 16) as u8,
+                (acc[2] / 16) as u8,
+            ])
         })
     };
     let across = pass(&src, 1, 0);
@@ -547,7 +557,9 @@ fn strips(img: DynamicImage, ratio: f32) -> Vec<DynamicImage> {
         let target = at + page_h;
         let from = target - page_h / 5;
         let to = (target + page_h / 10).min(h - 1);
-        let cut = (from..to).min_by_key(|&y| (busy(y), y.abs_diff(target))).unwrap_or(target);
+        let cut = (from..to)
+            .min_by_key(|&y| (busy(y), y.abs_diff(target)))
+            .unwrap_or(target);
         out.push(img.crop_imm(0, at, w, cut - at));
         at = cut;
     }
@@ -570,7 +582,11 @@ fn prepare(data: &[u8], o: &EbookOptions, first: bool, rtl: bool) -> Result<Vec<
     if first && spread != Spread::Keep && wide(&img) {
         let (w, h) = img.dimensions();
         let half = w / 2;
-        img = if rtl { img.crop_imm(0, 0, half, h) } else { img.crop_imm(half, 0, w - half, h) };
+        img = if rtl {
+            img.crop_imm(0, 0, half, h)
+        } else {
+            img.crop_imm(half, 0, w - half, h)
+        };
     }
     if o.crop {
         img = cropped(img, o.numbers);
@@ -585,7 +601,11 @@ fn prepare(data: &[u8], o: &EbookOptions, first: bool, rtl: bool) -> Result<Vec<
         let halves = || {
             let left = img.crop_imm(0, 0, half, h);
             let right = img.crop_imm(half, 0, w - half, h);
-            if rtl { vec![right, left] } else { vec![left, right] }
+            if rtl {
+                vec![right, left]
+            } else {
+                vec![left, right]
+            }
         };
         match spread {
             Spread::Keep => vec![img.clone()],
@@ -618,7 +638,11 @@ fn prepare(data: &[u8], o: &EbookOptions, first: bool, rtl: bool) -> Result<Vec<
             // Not cut, split, turned, resized nor retouched: a JPEG stays
             // as it was (no second loss), unless a grey screen wants a
             // colour page grey.
-            let same = whole && (w, h) == (w0, h0) && !o.contrast && !o.greys16 && !(o.soften && o.device.colour_ink());
+            let same = whole
+                && (w, h) == (w0, h0)
+                && !o.contrast
+                && !o.greys16
+                && !(o.soften && o.device.colour_ink());
             if same && data.starts_with(&[0xff, 0xd8]) && (source_grey || !grey) {
                 return Ok(Out {
                     data: data.to_vec(),
@@ -627,13 +651,21 @@ fn prepare(data: &[u8], o: &EbookOptions, first: bool, rtl: bool) -> Result<Vec<
                     grey: source_grey,
                 });
             }
-            let p = if grey { DynamicImage::ImageLuma8(p.to_luma8()) } else { p };
+            let p = if grey {
+                DynamicImage::ImageLuma8(p.to_luma8())
+            } else {
+                p
+            };
             let p = if o.contrast {
                 stretched(p, if o.device.ink() { 1.2 } else { 1.0 })
             } else {
                 p
             };
-            let p = if o.soften && o.device.colour_ink() { softened(p) } else { p };
+            let p = if o.soften && o.device.colour_ink() {
+                softened(p)
+            } else {
+                p
+            };
             let encode = |q: u8| -> Result<Vec<u8>, String> {
                 let mut out = Vec::new();
                 let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, q);
@@ -665,7 +697,12 @@ fn prepare(data: &[u8], o: &EbookOptions, first: bool, rtl: bool) -> Result<Vec<
                     out = png;
                 }
             }
-            Ok(Out { data: out, w, h, grey })
+            Ok(Out {
+                data: out,
+                w,
+                h,
+                grey,
+            })
         })
         .collect()
 }
@@ -710,7 +747,11 @@ fn zip_pages(path: &Path) -> Result<(Vec<Vec<u8>>, String), String> {
         .collect();
     let info_name = names
         .iter()
-        .find(|n| n.rsplit('/').next().is_some_and(|b| b.eq_ignore_ascii_case("ComicInfo.xml")))
+        .find(|n| {
+            n.rsplit('/')
+                .next()
+                .is_some_and(|b| b.eq_ignore_ascii_case("ComicInfo.xml"))
+        })
         .cloned();
     names.retain(|n| crate::convert::is_page_name(n) && !n.contains("__MACOSX"));
     names.sort_by(|a, b| crate::convert::natural_order(a, b));
@@ -801,7 +842,10 @@ pub fn convert(
     }
     // Made again in the same kind (a CBZ to a CBZ, a PDF to a PDF): in
     // place, the old file kept for undo.
-    let again = matches!((to, kind), (Format::Cbz, Kind::Zip) | (Format::Pdf, Kind::Pdf));
+    let again = matches!(
+        (to, kind),
+        (Format::Cbz, Kind::Zip) | (Format::Pdf, Kind::Pdf)
+    );
     let left = original_of(path, kind);
     if !again && (left == path || fs::symlink_metadata(&left).is_ok()) {
         return Err("convertTaken".into());
@@ -821,7 +865,9 @@ pub fn convert(
     }
     let made = make(path, &pages, &info, &o, values, manga)?;
     let tmp = temp_of(path);
-    let parts = write_all(&made, to, &info, values, &o, &tmp, &|k| part_path(path, to, k))?;
+    let parts = write_all(&made, to, &info, values, &o, &tmp, &|k| {
+        part_path(path, to, k)
+    })?;
     let count = made.pages.len();
     let undo_parts = |e: String| {
         for p in &parts {
@@ -862,7 +908,10 @@ pub fn original_of(path: &Path, kind: Kind) -> std::path::PathBuf {
 
 /// Where part `k` (from 2) of the book at `path` goes: `Name (2).azw3`.
 fn part_path(path: &Path, to: Format, k: usize) -> std::path::PathBuf {
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let ext = format!(".{}", to.ext());
     let stem = name.strip_suffix(&ext).unwrap_or(&name);
     path.with_file_name(format!("{stem} ({k}){ext}"))
@@ -886,7 +935,9 @@ fn write_all(
     let room = (u64::from(o.max_mb) << 20) * 95 / 100;
     let one = |made: &Made, to_path: &Path| -> Result<(), String> {
         let r = match to {
-            Format::Epub | Format::Kepub => crate::bookconv::epub_out::write(&book_of(made), to_path),
+            Format::Epub | Format::Kepub => {
+                crate::bookconv::epub_out::write(&book_of(made), to_path)
+            }
             Format::Azw3 => crate::bookconv::azw3_out::write(&book_of(made), to_path),
             Format::Cbz => write_cbz(made, info, values, to_path),
             Format::Pdf => write_pdf(made, to_path),
@@ -924,7 +975,13 @@ fn write_all(
     for k in 0..count {
         let (a, b) = (cuts[k], cuts[k + 1]);
         let piece = Made {
-            pages: m.pages[a..b].iter().map(|p| Out { data: p.data.clone(), ..*p }).collect(),
+            pages: m.pages[a..b]
+                .iter()
+                .map(|p| Out {
+                    data: p.data.clone(),
+                    ..*p
+                })
+                .collect(),
             title: format!("{} ({}/{count})", m.title, k + 1),
             authors: m.authors.clone(),
             publisher: m.publisher.clone(),
@@ -940,7 +997,11 @@ fn write_all(
                 .map(|(p, t)| (p - a, t.clone()))
                 .collect(),
         };
-        let to_path = if k == 0 { main.to_path_buf() } else { part(k + 1) };
+        let to_path = if k == 0 {
+            main.to_path_buf()
+        } else {
+            part(k + 1)
+        };
         if k > 0 && fs::symlink_metadata(&to_path).is_ok() {
             return Err(fail("convertTaken".into(), &made_parts));
         }
@@ -997,7 +1058,8 @@ pub fn join(
         } else {
             let name = issue.path.file_name().unwrap_or_default().to_string_lossy();
             let cbz = issue.path.with_file_name(format!(".{name}.renome-pages"));
-            let r = crate::convert::write_zip(&issue.path, kind, &cbz, &[], pdf).and_then(|_| zip_pages(&cbz));
+            let r = crate::convert::write_zip(&issue.path, kind, &cbz, &[], pdf)
+                .and_then(|_| zip_pages(&cbz));
             let _ = fs::remove_file(&cbz);
             r?
         };
@@ -1026,13 +1088,22 @@ pub fn join(
         }
     }
     let mut all = all.ok_or("comicUnsupported")?;
-    all.title = if title.is_empty() { all.series.clone() } else { title.to_string() };
+    all.title = if title.is_empty() {
+        all.series.clone()
+    } else {
+        title.to_string()
+    };
     if all.title.is_empty() {
-        all.title = out.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        all.title = out
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
     }
     let values = &issues[0].values;
     let tmp = temp_of(out);
-    let parts = write_all(&all, to, &first_info, values, &o, &tmp, &|k| part_path(out, to, k))?;
+    let parts = write_all(&all, to, &first_info, values, &o, &tmp, &|k| {
+        part_path(out, to, k)
+    })?;
     if let Err((_, e)) = crate::apply::rename_new(&tmp, out) {
         let _ = fs::remove_file(&tmp);
         for p in &parts {
@@ -1059,7 +1130,9 @@ fn make(
     manga: bool,
 ) -> Result<Made, String> {
     let rtl = manga || field(values, info, "Manga").eq_ignore_ascii_case("YesAndRightToLeft");
-    let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(8);
+    let threads = std::thread::available_parallelism()
+        .map_or(4, |n| n.get())
+        .min(8);
     let chunk = pages.len().div_ceil(threads).max(1);
     let done: Vec<Result<Vec<Out>, String>> = std::thread::scope(|s| {
         let handles: Vec<_> = pages
@@ -1076,7 +1149,10 @@ fn make(
             .collect();
         handles
             .into_iter()
-            .flat_map(|h| h.join().unwrap_or_else(|_| vec![Err("pageUnreadable".into())]))
+            .flat_map(|h| {
+                h.join()
+                    .unwrap_or_else(|_| vec![Err("pageUnreadable".into())])
+            })
             .collect()
     });
     // A page that cannot be read is left out, as the CBZ would.
@@ -1138,7 +1214,9 @@ fn book_of(m: &Made) -> Book {
     book.meta.series_index = m.number.clone();
     book.meta.date = m.year.clone();
     for out in &m.pages {
-        let Some(name) = book.add_file(out.data.clone(), "p.jpg") else { continue };
+        let Some(name) = book.add_file(out.data.clone(), "p.jpg") else {
+            continue;
+        };
         if book.cover.is_none() {
             book.cover = Some(name.clone());
         }
@@ -1150,7 +1228,11 @@ fn book_of(m: &Made) -> Book {
             page: Some((out.w, out.h)),
         });
     }
-    let marks = if m.toc.is_empty() { vec![(0, m.title.clone())] } else { m.toc.clone() };
+    let marks = if m.toc.is_empty() {
+        vec![(0, m.title.clone())]
+    } else {
+        m.toc.clone()
+    };
     for (page, title) in marks {
         if let Some(c) = book.chapters.get(page) {
             book.toc.push(Toc {
@@ -1165,21 +1247,35 @@ fn book_of(m: &Made) -> Book {
 
 /// A CBZ of the pages made ready, with the comic's `ComicInfo.xml` (and
 /// `values` in it).
-fn write_cbz(m: &Made, info: &str, values: &[(&'static str, String)], to: &Path) -> Result<(), String> {
+fn write_cbz(
+    m: &Made,
+    info: &str,
+    values: &[(&'static str, String)],
+    to: &Path,
+) -> Result<(), String> {
     let err = |e: zip::result::ZipError| e.to_string();
     let file = File::create(to).map_err(|e| e.to_string())?;
     let mut z = zip::ZipWriter::new(std::io::BufWriter::new(file));
     let digits = m.pages.len().to_string().len().max(3);
     for (i, p) in m.pages.iter().enumerate() {
-        let ext = if p.data.starts_with(b"\x89PNG") { "png" } else { "jpg" };
+        let ext = if p.data.starts_with(b"\x89PNG") {
+            "png"
+        } else {
+            "jpg"
+        };
         // Pictures are compressed already.
-        let o = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
-        z.start_file(format!("{:0digits$}.{ext}", i + 1), o).map_err(err)?;
+        let o = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        z.start_file(format!("{:0digits$}.{ext}", i + 1), o)
+            .map_err(err)?;
         z.write_all(&p.data).map_err(|e| e.to_string())?;
     }
     let old = (!info.is_empty()).then_some(info);
-    let values: Vec<(&'static str, String)> =
-        values.iter().filter(|(k, _)| *k != FALLBACK_LANGUAGE).cloned().collect();
+    let values: Vec<(&'static str, String)> = values
+        .iter()
+        .filter(|(k, _)| *k != FALLBACK_LANGUAGE)
+        .cloned()
+        .collect();
     let values = values.as_slice();
     let xml = if values.is_empty() {
         old.map(str::to_string)
@@ -1282,8 +1378,10 @@ mod tests {
 
     fn jpeg(img: DynamicImage) -> Vec<u8> {
         let mut b = Vec::new();
-        img.write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(&mut b, 90))
-            .unwrap();
+        img.write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(
+            &mut b, 90,
+        ))
+        .unwrap();
         b
     }
 
@@ -1326,7 +1424,11 @@ mod tests {
             ("phone", (1080, 2400), false, false),
         ] {
             let d: Device = serde_json::from_value(serde_json::json!(name)).unwrap();
-            assert_eq!((d.size(), d.grey(), d.colour_ink()), (Some(size), grey, colour), "{name}");
+            assert_eq!(
+                (d.size(), d.grey(), d.colour_ink()),
+                (Some(size), grey, colour),
+                "{name}"
+            );
         }
     }
 
@@ -1373,13 +1475,22 @@ mod tests {
     #[test]
     fn tones_stretched() {
         // A washed-out scan: greys from 60 to 200.
-        let img = DynamicImage::ImageLuma8(GrayImage::from_fn(100, 100, |x, _| image::Luma([60 + (x * 14 / 10) as u8])));
+        let img = DynamicImage::ImageLuma8(GrayImage::from_fn(100, 100, |x, _| {
+            image::Luma([60 + (x * 14 / 10) as u8])
+        }));
         let out = stretched(img, 1.2).to_luma8();
-        let (lo, hi) = out.pixels().fold((255u8, 0u8), |(lo, hi), p| (lo.min(p[0]), hi.max(p[0])));
+        let (lo, hi) = out
+            .pixels()
+            .fold((255u8, 0u8), |(lo, hi), p| (lo.min(p[0]), hi.max(p[0])));
         assert_eq!((lo, hi), (0, 255));
         // A blank page stays blank.
         let blank = DynamicImage::ImageLuma8(GrayImage::from_pixel(50, 50, image::Luma([240])));
-        assert!(stretched(blank, 1.2).to_luma8().pixels().all(|p| p[0] == 240));
+        assert!(
+            stretched(blank, 1.2)
+                .to_luma8()
+                .pixels()
+                .all(|p| p[0] == 240)
+        );
     }
 
     #[test]
@@ -1412,23 +1523,43 @@ mod tests {
     }
 
     fn opts(device: Device) -> EbookOptions {
-        EbookOptions { device, crop: false, spread: Spread::Keep, ..Default::default() }
+        EbookOptions {
+            device,
+            crop: false,
+            spread: Spread::Keep,
+            ..Default::default()
+        }
     }
 
     #[test]
     fn spreads_and_covers() {
         let wide = jpeg(page(1600, 1000));
-        let o = |s| EbookOptions { spread: s, ..opts(Device::Kindle) };
+        let o = |s| EbookOptions {
+            spread: s,
+            ..opts(Device::Kindle)
+        };
         let sizes = |v: Vec<Out>| v.iter().map(|p| (p.w > p.h, p.w)).collect::<Vec<_>>();
-        assert_eq!(prepare(&wide, &o(Spread::Keep), false, false).unwrap().len(), 1);
-        assert_eq!(prepare(&wide, &o(Spread::Split), false, false).unwrap().len(), 2);
+        assert_eq!(
+            prepare(&wide, &o(Spread::Keep), false, false)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            prepare(&wide, &o(Spread::Split), false, false)
+                .unwrap()
+                .len(),
+            2
+        );
         let turned = prepare(&wide, &o(Spread::Rotate), false, false).unwrap();
         assert_eq!(sizes(turned).len(), 1);
         let both = prepare(&wide, &o(Spread::Both), false, false).unwrap();
         assert_eq!(both.len(), 3);
         assert!(both[0].h > both[0].w, "turned to stand");
         // A wide cover keeps its front: the right half (left in a manga).
-        let cover = DynamicImage::ImageLuma8(GrayImage::from_fn(1600, 1000, |x, _| image::Luma([if x < 800 { 0 } else { 255 }])));
+        let cover = DynamicImage::ImageLuma8(GrayImage::from_fn(1600, 1000, |x, _| {
+            image::Luma([if x < 800 { 0 } else { 255 }])
+        }));
         let c = prepare(&jpeg(cover.clone()), &o(Spread::Split), true, false).unwrap();
         let px = image::load_from_memory(&c[0].data).unwrap().to_luma8();
         assert!(px.get_pixel(px.width() / 2, px.height() / 2)[0] > 200);
@@ -1440,14 +1571,25 @@ mod tests {
     #[test]
     fn small_pages_enlarged_and_custom_screens() {
         let small = jpeg(page(500, 700));
-        let o = EbookOptions { upscale: true, ..opts(Device::Kindle) };
+        let o = EbookOptions {
+            upscale: true,
+            ..opts(Device::Kindle)
+        };
         let p = &prepare(&small, &o, false, false).unwrap()[0];
         assert!(p.h == 1448 || p.w == 1072, "{}x{}", p.w, p.h);
-        let o = EbookOptions { width: 600, height: 800, ..opts(Device::Custom) };
+        let o = EbookOptions {
+            width: 600,
+            height: 800,
+            ..opts(Device::Custom)
+        };
         let p = &prepare(&jpeg(page(1600, 2400)), &o, false, false).unwrap()[0];
         assert!(p.w <= 600 && p.h <= 800);
         // A custom size too small to be one: pages as they are.
-        let o = EbookOptions { width: 10, height: 10, ..opts(Device::Custom) };
+        let o = EbookOptions {
+            width: 10,
+            height: 10,
+            ..opts(Device::Custom)
+        };
         assert_eq!(o.screen(), None);
     }
 
@@ -1469,8 +1611,17 @@ mod tests {
                 ..Default::default()
             };
             let store = d.path().join("store");
-            let done = convert(&named, to, o, &[], false, Original::Keep, PdfOptions::default(), &store)
-                .unwrap();
+            let done = convert(
+                &named,
+                to,
+                o,
+                &[],
+                false,
+                Original::Keep,
+                PdfOptions::default(),
+                &store,
+            )
+            .unwrap();
             // Cover, the spread in two, the last page.
             assert_eq!(done.pages, 4);
             assert_eq!(fs::read(&src).unwrap(), old, "the original stays beside");
@@ -1510,16 +1661,43 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let store = d.path().join("store");
         let src = d.path().join("Hero 003.cbz");
-        let info = "<?xml version=\"1.0\"?><ComicInfo><Series>Hero</Series><Number>3</Number></ComicInfo>";
+        let info =
+            "<?xml version=\"1.0\"?><ComicInfo><Series>Hero</Series><Number>3</Number></ComicInfo>";
         cbz(&src, &[page(1600, 2400), page(3200, 2400)], info);
         let old = fs::read(&src).unwrap();
-        let o = EbookOptions { device: Device::Kobo, crop: true, spread: Spread::Split, greys16: true, ..Default::default() };
-        let done = convert(&src, Format::Cbz, o, &[], false, Original::Keep, PdfOptions::default(), &store).unwrap();
+        let o = EbookOptions {
+            device: Device::Kobo,
+            crop: true,
+            spread: Spread::Split,
+            greys16: true,
+            ..Default::default()
+        };
+        let done = convert(
+            &src,
+            Format::Cbz,
+            o,
+            &[],
+            false,
+            Original::Keep,
+            PdfOptions::default(),
+            &store,
+        )
+        .unwrap();
         assert_eq!(done.pages, 3);
         let mut z = zip::ZipArchive::new(File::open(&src).unwrap()).unwrap();
-        let names: Vec<String> = z.file_names().filter_map(Result::ok).map(|n| n.into_owned()).collect();
+        let names: Vec<String> = z
+            .file_names()
+            .filter_map(Result::ok)
+            .map(|n| n.into_owned())
+            .collect();
         assert!(names.contains(&"ComicInfo.xml".to_string()), "{names:?}");
-        assert_eq!(names.iter().filter(|n| n.ends_with(".jpg") || n.ends_with(".png")).count(), 3);
+        assert_eq!(
+            names
+                .iter()
+                .filter(|n| n.ends_with(".jpg") || n.ends_with(".png"))
+                .count(),
+            3
+        );
         let mut first = Vec::new();
         z.by_index(0).unwrap().read_to_end(&mut first).unwrap();
         let img = image::load_from_memory(&first).unwrap();
@@ -1532,7 +1710,9 @@ mod tests {
     /// A page of noise (pictures that do not shrink much).
     fn noisy(w: u32, h: u32, seed: u32) -> DynamicImage {
         DynamicImage::ImageRgb8(image::RgbImage::from_fn(w, h, |x, y| {
-            let v = (x.wrapping_mul(2654435761) ^ y.wrapping_mul(40503) ^ seed).wrapping_mul(2246822519) >> 24;
+            let v = (x.wrapping_mul(2654435761) ^ y.wrapping_mul(40503) ^ seed)
+                .wrapping_mul(2246822519)
+                >> 24;
             image::Rgb([v as u8, (v >> 1) as u8, (v >> 2) as u8])
         }))
     }
@@ -1546,14 +1726,34 @@ mod tests {
         cbz(&src, &pages, "<ComicInfo><Series>Big</Series></ComicInfo>");
         let named = d.path().join("Big.epub");
         fs::rename(&src, &named).unwrap();
-        let o = EbookOptions { device: Device::Original, max_mb: 1, ..Default::default() };
-        let done = convert(&named, Format::Epub, o, &[], false, Original::Keep, PdfOptions::default(), &store).unwrap();
+        let o = EbookOptions {
+            device: Device::Original,
+            max_mb: 1,
+            ..Default::default()
+        };
+        let done = convert(
+            &named,
+            Format::Epub,
+            o,
+            &[],
+            false,
+            Original::Keep,
+            PdfOptions::default(),
+            &store,
+        )
+        .unwrap();
         assert!(!done.parts.is_empty(), "made in parts");
         assert_eq!(done.parts[0], d.path().join("Big (2).epub"));
         let mut pages = 0;
         for (k, p) in std::iter::once(&named).chain(&done.parts).enumerate() {
             let b = crate::bookconv::epub_in::read(p).unwrap();
-            assert!(b.meta.title.ends_with(&format!("({}/{})", k + 1, done.parts.len() + 1)), "{}", b.meta.title);
+            assert!(
+                b.meta
+                    .title
+                    .ends_with(&format!("({}/{})", k + 1, done.parts.len() + 1)),
+                "{}",
+                b.meta.title
+            );
             pages += b.chapters.len();
             assert!(fs::metadata(p).unwrap().len() < 1_200_000);
         }
@@ -1566,13 +1766,34 @@ mod tests {
         let mut issues = Vec::new();
         for n in 1..=3 {
             let p = d.path().join(format!("Hero #{n}.cbz"));
-            cbz(&p, &[page(800, 1200), page(800, 1200)], &format!("<ComicInfo><Series>Hero</Series><Number>{n}</Number><Writer>Ana</Writer></ComicInfo>"));
-            issues.push(Issue { path: p, values: Vec::new() });
+            cbz(
+                &p,
+                &[page(800, 1200), page(800, 1200)],
+                &format!(
+                    "<ComicInfo><Series>Hero</Series><Number>{n}</Number><Writer>Ana</Writer></ComicInfo>"
+                ),
+            );
+            issues.push(Issue {
+                path: p,
+                values: Vec::new(),
+            });
         }
         let before: Vec<Vec<u8>> = issues.iter().map(|i| fs::read(&i.path).unwrap()).collect();
         let out = d.path().join("Hero #1-3.epub");
-        let o = EbookOptions { device: Device::Kobo, ..Default::default() };
-        let j = join(&issues, Format::Epub, o, false, PdfOptions::default(), &out, "Hero #1-3").unwrap();
+        let o = EbookOptions {
+            device: Device::Kobo,
+            ..Default::default()
+        };
+        let j = join(
+            &issues,
+            Format::Epub,
+            o,
+            false,
+            PdfOptions::default(),
+            &out,
+            "Hero #1-3",
+        )
+        .unwrap();
         assert_eq!(j.files, std::slice::from_ref(&out));
         assert_eq!(j.pages, 6);
         let b = crate::bookconv::epub_in::read(&out).unwrap();
@@ -1584,7 +1805,19 @@ mod tests {
         for (i, old) in issues.iter().zip(before) {
             assert_eq!(fs::read(&i.path).unwrap(), old);
         }
-        assert_eq!(join(&issues, Format::Epub, o, false, PdfOptions::default(), &out, "").unwrap_err(), "convertTaken");
+        assert_eq!(
+            join(
+                &issues,
+                Format::Epub,
+                o,
+                false,
+                PdfOptions::default(),
+                &out,
+                ""
+            )
+            .unwrap_err(),
+            "convertTaken"
+        );
     }
 
     /// Makes e-books of the comics in `RENOME_COMIC_PROBE/src` (copies) in
@@ -1593,23 +1826,77 @@ mod tests {
     #[test]
     #[ignore]
     fn probe_comics() {
-        let Ok(dir) = std::env::var("RENOME_COMIC_PROBE") else { return };
+        let Ok(dir) = std::env::var("RENOME_COMIC_PROBE") else {
+            return;
+        };
         let dir = Path::new(&dir);
         let out = dir.join("out");
         let _ = fs::remove_dir_all(&out);
         fs::create_dir_all(out.join("samples")).unwrap();
         let store = out.join("store");
-        let base = EbookOptions { device: Device::KindlePw2024, crop: true, spread: Spread::Split, contrast: true, ..Default::default() };
+        let base = EbookOptions {
+            device: Device::KindlePw2024,
+            crop: true,
+            spread: Spread::Split,
+            contrast: true,
+            ..Default::default()
+        };
         let sets: Vec<(&str, Format, EbookOptions)> = vec![
             ("azw3", Format::Azw3, base),
-            ("azw3-plain", Format::Azw3, EbookOptions { contrast: false, ..base }),
-            ("azw3-16", Format::Azw3, EbookOptions { greys16: true, numbers: true, ..base }),
-            ("kepub-color", Format::Kepub, EbookOptions { device: Device::KoboColor, soften: true, ..base }),
-            ("cbz-both", Format::Cbz, EbookOptions { spread: Spread::Both, upscale: true, ..base }),
-            ("pdf-scribe", Format::Pdf, EbookOptions { device: Device::KindleScribe2025, ..base }),
-            ("epub-parts", Format::Epub, EbookOptions { max_mb: 50, ..base }),
+            (
+                "azw3-plain",
+                Format::Azw3,
+                EbookOptions {
+                    contrast: false,
+                    ..base
+                },
+            ),
+            (
+                "azw3-16",
+                Format::Azw3,
+                EbookOptions {
+                    greys16: true,
+                    numbers: true,
+                    ..base
+                },
+            ),
+            (
+                "kepub-color",
+                Format::Kepub,
+                EbookOptions {
+                    device: Device::KoboColor,
+                    soften: true,
+                    ..base
+                },
+            ),
+            (
+                "cbz-both",
+                Format::Cbz,
+                EbookOptions {
+                    spread: Spread::Both,
+                    upscale: true,
+                    ..base
+                },
+            ),
+            (
+                "pdf-scribe",
+                Format::Pdf,
+                EbookOptions {
+                    device: Device::KindleScribe2025,
+                    ..base
+                },
+            ),
+            (
+                "epub-parts",
+                Format::Epub,
+                EbookOptions { max_mb: 50, ..base },
+            ),
         ];
-        let mut srcs: Vec<_> = fs::read_dir(dir.join("src")).unwrap().flatten().map(|e| e.path()).collect();
+        let mut srcs: Vec<_> = fs::read_dir(dir.join("src"))
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .collect();
         srcs.sort();
         for src in &srcs {
             let size = fs::metadata(src).unwrap().len();
@@ -1619,7 +1906,16 @@ mod tests {
                 // The comic copied under the e-book's name, as the rename leaves it.
                 fs::copy(src, &named).unwrap();
                 let t = std::time::Instant::now();
-                match convert(&named, *to, *o, &[], stem.starts_with("frieren"), Original::Delete, PdfOptions::default(), &store) {
+                match convert(
+                    &named,
+                    *to,
+                    *o,
+                    &[],
+                    stem.starts_with("frieren"),
+                    Original::Delete,
+                    PdfOptions::default(),
+                    &store,
+                ) {
                     Ok(d) => {
                         let mut total = fs::metadata(&named).map(|m| m.len()).unwrap_or(0);
                         for p in &d.parts {
@@ -1640,13 +1936,26 @@ mod tests {
                 let pics: Vec<Vec<u8>> = match to {
                     Format::Cbz => zip_pages(&named).map(|p| p.0).unwrap_or_default(),
                     Format::Pdf => Vec::new(),
-                    Format::Azw3 => crate::bookconv::mobi::read(&named).map(|b| b.files.into_iter().map(|f| f.data).collect()).unwrap_or_default(),
-                    _ => crate::bookconv::epub_in::read(&named).map(|b| b.files.into_iter().map(|f| f.data).collect()).unwrap_or_default(),
+                    Format::Azw3 => crate::bookconv::mobi::read(&named)
+                        .map(|b| b.files.into_iter().map(|f| f.data).collect())
+                        .unwrap_or_default(),
+                    _ => crate::bookconv::epub_in::read(&named)
+                        .map(|b| b.files.into_iter().map(|f| f.data).collect())
+                        .unwrap_or_default(),
                 };
                 for i in [0usize, 4, pics.len() / 2] {
                     if let Some(p) = pics.get(i) {
-                        let ext = if p.starts_with(b"\x89PNG") { "png" } else { "jpg" };
-                        fs::write(out.join("samples").join(format!("{stem}-{label}-{i}.{ext}")), p).unwrap();
+                        let ext = if p.starts_with(b"\x89PNG") {
+                            "png"
+                        } else {
+                            "jpg"
+                        };
+                        fs::write(
+                            out.join("samples")
+                                .join(format!("{stem}-{label}-{i}.{ext}")),
+                            p,
+                        )
+                        .unwrap();
                     }
                 }
             }
@@ -1655,14 +1964,31 @@ mod tests {
         let issues: Vec<Issue> = srcs
             .iter()
             .filter(|p| p.file_name().unwrap().to_string_lossy().starts_with("rei"))
-            .map(|p| Issue { path: p.clone(), values: vec![("Series", "Rei".into())] })
+            .map(|p| Issue {
+                path: p.clone(),
+                values: vec![("Series", "Rei".into())],
+            })
             .collect();
         if issues.len() > 1 {
             let vol = out.join("Rei #3-4.azw3");
             let t = std::time::Instant::now();
-            let j = join(&issues, Format::Azw3, base, false, PdfOptions::default(), &vol, "Rei #3-4").unwrap();
+            let j = join(
+                &issues,
+                Format::Azw3,
+                base,
+                false,
+                PdfOptions::default(),
+                &vol,
+                "Rei #3-4",
+            )
+            .unwrap();
             let b = crate::bookconv::mobi::read(&vol).unwrap();
-            println!("joined {} pages, toc {:?}, {:.1}s", j.pages, b.toc.iter().map(|t| t.title.clone()).collect::<Vec<_>>(), t.elapsed().as_secs_f32());
+            println!(
+                "joined {} pages, toc {:?}, {:.1}s",
+                j.pages,
+                b.toc.iter().map(|t| t.title.clone()).collect::<Vec<_>>(),
+                t.elapsed().as_secs_f32()
+            );
         }
     }
 
@@ -1671,10 +1997,18 @@ mod tests {
     #[test]
     #[ignore]
     fn probe_kf8() {
-        let Ok(dir) = std::env::var("RENOME_KF8_PROBE") else { return };
+        let Ok(dir) = std::env::var("RENOME_KF8_PROBE") else {
+            return;
+        };
         let dir = Path::new(&dir);
         let store = dir.join("store");
-        let o = EbookOptions { device: Device::KindlePw2024, crop: true, spread: Spread::Split, contrast: true, ..Default::default() };
+        let o = EbookOptions {
+            device: Device::KindlePw2024,
+            crop: true,
+            spread: Spread::Split,
+            contrast: true,
+            ..Default::default()
+        };
         for (to, name) in [
             (Format::Azw3, "ours.azw3"),
             (Format::Epub, "ours.epub"),
@@ -1694,7 +2028,17 @@ mod tests {
                 ("Writer", "Autor".to_string()),
                 (FALLBACK_LANGUAGE, "pt".to_string()),
             ];
-            convert(&p, to, o, &values, false, Original::Delete, PdfOptions::default(), &store).unwrap();
+            convert(
+                &p,
+                to,
+                o,
+                &values,
+                false,
+                Original::Delete,
+                PdfOptions::default(),
+                &store,
+            )
+            .unwrap();
         }
     }
 }

@@ -162,9 +162,8 @@ fn legacy_for(lang: &str) -> Option<&'static Encoding> {
         "ko" => EUC_KR,
         "zh" if ["tw", "hk", "mo"].contains(&region.to_ascii_lowercase().as_str()) => BIG5,
         "zh" => GBK,
-        "pt" | "en" | "es" | "fr" | "de" | "it" | "nl" | "sv" | "no" | "da" | "fi" | "ca" | "id" => {
-            WINDOWS_1252
-        }
+        "pt" | "en" | "es" | "fr" | "de" | "it" | "nl" | "sv" | "no" | "da" | "fi" | "ca"
+        | "id" => WINDOWS_1252,
         _ => return None,
     })
 }
@@ -290,9 +289,8 @@ static MDVD_LINE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\{(\d+)\}\{(\d*)\}(.*)$").unwrap());
 
 /// The time of an inline WebVTT timestamp (`<00:01.500>`) inside a cue.
-static VTT_INLINE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"<(?:(\d+):)?(\d{1,2}):(\d{2})\.(\d{3})>").unwrap()
-});
+static VTT_INLINE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"<(?:(\d+):)?(\d{1,2}):(\d{2})\.(\d{3})>").unwrap());
 
 fn ass_ms(text: &str) -> Option<i64> {
     let c = ASS_TIME.captures(text)?;
@@ -322,8 +320,13 @@ enum Item {
 #[derive(Debug, Clone)]
 enum Shape {
     /// Whatever follows the times on the timing line (positions).
-    Srt { extra: String },
-    Vtt { id: Option<String>, settings: String },
+    Srt {
+        extra: String,
+    },
+    Vtt {
+        id: Option<String>,
+        settings: String,
+    },
     /// A `Dialogue:` or `Comment:` line split by its `Format:`.
     Ass {
         kind: String,
@@ -359,7 +362,8 @@ pub fn detect(text: &str) -> Option<Format> {
     if first.starts_with("WEBVTT") {
         return Some(Format::Vtt);
     }
-    if lower.contains("[script info]") || lower.contains("\ndialogue:") && lower.contains("[events]")
+    if lower.contains("[script info]")
+        || lower.contains("\ndialogue:") && lower.contains("[events]")
     {
         return Some(Format::Ass);
     }
@@ -369,7 +373,10 @@ pub fn detect(text: &str) -> Option<Format> {
     if lower.contains("<sami") || lower.contains("<sync start") {
         return Some(Format::Sami);
     }
-    if head.lines().any(|l| SRT_TIMING.is_match(l) && l.contains("-->")) {
+    if head
+        .lines()
+        .any(|l| SRT_TIMING.is_match(l) && l.contains("-->"))
+    {
         return Some(Format::Srt);
     }
     if lower.contains("[information]") || head.lines().any(|l| SV_TIMING.is_match(l)) {
@@ -545,7 +552,10 @@ impl Doc {
             let (key, rest) = trimmed.split_once(':').unwrap_or(("", ""));
             let key_l = key.trim().to_ascii_lowercase();
             if section.contains("styles") && key_l == "format" {
-                style_format = rest.split(',').map(|s| s.trim().to_ascii_lowercase()).collect();
+                style_format = rest
+                    .split(',')
+                    .map(|s| s.trim().to_ascii_lowercase())
+                    .collect();
             } else if section.contains("styles") && key_l == "style" {
                 let f: Vec<&str> = rest.split(',').map(str::trim).collect();
                 let at = |n: &str| style_format.iter().position(|x| x == n);
@@ -557,7 +567,10 @@ impl Doc {
                 }
             }
             if section == "[events]" && key_l == "format" {
-                format = rest.split(',').map(|s| s.trim().to_ascii_lowercase()).collect();
+                format = rest
+                    .split(',')
+                    .map(|s| s.trim().to_ascii_lowercase())
+                    .collect();
             }
             let event = section == "[events]" && (key_l == "dialogue" || key_l == "comment");
             if event && !format.is_empty() {
@@ -712,7 +725,9 @@ impl Doc {
             }
             for (j, c) in ps.iter().enumerate() {
                 let m = c.get(0).unwrap();
-                let to = ps.get(j + 1).map_or(chunk.len(), |n| n.get(0).unwrap().start());
+                let to = ps
+                    .get(j + 1)
+                    .map_or(chunk.len(), |n| n.get(0).unwrap().start());
                 let class = c.get(1).map_or("", |m| m.as_str()).to_ascii_lowercase();
                 paras.push((time, class, sami_text(&chunk[m.end()..to])));
             }
@@ -797,7 +812,11 @@ impl Doc {
             let lines = split_lines(format, &c.text);
             let kept: Vec<String> = lines
                 .iter()
-                .filter(|l| !marks.get(at).is_some_and(|m| m.contains(&visible(format, l))))
+                .filter(|l| {
+                    !marks
+                        .get(at)
+                        .is_some_and(|m| m.contains(&visible(format, l)))
+                })
                 .cloned()
                 .collect();
             dropped += lines.len() - kept.len();
@@ -865,7 +884,10 @@ impl Doc {
     fn mostly_capitals(&self) -> bool {
         let (mut up, mut all) = (0usize, 0usize);
         for c in self.cues() {
-            for ch in visible(self.format, &c.text).chars().filter(|c| c.is_alphabetic()) {
+            for ch in visible(self.format, &c.text)
+                .chars()
+                .filter(|c| c.is_alphabetic())
+            {
                 all += 1;
                 if ch.is_uppercase() {
                     up += 1;
@@ -1225,7 +1247,10 @@ fn is_ad(line: &str, edge: bool) -> bool {
     // sentence that speaks of a site stays.
     URL.is_match(line) && {
         let rest = URL.replace_all(line, " ");
-        let words = rest.split_whitespace().filter(|w| w.chars().any(char::is_alphanumeric)).count();
+        let words = rest
+            .split_whitespace()
+            .filter(|w| w.chars().any(char::is_alphanumeric))
+            .count();
         words <= 2 || AD_WORDS.is_match(&rest)
     }
 }
@@ -1305,7 +1330,11 @@ fn clean_hearing(format: Format, text: &str, caps: bool) -> Option<String> {
             .map(|m| (m.start(), m.end()))
             .collect();
         let core = p.trim().trim_start_matches(['-', '–', '—']).trim();
-        let core_at = p.len() - p.trim_start().trim_start_matches(['-', '–', '—']).trim_start().len();
+        let core_at = p.len()
+            - p.trim_start()
+                .trim_start_matches(['-', '–', '—'])
+                .trim_start()
+                .len();
         for c in PARENS.captures_iter(&p) {
             let m = c.get(0).unwrap();
             let inner = c[1].trim();
@@ -1339,9 +1368,9 @@ fn clean_hearing(format: Format, text: &str, caps: bool) -> Option<String> {
         }
         // Only music notes (and spaces, dashes): the line goes.
         let notes = core.chars().any(|c| matches!(c, '♪' | '♫' | '♬' | '♩'))
-            && core
-                .chars()
-                .all(|c| matches!(c, '♪' | '♫' | '♬' | '♩' | '#' | '*' | '-' | '–') || c.is_whitespace());
+            && core.chars().all(|c| {
+                matches!(c, '♪' | '♫' | '♬' | '♩' | '#' | '*' | '-' | '–') || c.is_whitespace()
+            });
         if notes {
             changed = true;
             continue;
@@ -1416,7 +1445,8 @@ fn strip_srt_tags(text: &str) -> String {
 /// classes, timestamps and ruby text left out; a cue placed on top gets
 /// `{\an8}`.
 fn vtt_to_srt(text: &str, settings: &str) -> String {
-    static TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<(/?)([a-zA-Z]+)?[^<>]*>").unwrap());
+    static TAG: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"<(/?)([a-zA-Z]+)?[^<>]*>").unwrap());
     static RT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<rt>.*?</rt>").unwrap());
     let t = RT.replace_all(text, "");
     let t = TAG.replace_all(&t, |c: &regex::Captures| {
@@ -1436,11 +1466,7 @@ fn vtt_to_srt(text: &str, settings: &str) -> String {
             }
         })
     });
-    if top {
-        format!("{{\\an8}}{t}")
-    } else {
-        t
-    }
+    if top { format!("{{\\an8}}{t}") } else { t }
 }
 
 /// SubStation's text as SubRip's: line breaks, hard spaces, italics, bold,
@@ -1520,17 +1546,15 @@ fn ass_to_srt(text: &str, italic: bool) -> String {
 }
 
 fn tidy_lines(text: &str) -> String {
-    text.split('\n')
-        .map(tidy)
-        .collect::<Vec<_>>()
-        .join("\n")
+    text.split('\n').map(tidy).collect::<Vec<_>>().join("\n")
 }
 
 /// MicroDVD's text as SubRip's: `|` breaks lines, `{y:i}` (that line) and
 /// `{Y:i}` (all its lines) make italics, bold and underline; colours and
 /// fonts are left out.
 fn microdvd_to_srt(text: &str) -> String {
-    static CODE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{([a-zA-Z]):([^{}]*)\}").unwrap());
+    static CODE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\{([a-zA-Z]):([^{}]*)\}").unwrap());
     let mut all: Vec<char> = Vec::new();
     let lines: Vec<String> = text.split('|').map(str::to_string).collect();
     let mut styled: Vec<(Vec<char>, String)> = Vec::new();
@@ -1666,7 +1690,11 @@ pub struct Fix {
 
 impl Fix {
     pub fn is_empty(&self) -> bool {
-        !self.convert && self.encoding.is_none() && self.ads == 0 && self.hearing == 0 && !self.retime
+        !self.convert
+            && self.encoding.is_none()
+            && self.ads == 0
+            && self.hearing == 0
+            && !self.retime
     }
 }
 
@@ -1841,7 +1869,9 @@ fn rewrite(
     let out = out_enc.encode(&new_text);
     // Read as UTF-8 but not quite (a few bad bytes): written as it was,
     // rather than with replacement marks.
-    if enc.is_utf8() && std::str::from_utf8(bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes)).is_err() {
+    if enc.is_utf8()
+        && std::str::from_utf8(bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes)).is_err()
+    {
         return Err("subEncoding".into());
     }
     Ok((out != bytes).then_some(out))
@@ -1901,10 +1931,19 @@ pub struct Fixed {
 /// `.srt` but in another format is made into SubRip: the original steps
 /// aside with its own extension (kept, or sent to the trash). Otherwise it
 /// is edited where it is, its old content saved in `store` for undo.
-pub fn fix_file(path: &Path, tools: &Tools, original: Original, store: &Path) -> Result<Fixed, String> {
+pub fn fix_file(
+    path: &Path,
+    tools: &Tools,
+    original: Original,
+    store: &Path,
+) -> Result<Fixed, String> {
     let loaded = load(path)?;
     let (bytes, text) = (&loaded.0, &loaded.1);
-    let format = if is_picture(bytes) { None } else { detect(text) };
+    let format = if is_picture(bytes) {
+        None
+    } else {
+        detect(text)
+    };
     let ext = path
         .extension()
         .map(|e| e.to_string_lossy().to_lowercase())
@@ -1920,7 +1959,9 @@ pub fn fix_file(path: &Path, tools: &Tools, original: Original, store: &Path) ->
         // SubStation's first version is `.ssa`.
         let lower = text.to_ascii_lowercase();
         let own = match format {
-            Some(Format::Ass) if !lower.contains("v4.00+") && lower.contains("[v4 styles]") => "ssa",
+            Some(Format::Ass) if !lower.contains("v4.00+") && lower.contains("[v4 styles]") => {
+                "ssa"
+            }
             f => f.map_or("sub", Format::ext),
         };
         let left = path.with_extension(own);
@@ -2036,7 +2077,10 @@ mod tests {
         assert_eq!(c("♪ la la la ♪"), None);
         assert_eq!(c("♪ ♪").as_deref(), Some(""));
         assert_eq!(c("- [gasps]\n- What?").as_deref(), Some("What?"));
-        assert_eq!(c("<i>(LAUGHING) Stop it.</i>").as_deref(), Some("<i>Stop it.</i>"));
+        assert_eq!(
+            c("<i>(LAUGHING) Stop it.</i>").as_deref(),
+            Some("<i>Stop it.</i>")
+        );
         assert_eq!(c("MAN #2: Run!").as_deref(), Some("Run!"));
         // All in capitals: names and words cannot be told apart.
         assert_eq!(clean_hearing(Format::Srt, "JOHN: RUN!", true), None);
@@ -2080,7 +2124,10 @@ mod tests {
         );
         let mut d = Doc::parse(ASS, None).unwrap();
         d.retime(1000, 1.0);
-        assert!(d.write().contains("Dialogue: 0,0:00:02.00,0:00:03.50,Default"));
+        assert!(
+            d.write()
+                .contains("Dialogue: 0,0:00:02.00,0:00:03.50,Default")
+        );
         assert!(d.write().contains("Comment: 0,0:00:02.00"));
     }
 
@@ -2137,7 +2184,10 @@ mod tests {
     #[test]
     fn encodings() {
         let (t, e) = decode(b"ol\xE1 a\xE7\xE3o", None);
-        assert_eq!((t.as_str(), e), ("olá ação", Enc::Legacy(encoding_rs::WINDOWS_1252)));
+        assert_eq!(
+            (t.as_str(), e),
+            ("olá ação", Enc::Legacy(encoding_rs::WINDOWS_1252))
+        );
         // "Привет мир" in windows-1251.
         let ru = b"\xCF\xF0\xE8\xE2\xE5\xF2 \xEC\xE8\xF0";
         assert_eq!(decode(ru, None).0, "Привет мир");
@@ -2147,7 +2197,10 @@ mod tests {
         assert_eq!(decode(pl, Some("pl")).0, "Zażółć gęślą");
         assert_eq!(decode(pl, None).0, "Zażółć gęślą");
         assert_eq!(to_utf8(b"\xEF\xBB\xBFol\xC3\xA1", None), "olá".as_bytes());
-        assert_eq!(to_utf8(b"\xFF\xFEo\x00l\x00\xE1\x00", None), "olá".as_bytes());
+        assert_eq!(
+            to_utf8(b"\xFF\xFEo\x00l\x00\xE1\x00", None),
+            "olá".as_bytes()
+        );
         let w = Enc::Legacy(encoding_rs::WINDOWS_1252);
         assert_eq!(w.encode("olá"), b"ol\xE1");
         assert_eq!(w.encode("ол"), "ол".as_bytes());
@@ -2195,8 +2248,15 @@ mod tests {
         let s = summary(&p).unwrap();
         assert!(plan(&s, &tools, "srt").unwrap().convert);
         let done = fix_file(&p, &tools, Original::Keep, &d.path().join("s")).unwrap();
-        assert!(fs::read_to_string(&p).unwrap().starts_with("1\r\n00:00:01,000"));
-        assert_eq!(fs::read_to_string(d.path().join("Movie.en.ass")).unwrap(), ASS);
+        assert!(
+            fs::read_to_string(&p)
+                .unwrap()
+                .starts_with("1\r\n00:00:01,000")
+        );
+        assert_eq!(
+            fs::read_to_string(d.path().join("Movie.en.ass")).unwrap(),
+            ASS
+        );
         let c = done.backup.unwrap().converted.unwrap();
         crate::convert::restore(&p, &c).unwrap();
         assert_eq!(fs::read_to_string(&p).unwrap(), ASS);

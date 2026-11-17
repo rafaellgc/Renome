@@ -142,7 +142,10 @@ fn kind(path: &Path) -> Option<Kind> {
         return Some(Kind::Matroska);
     }
     let boxes: [&[u8; 4]; 6] = [b"ftyp", b"moov", b"mdat", b"free", b"wide", b"skip"];
-    boxes.iter().any(|k| head[4..8] == k[..]).then_some(Kind::Mp4)
+    boxes
+        .iter()
+        .any(|k| head[4..8] == k[..])
+        .then_some(Kind::Mp4)
 }
 
 /// The changes to make: same-length patches inside the file, and what
@@ -155,7 +158,12 @@ struct Plan {
 
 /// Writes `meta` into the video at `path`; the old bytes go to a new file
 /// in `store`. `None` when there was nothing to change.
-pub fn write(path: &Path, meta: &VideoMeta, opt: &Options, store: &Path) -> Result<Option<VideoEdit>, String> {
+pub fn write(
+    path: &Path,
+    meta: &VideoMeta,
+    opt: &Options,
+    store: &Path,
+) -> Result<Option<VideoEdit>, String> {
     let k = kind(path).ok_or("videoUnsupported")?;
     let mut f = File::options()
         .read(true)
@@ -190,7 +198,13 @@ fn write_at(f: &mut File, at: u64, b: &[u8]) -> std::io::Result<()> {
 /// Saves what `plan` changes, then makes the changes: the new tail first
 /// (beyond what any reader of the old file looks at), then the patches.
 /// A failure puts the file back.
-fn apply(f: &mut File, path: &Path, len: u64, plan: Plan, store: &Path) -> Result<VideoEdit, String> {
+fn apply(
+    f: &mut File,
+    path: &Path,
+    len: u64,
+    plan: Plan,
+    store: &Path,
+) -> Result<VideoEdit, String> {
     let mut patches = plan.patches;
     patches.sort_by_key(|p| p.0);
     for w in patches.windows(2) {
@@ -335,9 +349,7 @@ fn size_vint(n: u64, len: usize) -> Option<Vec<u8>> {
 }
 
 fn min_size_len(n: u64) -> usize {
-    (1..=8)
-        .find(|&l| n < (1u64 << (7 * l)) - 1)
-        .unwrap_or(8)
+    (1..=8).find(|&l| n < (1u64 << (7 * l)) - 1).unwrap_or(8)
 }
 
 /// An element: id, size (as short as it can be, or `size_len` bytes)
@@ -444,7 +456,12 @@ fn header_at(f: &mut File, at: u64) -> Option<(u64, Option<u64>, u64)> {
 /// The Matroska changes: new Tags (and Attachments with the cover) at
 /// the end, the old ones made Void, the SeekHead pointing to the new
 /// ones, the segment's size, and the title in Info when it fits.
-fn mkv_plan(f: &mut File, len: u64, meta: &VideoMeta, opt: &Options) -> Result<Option<Plan>, String> {
+fn mkv_plan(
+    f: &mut File,
+    len: u64,
+    meta: &VideoMeta,
+    opt: &Options,
+) -> Result<Option<Plan>, String> {
     let bad = || "videoUnsupported".to_string();
     let (id, size, h) = header_at(f, 0).ok_or_else(bad)?;
     if id != 0x1a45_dfa3 {
@@ -532,7 +549,10 @@ fn mkv_plan(f: &mut File, len: u64, meta: &VideoMeta, opt: &Options) -> Result<O
         }
         for (name, cover) in &covers {
             let png = cover.starts_with(b"\x89PNG");
-            let mut file = str_el(0x466e, &format!("{name}.{}", if png { "png" } else { "jpg" }));
+            let mut file = str_el(
+                0x466e,
+                &format!("{name}.{}", if png { "png" } else { "jpg" }),
+            );
             file.extend(str_el(0x4660, if png { "image/png" } else { "image/jpeg" }));
             file.extend(el(0x465c, cover));
             // The UID from the picture and its name: the same picture
@@ -616,10 +636,22 @@ fn mkv_plan(f: &mut File, len: u64, meta: &VideoMeta, opt: &Options) -> Result<O
         i = members.iter().max().map_or(i + 1, |m| m + 1);
         let room = end - start.at;
         let mut placed = None;
-        for combo in combos(&members.iter().map(|&m| choices[m].1.len()).collect::<Vec<_>>()) {
+        for combo in combos(
+            &members
+                .iter()
+                .map(|&m| choices[m].1.len())
+                .collect::<Vec<_>>(),
+        ) {
             // The last choice of each is the element as it was.
-            let same = members.iter().zip(&combo).all(|(&m, &c)| c == choices[m].1.len() - 1);
-            let parts: Vec<(u64, &Vec<u8>)> = members.iter().zip(&combo).map(|(&m, &c)| (choices[m].0.id, &choices[m].1[c])).collect();
+            let same = members
+                .iter()
+                .zip(&combo)
+                .all(|(&m, &c)| c == choices[m].1.len() - 1);
+            let parts: Vec<(u64, &Vec<u8>)> = members
+                .iter()
+                .zip(&combo)
+                .map(|(&m, &c)| (choices[m].0.id, &choices[m].1[c]))
+                .collect();
             if same {
                 break;
             }
@@ -628,7 +660,9 @@ fn mkv_plan(f: &mut File, len: u64, meta: &VideoMeta, opt: &Options) -> Result<O
                 break;
             }
         }
-        let Some((parts, bytes)) = placed else { continue };
+        let Some((parts, bytes)) = placed else {
+            continue;
+        };
         covered.extend(run);
         let mut at = start.at;
         for (&m, (id, kids)) in members.iter().zip(&parts) {
@@ -743,7 +777,11 @@ fn mkv_plan(f: &mut File, len: u64, meta: &VideoMeta, opt: &Options) -> Result<O
 
 /// A SeekHead rebuilt with `entries` where it is (with the room after
 /// it), or an error when it does not fit.
-fn seekhead_patch(sh: &Top, entries: &[(Vec<u8>, u64)], room: u64) -> Result<(u64, Vec<u8>), String> {
+fn seekhead_patch(
+    sh: &Top,
+    entries: &[(Vec<u8>, u64)],
+    room: u64,
+) -> Result<(u64, Vec<u8>), String> {
     let mut kids = Vec::new();
     for (sid, pos) in entries {
         let mut e = el(0x53ab, sid);
@@ -751,7 +789,11 @@ fn seekhead_patch(sh: &Top, entries: &[(Vec<u8>, u64)], room: u64) -> Result<(u6
         kids.extend(el(0x4dbb, &e));
     }
     let bytes = fill(room, el(SEEKHEAD, &kids), |extra| {
-        Some(el_len(SEEKHEAD, &kids, Some(min_size_len(kids.len() as u64) + extra)))
+        Some(el_len(
+            SEEKHEAD,
+            &kids,
+            Some(min_size_len(kids.len() as u64) + extra),
+        ))
     })
     .ok_or("videoNoRoom")?;
     Ok((sh.at, bytes))
@@ -776,8 +818,12 @@ fn is_font(file: &[u8]) -> bool {
                 s.starts_with("font/")
                     || s.starts_with("application/x-font")
                     || s.starts_with("application/font-")
-                    || ["application/x-truetype-font", "application/vnd.ms-opentype", "application/vnd.ms-fontobject"]
-                        .contains(&s.as_str())
+                    || [
+                        "application/x-truetype-font",
+                        "application/vnd.ms-opentype",
+                        "application/vnd.ms-fontobject",
+                    ]
+                    .contains(&s.as_str())
             }
             0x466e => [".ttf", ".otf", ".ttc", ".woff", ".woff2", ".pfb", ".fon"]
                 .iter()
@@ -864,14 +910,21 @@ fn mkv_codec(id: &str) -> String {
 /// reads it.
 fn mkv_tracks(tracks: &[u8]) -> (Vec<&[u8]>, Vec<crate::tracknames::TrackInfo>) {
     use crate::tracknames::{TrackInfo, TrackKind};
-    let entries: Vec<&[u8]> = ebml(tracks).filter(|(id, _)| *id == 0xae).map(|(_, v)| v).collect();
+    let entries: Vec<&[u8]> = ebml(tracks)
+        .filter(|(id, _)| *id == 0xae)
+        .map(|(_, v)| v)
+        .collect();
     let infos: Vec<TrackInfo> = entries
         .iter()
         .map(|e| {
             let mut t = TrackInfo::default();
             let (mut lang, mut bcp) = (None, None);
             for (id, v) in ebml(e) {
-                let text = || String::from_utf8_lossy(v).trim_end_matches('\0').to_string();
+                let text = || {
+                    String::from_utf8_lossy(v)
+                        .trim_end_matches('\0')
+                        .to_string()
+                };
                 match id {
                     0x83 => {
                         t.kind = match ebml_uint(v) {
@@ -900,7 +953,10 @@ fn mkv_tracks(tracks: &[u8]) -> (Vec<&[u8]>, Vec<crate::tracknames::TrackInfo>) 
                 }
             }
             // Matroska's default language is English.
-            t.lang = bcp.filter(|s| !s.is_empty()).or(lang).unwrap_or_else(|| "eng".into());
+            t.lang = bcp
+                .filter(|s| !s.is_empty())
+                .or(lang)
+                .unwrap_or_else(|| "eng".into());
             t
         })
         .collect();
@@ -911,11 +967,17 @@ fn mkv_tracks(tracks: &[u8]) -> (Vec<&[u8]>, Vec<crate::tracknames::TrackInfo>) 
 /// language its old name told); `None` when nothing changes.
 fn named_tracks(tracks: &[u8]) -> Option<Vec<u8>> {
     let (entries, infos) = mkv_tracks(tracks);
-    let new = crate::tracknames::names(&infos);    let mut out = Vec::new();
+    let new = crate::tracknames::names(&infos);
+    let mut out = Vec::new();
     let mut changed = false;
     for ((e, old), n) in entries.iter().zip(&infos).zip(&new) {
         let mut kids = Vec::new();
-        let flags = [(0x55aa, n.forced && !old.forced), (0x55ab, n.hearing && !old.hearing), (0x55ac, n.described && !old.described), (0x55af, n.commentary && !old.commentary)];
+        let flags = [
+            (0x55aa, n.forced && !old.forced),
+            (0x55ab, n.hearing && !old.hearing),
+            (0x55ac, n.described && !old.described),
+            (0x55af, n.commentary && !old.commentary),
+        ];
         for (id, v) in ebml(e) {
             match id {
                 0x536e | CRC32 => continue,
@@ -951,17 +1013,53 @@ fn named_tracks(tracks: &[u8]) -> Option<Vec<u8>> {
 /// The names of the simple tags written, per target level.
 fn our_names(level: u64, meta: &VideoMeta) -> &'static [&'static str] {
     const WORK: &[&str] = &[
-        "TITLE", "DATE_RELEASED", "DESCRIPTION", "SYNOPSIS", "SUMMARY", "GENRE", "IMDB", "TMDB", "ORIGINAL_TITLE",
-        "TAGLINE", "LAW_RATING", "RATING", "KEYWORDS", "COUNTRY", "PRODUCTION_STUDIO", "DIRECTOR", "WRITTEN_BY",
-        "PRODUCER", "COMPOSER", "ACTOR", "PART_NUMBER", "TRAILER",
+        "TITLE",
+        "DATE_RELEASED",
+        "DESCRIPTION",
+        "SYNOPSIS",
+        "SUMMARY",
+        "GENRE",
+        "IMDB",
+        "TMDB",
+        "ORIGINAL_TITLE",
+        "TAGLINE",
+        "LAW_RATING",
+        "RATING",
+        "KEYWORDS",
+        "COUNTRY",
+        "PRODUCTION_STUDIO",
+        "DIRECTOR",
+        "WRITTEN_BY",
+        "PRODUCER",
+        "COMPOSER",
+        "ACTOR",
+        "PART_NUMBER",
+        "TRAILER",
     ];
     const SHOW: &[&str] = &[
-        "TITLE", "IMDB", "TMDB", "GENRE", "ORIGINAL_TITLE", "TAGLINE", "LAW_RATING", "KEYWORDS", "PRODUCTION_STUDIO",
-        "ACTOR", "TRAILER",
+        "TITLE",
+        "IMDB",
+        "TMDB",
+        "GENRE",
+        "ORIGINAL_TITLE",
+        "TAGLINE",
+        "LAW_RATING",
+        "KEYWORDS",
+        "PRODUCTION_STUDIO",
+        "ACTOR",
+        "TRAILER",
     ];
     const EPISODE: &[&str] = &[
-        "TITLE", "PART_NUMBER", "DATE_RELEASED", "DESCRIPTION", "SYNOPSIS", "SUMMARY", "DIRECTOR", "WRITTEN_BY",
-        "ACTOR", "RATING",
+        "TITLE",
+        "PART_NUMBER",
+        "DATE_RELEASED",
+        "DESCRIPTION",
+        "SYNOPSIS",
+        "SUMMARY",
+        "DIRECTOR",
+        "WRITTEN_BY",
+        "ACTOR",
+        "RATING",
     ];
     match (meta.is_episode(), level) {
         (false, 50) => WORK,
@@ -1047,12 +1145,24 @@ fn tag_of(level: u64, kind: &str, simples: Vec<Vec<u8>>) -> Vec<u8> {
 }
 
 fn tag(level: u64, kind: &str, simples: &[(&str, String)]) -> Vec<u8> {
-    tag_of(level, kind, simples.iter().filter(|(_, v)| !v.is_empty()).map(|(n, v)| simple(n, v)).collect())
+    tag_of(
+        level,
+        kind,
+        simples
+            .iter()
+            .filter(|(_, v)| !v.is_empty())
+            .map(|(n, v)| simple(n, v))
+            .collect(),
+    )
 }
 
 /// Simple tags of one name, one per value.
 fn each(name: &str, values: &[String]) -> Vec<Vec<u8>> {
-    values.iter().filter(|v| !v.is_empty()).map(|v| simple(name, v)).collect()
+    values
+        .iter()
+        .filter(|v| !v.is_empty())
+        .map(|v| simple(name, v))
+        .collect()
 }
 
 fn one(name: &str, value: &str) -> Vec<u8> {
@@ -1090,7 +1200,14 @@ fn our_tags(meta: &VideoMeta) -> Vec<u8> {
         let mut out = tag(70, "COLLECTION", &[("TITLE", meta.collection.clone())]);
         let mut s = vec![
             one("TITLE", &meta.title),
-            one("ORIGINAL_TITLE", if meta.original_title == meta.title { "" } else { &meta.original_title }),
+            one(
+                "ORIGINAL_TITLE",
+                if meta.original_title == meta.title {
+                    ""
+                } else {
+                    &meta.original_title
+                },
+            ),
             one("TAGLINE", &meta.tagline),
             one("DATE_RELEASED", &meta.date),
             one("SYNOPSIS", &meta.description),
@@ -1100,7 +1217,13 @@ fn our_tags(meta: &VideoMeta) -> Vec<u8> {
             one("RATING", &five(&meta.rating)),
         ];
         if !meta.collection.is_empty() {
-            s.push(one("PART_NUMBER", &meta.collection_part.map(|n| n.to_string()).unwrap_or_default()));
+            s.push(one(
+                "PART_NUMBER",
+                &meta
+                    .collection_part
+                    .map(|n| n.to_string())
+                    .unwrap_or_default(),
+            ));
         }
         s.extend(each("COUNTRY", &meta.countries));
         s.extend(each("PRODUCTION_STUDIO", &meta.studios));
@@ -1117,7 +1240,14 @@ fn our_tags(meta: &VideoMeta) -> Vec<u8> {
     }
     let mut show = vec![
         one("TITLE", &meta.show),
-        one("ORIGINAL_TITLE", if meta.original_title == meta.show { "" } else { &meta.original_title }),
+        one(
+            "ORIGINAL_TITLE",
+            if meta.original_title == meta.show {
+                ""
+            } else {
+                &meta.original_title
+            },
+        ),
         one("TAGLINE", &meta.tagline),
         one("GENRE", &genre),
         one("KEYWORDS", &keywords),
@@ -1137,11 +1267,17 @@ fn our_tags(meta: &VideoMeta) -> Vec<u8> {
     out.extend(tag(
         60,
         "SEASON",
-        &[("PART_NUMBER", meta.season.map(|s| s.to_string()).unwrap_or_default())],
+        &[(
+            "PART_NUMBER",
+            meta.season.map(|s| s.to_string()).unwrap_or_default(),
+        )],
     ));
     let mut ep = vec![
         one("TITLE", &meta.title),
-        one("PART_NUMBER", &meta.episode.map(|e| e.to_string()).unwrap_or_default()),
+        one(
+            "PART_NUMBER",
+            &meta.episode.map(|e| e.to_string()).unwrap_or_default(),
+        ),
         one("DATE_RELEASED", &meta.date),
         one("SYNOPSIS", &meta.description),
         one("RATING", &five(&meta.rating)),
@@ -1187,7 +1323,9 @@ fn kids(data: &[u8]) -> Vec<([u8; 4], &[u8], &[u8])> {
         let mut len = u32::from_be_bytes(data[at..at + 4].try_into().unwrap()) as usize;
         let mut head = 8;
         if len == 1 {
-            let Some(b) = data.get(at + 8..at + 16) else { break };
+            let Some(b) = data.get(at + 8..at + 16) else {
+                break;
+            };
             len = u64::from_be_bytes(b.try_into().unwrap()) as usize;
             head = 16;
         } else if len == 0 {
@@ -1229,7 +1367,15 @@ fn freeform(name: &str, value: &str) -> Vec<u8> {
     let mut d = 1u32.to_be_bytes().to_vec();
     d.extend([0, 0, 0, 0]);
     d.extend_from_slice(value.as_bytes());
-    mp4_box(b"----", &[mp4_box(b"mean", &mean), mp4_box(b"name", &n), mp4_box(b"data", &d)].concat())
+    mp4_box(
+        b"----",
+        &[
+            mp4_box(b"mean", &mean),
+            mp4_box(b"name", &n),
+            mp4_box(b"data", &d),
+        ]
+        .concat(),
+    )
 }
 
 /// What tells items apart: the kind, and a free-form item's name too.
@@ -1244,7 +1390,9 @@ fn item_key(kind: &[u8; 4], content: &[u8]) -> Vec<u8> {
 }
 
 fn plist_text(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// The people list players read from MP4 movies (`iTunMOVI`).
@@ -1256,7 +1404,10 @@ fn people_plist(meta: &VideoMeta) -> String {
         }
         let mut s = format!("<key>{key}</key><array>");
         for n in names {
-            s.push_str(&format!("<dict><key>name</key><string>{}</string></dict>", plist_text(n)));
+            s.push_str(&format!(
+                "<dict><key>name</key><string>{}</string></dict>",
+                plist_text(n)
+            ));
         }
         s.push_str("</array>");
         s
@@ -1264,7 +1415,12 @@ fn people_plist(meta: &VideoMeta) -> String {
     fn names(v: &[String]) -> Vec<&str> {
         v.iter().map(String::as_str).collect()
     }
-    let cast: Vec<&str> = meta.cast.iter().chain(&meta.guests).map(|p| p.name.as_str()).collect();
+    let cast: Vec<&str> = meta
+        .cast
+        .iter()
+        .chain(&meta.guests)
+        .map(|p| p.name.as_str())
+        .collect();
     let mut body = [
         list("cast", &cast),
         list("directors", &names(&meta.directors)),
@@ -1272,9 +1428,16 @@ fn people_plist(meta: &VideoMeta) -> String {
         list("producers", &names(&meta.producers)),
     ]
     .concat();
-    let studio = if meta.network.is_empty() { meta.studios.first().cloned().unwrap_or_default() } else { meta.network.clone() };
+    let studio = if meta.network.is_empty() {
+        meta.studios.first().cloned().unwrap_or_default()
+    } else {
+        meta.network.clone()
+    };
     if !studio.is_empty() {
-        body.push_str(&format!("<key>studio</key><string>{}</string>", plist_text(&studio)));
+        body.push_str(&format!(
+            "<key>studio</key><string>{}</string>",
+            plist_text(&studio)
+        ));
     }
     if body.is_empty() {
         return String::new();
@@ -1289,9 +1452,19 @@ fn people_plist(meta: &VideoMeta) -> String {
 fn apple_rating(meta: &VideoMeta) -> String {
     let c = meta.certification.as_str();
     let (system, score) = if meta.is_episode() {
-        ("us-tv", ["TV-Y", "TV-Y7", "TV-G", "TV-PG", "TV-14", "TV-MA"].iter().position(|x| *x == c))
+        (
+            "us-tv",
+            ["TV-Y", "TV-Y7", "TV-G", "TV-PG", "TV-14", "TV-MA"]
+                .iter()
+                .position(|x| *x == c),
+        )
     } else {
-        ("mpaa", ["G", "PG", "PG-13", "R", "NC-17"].iter().position(|x| *x == c))
+        (
+            "mpaa",
+            ["G", "PG", "PG-13", "R", "NC-17"]
+                .iter()
+                .position(|x| *x == c),
+        )
     };
     score.map_or_else(String::new, |i| format!("{system}|{c}|{}|", (i + 1) * 100))
 }
@@ -1338,7 +1511,11 @@ fn our_items(meta: &VideoMeta) -> Vec<(Vec<u8>, Vec<u8>)> {
     } else {
         meta.original_title.as_str()
     };
-    let part = if meta.collection.is_empty() { None } else { meta.collection_part };
+    let part = if meta.collection.is_empty() {
+        None
+    } else {
+        meta.collection_part
+    };
     let free = [
         ("iTunMOVI", people_plist(meta)),
         ("iTunEXTC", apple_rating(meta)),
@@ -1350,7 +1527,10 @@ fn our_items(meta: &VideoMeta) -> Vec<(Vec<u8>, Vec<u8>)> {
         ("COUNTRY", meta.countries.join(", ")),
         ("PRODUCTION_STUDIO", meta.studios.join(", ")),
         ("COLLECTION", meta.collection.clone()),
-        ("COLLECTION_PART", part.map(|n| n.to_string()).unwrap_or_default()),
+        (
+            "COLLECTION_PART",
+            part.map(|n| n.to_string()).unwrap_or_default(),
+        ),
         ("TRAILER", meta.trailer.clone()),
         ("IMDB", meta.imdb.clone()),
         ("TMDB", meta.tmdb.clone()),
@@ -1369,8 +1549,20 @@ fn our_items(meta: &VideoMeta) -> Vec<(Vec<u8>, Vec<u8>)> {
 /// The free-form items written: a later write replaces them even when it
 /// has none of its own (they would belong to something else).
 const OUR_FREE: &[&str] = &[
-    "iTunMOVI", "iTunEXTC", "ORIGINAL_TITLE", "TAGLINE", "LAW_RATING", "RATING", "KEYWORDS", "COUNTRY",
-    "PRODUCTION_STUDIO", "COLLECTION", "COLLECTION_PART", "TRAILER", "IMDB", "TMDB",
+    "iTunMOVI",
+    "iTunEXTC",
+    "ORIGINAL_TITLE",
+    "TAGLINE",
+    "LAW_RATING",
+    "RATING",
+    "KEYWORDS",
+    "COUNTRY",
+    "PRODUCTION_STUDIO",
+    "COLLECTION",
+    "COLLECTION_PART",
+    "TRAILER",
+    "IMDB",
+    "TMDB",
 ];
 
 /// QuickTime and 3GPP texts kept beside the items (`©cmt`, `titl`…):
@@ -1378,8 +1570,8 @@ const OUR_FREE: &[&str] = &[
 fn loose_text(kind: &[u8; 4]) -> bool {
     kind[0] == 0xa9
         || [
-            b"name", b"Xtra", b"cprt", b"titl", b"dscp", b"perf", b"auth", b"gnre", b"albm", b"yrrc", b"rtng", b"clsf",
-            b"kywd", b"loci", b"desc",
+            b"name", b"Xtra", b"cprt", b"titl", b"dscp", b"perf", b"auth", b"gnre", b"albm",
+            b"yrrc", b"rtng", b"clsf", b"kywd", b"loci", b"desc",
         ]
         .contains(&kind)
 }
@@ -1395,7 +1587,10 @@ fn mp4_track(trak: &[u8]) -> crate::tracknames::TrackInfo {
         if &k == b"udta" {
             for (k2, _, c2) in kids(c) {
                 if &k2 == b"name" {
-                    udta_name = String::from_utf8_lossy(c2).trim_matches('\0').trim().to_string();
+                    udta_name = String::from_utf8_lossy(c2)
+                        .trim_matches('\0')
+                        .trim()
+                        .to_string();
                 }
             }
         }
@@ -1405,7 +1600,11 @@ fn mp4_track(trak: &[u8]) -> crate::tracknames::TrackInfo {
         for (k2, _, c2) in kids(c) {
             match &k2 {
                 b"mdhd" => t.lang = mdhd_lang(c2).unwrap_or_default(),
-                b"elng" => elng = String::from_utf8_lossy(c2.get(4..).unwrap_or_default()).trim_matches('\0').to_string(),
+                b"elng" => {
+                    elng = String::from_utf8_lossy(c2.get(4..).unwrap_or_default())
+                        .trim_matches('\0')
+                        .to_string()
+                }
                 b"hdlr" => {
                     t.kind = match c2.get(8..12) {
                         Some(b"vide") => TrackKind::Video,
@@ -1440,7 +1639,9 @@ fn mp4_track(trak: &[u8]) -> crate::tracknames::TrackInfo {
                         }
                         .to_string();
                         if t.kind == TrackKind::Audio {
-                            t.channels = entry.get(24..26).map_or(0, |b| u32::from(u16::from_be_bytes([b[0], b[1]])));
+                            t.channels = entry
+                                .get(24..26)
+                                .map_or(0, |b| u32::from(u16::from_be_bytes([b[0], b[1]])));
                         }
                     }
                 }
@@ -1465,7 +1666,11 @@ fn mp4_track(trak: &[u8]) -> crate::tracknames::TrackInfo {
 /// Media Audio`): no name of the track's.
 fn is_default_handler(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
-    n.is_empty() || n.contains("handler") || n.contains("media") || n.starts_with("gpac") || n.contains("produced by")
+    n.is_empty()
+        || n.contains("handler")
+        || n.contains("media")
+        || n.starts_with("gpac")
+        || n.contains("produced by")
 }
 
 /// The name in a `hdlr` box: after version, flags, a field, the type and
@@ -1476,7 +1681,10 @@ fn hdlr_text(c: &[u8]) -> String {
         Some(&n) if n as usize == name.len() - 1 && n > 0 => &name[1..],
         _ => name,
     };
-    String::from_utf8_lossy(name).trim_matches('\0').trim().to_string()
+    String::from_utf8_lossy(name)
+        .trim_matches('\0')
+        .trim()
+        .to_string()
 }
 
 fn mdhd_lang(c: &[u8]) -> Option<String> {
@@ -1494,7 +1702,11 @@ fn mdhd_lang(c: &[u8]) -> Option<String> {
 
 /// A track with its new name (and language, when its old name told it):
 /// the handler's name and `udta/name`, as players read them.
-fn named_trak(trak: &[u8], info: &crate::tracknames::TrackInfo, n: &crate::tracknames::NewName) -> Vec<u8> {
+fn named_trak(
+    trak: &[u8],
+    info: &crate::tracknames::TrackInfo,
+    n: &crate::tracknames::NewName,
+) -> Vec<u8> {
     use crate::tracknames::TrackKind;
     let mut body = Vec::new();
     let mut had_udta = false;
@@ -1532,7 +1744,9 @@ fn named_trak(trak: &[u8], info: &crate::tracknames::TrackInfo, n: &crate::track
                             let at = if c2.first() == Some(&1) { 32 } else { 20 };
                             let mut b = c2.to_vec();
                             if code.len() == 3 && b.len() >= at + 2 {
-                                let v = (u16::from(code[0] - 0x60) << 10) | (u16::from(code[1] - 0x60) << 5) | u16::from(code[2] - 0x60);
+                                let v = (u16::from(code[0] - 0x60) << 10)
+                                    | (u16::from(code[1] - 0x60) << 5)
+                                    | u16::from(code[2] - 0x60);
                                 b[at..at + 2].copy_from_slice(&v.to_be_bytes());
                             }
                             m.extend(mp4_box(b"mdhd", &b));
@@ -1592,9 +1806,17 @@ fn new_moov(moov: &[u8], meta: &VideoMeta, opt: &Options) -> Option<Vec<u8>> {
         // A fragmented file: its index is not the whole story.
         return None;
     }
-    let traks: Vec<&[u8]> = parts.iter().filter(|k| &k.0 == b"trak").map(|k| k.2).collect();
+    let traks: Vec<&[u8]> = parts
+        .iter()
+        .filter(|k| &k.0 == b"trak")
+        .map(|k| k.2)
+        .collect();
     let infos: Vec<crate::tracknames::TrackInfo> = traks.iter().map(|t| mp4_track(t)).collect();
-    let names = if opt.tracks { crate::tracknames::names(&infos) } else { Vec::new() };
+    let names = if opt.tracks {
+        crate::tracknames::names(&infos)
+    } else {
+        Vec::new()
+    };
     let mut body = Vec::new();
     let mut had_udta = false;
     let mut nth = 0;
@@ -1688,7 +1910,10 @@ fn new_ilst(ilst: &[u8], ours: &[(Vec<u8>, Vec<u8>)]) -> Vec<u8> {
         // this time goes too (it would belong to something else).
         let key = item_key(&kind, content);
         let replaced = ours.iter().any(|(k, _)| *k == key)
-            || [*b"desc", *b"ldes", *b"tvsh", *b"tven", *b"tvsn", *b"tves", *b"stik", *b"tvnn"].contains(&kind)
+            || [
+                *b"desc", *b"ldes", *b"tvsh", *b"tven", *b"tvsn", *b"tves", *b"stik", *b"tvnn",
+            ]
+            .contains(&kind)
             || (&kind == b"----" && OUR_FREE.iter().any(|n| key[4..] == *n.as_bytes()));
         if !replaced {
             out.extend_from_slice(head);
@@ -1739,14 +1964,21 @@ fn mp4_tops(f: &mut File, len: u64) -> Result<Vec<Bx>, String> {
 /// The MP4 changes: the new `moov` where the old one is, when it fits
 /// (with the `free` boxes after it), else at the end with the old one
 /// turned into `free`.
-fn mp4_plan(f: &mut File, len: u64, meta: &VideoMeta, opt: &Options) -> Result<Option<Plan>, String> {
+fn mp4_plan(
+    f: &mut File,
+    len: u64,
+    meta: &VideoMeta,
+    opt: &Options,
+) -> Result<Option<Plan>, String> {
     let bad = || "videoUnsupported".to_string();
     let tops = mp4_tops(f, len)?;
     let i = tops
         .iter()
         .position(|b| &b.kind == b"moov")
         .ok_or_else(bad)?;
-    if tops.iter().filter(|b| &b.kind == b"moov").count() != 1 || tops.iter().any(|b| &b.kind == b"moof") {
+    if tops.iter().filter(|b| &b.kind == b"moov").count() != 1
+        || tops.iter().any(|b| &b.kind == b"moof")
+    {
         return Err(bad());
     }
     let mv = tops[i];
@@ -1890,11 +2122,7 @@ fn read_mp4(path: &Path) -> Option<(VideoMeta, bool)> {
         };
         let value = data.get(8..).unwrap_or(&[]);
         let text = || String::from_utf8_lossy(value).into_owned();
-        let num = || {
-            value
-                .iter()
-                .fold(0u32, |n, b| (n << 8) | u32::from(*b))
-        };
+        let num = || value.iter().fold(0u32, |n, b| (n << 8) | u32::from(*b));
         match &kind {
             b"\xa9nam" => meta.title = text(),
             b"\xa9day" => meta.date = text(),
@@ -1915,15 +2143,28 @@ mod tests {
     /// A small Matroska file: SeekHead (with room after it), Info, Tracks,
     /// a Cluster, and track tags as mkvmerge writes them.
     fn mkv(with_tags: bool) -> Vec<u8> {
-        let info = el(INFO, &[uint_el(0x2ad7b1, 1_000_000), str_el(0x4d80, "muxer")].concat());
-        let tracks = el(0x1654_ae6b, &el(0xae, &[uint_el(0xd7, 1), uint_el(0x83, 1)].concat()));
-        let cluster = el(CLUSTER, &[uint_el(0xe7, 0), el(0xa3, &[0x81, 0, 0, 0x80, 1, 2, 3])].concat());
+        let info = el(
+            INFO,
+            &[uint_el(0x2ad7b1, 1_000_000), str_el(0x4d80, "muxer")].concat(),
+        );
+        let tracks = el(
+            0x1654_ae6b,
+            &el(0xae, &[uint_el(0xd7, 1), uint_el(0x83, 1)].concat()),
+        );
+        let cluster = el(
+            CLUSTER,
+            &[uint_el(0xe7, 0), el(0xa3, &[0x81, 0, 0, 0x80, 1, 2, 3])].concat(),
+        );
         let track_tag = {
             let mut t = el(0x63c0, &uint_el(0x63c5, 7));
             t.extend(simple("BPS", "1000"));
             el(0x7373, &t)
         };
-        let old_global = tag(50, "MOVIE", &[("TITLE", "Old".into()), ("COMMENT", "keep me".into())]);
+        let old_global = tag(
+            50,
+            "MOVIE",
+            &[("TITLE", "Old".into()), ("COMMENT", "keep me".into())],
+        );
         let tags = el(TAGS, &[track_tag, old_global].concat());
         // Positions inside the segment: SeekHead (fixed 64 bytes with its
         // Void), then Info, Tracks, Cluster, Tags.
@@ -1976,7 +2217,9 @@ mod tests {
             let p = d.path().join("m.mkv");
             let old = mkv(with_tags);
             fs::write(&p, &old).unwrap();
-            let edit = write(&p, &meta(), &Options::default(), &store).unwrap().unwrap();
+            let edit = write(&p, &meta(), &Options::default(), &store)
+                .unwrap()
+                .unwrap();
             let (got, cover) = read(&p).unwrap();
             assert_eq!(got.title, "Some Movie");
             assert_eq!(got.date, "2010-07-16");
@@ -1996,7 +2239,9 @@ mod tests {
             let plan = mkv_plan(&mut f, bytes.len() as u64, &meta(), &Options::default()).unwrap();
             assert!(plan.is_some());
             // Written twice: still one cover.
-            let edit2 = write(&p, &meta(), &Options::default(), &store).unwrap().unwrap();
+            let edit2 = write(&p, &meta(), &Options::default(), &store)
+                .unwrap()
+                .unwrap();
             restore(&p, &edit2, &store).unwrap();
             restore(&p, &edit, &store).unwrap();
             assert_eq!(fs::read(&p).unwrap(), old);
@@ -2015,10 +2260,17 @@ mod tests {
             episode: Some(2),
             ..Default::default()
         };
-        write(&p, &m, &Options::default(), &d.path().join("s")).unwrap().unwrap();
+        write(&p, &m, &Options::default(), &d.path().join("s"))
+            .unwrap()
+            .unwrap();
         let (got, cover) = read(&p).unwrap();
         assert_eq!(
-            (got.show.as_str(), got.season, got.episode, got.title.as_str()),
+            (
+                got.show.as_str(),
+                got.season,
+                got.episode,
+                got.title.as_str()
+            ),
             ("Some Show", Some(1), Some(2), "Pilot")
         );
         assert!(!cover);
@@ -2028,7 +2280,10 @@ mod tests {
     /// after mdat.
     fn mp4(moov_last: bool, free_after: usize) -> Vec<u8> {
         let ftyp = mp4_box(b"ftyp", b"isom\0\0\0\0isom");
-        let ilst = mp4_box(b"ilst", &[item(b"\xa9too", 1, b"encoder"), item(b"\xa9nam", 1, b"Old")].concat());
+        let ilst = mp4_box(
+            b"ilst",
+            &[item(b"\xa9too", 1, b"encoder"), item(b"\xa9nam", 1, b"Old")].concat(),
+        );
         let mut meta = vec![0, 0, 0, 0];
         meta.extend(handler());
         meta.extend(ilst);
@@ -2055,9 +2310,14 @@ mod tests {
             let p = d.path().join("v.mp4");
             let old = mp4(last, free);
             fs::write(&p, &old).unwrap();
-            let edit = write(&p, &meta(), &Options::default(), &store).unwrap().unwrap();
+            let edit = write(&p, &meta(), &Options::default(), &store)
+                .unwrap()
+                .unwrap();
             let (got, cover) = read(&p).unwrap();
-            assert_eq!((got.title.as_str(), got.date.as_str()), ("Some Movie", "2010-07-16"));
+            assert_eq!(
+                (got.title.as_str(), got.date.as_str()),
+                ("Some Movie", "2010-07-16")
+            );
             assert!(cover);
             let bytes = fs::read(&p).unwrap();
             // The media data is where it was.
@@ -2080,14 +2340,22 @@ mod tests {
         let store = d.path().join("store");
         let p = d.path().join("v.mp4");
         fs::write(&p, mp4(false, 0)).unwrap();
-        let edit = write(&p, &meta(), &Options::default(), &store).unwrap().unwrap();
+        let edit = write(&p, &meta(), &Options::default(), &store)
+            .unwrap()
+            .unwrap();
         let mut f = File::options().append(true).open(&p).unwrap();
         f.write_all(b"more").unwrap();
         assert_eq!(restore(&p, &edit, &store).unwrap_err(), "videoChanged");
     }
 
     fn entry(num: u64, kind: u64, lang: &str, name: &str, codec: &str, channels: u64) -> Vec<u8> {
-        let mut e = [uint_el(0xd7, num), uint_el(0x73c5, 100 + num), uint_el(0x83, kind), str_el(0x86, codec)].concat();
+        let mut e = [
+            uint_el(0xd7, num),
+            uint_el(0x73c5, 100 + num),
+            uint_el(0x83, kind),
+            str_el(0x86, codec),
+        ]
+        .concat();
         if !lang.is_empty() {
             e.extend(str_el(0x22b59c, lang));
         }
@@ -2101,13 +2369,29 @@ mod tests {
     }
 
     fn attached(name: &str, mime: &str) -> Vec<u8> {
-        el(0x61a7, &[str_el(0x466e, name), str_el(0x4660, mime), el(0x465c, b"data"), uint_el(0x46ae, 9)].concat())
+        el(
+            0x61a7,
+            &[
+                str_el(0x466e, name),
+                str_el(0x4660, mime),
+                el(0x465c, b"data"),
+                uint_el(0x46ae, 9),
+            ]
+            .concat(),
+        )
     }
 
     /// A Matroska file with named tracks, attachments and site tags, the
     /// tags right after the tracks (as some tools write them).
     fn mkv_dirty() -> Vec<u8> {
-        let info = el(INFO, &[uint_el(0x2ad7b1, 1_000_000), str_el(0x7ba9, "Some.Movie.2010 - www.site.com")].concat());
+        let info = el(
+            INFO,
+            &[
+                uint_el(0x2ad7b1, 1_000_000),
+                str_el(0x7ba9, "Some.Movie.2010 - www.site.com"),
+            ]
+            .concat(),
+        );
         let tracks = el(
             TRACKS,
             &[
@@ -2115,7 +2399,14 @@ mod tests {
                 entry(2, 2, "por", "Dublagem Clássica [site.com]", "A_AC3", 2),
                 entry(3, 2, "por", "Redublagem", "A_AC3", 2),
                 entry(4, 17, "por", "Legendas por Fulano", "S_TEXT/UTF8", 0),
-                entry(5, 17, "und", "Brazilian Portuguese Forced", "S_TEXT/UTF8", 0),
+                entry(
+                    5,
+                    17,
+                    "und",
+                    "Brazilian Portuguese Forced",
+                    "S_TEXT/UTF8",
+                    0,
+                ),
             ]
             .concat(),
         );
@@ -2124,14 +2415,32 @@ mod tests {
             t.extend(simple("BPS", "1000"));
             el(0x7373, &t)
         };
-        let junk = tag(50, "MOVIE", &[("COMMENT", "Downloaded from somewhere".into())]);
+        let junk = tag(
+            50,
+            "MOVIE",
+            &[("COMMENT", "Downloaded from somewhere".into())],
+        );
         let tags = el(TAGS, &[track_tag, junk].concat());
         let att = el(
             ATTACHMENTS,
-            &[attached("font.ttf", "application/x-truetype-font"), attached("poster.jpg", "image/jpeg"), attached("cover.jpg", "image/jpeg")].concat(),
+            &[
+                attached("font.ttf", "application/x-truetype-font"),
+                attached("poster.jpg", "image/jpeg"),
+                attached("cover.jpg", "image/jpeg"),
+            ]
+            .concat(),
         );
-        let cluster = el(CLUSTER, &[uint_el(0xe7, 0), el(0xa3, &[0x81, 0, 0, 0x80, 1, 2, 3])].concat());
-        mkv_from(vec![(INFO, info), (TRACKS, tracks), (TAGS, tags), (ATTACHMENTS, att), (CLUSTER, cluster)])
+        let cluster = el(
+            CLUSTER,
+            &[uint_el(0xe7, 0), el(0xa3, &[0x81, 0, 0, 0x80, 1, 2, 3])].concat(),
+        );
+        mkv_from(vec![
+            (INFO, info),
+            (TRACKS, tracks),
+            (TAGS, tags),
+            (ATTACHMENTS, att),
+            (CLUSTER, cluster),
+        ])
     }
 
     /// A Matroska file of these elements, after a SeekHead to them with
@@ -2214,7 +2523,10 @@ mod tests {
             studios: vec!["Studio".into()],
             directors: vec!["Director A".into()],
             writers: vec!["Writer B".into()],
-            cast: vec![Person { name: "Actor C".into(), character: "Hero".into() }],
+            cast: vec![Person {
+                name: "Actor C".into(),
+                character: "Hero".into(),
+            }],
             collection: "Some Collection".into(),
             collection_part: Some(2),
             trailer: "https://www.youtube.com/watch?v=x".into(),
@@ -2230,12 +2542,21 @@ mod tests {
         let p = d.path().join("m.mkv");
         let old = mkv_dirty();
         fs::write(&p, &old).unwrap();
-        let opt = Options { clean: true, tracks: true };
+        let opt = Options {
+            clean: true,
+            tracks: true,
+        };
         let edit = write(&p, &full_meta(), &opt, &store).unwrap().unwrap();
         let (ids, names) = walk(&p);
         assert_eq!(
             names,
-            ["", "Português – Dublagem Clássica", "Português – Redublagem", "Português", "Português (Brasil) – Forçada"]
+            [
+                "",
+                "Português – Dublagem Clássica",
+                "Português – Redublagem",
+                "Português",
+                "Português (Brasil) – Forçada"
+            ]
         );
         assert!(ids.contains(&TAGS) && ids.contains(&ATTACHMENTS) && ids.contains(&CLUSTER));
         let live = {
@@ -2257,14 +2578,22 @@ mod tests {
             String::from_utf8_lossy(&out).into_owned()
         };
         assert!(live.contains("font.ttf") && live.contains("BPS"));
-        assert!(!live.contains("poster.jpg") && !live.contains("Downloaded") && !live.contains("site.com"));
+        assert!(
+            !live.contains("poster.jpg")
+                && !live.contains("Downloaded")
+                && !live.contains("site.com")
+        );
         assert!(live.contains("cover.jpg") && live.contains("cover_land.jpg"));
         assert!(live.contains("Actor C") && live.contains("CHARACTER") && live.contains("Hero"));
         assert!(live.contains("Some Collection") && live.contains("LAW_RATING"));
         // The forced flag the old name told.
         let mut f = File::open(&p).unwrap();
         let bytes = fs::read(&p).unwrap();
-        assert!(mkv_plan(&mut f, bytes.len() as u64, &full_meta(), &opt).unwrap().is_some());
+        assert!(
+            mkv_plan(&mut f, bytes.len() as u64, &full_meta(), &opt)
+                .unwrap()
+                .is_some()
+        );
         // Again: the same names.
         let edit2 = write(&p, &full_meta(), &opt, &store).unwrap().unwrap();
         assert_eq!(walk(&p).1, names);
@@ -2281,11 +2610,24 @@ mod tests {
         let store = d.path().join("s");
         let p = d.path().join("m.mkv");
         let info = el(INFO, &uint_el(0x2ad7b1, 1_000_000));
-        let tracks = el(TRACKS, &[entry(1, 1, "", "", "V_MPEG4/ISO/AVC", 0), entry(2, 2, "por", "", "A_AAC", 2)].concat());
-        let cluster = el(CLUSTER, &[uint_el(0xe7, 0), el(0xa3, &[0x81, 0, 0, 0x80, 1, 2, 3])].concat());
+        let tracks = el(
+            TRACKS,
+            &[
+                entry(1, 1, "", "", "V_MPEG4/ISO/AVC", 0),
+                entry(2, 2, "por", "", "A_AAC", 2),
+            ]
+            .concat(),
+        );
+        let cluster = el(
+            CLUSTER,
+            &[uint_el(0xe7, 0), el(0xa3, &[0x81, 0, 0, 0x80, 1, 2, 3])].concat(),
+        );
         let old = mkv_from(vec![(INFO, info), (TRACKS, tracks), (CLUSTER, cluster)]);
         fs::write(&p, &old).unwrap();
-        let opt = Options { clean: true, tracks: true };
+        let opt = Options {
+            clean: true,
+            tracks: true,
+        };
         let edit = write(&p, &meta(), &opt, &store).unwrap().unwrap();
         let (ids, names) = walk(&p);
         assert_eq!(names, ["", ""]);
@@ -2294,9 +2636,24 @@ mod tests {
         assert_eq!(fs::read(&p).unwrap(), old);
         // With room after them (a Void), they get their names.
         let info = el(INFO, &uint_el(0x2ad7b1, 1_000_000));
-        let tracks = el(TRACKS, &[entry(1, 1, "", "", "V_MPEG4/ISO/AVC", 0), entry(2, 2, "por", "", "A_AAC", 2)].concat());
-        let cluster = el(CLUSTER, &[uint_el(0xe7, 0), el(0xa3, &[0x81, 0, 0, 0x80, 1, 2, 3])].concat());
-        let old = mkv_from(vec![(INFO, info), (TRACKS, tracks), (VOID, void(40).unwrap()), (CLUSTER, cluster)]);
+        let tracks = el(
+            TRACKS,
+            &[
+                entry(1, 1, "", "", "V_MPEG4/ISO/AVC", 0),
+                entry(2, 2, "por", "", "A_AAC", 2),
+            ]
+            .concat(),
+        );
+        let cluster = el(
+            CLUSTER,
+            &[uint_el(0xe7, 0), el(0xa3, &[0x81, 0, 0, 0x80, 1, 2, 3])].concat(),
+        );
+        let old = mkv_from(vec![
+            (INFO, info),
+            (TRACKS, tracks),
+            (VOID, void(40).unwrap()),
+            (CLUSTER, cluster),
+        ]);
         fs::write(&p, &old).unwrap();
         let edit = write(&p, &meta(), &opt, &store).unwrap().unwrap();
         assert_eq!(walk(&p).1, ["", "Português"]);
@@ -2308,7 +2665,8 @@ mod tests {
     fn trak(handler: &[u8; 4], name: &str, lang: &str, codec: &[u8; 4], channels: u16) -> Vec<u8> {
         let mut mdhd = vec![0u8; 20];
         let l = lang.as_bytes();
-        let v = (u16::from(l[0] - 0x60) << 10) | (u16::from(l[1] - 0x60) << 5) | u16::from(l[2] - 0x60);
+        let v =
+            (u16::from(l[0] - 0x60) << 10) | (u16::from(l[1] - 0x60) << 5) | u16::from(l[2] - 0x60);
         mdhd.extend(v.to_be_bytes());
         mdhd.extend([0, 0]);
         let mut hdlr = vec![0u8; 8];
@@ -2324,7 +2682,10 @@ mod tests {
         let mut stsd = vec![0, 0, 0, 0, 0, 0, 0, 1];
         stsd.extend(mp4_box(codec, &entry));
         let minf = mp4_box(b"minf", &mp4_box(b"stbl", &mp4_box(b"stsd", &stsd)));
-        let mdia = mp4_box(b"mdia", &[mp4_box(b"mdhd", &mdhd), mp4_box(b"hdlr", &hdlr), minf].concat());
+        let mdia = mp4_box(
+            b"mdia",
+            &[mp4_box(b"mdhd", &mdhd), mp4_box(b"hdlr", &hdlr), minf].concat(),
+        );
         mp4_box(b"trak", &[mp4_box(b"tkhd", &[0u8; 84]), mdia].concat())
     }
 
@@ -2334,11 +2695,21 @@ mod tests {
         let store = d.path().join("store");
         let p = d.path().join("v.mp4");
         let ftyp = mp4_box(b"ftyp", b"isom\0\0\0\0isom");
-        let ilst = mp4_box(b"ilst", &[item(b"\xa9too", 1, b"encoder"), item(b"\xa9cmt", 1, b"www.site.com")].concat());
+        let ilst = mp4_box(
+            b"ilst",
+            &[
+                item(b"\xa9too", 1, b"encoder"),
+                item(b"\xa9cmt", 1, b"www.site.com"),
+            ]
+            .concat(),
+        );
         let mut m = vec![0, 0, 0, 0];
         m.extend(handler());
         m.extend(ilst);
-        let udta = mp4_box(b"udta", &[mp4_box(b"meta", &m), item(b"\xa9cmt", 1, b"loose")].concat());
+        let udta = mp4_box(
+            b"udta",
+            &[mp4_box(b"meta", &m), item(b"\xa9cmt", 1, b"loose")].concat(),
+        );
         let moov = mp4_box(
             b"moov",
             &[
@@ -2353,18 +2724,37 @@ mod tests {
         );
         let old = [ftyp, mp4_box(b"mdat", &[7u8; 1000]), moov].concat();
         fs::write(&p, &old).unwrap();
-        let opt = Options { clean: true, tracks: true };
+        let opt = Options {
+            clean: true,
+            tracks: true,
+        };
         let edit = write(&p, &full_meta(), &opt, &store).unwrap().unwrap();
         let bytes = fs::read(&p).unwrap();
         let mut f = File::open(&p).unwrap();
         let tops = mp4_tops(&mut f, bytes.len() as u64).unwrap();
         let mv = tops.iter().find(|b| &b.kind == b"moov").unwrap();
         let moov = &bytes[(mv.at + mv.head) as usize..(mv.at + mv.len) as usize];
-        let names: Vec<String> = kids(moov).into_iter().filter(|k| &k.0 == b"trak").map(|k| mp4_track(k.2).name).collect();
-        assert_eq!(names, ["", "Português – Dublagem Clássica", "Português – Redublagem", "English – SDH"]);
+        let names: Vec<String> = kids(moov)
+            .into_iter()
+            .filter(|k| &k.0 == b"trak")
+            .map(|k| mp4_track(k.2).name)
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "",
+                "Português – Dublagem Clássica",
+                "Português – Redublagem",
+                "English – SDH"
+            ]
+        );
         let text = String::from_utf8_lossy(moov);
         assert!(!text.contains("encoder") && !text.contains("site.com") && !text.contains("loose"));
-        assert!(text.contains("iTunMOVI") && text.contains("Actor C") && text.contains("Some Collection"));
+        assert!(
+            text.contains("iTunMOVI")
+                && text.contains("Actor C")
+                && text.contains("Some Collection")
+        );
         assert!(text.contains("VideoHandler"));
         let (got, cover) = read(&p).unwrap();
         assert_eq!(got.title, "Some Movie");
@@ -2390,17 +2780,25 @@ mod tests {
     #[test]
     #[ignore]
     fn probe_dir() {
-        let Ok(dir) = std::env::var("RENOME_PROBE_DIR") else { return };
+        let Ok(dir) = std::env::var("RENOME_PROBE_DIR") else {
+            return;
+        };
         let dir = Path::new(&dir);
         let store = dir.join("store");
         let undo = std::env::var("RENOME_PROBE_UNDO").is_ok();
         let mut m = full_meta();
         m.cover = fs::read(dir.join("cover.jpg")).ok();
         m.backdrop = fs::read(dir.join("wide.jpg")).ok();
-        let opt = Options { clean: true, tracks: true };
+        let opt = Options {
+            clean: true,
+            tracks: true,
+        };
         for e in fs::read_dir(dir).unwrap().flatten() {
             let p = e.path();
-            let ext = p.extension().map(|x| x.to_string_lossy().to_string()).unwrap_or_default();
+            let ext = p
+                .extension()
+                .map(|x| x.to_string_lossy().to_string())
+                .unwrap_or_default();
             if !["mkv", "mp4"].contains(&ext.as_str()) {
                 continue;
             }
@@ -2412,7 +2810,13 @@ mod tests {
             } else {
                 let edit = write(&p, &m, &opt, &store).unwrap().unwrap();
                 fs::write(&saved, serde_json::to_vec(&edit).unwrap()).unwrap();
-                println!("written {} ({} patches, {} -> {})", p.display(), edit.patches.len(), edit.old_len, edit.new_len);
+                println!(
+                    "written {} ({} patches, {} -> {})",
+                    p.display(),
+                    edit.patches.len(),
+                    edit.old_len,
+                    edit.new_len
+                );
             }
         }
     }
@@ -2422,8 +2826,14 @@ mod tests {
     #[test]
     #[ignore]
     fn probe_names() {
-        let Ok(list) = std::env::var("RENOME_PROBE_NAMES") else { return };
-        for line in fs::read_to_string(list).unwrap().lines().filter(|l| !l.is_empty()) {
+        let Ok(list) = std::env::var("RENOME_PROBE_NAMES") else {
+            return;
+        };
+        for line in fs::read_to_string(list)
+            .unwrap()
+            .lines()
+            .filter(|l| !l.is_empty())
+        {
             let p = Path::new(line);
             println!("== {}", p.file_name().unwrap().to_string_lossy());
             let infos: Vec<crate::tracknames::TrackInfo> = match kind(p) {
@@ -2452,14 +2862,28 @@ mod tests {
                     let len = f.metadata().unwrap().len();
                     let tops = mp4_tops(&mut f, len).unwrap();
                     let mv = tops.iter().find(|b| &b.kind == b"moov").unwrap();
-                    let moov = read_at(&mut f, mv.at + mv.head, (mv.len - mv.head) as usize).unwrap();
-                    kids(&moov).into_iter().filter(|k| &k.0 == b"trak").map(|k| mp4_track(k.2)).collect()
+                    let moov =
+                        read_at(&mut f, mv.at + mv.head, (mv.len - mv.head) as usize).unwrap();
+                    kids(&moov)
+                        .into_iter()
+                        .filter(|k| &k.0 == b"trak")
+                        .map(|k| mp4_track(k.2))
+                        .collect()
                 }
                 None => continue,
             };
             let new = crate::tracknames::names(&infos);
             for (t, n) in infos.iter().zip(new) {
-                println!("  {:?} {} {} {}ch {:?} -> {:?}{}", t.kind, t.lang, t.codec, t.channels, t.name, n.name, if n.forced { " [forced]" } else { "" });
+                println!(
+                    "  {:?} {} {} {}ch {:?} -> {:?}{}",
+                    t.kind,
+                    t.lang,
+                    t.codec,
+                    t.channels,
+                    t.name,
+                    n.name,
+                    if n.forced { " [forced]" } else { "" }
+                );
             }
         }
     }

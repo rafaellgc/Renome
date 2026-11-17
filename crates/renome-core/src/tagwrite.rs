@@ -1465,13 +1465,21 @@ mod tests {
             ..Default::default()
         };
         let fields = audiobook_fields(&book, "Uma sinopse.", "por");
-        let get = |f: Field| fields.iter().find(|(x, _)| *x == f).map(|(_, v)| v[0].clone());
+        let get = |f: Field| {
+            fields
+                .iter()
+                .find(|(x, _)| *x == f)
+                .map(|(_, v)| v[0].clone())
+        };
         assert_eq!(get(Field::Title).as_deref(), Some("Ecos - 03"));
         assert_eq!(get(Field::Composer).as_deref(), Some("Tomé Rocha"));
         assert_eq!(get(Field::TrackTotal).as_deref(), Some("12"));
         let mut cover = Vec::new();
         image::DynamicImage::ImageRgb8(image::RgbImage::new(1600, 2400))
-            .write_to(&mut std::io::Cursor::new(&mut cover), image::ImageFormat::Png)
+            .write_to(
+                &mut std::io::Cursor::new(&mut cover),
+                image::ImageFormat::Png,
+            )
             .unwrap();
         let small = embeddable_cover(&cover, 1200).unwrap();
         let img = image::load_from_memory(&small).unwrap();
@@ -1482,17 +1490,31 @@ mod tests {
             let p = d.path().join(name.replace("m4a", "m4b"));
             fs::copy(Path::new("tests/fixtures").join(name), &p).unwrap();
             let store = d.path().join("s");
-            let b = write(&p, &fields, Some(&small), true, &store).unwrap().unwrap();
+            let b = write(&p, &fields, Some(&small), true, &store)
+                .unwrap()
+                .unwrap();
             let t = crate::music::read(&p).unwrap();
-            assert_eq!((t.album.as_str(), t.composer.as_str()), ("Ecos", "Tomé Rocha"), "{p:?}");
-            assert_eq!((t.series.as_str(), t.series_index.as_str()), ("Vozes", "2"), "{p:?}");
+            assert_eq!(
+                (t.album.as_str(), t.composer.as_str()),
+                ("Ecos", "Tomé Rocha"),
+                "{p:?}"
+            );
+            assert_eq!(
+                (t.series.as_str(), t.series_index.as_str()),
+                ("Vozes", "2"),
+                "{p:?}"
+            );
             let comment = || {
                 let f = lofty::read_from_path(&p).unwrap();
                 f.primary_tag()
                     .and_then(|t| t.get_string(ItemKey::Comment))
                     .map(str::to_string)
             };
-            assert_eq!(comment().as_deref(), Some("Uma sinopse."), "{p:?}: kept by cleaning");
+            assert_eq!(
+                comment().as_deref(),
+                Some("Uma sinopse."),
+                "{p:?}: kept by cleaning"
+            );
             let again = write(&p, &fields, Some(&small), true, &store).unwrap();
             assert!(again.is_none(), "{p:?}: cleaned twice");
             restore(&b, &store).unwrap();

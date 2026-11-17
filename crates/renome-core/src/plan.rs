@@ -761,7 +761,10 @@ fn send_rest(items: &mut [PreviewItem], files: &[FileEntry], to: &SendTo) {
         .map(|f| (f.path.as_path(), f.base.as_path()))
         .collect();
     // The release's advertisements stay where they were.
-    for i in items.iter_mut().filter(|i| i.dest.is_none() && !i.release_junk) {
+    for i in items
+        .iter_mut()
+        .filter(|i| i.dest.is_none() && !i.release_junk)
+    {
         let rel = base
             .get(i.path.as_path())
             .and_then(|b| i.dir.strip_prefix(b).ok())
@@ -851,7 +854,10 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
             && let Some(m) = view.books.get(&i.path)
         {
             let dir = crate::audiobook::book_dir(&i.dir);
-            audiobooks.entry(dir.clone()).or_default().insert(book_key(m));
+            audiobooks
+                .entry(dir.clone())
+                .or_default()
+                .insert(book_key(m));
             let moving = i.dest.is_some().then(|| here.clone());
             match places.get_mut(&dir) {
                 Some(p) if *p != moving => *p = None,
@@ -873,7 +879,10 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
         .filter(|i| i.extra.is_none() && view.movies.contains_key(&i.path))
         .filter_map(|i| Some((i.dir.clone(), *base.get(i.path.as_path())?)))
         .collect();
-    for i in items.iter().filter(|i| is_audio_path(&i.path) && view.books.contains_key(&i.path)) {
+    for i in items
+        .iter()
+        .filter(|i| is_audio_path(&i.path) && view.books.contains_key(&i.path))
+    {
         if let Some(b) = base.get(i.path.as_path()) {
             added.insert(crate::audiobook::book_dir(&i.dir), b);
         }
@@ -888,7 +897,9 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
                     .into_iter()
                     .filter_map(Result::ok)
                     .filter(|e| !e.file_type().is_dir() && is_audio_path(e.path()))
-                    .all(|e| view.books.get(e.path()).map(book_key).as_ref() == books.iter().next());
+                    .all(|e| {
+                        view.books.get(e.path()).map(book_key).as_ref() == books.iter().next()
+                    });
             if !own {
                 *place = None;
             }
@@ -1288,10 +1299,7 @@ pub fn preview(
     let songs: HashMap<&Path, AudioTags> = match music {
         None => HashMap::new(),
         Some((from_name, _)) => {
-            let visible: Vec<&FileEntry> = files
-                .iter()
-                .filter(|f| filter.takes(f))
-                .collect();
+            let visible: Vec<&FileEntry> = files.iter().filter(|f| filter.takes(f)).collect();
             let mut tags: Vec<(PathBuf, AudioTags)> = Vec::new();
             let mut paths: Vec<&Path> = Vec::new();
             for f in visible {
@@ -1434,12 +1442,7 @@ pub fn preview(
         .filters()
         .map(|only| {
             only.map(|o| {
-                crate::rules::Places::of(
-                    shown
-                        .iter()
-                        .map(|&(_, _, f)| f)
-                        .filter(|f| o.takes(f)),
-                )
+                crate::rules::Places::of(shown.iter().map(|&(_, _, f)| f).filter(|f| o.takes(f)))
             })
         })
         .collect();
@@ -1462,13 +1465,9 @@ pub fn preview(
             .get(&file.path)
             .filter(|_| !file.is_dir && tmdb::is_screen(&file.ext)),
         song: songs.get(file.path.as_path()),
-        book: view
-            .books
-            .get(&file.path)
-            .filter(|_| {
-                !file.is_dir
-                    && (crate::ebook::is_book(&file.ext) || crate::music::is_audio(&file.ext))
-            }),
+        book: view.books.get(&file.path).filter(|_| {
+            !file.is_dir && (crate::ebook::is_book(&file.ext) || crate::music::is_audio(&file.ext))
+        }),
         comic: None,
         comic_folder: None,
         video: if tmdb::is_video(&file.ext) {
@@ -1634,7 +1633,8 @@ pub fn preview(
                 .filter(|n| *n > 0 && file.ext.eq_ignore_ascii_case("pdf"));
             let sub_fix = sub_tools.as_ref().and_then(|(t, _)| {
                 let ext = new_name.rsplit_once('.').map_or("", |(_, e)| e);
-                file.subtitle().and_then(|s| crate::subtext::plan(s, t, ext))
+                file.subtitle()
+                    .and_then(|s| crate::subtext::plan(s, t, ext))
             });
             let (sub_extract, sub_pictures) = match (&sub_tools, &sub_langs) {
                 (Some((t, _)), Some(langs)) if !file.is_dir => {
@@ -2220,7 +2220,10 @@ fn left_folders(items: &[PreviewItem], view: &View) -> (Vec<LeftFolder>, Vec<Pat
             .count();
         if files == 0 {
             // Only advertisements left: the folder goes to the trash.
-            if items.iter().any(|i| i.to_trash && i.path.starts_with(&from)) {
+            if items
+                .iter()
+                .any(|i| i.to_trash && i.path.starts_with(&from))
+            {
                 trash.push(from);
             }
             continue;
@@ -2238,7 +2241,10 @@ fn left_folders(items: &[PreviewItem], view: &View) -> (Vec<LeftFolder>, Vec<Pat
 /// [`Preview::trash`]): the files that still look like advertisements, and
 /// the folders that hold nothing else (any other file keeps a folder, and
 /// only its advertisements go).
-pub fn trash_leftovers(files: &[PathBuf], folders: &[PathBuf]) -> (Vec<PathBuf>, Vec<(PathBuf, String)>) {
+pub fn trash_leftovers(
+    files: &[PathBuf],
+    folders: &[PathBuf],
+) -> (Vec<PathBuf>, Vec<(PathBuf, String)>) {
     let is_ad = |p: &Path| {
         std::fs::symlink_metadata(p)
             .is_ok_and(|m| m.is_file() && crate::extras::release_junk(p, m.len()))
@@ -2310,7 +2316,17 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let files = entries(
             d.path(),
-            &["a.mkv", "a.pt-BR.srt", "b.mkv", "b.srt", "c.jpg", "c.CR2.xmp", "d.mkv", "d-thumb.jpg", "d.nfo"],
+            &[
+                "a.mkv",
+                "a.pt-BR.srt",
+                "b.mkv",
+                "b.srt",
+                "c.jpg",
+                "c.CR2.xmp",
+                "d.mkv",
+                "d-thumb.jpg",
+                "d.nfo",
+            ],
         );
         let number = |pairs| Step {
             enabled: true,
@@ -2327,7 +2343,17 @@ mod tests {
         let p = preview(&files, &[number(true)], &HashMap::new(), &View::default());
         assert_eq!(
             names_of(&p),
-            ["Ep 1.mkv", "Ep 1.pt-BR.srt", "Ep 2.mkv", "Ep 2.srt", "Ep 3.jpg", "Ep 3.CR2.xmp", "Ep 4.mkv", "Ep 4-thumb.jpg", "Ep 4.nfo"]
+            [
+                "Ep 1.mkv",
+                "Ep 1.pt-BR.srt",
+                "Ep 2.mkv",
+                "Ep 2.srt",
+                "Ep 3.jpg",
+                "Ep 3.CR2.xmp",
+                "Ep 4.mkv",
+                "Ep 4-thumb.jpg",
+                "Ep 4.nfo"
+            ]
         );
         let p = preview(&files, &[number(false)], &HashMap::new(), &View::default());
         assert_eq!(names_of(&p)[1], "Ep 2.srt");
@@ -2340,7 +2366,10 @@ mod tests {
         let mut videos = vec![number(false)];
         videos[0].only = "mkv".into();
         let p = preview(&files, &videos, &HashMap::new(), &View::default());
-        assert_eq!(names_of(&p)[..4], ["Ep 1.mkv", "a.pt-BR.srt", "Ep 2.mkv", "b.srt"]);
+        assert_eq!(
+            names_of(&p)[..4],
+            ["Ep 1.mkv", "a.pt-BR.srt", "Ep 2.mkv", "b.srt"]
+        );
     }
 
     #[test]
@@ -2377,7 +2406,11 @@ mod tests {
             "[Script Info]\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hi\n",
         )
         .unwrap();
-        fs::write(dir.join("Movie.pt.srt"), b"1\r\n00:00:01,000 --> 00:00:02,000\r\nOl\xE1 [RISOS]\r\n\r\n").unwrap();
+        fs::write(
+            dir.join("Movie.pt.srt"),
+            b"1\r\n00:00:01,000 --> 00:00:02,000\r\nOl\xE1 [RISOS]\r\n\r\n",
+        )
+        .unwrap();
         fs::write(dir.join("Movie.mkv"), crate::mkvsubs::tests::sample()).unwrap();
         fs::write(dir.join("Movie.sub"), "{25}{50}Hi\n").unwrap();
         let files: Vec<FileEntry> = ["Movie.en.ass", "Movie.pt.srt", "Movie.mkv", "Movie.sub"]
@@ -3239,7 +3272,10 @@ mod tests {
         };
         // Out of its old folder and its disc folders, parts numbered, the
         // cover along.
-        assert_eq!(dest("CD1/faixa 01.mp3"), to.join("Ecos - 1.mp3".replace("1.", "01.")));
+        assert_eq!(
+            dest("CD1/faixa 01.mp3"),
+            to.join("Ecos - 1.mp3".replace("1.", "01."))
+        );
         assert_eq!(dest("CD2/faixa 01.mp3"), to.join("Ecos - 02.mp3"));
         assert_eq!(dest("cover.jpg"), to.join("cover.jpg"));
     }
@@ -3830,16 +3866,26 @@ mod tests {
         for copy in [false, true] {
             let mut view = View {
                 leftover_suffix: "additional files".into(),
-                send_to: Some(SendTo { dir: library.clone(), copy }),
+                send_to: Some(SendTo {
+                    dir: library.clone(),
+                    copy,
+                }),
                 ..View::default()
             };
             view.movies.insert(files[0].path.clone(), m.clone());
             let p = preview(&files, &steps, &HashMap::new(), &view);
             let new = library.join("Os Jardins de Cinza (2017)");
-            let ad = p.items.iter().find(|i| i.original == "BAIXE MAIS FILMES.url").unwrap();
+            let ad = p
+                .items
+                .iter()
+                .find(|i| i.original == "BAIXE MAIS FILMES.url")
+                .unwrap();
             assert!(ad.release_junk);
             assert_eq!(ad.target(), old.join("BAIXE MAIS FILMES.url"));
-            assert_eq!(p.items[0].target(), new.join("Os Jardins de Cinza (2017).mkv"));
+            assert_eq!(
+                p.items[0].target(),
+                new.join("Os Jardins de Cinza (2017).mkv")
+            );
             if copy {
                 assert!(p.left_folders.is_empty());
             } else {
@@ -3853,18 +3899,28 @@ mod tests {
             // To the trash: the folder goes whole, nothing is renamed.
             view.trash_ads = true;
             let p = preview(&files, &steps, &HashMap::new(), &view);
-            let ad = p.items.iter().find(|i| i.original == "BAIXE MAIS FILMES.url").unwrap();
+            let ad = p
+                .items
+                .iter()
+                .find(|i| i.original == "BAIXE MAIS FILMES.url")
+                .unwrap();
             assert_eq!(ad.to_trash, !copy);
             assert!(p.left_folders.is_empty());
             assert!(p.trash.is_empty());
-            assert_eq!(p.trash_folders, if copy { vec![] } else { vec![old.clone()] });
+            assert_eq!(
+                p.trash_folders,
+                if copy { vec![] } else { vec![old.clone()] }
+            );
         }
         // Something else stays: the folder is renamed, and only the
         // advertisement goes, from there.
         fs::write(old.join("notas.odt"), b"x").unwrap();
         let mut view = View {
             leftover_suffix: "additional files".into(),
-            send_to: Some(SendTo { dir: library.clone(), copy: false }),
+            send_to: Some(SendTo {
+                dir: library.clone(),
+                copy: false,
+            }),
             trash_ads: true,
             ..View::default()
         };

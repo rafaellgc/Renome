@@ -1072,7 +1072,11 @@ pub fn merge(g: &ComicGuess, info: &ComicInfo) -> ComicMatch {
         && fold(&g.series).starts_with(&format!("{} ", fold(&info.series)))
     {
         let n = fold(&info.series).split_whitespace().count();
-        g.series.split_whitespace().skip(n).collect::<Vec<_>>().join(" ")
+        g.series
+            .split_whitespace()
+            .skip(n)
+            .collect::<Vec<_>>()
+            .join(" ")
     } else {
         String::new()
     };
@@ -1333,12 +1337,21 @@ pub fn arrange(comics: &mut [ComicMatch]) -> Vec<Option<ComicMatch>> {
     // (`capt aurora` twice and `Capt Aurora` once: three); of those, the
     // one with the most capitals (a name written by hand over one made from
     // a lowercase file name), then the first.
-    let capitals = |s: &str| s.split_whitespace().filter(|w| w.chars().next().is_some_and(char::is_uppercase)).count();
+    let capitals = |s: &str| {
+        s.split_whitespace()
+            .filter(|w| w.chars().next().is_some_and(char::is_uppercase))
+            .count()
+    };
     let chosen: HashMap<&str, String> = spellings
         .iter()
         .map(|(r, v)| {
             let folded = |s: &str| s.to_lowercase();
-            let total = |s: &str| v.iter().filter(|(o, _)| folded(o) == folded(s)).map(|(_, n)| n).sum::<usize>();
+            let total = |s: &str| {
+                v.iter()
+                    .filter(|(o, _)| folded(o) == folded(s))
+                    .map(|(_, n)| n)
+                    .sum::<usize>()
+            };
             let most = v.iter().map(|(s, _)| total(s)).max().unwrap_or(0);
             let s = v
                 .iter()
@@ -1960,8 +1973,14 @@ mod tests {
     fn name_longer_than_the_series_inside_keeps_the_rest() {
         let info = parse_info("<ComicInfo><Series>Aurora</Series></ComicInfo>").unwrap();
         let m = merge(&parse_name("Aurora edicao especial", ""), &info);
-        assert_eq!((m.series.as_str(), m.title.as_str()), ("Aurora", "edicao especial"));
-        assert_eq!(comic_name("{série} #{número} - {título} ({ano})", &m, " - "), "Aurora - edicao especial");
+        assert_eq!(
+            (m.series.as_str(), m.title.as_str()),
+            ("Aurora", "edicao especial")
+        );
+        assert_eq!(
+            comic_name("{série} #{número} - {título} ({ano})", &m, " - "),
+            "Aurora - edicao especial"
+        );
         // With a number, the name's words are not a title.
         let m = merge(&parse_name("Aurora Especial 002", ""), &info);
         assert_eq!(m.title, "");
@@ -2317,7 +2336,11 @@ mod tests {
         ];
         let folders = arrange(&mut all);
         // Apart only in case, they count as one, and the capitalized wins.
-        assert!(all[all.len() - 3..].iter().all(|m| m.series == "Capt Aurora"));
+        assert!(
+            all[all.len() - 3..]
+                .iter()
+                .all(|m| m.series == "Capt Aurora")
+        );
         assert_eq!(all[2].series, "Scooby Apocalypse");
         assert_eq!(all[3].series, "Evento Leviatã");
         let f = |i: usize| folders[i].as_ref().map(|m| m.series.as_str());

@@ -716,7 +716,9 @@ pub(crate) fn youtube(key: &str) -> String {
 
 /// TMDB's average as written (`7.8`), none when no one voted.
 pub(crate) fn average(v: Option<f64>) -> String {
-    v.filter(|&v| v > 0.0).map(|v| format!("{v:.1}")).unwrap_or_default()
+    v.filter(|&v| v > 0.0)
+        .map(|v| format!("{v:.1}"))
+        .unwrap_or_default()
 }
 
 /// What goes inside a movie's video (see [`crate::videotags`]): all its
@@ -745,20 +747,42 @@ pub fn video_meta(d: &Details, lang: &str) -> crate::videotags::VideoMeta {
         certification: cert,
         rating: average(d.vote_average),
         keywords: d.keywords.keywords.iter().map(|k| k.name.clone()).collect(),
-        countries: d.production_countries.iter().map(|c| c.name.clone()).collect(),
-        studios: d.production_companies.iter().map(|c| c.name.clone()).collect(),
+        countries: d
+            .production_countries
+            .iter()
+            .map(|c| c.name.clone())
+            .collect(),
+        studios: d
+            .production_companies
+            .iter()
+            .map(|c| c.name.clone())
+            .collect(),
         directors: names(crew(&d.credits.crew, |c| c.job == "Director")),
         writers: names(crew(&d.credits.crew, |c| c.department == "Writing")),
-        producers: names(crew(&d.credits.crew, |c| c.job == "Producer").into_iter().take(5).collect()),
-        composers: names(crew(&d.credits.crew, |c| c.job == "Original Music Composer")),
+        producers: names(
+            crew(&d.credits.crew, |c| c.job == "Producer")
+                .into_iter()
+                .take(5)
+                .collect(),
+        ),
+        composers: names(crew(&d.credits.crew, |c| {
+            c.job == "Original Music Composer"
+        })),
         cast: d
             .credits
             .cast
             .iter()
             .take(20)
-            .map(|a| Person { name: a.name.clone(), character: a.character.clone() })
+            .map(|a| Person {
+                name: a.name.clone(),
+                character: a.character.clone(),
+            })
             .collect(),
-        collection: d.belongs_to_collection.as_ref().map(|c| c.name.clone()).unwrap_or_default(),
+        collection: d
+            .belongs_to_collection
+            .as_ref()
+            .map(|c| c.name.clone())
+            .unwrap_or_default(),
         trailer: d.trailer(lang2).map(youtube).unwrap_or_default(),
         ..Default::default()
     }
@@ -769,7 +793,10 @@ pub fn video_meta(d: &Details, lang: &str) -> crate::videotags::VideoMeta {
 pub fn collection_part(id: u64, parts: &[(u64, String)]) -> Option<u32> {
     let mut sorted: Vec<&(u64, String)> = parts.iter().collect();
     sorted.sort_by_key(|(i, d)| (d.is_empty(), d.clone(), *i));
-    sorted.iter().position(|(i, _)| *i == id).map(|n| n as u32 + 1)
+    sorted
+        .iter()
+        .position(|(i, _)| *i == id)
+        .map(|n| n as u32 + 1)
 }
 
 /// The `.nfo` file (Kodi format, read by Jellyfin, Kodi and Emby), with
@@ -1203,20 +1230,40 @@ mod tests {
         .unwrap();
         // The same details, for inside the video.
         let m = video_meta(&d, "pt-BR");
-        assert_eq!((m.title.as_str(), m.original_title.as_str(), m.tmdb.as_str()), ("O Senhor & os Anéis", "LOTR", "movie/120"));
-        assert_eq!((m.certification.as_str(), m.rating.as_str()), ("BR-12", "8.4"));
+        assert_eq!(
+            (m.title.as_str(), m.original_title.as_str(), m.tmdb.as_str()),
+            ("O Senhor & os Anéis", "LOTR", "movie/120")
+        );
+        assert_eq!(
+            (m.certification.as_str(), m.rating.as_str()),
+            ("BR-12", "8.4")
+        );
         assert_eq!(m.directors, ["Peter Jackson"]);
         assert_eq!(m.writers, ["Fran Walsh"]);
         assert_eq!(m.composers, ["Howard Shore"]);
-        assert_eq!((m.cast[0].name.as_str(), m.cast[0].character.as_str()), ("Elijah Wood", "Frodo"));
+        assert_eq!(
+            (m.cast[0].name.as_str(), m.cast[0].character.as_str()),
+            ("Elijah Wood", "Frodo")
+        );
         assert_eq!(m.collection, "Senhor dos Anéis");
         assert_eq!(m.keywords, ["elves"]);
         assert_eq!(m.trailer, "https://www.youtube.com/watch?v=pt1");
         assert_eq!(
-            collection_part(120, &[(122, "2003-12-17".into()), (121, "2002-12-18".into()), (120, "2001-12-18".into()), (9, String::new())]),
+            collection_part(
+                120,
+                &[
+                    (122, "2003-12-17".into()),
+                    (121, "2002-12-18".into()),
+                    (120, "2001-12-18".into()),
+                    (9, String::new())
+                ]
+            ),
             Some(1)
         );
-        assert_eq!(collection_part(9, &[(9, String::new()), (121, "2002-12-18".into())]), Some(2));
+        assert_eq!(
+            collection_part(9, &[(9, String::new()), (121, "2002-12-18".into())]),
+            Some(2)
+        );
         let x = nfo(&d, "pt-BR");
         for want in [
             "<title>O Senhor &amp; os Anéis</title>",

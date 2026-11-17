@@ -72,28 +72,86 @@ fn subsource_code(two: &str, region: &str) -> &'static str {
         _ => {}
     }
     const NAMES: [(&str, &str); 72] = [
-        ("af", "afrikaans"), ("am", "amharic"), ("ar", "arabic"), ("as", "assamese"),
-        ("az", "azerbaijani"), ("be", "belarusian"), ("bg", "bulgarian"), ("bn", "bengali"),
-        ("br", "breton"), ("bs", "bosnian"), ("ca", "catalan"), ("cs", "czech"),
-        ("cy", "welsh"), ("da", "danish"), ("de", "german"), ("el", "greek"),
-        ("en", "english"), ("eo", "espranto"), ("es", "spanish"), ("et", "estonian"),
-        ("eu", "basque"), ("fa", "farsi_persian"), ("fi", "finnish"), ("fr", "french"),
-        ("ga", "irish"), ("gd", "gaelic"), ("gl", "gaelician"), ("he", "hebrew"),
-        ("hi", "hindi"), ("hr", "croatian"), ("hu", "hungarian"), ("hy", "armenian"),
-        ("id", "indonesian"), ("is", "icelandic"), ("it", "italian"), ("ja", "japanese"),
-        ("ka", "georgian"), ("kk", "kazakh"), ("km", "khmer"), ("kn", "kannada"),
-        ("ko", "korean"), ("ku", "kurdish"), ("ky", "kyrgyz"), ("lb", "luxembourgish"),
-        ("lt", "lithuanian"), ("lv", "latvian"), ("mk", "macedonian"), ("ml", "malayalam"),
-        ("mn", "mongolian"), ("mr", "marathi"), ("ms", "malay"), ("my", "burmese"),
-        ("ne", "nepali"), ("nl", "dutch"), ("no", "norwegian"), ("pl", "polish"),
-        ("ps", "pashto"), ("pt", "portuguese"), ("ro", "romanian"), ("ru", "russian"),
-        ("si", "sinhala"), ("sk", "slovak"), ("sl", "slovenian"), ("sq", "albanian"),
-        ("sr", "serbian"), ("sv", "swedish"), ("sw", "swahili"), ("ta", "tamil"),
-        ("te", "telugu"), ("th", "thai"), ("tr", "turkish"), ("uk", "ukrainian"),
+        ("af", "afrikaans"),
+        ("am", "amharic"),
+        ("ar", "arabic"),
+        ("as", "assamese"),
+        ("az", "azerbaijani"),
+        ("be", "belarusian"),
+        ("bg", "bulgarian"),
+        ("bn", "bengali"),
+        ("br", "breton"),
+        ("bs", "bosnian"),
+        ("ca", "catalan"),
+        ("cs", "czech"),
+        ("cy", "welsh"),
+        ("da", "danish"),
+        ("de", "german"),
+        ("el", "greek"),
+        ("en", "english"),
+        ("eo", "espranto"),
+        ("es", "spanish"),
+        ("et", "estonian"),
+        ("eu", "basque"),
+        ("fa", "farsi_persian"),
+        ("fi", "finnish"),
+        ("fr", "french"),
+        ("ga", "irish"),
+        ("gd", "gaelic"),
+        ("gl", "gaelician"),
+        ("he", "hebrew"),
+        ("hi", "hindi"),
+        ("hr", "croatian"),
+        ("hu", "hungarian"),
+        ("hy", "armenian"),
+        ("id", "indonesian"),
+        ("is", "icelandic"),
+        ("it", "italian"),
+        ("ja", "japanese"),
+        ("ka", "georgian"),
+        ("kk", "kazakh"),
+        ("km", "khmer"),
+        ("kn", "kannada"),
+        ("ko", "korean"),
+        ("ku", "kurdish"),
+        ("ky", "kyrgyz"),
+        ("lb", "luxembourgish"),
+        ("lt", "lithuanian"),
+        ("lv", "latvian"),
+        ("mk", "macedonian"),
+        ("ml", "malayalam"),
+        ("mn", "mongolian"),
+        ("mr", "marathi"),
+        ("ms", "malay"),
+        ("my", "burmese"),
+        ("ne", "nepali"),
+        ("nl", "dutch"),
+        ("no", "norwegian"),
+        ("pl", "polish"),
+        ("ps", "pashto"),
+        ("pt", "portuguese"),
+        ("ro", "romanian"),
+        ("ru", "russian"),
+        ("si", "sinhala"),
+        ("sk", "slovak"),
+        ("sl", "slovenian"),
+        ("sq", "albanian"),
+        ("sr", "serbian"),
+        ("sv", "swedish"),
+        ("sw", "swahili"),
+        ("ta", "tamil"),
+        ("te", "telugu"),
+        ("th", "thai"),
+        ("tr", "turkish"),
+        ("uk", "ukrainian"),
     ];
     const MORE: [(&str, &str); 6] = [
-        ("ur", "urdu"), ("uz", "uzbek"), ("vi", "vietnamese"), ("zh", "chinese"),
-        ("tl", "tagalog"), ("tt", "tatar"),
+        ("ur", "urdu"),
+        ("uz", "uzbek"),
+        ("vi", "vietnamese"),
+        ("zh", "chinese"),
+        ("tl", "tagalog"),
+        ("tt", "tatar"),
     ];
     NAMES
         .iter()
@@ -491,7 +549,11 @@ pub fn target(video: &Path, lang: &str, hearing_impaired: bool, ext: &str) -> Pa
 /// most words with the video's name (`video`), then the largest. Its
 /// extension and bytes. An archive that is not a zip is taken for the
 /// subtitle itself (`srt`).
-pub fn from_archive(bytes: &[u8], episode: Option<(u32, u32)>, video: &str) -> Option<(String, Vec<u8>)> {
+pub fn from_archive(
+    bytes: &[u8],
+    episode: Option<(u32, u32)>,
+    video: &str,
+) -> Option<(String, Vec<u8>)> {
     if !bytes.starts_with(b"PK") {
         return (!bytes.is_empty()).then(|| ("srt".to_string(), bytes.to_vec()));
     }
@@ -529,10 +591,22 @@ mod tests {
         };
         // A 100-minute video.
         let v = 6000.0;
-        assert_eq!(super::fits(at("01:38:00").as_bytes(), None, v, None), Some(true));
-        assert_eq!(super::fits(at("01:40:50").as_bytes(), None, v, None), Some(true));
-        assert_eq!(super::fits(at("01:45:00").as_bytes(), None, v, None), Some(false));
-        assert_eq!(super::fits(at("00:40:00").as_bytes(), None, v, None), Some(false));
+        assert_eq!(
+            super::fits(at("01:38:00").as_bytes(), None, v, None),
+            Some(true)
+        );
+        assert_eq!(
+            super::fits(at("01:40:50").as_bytes(), None, v, None),
+            Some(true)
+        );
+        assert_eq!(
+            super::fits(at("01:45:00").as_bytes(), None, v, None),
+            Some(false)
+        );
+        assert_eq!(
+            super::fits(at("00:40:00").as_bytes(), None, v, None),
+            Some(false)
+        );
         assert_eq!(super::fits(b"nada", None, v, None), None);
     }
 
@@ -646,7 +720,11 @@ mod tests {
         };
         // The same release on both: the one that spares the quota.
         let mut c = vec![
-            from(Source::OpenSubtitles, "Movie.2010.1080p.WEB-DL.H264-GRP", 90000),
+            from(
+                Source::OpenSubtitles,
+                "Movie.2010.1080p.WEB-DL.H264-GRP",
+                90000,
+            ),
             from(Source::OpenSubtitles, "Movie.2010.720p.HDTV", 300),
             from(Source::Subsource, "Movie.2010.1080p.WEB-DL.H264-GRP", 800),
         ];
@@ -656,7 +734,11 @@ mod tests {
         // A better fit still wins, whatever the service.
         let mut c = vec![
             from(Source::Subdl, "Movie.2010.720p.HDTV", 0),
-            from(Source::OpenSubtitles, "Movie.2010.1080p.WEB-DL.H264-GRP", 10),
+            from(
+                Source::OpenSubtitles,
+                "Movie.2010.1080p.WEB-DL.H264-GRP",
+                10,
+            ),
         ];
         rank(video, &mut c);
         assert_eq!(c[0].source, Source::OpenSubtitles);
@@ -733,8 +815,15 @@ mod tests {
             buf.into_inner()
         };
         // Numbered without the season.
-        let z = zip_of(&[("Show - 03.srt", "three"), ("Show - 04.srt", "four"), ("Show - 05 long.srt", "five!!")]);
-        assert_eq!(from_archive(&z, Some((1, 4)), "Show S01E04").unwrap().1, b"four");
+        let z = zip_of(&[
+            ("Show - 03.srt", "three"),
+            ("Show - 04.srt", "four"),
+            ("Show - 05 long.srt", "five!!"),
+        ]);
+        assert_eq!(
+            from_archive(&z, Some((1, 4)), "Show S01E04").unwrap().1,
+            b"four"
+        );
         let z = zip_of(&[("Show.E03.srt", "three"), ("Show.E04.srt", "four")]);
         assert_eq!(from_archive(&z, Some((2, 3)), "").unwrap().1, b"three");
         // The release of the video, not the largest.
@@ -742,6 +831,11 @@ mod tests {
             ("Movie.2010.1080p.BluRay.x264-GRP.srt", "blu"),
             ("Movie.2010.720p.WEB-DL-OTHER.srt", "web, longer"),
         ]);
-        assert_eq!(from_archive(&z, None, "Movie.2010.1080p.BluRay.x264-GRP").unwrap().1, b"blu");
+        assert_eq!(
+            from_archive(&z, None, "Movie.2010.1080p.BluRay.x264-GRP")
+                .unwrap()
+                .1,
+            b"blu"
+        );
     }
 }

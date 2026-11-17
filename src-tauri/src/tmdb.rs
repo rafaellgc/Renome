@@ -140,7 +140,10 @@ impl Client {
             imdb_id: Option<String>,
         }
         let kind = if tv { "tv" } else { "movie" };
-        let ids: Ids = self.get(&format!("/{kind}/{id}/external_ids"), &[]).await.ok()?;
+        let ids: Ids = self
+            .get(&format!("/{kind}/{id}/external_ids"), &[])
+            .await
+            .ok()?;
         ids.imdb_id.filter(|i| i.starts_with("tt"))
     }
 
@@ -1049,7 +1052,9 @@ impl Client {
     /// wide, a background 1280.
     async fn picture(&self, path: &str, width: u32) -> Result<Vec<u8>, String> {
         let base = image_base();
-        let base = base.strip_suffix("/original").map_or(base.clone(), |b| format!("{b}/w{width}"));
+        let base = base
+            .strip_suffix("/original")
+            .map_or(base.clone(), |b| format!("{b}/w{width}"));
         let res = self
             .http
             .get(format!("{base}{path}"))
@@ -1108,7 +1113,11 @@ pub async fn video_meta(
         .map(|id| async move {
             let r: Result<RawSet, String> = client.get(&format!("/collection/{id}"), &[]).await;
             r.ok().map(|s| {
-                let parts = s.parts.into_iter().map(|p| (p.id, p.release_date.unwrap_or_default())).collect();
+                let parts = s
+                    .parts
+                    .into_iter()
+                    .map(|p| (p.id, p.release_date.unwrap_or_default()))
+                    .collect();
                 (id, parts)
             })
         })
@@ -1132,7 +1141,10 @@ pub async fn video_meta(
                 .and_then(|s| s.poster_path.clone())
                 .or_else(|| show?.poster_path.clone());
             wanted.extend(p.map(|p| (p, 780)));
-            wanted.extend(show.and_then(|d| d.backdrop_path.clone()).map(|p| (p, 1280)));
+            wanted.extend(
+                show.and_then(|d| d.backdrop_path.clone())
+                    .map(|p| (p, 1280)),
+            );
         }
         wanted.sort();
         wanted.dedup();
@@ -1151,7 +1163,11 @@ pub async fn video_meta(
         .iter()
         .map(|item| {
             if let Some(id) = item.movie {
-                let d = movies.get(&id).ok_or("tmdbNotFound")?.as_ref().map_err(Clone::clone)?;
+                let d = movies
+                    .get(&id)
+                    .ok_or("tmdbNotFound")?
+                    .as_ref()
+                    .map_err(Clone::clone)?;
                 let mut m = tmdb::video_meta(d, &client.lang);
                 m.collection_part = d
                     .belongs_to_collection
@@ -1163,7 +1179,11 @@ pub async fn video_meta(
                 return Ok(m);
             }
             let id = item.show.ok_or("tmdbNotFound")?;
-            let show = shows.get(&id).ok_or("tmdbNotFound")?.as_ref().map_err(Clone::clone)?;
+            let show = shows
+                .get(&id)
+                .ok_or("tmdbNotFound")?
+                .as_ref()
+                .map_err(Clone::clone)?;
             let season = seasons
                 .get(&(id, item.season))
                 .ok_or("tmdbNotFound")?
@@ -1174,8 +1194,14 @@ pub async fn video_meta(
                 .iter()
                 .filter_map(|&n| season.episodes.iter().find(|e| e.episode_number == n))
                 .collect();
-            let mut m = renome_core::tv::video_meta(show, item.season, &eps, &client.lang).ok_or("tmdbNotFound")?;
-            m.cover = picture(&season.poster_path.clone().or_else(|| show.poster_path.clone()));
+            let mut m = renome_core::tv::video_meta(show, item.season, &eps, &client.lang)
+                .ok_or("tmdbNotFound")?;
+            m.cover = picture(
+                &season
+                    .poster_path
+                    .clone()
+                    .or_else(|| show.poster_path.clone()),
+            );
             m.backdrop = picture(&show.backdrop_path);
             Ok(m)
         })

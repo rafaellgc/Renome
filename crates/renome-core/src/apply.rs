@@ -1900,8 +1900,14 @@ mod tests {
         );
         assert!(p.join("Movie (2010).en.ass").exists());
         h.add_tags(&id, backups).unwrap();
-        let x = crate::mkvsubs::extract(&p.join("Movie (2010).mkv"), &tools, &[], &|| false, &|_, _| {})
-            .unwrap();
+        let x = crate::mkvsubs::extract(
+            &p.join("Movie (2010).mkv"),
+            &tools,
+            &[],
+            &|| false,
+            &|_, _| {},
+        )
+        .unwrap();
         assert_eq!(x.created.len(), 1, "{:?}", x.errors);
         h.add_created(&id, &x.created).unwrap();
 

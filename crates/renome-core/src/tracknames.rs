@@ -63,53 +63,490 @@ struct Language {
 }
 
 const LANGUAGES: &[Language] = &[
-    Language { two: "pt", three: "por", others: &["pob", "ptb"], own: "Português", words: &["portuguese", "portugues", "portugais", "portugues-br", "brazilian", "brasileiro", "pt-br", "ptbr", "pt-pt"] },
-    Language { two: "en", three: "eng", others: &[], own: "English", words: &["english", "ingles", "anglais", "englisch", "inglese"] },
-    Language { two: "es", three: "spa", others: &["spl", "esp"], own: "Español", words: &["spanish", "espanol", "espanhol", "castellano", "castilian", "latino", "espagnol", "spanisch", "spagnolo", "es-419", "es-es", "es-mx"] },
-    Language { two: "fr", three: "fre", others: &["fra"], own: "Français", words: &["french", "francais", "frances", "franzosisch", "francese", "vff", "vfq", "vfi"] },
-    Language { two: "de", three: "ger", others: &["deu"], own: "Deutsch", words: &["german", "deutsch", "alemao", "aleman", "allemand", "tedesco"] },
-    Language { two: "it", three: "ita", others: &[], own: "Italiano", words: &["italian", "italiano", "italien", "italienisch"] },
-    Language { two: "ja", three: "jpn", others: &[], own: "日本語", words: &["japanese", "japones", "japonais", "japanisch", "giapponese", "日本語"] },
-    Language { two: "ko", three: "kor", others: &[], own: "한국어", words: &["korean", "coreano", "coreen", "koreanisch", "한국어"] },
-    Language { two: "zh", three: "chi", others: &["zho", "chs", "cht"], own: "中文", words: &["chinese", "chines", "chino", "chinois", "chinesisch", "cinese", "mandarin", "cantonese", "中文", "简体", "繁體", "繁体"] },
-    Language { two: "ru", three: "rus", others: &[], own: "Русский", words: &["russian", "russo", "ruso", "russe", "russisch", "русский"] },
-    Language { two: "nl", three: "dut", others: &["nld"], own: "Nederlands", words: &["dutch", "nederlands", "holandes", "neerlandais", "niederlandisch", "olandese", "flemish"] },
-    Language { two: "sv", three: "swe", others: &[], own: "Svenska", words: &["swedish", "svenska", "sueco", "suedois", "schwedisch", "svedese"] },
-    Language { two: "no", three: "nor", others: &["nob", "nno", "nb", "nn"], own: "Norsk", words: &["norwegian", "norsk", "bokmal", "nynorsk", "noruegues", "noruego", "norvegien", "norwegisch", "norvegese"] },
-    Language { two: "da", three: "dan", others: &[], own: "Dansk", words: &["danish", "dansk", "dinamarques", "danes", "danois", "danisch", "danese"] },
-    Language { two: "fi", three: "fin", others: &[], own: "Suomi", words: &["finnish", "suomi", "finlandes", "finnois", "finnisch", "finlandese"] },
-    Language { two: "pl", three: "pol", others: &[], own: "Polski", words: &["polish", "polski", "polones", "polaco", "polonais", "polnisch", "polacco"] },
-    Language { two: "tr", three: "tur", others: &[], own: "Türkçe", words: &["turkish", "turkce", "turco", "turc", "turkisch"] },
-    Language { two: "ar", three: "ara", others: &[], own: "العربية", words: &["arabic", "arabe", "arabisch", "arabo", "العربية"] },
-    Language { two: "he", three: "heb", others: &[], own: "עברית", words: &["hebrew", "hebraico", "hebreo", "hebreu", "hebraisch", "ebraico", "עברית"] },
-    Language { two: "el", three: "gre", others: &["ell"], own: "Ελληνικά", words: &["greek", "grego", "griego", "grec", "griechisch", "greco", "ελληνικα"] },
-    Language { two: "cs", three: "cze", others: &["ces"], own: "Čeština", words: &["czech", "cestina", "tcheco", "checo", "tcheque", "tschechisch", "ceco"] },
-    Language { two: "hu", three: "hun", others: &[], own: "Magyar", words: &["hungarian", "magyar", "hungaro", "hongrois", "ungarisch", "ungherese"] },
-    Language { two: "ro", three: "rum", others: &["ron"], own: "Română", words: &["romanian", "romana", "romeno", "rumano", "roumain", "rumanisch"] },
-    Language { two: "uk", three: "ukr", others: &[], own: "Українська", words: &["ukrainian", "ucraniano", "ukrainien", "ukrainisch", "ucraino", "українська"] },
-    Language { two: "th", three: "tha", others: &[], own: "ไทย", words: &["thai", "tailandes", "thailandais", "thailandisch", "ไทย"] },
-    Language { two: "vi", three: "vie", others: &[], own: "Tiếng Việt", words: &["vietnamese", "vietnamita", "vietnamien", "vietnamesisch"] },
-    Language { two: "id", three: "ind", others: &[], own: "Bahasa Indonesia", words: &["indonesian", "indonesio", "indonesien", "indonesisch"] },
-    Language { two: "ms", three: "may", others: &["msa"], own: "Bahasa Melayu", words: &["malay", "malaio", "malayo", "malais"] },
-    Language { two: "ca", three: "cat", others: &[], own: "Català", words: &["catalan", "catala", "catalao"] },
-    Language { two: "hr", three: "hrv", others: &["scr"], own: "Hrvatski", words: &["croatian", "hrvatski", "croata", "croate", "kroatisch"] },
-    Language { two: "sr", three: "srp", others: &["scc"], own: "Српски", words: &["serbian", "srpski", "servio", "serbio", "serbe", "serbisch"] },
-    Language { two: "bg", three: "bul", others: &[], own: "Български", words: &["bulgarian", "bulgaro", "bulgare", "bulgarisch"] },
-    Language { two: "sk", three: "slo", others: &["slk"], own: "Slovenčina", words: &["slovak", "slovencina", "eslovaco", "slovaque", "slowakisch"] },
-    Language { two: "sl", three: "slv", others: &[], own: "Slovenščina", words: &["slovenian", "slovene", "slovenscina", "esloveno", "slovene"] },
-    Language { two: "et", three: "est", others: &[], own: "Eesti", words: &["estonian", "eesti", "estonio", "estonien", "estnisch"] },
-    Language { two: "lv", three: "lav", others: &[], own: "Latviešu", words: &["latvian", "latviesu", "leton", "letao", "letton", "lettisch"] },
-    Language { two: "lt", three: "lit", others: &[], own: "Lietuvių", words: &["lithuanian", "lietuviu", "lituano", "lituanien", "litauisch"] },
-    Language { two: "is", three: "ice", others: &["isl"], own: "Íslenska", words: &["icelandic", "islenska", "islandes", "islandais", "islandisch"] },
-    Language { two: "hi", three: "hin", others: &[], own: "हिन्दी", words: &["hindi", "हिन्दी"] },
-    Language { two: "ta", three: "tam", others: &[], own: "தமிழ்", words: &["tamil"] },
-    Language { two: "te", three: "tel", others: &[], own: "తెలుగు", words: &["telugu"] },
-    Language { two: "bn", three: "ben", others: &[], own: "বাংলা", words: &["bengali", "bangla"] },
-    Language { two: "fa", three: "per", others: &["fas"], own: "فارسی", words: &["persian", "farsi", "persa", "persan"] },
-    Language { two: "ur", three: "urd", others: &[], own: "اردو", words: &["urdu"] },
-    Language { two: "fil", three: "fil", others: &["tgl"], own: "Filipino", words: &["filipino", "tagalog"] },
-    Language { two: "eu", three: "baq", others: &["eus"], own: "Euskara", words: &["basque", "euskara", "basco", "vasco", "euskera"] },
-    Language { two: "gl", three: "glg", others: &[], own: "Galego", words: &["galician", "galego", "gallego"] },
+    Language {
+        two: "pt",
+        three: "por",
+        others: &["pob", "ptb"],
+        own: "Português",
+        words: &[
+            "portuguese",
+            "portugues",
+            "portugais",
+            "portugues-br",
+            "brazilian",
+            "brasileiro",
+            "pt-br",
+            "ptbr",
+            "pt-pt",
+        ],
+    },
+    Language {
+        two: "en",
+        three: "eng",
+        others: &[],
+        own: "English",
+        words: &["english", "ingles", "anglais", "englisch", "inglese"],
+    },
+    Language {
+        two: "es",
+        three: "spa",
+        others: &["spl", "esp"],
+        own: "Español",
+        words: &[
+            "spanish",
+            "espanol",
+            "espanhol",
+            "castellano",
+            "castilian",
+            "latino",
+            "espagnol",
+            "spanisch",
+            "spagnolo",
+            "es-419",
+            "es-es",
+            "es-mx",
+        ],
+    },
+    Language {
+        two: "fr",
+        three: "fre",
+        others: &["fra"],
+        own: "Français",
+        words: &[
+            "french",
+            "francais",
+            "frances",
+            "franzosisch",
+            "francese",
+            "vff",
+            "vfq",
+            "vfi",
+        ],
+    },
+    Language {
+        two: "de",
+        three: "ger",
+        others: &["deu"],
+        own: "Deutsch",
+        words: &[
+            "german", "deutsch", "alemao", "aleman", "allemand", "tedesco",
+        ],
+    },
+    Language {
+        two: "it",
+        three: "ita",
+        others: &[],
+        own: "Italiano",
+        words: &["italian", "italiano", "italien", "italienisch"],
+    },
+    Language {
+        two: "ja",
+        three: "jpn",
+        others: &[],
+        own: "日本語",
+        words: &[
+            "japanese",
+            "japones",
+            "japonais",
+            "japanisch",
+            "giapponese",
+            "日本語",
+        ],
+    },
+    Language {
+        two: "ko",
+        three: "kor",
+        others: &[],
+        own: "한국어",
+        words: &["korean", "coreano", "coreen", "koreanisch", "한국어"],
+    },
+    Language {
+        two: "zh",
+        three: "chi",
+        others: &["zho", "chs", "cht"],
+        own: "中文",
+        words: &[
+            "chinese",
+            "chines",
+            "chino",
+            "chinois",
+            "chinesisch",
+            "cinese",
+            "mandarin",
+            "cantonese",
+            "中文",
+            "简体",
+            "繁體",
+            "繁体",
+        ],
+    },
+    Language {
+        two: "ru",
+        three: "rus",
+        others: &[],
+        own: "Русский",
+        words: &["russian", "russo", "ruso", "russe", "russisch", "русский"],
+    },
+    Language {
+        two: "nl",
+        three: "dut",
+        others: &["nld"],
+        own: "Nederlands",
+        words: &[
+            "dutch",
+            "nederlands",
+            "holandes",
+            "neerlandais",
+            "niederlandisch",
+            "olandese",
+            "flemish",
+        ],
+    },
+    Language {
+        two: "sv",
+        three: "swe",
+        others: &[],
+        own: "Svenska",
+        words: &[
+            "swedish",
+            "svenska",
+            "sueco",
+            "suedois",
+            "schwedisch",
+            "svedese",
+        ],
+    },
+    Language {
+        two: "no",
+        three: "nor",
+        others: &["nob", "nno", "nb", "nn"],
+        own: "Norsk",
+        words: &[
+            "norwegian",
+            "norsk",
+            "bokmal",
+            "nynorsk",
+            "noruegues",
+            "noruego",
+            "norvegien",
+            "norwegisch",
+            "norvegese",
+        ],
+    },
+    Language {
+        two: "da",
+        three: "dan",
+        others: &[],
+        own: "Dansk",
+        words: &[
+            "danish",
+            "dansk",
+            "dinamarques",
+            "danes",
+            "danois",
+            "danisch",
+            "danese",
+        ],
+    },
+    Language {
+        two: "fi",
+        three: "fin",
+        others: &[],
+        own: "Suomi",
+        words: &[
+            "finnish",
+            "suomi",
+            "finlandes",
+            "finnois",
+            "finnisch",
+            "finlandese",
+        ],
+    },
+    Language {
+        two: "pl",
+        three: "pol",
+        others: &[],
+        own: "Polski",
+        words: &[
+            "polish", "polski", "polones", "polaco", "polonais", "polnisch", "polacco",
+        ],
+    },
+    Language {
+        two: "tr",
+        three: "tur",
+        others: &[],
+        own: "Türkçe",
+        words: &["turkish", "turkce", "turco", "turc", "turkisch"],
+    },
+    Language {
+        two: "ar",
+        three: "ara",
+        others: &[],
+        own: "العربية",
+        words: &["arabic", "arabe", "arabisch", "arabo", "العربية"],
+    },
+    Language {
+        two: "he",
+        three: "heb",
+        others: &[],
+        own: "עברית",
+        words: &[
+            "hebrew",
+            "hebraico",
+            "hebreo",
+            "hebreu",
+            "hebraisch",
+            "ebraico",
+            "עברית",
+        ],
+    },
+    Language {
+        two: "el",
+        three: "gre",
+        others: &["ell"],
+        own: "Ελληνικά",
+        words: &[
+            "greek",
+            "grego",
+            "griego",
+            "grec",
+            "griechisch",
+            "greco",
+            "ελληνικα",
+        ],
+    },
+    Language {
+        two: "cs",
+        three: "cze",
+        others: &["ces"],
+        own: "Čeština",
+        words: &[
+            "czech",
+            "cestina",
+            "tcheco",
+            "checo",
+            "tcheque",
+            "tschechisch",
+            "ceco",
+        ],
+    },
+    Language {
+        two: "hu",
+        three: "hun",
+        others: &[],
+        own: "Magyar",
+        words: &[
+            "hungarian",
+            "magyar",
+            "hungaro",
+            "hongrois",
+            "ungarisch",
+            "ungherese",
+        ],
+    },
+    Language {
+        two: "ro",
+        three: "rum",
+        others: &["ron"],
+        own: "Română",
+        words: &[
+            "romanian",
+            "romana",
+            "romeno",
+            "rumano",
+            "roumain",
+            "rumanisch",
+        ],
+    },
+    Language {
+        two: "uk",
+        three: "ukr",
+        others: &[],
+        own: "Українська",
+        words: &[
+            "ukrainian",
+            "ucraniano",
+            "ukrainien",
+            "ukrainisch",
+            "ucraino",
+            "українська",
+        ],
+    },
+    Language {
+        two: "th",
+        three: "tha",
+        others: &[],
+        own: "ไทย",
+        words: &["thai", "tailandes", "thailandais", "thailandisch", "ไทย"],
+    },
+    Language {
+        two: "vi",
+        three: "vie",
+        others: &[],
+        own: "Tiếng Việt",
+        words: &["vietnamese", "vietnamita", "vietnamien", "vietnamesisch"],
+    },
+    Language {
+        two: "id",
+        three: "ind",
+        others: &[],
+        own: "Bahasa Indonesia",
+        words: &["indonesian", "indonesio", "indonesien", "indonesisch"],
+    },
+    Language {
+        two: "ms",
+        three: "may",
+        others: &["msa"],
+        own: "Bahasa Melayu",
+        words: &["malay", "malaio", "malayo", "malais"],
+    },
+    Language {
+        two: "ca",
+        three: "cat",
+        others: &[],
+        own: "Català",
+        words: &["catalan", "catala", "catalao"],
+    },
+    Language {
+        two: "hr",
+        three: "hrv",
+        others: &["scr"],
+        own: "Hrvatski",
+        words: &["croatian", "hrvatski", "croata", "croate", "kroatisch"],
+    },
+    Language {
+        two: "sr",
+        three: "srp",
+        others: &["scc"],
+        own: "Српски",
+        words: &["serbian", "srpski", "servio", "serbio", "serbe", "serbisch"],
+    },
+    Language {
+        two: "bg",
+        three: "bul",
+        others: &[],
+        own: "Български",
+        words: &["bulgarian", "bulgaro", "bulgare", "bulgarisch"],
+    },
+    Language {
+        two: "sk",
+        three: "slo",
+        others: &["slk"],
+        own: "Slovenčina",
+        words: &["slovak", "slovencina", "eslovaco", "slovaque", "slowakisch"],
+    },
+    Language {
+        two: "sl",
+        three: "slv",
+        others: &[],
+        own: "Slovenščina",
+        words: &["slovenian", "slovene", "slovenscina", "esloveno", "slovene"],
+    },
+    Language {
+        two: "et",
+        three: "est",
+        others: &[],
+        own: "Eesti",
+        words: &["estonian", "eesti", "estonio", "estonien", "estnisch"],
+    },
+    Language {
+        two: "lv",
+        three: "lav",
+        others: &[],
+        own: "Latviešu",
+        words: &[
+            "latvian", "latviesu", "leton", "letao", "letton", "lettisch",
+        ],
+    },
+    Language {
+        two: "lt",
+        three: "lit",
+        others: &[],
+        own: "Lietuvių",
+        words: &[
+            "lithuanian",
+            "lietuviu",
+            "lituano",
+            "lituanien",
+            "litauisch",
+        ],
+    },
+    Language {
+        two: "is",
+        three: "ice",
+        others: &["isl"],
+        own: "Íslenska",
+        words: &[
+            "icelandic",
+            "islenska",
+            "islandes",
+            "islandais",
+            "islandisch",
+        ],
+    },
+    Language {
+        two: "hi",
+        three: "hin",
+        others: &[],
+        own: "हिन्दी",
+        words: &["hindi", "हिन्दी"],
+    },
+    Language {
+        two: "ta",
+        three: "tam",
+        others: &[],
+        own: "தமிழ்",
+        words: &["tamil"],
+    },
+    Language {
+        two: "te",
+        three: "tel",
+        others: &[],
+        own: "తెలుగు",
+        words: &["telugu"],
+    },
+    Language {
+        two: "bn",
+        three: "ben",
+        others: &[],
+        own: "বাংলা",
+        words: &["bengali", "bangla"],
+    },
+    Language {
+        two: "fa",
+        three: "per",
+        others: &["fas"],
+        own: "فارسی",
+        words: &["persian", "farsi", "persa", "persan"],
+    },
+    Language {
+        two: "ur",
+        three: "urd",
+        others: &[],
+        own: "اردو",
+        words: &["urdu"],
+    },
+    Language {
+        two: "fil",
+        three: "fil",
+        others: &["tgl"],
+        own: "Filipino",
+        words: &["filipino", "tagalog"],
+    },
+    Language {
+        two: "eu",
+        three: "baq",
+        others: &["eus"],
+        own: "Euskara",
+        words: &["basque", "euskara", "basco", "vasco", "euskera"],
+    },
+    Language {
+        two: "gl",
+        three: "glg",
+        others: &[],
+        own: "Galego",
+        words: &["galician", "galego", "gallego"],
+    },
 ];
 
 fn language(code: &str) -> Option<&'static Language> {
@@ -123,12 +560,31 @@ fn language(code: &str) -> Option<&'static Language> {
 /// name, and how the language writes them.
 fn region_of_word(two: &str, word: &str) -> Option<&'static str> {
     Some(match (two, word) {
-        ("pt", "brasil" | "brazil" | "brazilian" | "brasileiro" | "brasileira" | "pt-br" | "ptbr" | "pob" | "ptb" | "portugues-br") => "BR",
+        (
+            "pt",
+            "brasil" | "brazil" | "brazilian" | "brasileiro" | "brasileira" | "pt-br" | "ptbr"
+            | "pob" | "ptb" | "portugues-br",
+        ) => "BR",
         ("pt", "portugal" | "europeu" | "european" | "pt-pt" | "ptpt") => "PT",
-        ("es", "latino" | "latin" | "america" | "latam" | "latinoamerica" | "latinoamericano" | "es-419" | "es-mx" | "mexico" | "mexicano" | "spl") => "419",
-        ("es", "castellano" | "castilian" | "espana" | "spain" | "es-es" | "europeo" | "european") => "ES",
-        ("zh", "simplified" | "simplificado" | "简体" | "简" | "chs" | "zh-hans" | "zh-cn" | "mandarin") => "Hans",
-        ("zh", "traditional" | "tradicional" | "繁體" | "繁体" | "繁" | "cht" | "zh-hant" | "zh-tw" | "zh-hk" | "cantonese") => "Hant",
+        (
+            "es",
+            "latino" | "latin" | "america" | "latam" | "latinoamerica" | "latinoamericano"
+            | "es-419" | "es-mx" | "mexico" | "mexicano" | "spl",
+        ) => "419",
+        (
+            "es",
+            "castellano" | "castilian" | "espana" | "spain" | "es-es" | "europeo" | "european",
+        ) => "ES",
+        (
+            "zh",
+            "simplified" | "simplificado" | "简体" | "简" | "chs" | "zh-hans" | "zh-cn"
+            | "mandarin",
+        ) => "Hans",
+        (
+            "zh",
+            "traditional" | "tradicional" | "繁體" | "繁体" | "繁" | "cht" | "zh-hant" | "zh-tw"
+            | "zh-hk" | "cantonese",
+        ) => "Hant",
         ("fr", "canada" | "canadien" | "quebec" | "quebecois" | "vfq" | "fr-ca") => "CA",
         _ => return None,
     })
@@ -206,13 +662,15 @@ fn word(two: &str, w: Word) -> &'static str {
 /// accents).
 fn detail_of(w: &str) -> Option<Word> {
     Some(match w {
-        "forced" | "forcada" | "forcadas" | "forcado" | "forcados" | "forzada" | "forzadas" | "forzado" | "forzados"
-        | "forces" | "erzwungen" | "forzati" | "foreign" => Word::Forced,
+        "forced" | "forcada" | "forcadas" | "forcado" | "forcados" | "forzada" | "forzadas"
+        | "forzado" | "forzados" | "forces" | "erzwungen" | "forzati" | "foreign" => Word::Forced,
         "sdh" | "cc" | "hi" | "hoh" | "surdos" | "surdo" | "sordos" => Word::Sdh,
-        "commentary" | "commentaries" | "comment" | "comments" | "comentario" | "comentarios" | "comentado"
-        | "commentaire" | "commentaires" | "kommentar" | "commento" => Word::Commentary,
-        "audiodescricao" | "audiodescripcion" | "audiodescription" | "audiodeskription" | "audiodescrizione"
-        | "descriptive" | "descritivo" | "descriptiva" => Word::Described,
+        "commentary" | "commentaries" | "comment" | "comments" | "comentario" | "comentarios"
+        | "comentado" | "commentaire" | "commentaires" | "kommentar" | "commento" => {
+            Word::Commentary
+        }
+        "audiodescricao" | "audiodescripcion" | "audiodescription" | "audiodeskription"
+        | "audiodescrizione" | "descriptive" | "descritivo" | "descriptiva" => Word::Described,
         "signs" | "letreiros" | "carteles" | "placas" | "panneaux" => Word::Signs,
         _ => return None,
     })
@@ -233,18 +691,113 @@ const PHRASES: &[(&[&str], Word)] = &[
 /// Words that say nothing to tell tracks apart: kinds, codecs, channels,
 /// formats.
 const PLAIN: &[&str] = &[
-    "audio", "sub", "subs", "subtitle", "subtitles", "subtitulo", "subtitulos", "subtitulado", "legenda", "legendas",
-    "legendado", "legendada", "legendados", "sous-titres", "untertitel", "sottotitoli", "dublado", "dublada", "dubbed",
-    "dub", "doblado", "doblada", "track", "faixa", "pista", "piste", "spur", "full", "completa", "completo", "complete",
-    "completas", "default", "padrao", "stereo", "estereo", "mono", "surround", "ch", "channels", "canais", "canales",
-    "aac", "ac3", "ac-3", "eac3", "e-ac3", "e-ac-3", "dd", "dd+", "ddp", "dolby", "digital", "plus", "dts", "dts-hd",
-    "dts-x", "dts:x", "ma", "hra", "es", "truehd", "true-hd", "atmos", "flac", "opus", "mp3", "mp2", "lpcm", "pcm", "vorbis",
-    "srt", "ass", "ssa", "pgs", "sup", "vobsub", "subrip", "webvtt", "vtt", "text", "texto", "utf8", "utf-8", "idx",
-    "kbps", "khz", "bit", "hevc", "avc", "x264", "x265", "h264", "h265", "and", "e", "y", "et", "und", "&", "+",
+    "audio",
+    "sub",
+    "subs",
+    "subtitle",
+    "subtitles",
+    "subtitulo",
+    "subtitulos",
+    "subtitulado",
+    "legenda",
+    "legendas",
+    "legendado",
+    "legendada",
+    "legendados",
+    "sous-titres",
+    "untertitel",
+    "sottotitoli",
+    "dublado",
+    "dublada",
+    "dubbed",
+    "dub",
+    "doblado",
+    "doblada",
+    "track",
+    "faixa",
+    "pista",
+    "piste",
+    "spur",
+    "full",
+    "completa",
+    "completo",
+    "complete",
+    "completas",
+    "default",
+    "padrao",
+    "stereo",
+    "estereo",
+    "mono",
+    "surround",
+    "ch",
+    "channels",
+    "canais",
+    "canales",
+    "aac",
+    "ac3",
+    "ac-3",
+    "eac3",
+    "e-ac3",
+    "e-ac-3",
+    "dd",
+    "dd+",
+    "ddp",
+    "dolby",
+    "digital",
+    "plus",
+    "dts",
+    "dts-hd",
+    "dts-x",
+    "dts:x",
+    "ma",
+    "hra",
+    "es",
+    "truehd",
+    "true-hd",
+    "atmos",
+    "flac",
+    "opus",
+    "mp3",
+    "mp2",
+    "lpcm",
+    "pcm",
+    "vorbis",
+    "srt",
+    "ass",
+    "ssa",
+    "pgs",
+    "sup",
+    "vobsub",
+    "subrip",
+    "webvtt",
+    "vtt",
+    "text",
+    "texto",
+    "utf8",
+    "utf-8",
+    "idx",
+    "kbps",
+    "khz",
+    "bit",
+    "hevc",
+    "avc",
+    "x264",
+    "x265",
+    "h264",
+    "h265",
+    "and",
+    "e",
+    "y",
+    "et",
+    "und",
+    "&",
+    "+",
 ];
 
 /// Words left at either end of what is kept (`por Fulano` → `Fulano`).
-const JOINERS: &[&str] = &["by", "por", "de", "from", "da", "do", "von", "par", "-", "–", "e", "and", "y", "et"];
+const JOINERS: &[&str] = &[
+    "by", "por", "de", "from", "da", "do", "von", "par", "-", "–", "e", "and", "y", "et",
+];
 
 /// A site, address or handle (`site.com`, `www.x`, `@group`).
 fn is_address(word: &str) -> bool {
@@ -257,14 +810,13 @@ fn is_address(word: &str) -> bool {
         return true;
     }
     const ENDS: &[&str] = &[
-        "com", "net", "org", "br", "to", "tv", "me", "io", "cc", "co", "xyz", "info", "biz", "ru", "nu", "se", "ws",
-        "in", "uk", "us", "site", "club", "online", "top", "pw", "is", "li", "la", "ch", "su", "lol", "eu",
+        "com", "net", "org", "br", "to", "tv", "me", "io", "cc", "co", "xyz", "info", "biz", "ru",
+        "nu", "se", "ws", "in", "uk", "us", "site", "club", "online", "top", "pw", "is", "li",
+        "la", "ch", "su", "lol", "eu",
     ];
     match w.rsplit_once('.') {
         Some((head, end)) => {
-            !head.is_empty()
-                && head.chars().any(|c| c.is_alphabetic())
-                && ENDS.contains(&end)
+            !head.is_empty() && head.chars().any(|c| c.is_alphabetic()) && ENDS.contains(&end)
         }
         None => false,
     }
@@ -305,7 +857,12 @@ fn read_name(name: &str) -> Said {
             continue;
         }
         for (phrase, w) in PHRASES {
-            if folded[i..].len() >= phrase.len() && folded[i..i + phrase.len()].iter().zip(*phrase).all(|(a, b)| a == b) {
+            if folded[i..].len() >= phrase.len()
+                && folded[i..i + phrase.len()]
+                    .iter()
+                    .zip(*phrase)
+                    .all(|(a, b)| a == b)
+            {
                 said.details.push(*w);
                 for k in keep.iter_mut().skip(i).take(phrase.len()) {
                     *k = false;
@@ -318,7 +875,9 @@ fn read_name(name: &str) -> Said {
             continue;
         }
         // "songs" with signs: part of "signs & songs".
-        if ["songs", "musicas", "canciones", "chansons"].contains(&f.as_str()) && folded.iter().any(|x| detail_of(x) == Some(Word::Signs)) {
+        if ["songs", "musicas", "canciones", "chansons"].contains(&f.as_str())
+            && folded.iter().any(|x| detail_of(x) == Some(Word::Signs))
+        {
             keep[i] = false;
             continue;
         }
@@ -341,12 +900,20 @@ fn read_name(name: &str) -> Said {
             }
         }
         if ["br", "pt"].contains(&f.as_str()) && words[i].chars().all(|c| c.is_ascii_uppercase()) {
-            said.regions.push(("pt", if f == "br" { "BR" } else { "PT" }));
+            said.regions
+                .push(("pt", if f == "br" { "BR" } else { "PT" }));
             keep[i] = false;
         }
-        let channels = f.len() == 3 && f.as_bytes()[1] == b'.' && f.as_bytes()[0].is_ascii_digit() && f.as_bytes()[2].is_ascii_digit();
+        let channels = f.len() == 3
+            && f.as_bytes()[1] == b'.'
+            && f.as_bytes()[0].is_ascii_digit()
+            && f.as_bytes()[2].is_ascii_digit();
         let digit = f.len() == 1 && f.as_bytes()[0].is_ascii_digit();
-        if PLAIN.contains(&f.as_str()) || channels || digit || f.chars().all(|c| !c.is_alphanumeric()) {
+        if PLAIN.contains(&f.as_str())
+            || channels
+            || digit
+            || f.chars().all(|c| !c.is_alphanumeric())
+        {
             keep[i] = false;
         }
     }
@@ -354,13 +921,21 @@ fn read_name(name: &str) -> Said {
         .iter()
         .zip(&keep)
         .filter(|(_, k)| **k)
-        .map(|(w, _)| w.trim_matches(|c: char| !c.is_alphanumeric() && c != '\'' && c != '!' && c != '.'))
+        .map(|(w, _)| {
+            w.trim_matches(|c: char| !c.is_alphanumeric() && c != '\'' && c != '!' && c != '.')
+        })
         .filter(|w| !w.is_empty())
         .collect();
-    while rest.first().is_some_and(|w| JOINERS.contains(&fold(w).as_str())) {
+    while rest
+        .first()
+        .is_some_and(|w| JOINERS.contains(&fold(w).as_str()))
+    {
         rest.remove(0);
     }
-    while rest.last().is_some_and(|w| JOINERS.contains(&fold(w).as_str())) {
+    while rest
+        .last()
+        .is_some_and(|w| JOINERS.contains(&fold(w).as_str()))
+    {
         rest.pop();
     }
     said.rest = rest.join(" ");
@@ -413,7 +988,14 @@ pub fn names(tracks: &[TrackInfo]) -> Vec<NewName> {
                 if t.kind == TrackKind::Video {
                     new.name.clear();
                 }
-                return Work { base: String::new(), details: Vec::new(), rest: String::new(), apart: String::new(), new, named: false };
+                return Work {
+                    base: String::new(),
+                    details: Vec::new(),
+                    rest: String::new(),
+                    apart: String::new(),
+                    new,
+                    named: false,
+                };
             }
             let said = read_name(&t.name);
             let (code, tag_region) = t.lang.split_once(['-', '_']).unwrap_or((&t.lang, ""));
@@ -424,9 +1006,18 @@ pub fn names(tracks: &[TrackInfo]) -> Vec<NewName> {
             }
             let two = lang.map_or("", |l| l.two);
             let region = region_of_tag(two, tag_region)
-                .or_else(|| ["pob", "ptb"].contains(&code.to_ascii_lowercase().as_str()).then_some("BR"))
+                .or_else(|| {
+                    ["pob", "ptb"]
+                        .contains(&code.to_ascii_lowercase().as_str())
+                        .then_some("BR")
+                })
                 .or_else(|| (code.eq_ignore_ascii_case("spl")).then_some("419"))
-                .or_else(|| said.regions.iter().find(|(l, _)| *l == two).map(|(_, r)| *r));
+                .or_else(|| {
+                    said.regions
+                        .iter()
+                        .find(|(l, _)| *l == two)
+                        .map(|(_, r)| *r)
+                });
             let mut base = lang.map(|l| l.own.to_string()).unwrap_or_default();
             if let Some(r) = region {
                 let n = region_name(two, r);
@@ -471,7 +1062,14 @@ pub fn names(tracks: &[TrackInfo]) -> Vec<NewName> {
                     .collect::<Vec<_>>()
                     .join(" ")
             };
-            Work { base, details, rest: if lang.is_some() { rest } else { String::new() }, apart, new, named: true }
+            Work {
+                base,
+                details,
+                rest: if lang.is_some() { rest } else { String::new() },
+                apart,
+                new,
+                named: true,
+            }
         })
         .collect();
 
@@ -532,11 +1130,24 @@ mod tests {
     use super::*;
 
     fn audio(lang: &str, name: &str, codec: &str, ch: u32) -> TrackInfo {
-        TrackInfo { kind: TrackKind::Audio, lang: lang.into(), name: name.into(), codec: codec.into(), channels: ch, ..Default::default() }
+        TrackInfo {
+            kind: TrackKind::Audio,
+            lang: lang.into(),
+            name: name.into(),
+            codec: codec.into(),
+            channels: ch,
+            ..Default::default()
+        }
     }
 
     fn sub(lang: &str, name: &str, codec: &str) -> TrackInfo {
-        TrackInfo { kind: TrackKind::Subtitle, lang: lang.into(), name: name.into(), codec: codec.into(), ..Default::default() }
+        TrackInfo {
+            kind: TrackKind::Subtitle,
+            lang: lang.into(),
+            name: name.into(),
+            codec: codec.into(),
+            ..Default::default()
+        }
     }
 
     fn got(t: &[TrackInfo]) -> Vec<String> {
@@ -546,7 +1157,11 @@ mod tests {
     #[test]
     fn languages_regions_and_details() {
         let t = [
-            TrackInfo { kind: TrackKind::Video, name: "Encoded by GROUP www.site.com".into(), ..Default::default() },
+            TrackInfo {
+                kind: TrackKind::Video,
+                name: "Encoded by GROUP www.site.com".into(),
+                ..Default::default()
+            },
             audio("eng", "English 5.1 - www.site.com", "AC3", 6),
             sub("por", "Portuguese (Brazil) [site.to]", "SRT"),
             sub("pt-BR", "Forced", "SRT"),
@@ -602,7 +1217,14 @@ mod tests {
         ];
         assert_eq!(
             got(&t),
-            ["Português – Fulano", "Português – Beltrano", "English – ASS", "English – SRT", "Français – 1", "Français – 2"]
+            [
+                "Português – Fulano",
+                "Português – Beltrano",
+                "English – ASS",
+                "English – SRT",
+                "Français – 1",
+                "Français – 2"
+            ]
         );
     }
 
@@ -619,13 +1241,25 @@ mod tests {
         ];
         assert_eq!(
             got(&t),
-            ["Español (España)", "Español", "Norsk", "English – Commentary", "English", "Português (Brasil) – Forçada", "English – SDH"]
+            [
+                "Español (España)",
+                "Español",
+                "Norsk",
+                "English – Commentary",
+                "English",
+                "Português (Brasil) – Forçada",
+                "English – SDH"
+            ]
         );
     }
 
     #[test]
     fn undetermined_told_by_name() {
-        let n = names(&[sub("und", "Brazilian Portuguese", "SRT"), sub("", "", "SRT"), audio("und", "Track 1", "AAC", 2)]);
+        let n = names(&[
+            sub("und", "Brazilian Portuguese", "SRT"),
+            sub("", "", "SRT"),
+            audio("und", "Track 1", "AAC", 2),
+        ]);
         assert_eq!(n[0].name, "Português (Brasil)");
         assert_eq!(n[0].lang, Some("por"));
         assert_eq!(n[1].name, "");
@@ -635,14 +1269,24 @@ mod tests {
 
     #[test]
     fn words_kept_without_language() {
-        let n = names(&[sub("und", "Signs & Songs", "ASS"), audio("und", "Original Mix", "FLAC", 2)]);
+        let n = names(&[
+            sub("und", "Signs & Songs", "ASS"),
+            audio("und", "Original Mix", "FLAC", 2),
+        ]);
         assert_eq!(n[0].name, "Signs & songs");
         assert_eq!(n[1].name, "Original Mix");
     }
 
     #[test]
     fn addresses() {
-        for w in ["site.com", "www.x.org", "@grupo", "https://a.b/c", "Legendas.TV", "[site.net]"] {
+        for w in [
+            "site.com",
+            "www.x.org",
+            "@grupo",
+            "https://a.b/c",
+            "Legendas.TV",
+            "[site.net]",
+        ] {
             assert!(is_address(w), "{w}");
         }
         for w in ["5.1", "Vol.2", "Dr.", "Ch.1", "St."] {

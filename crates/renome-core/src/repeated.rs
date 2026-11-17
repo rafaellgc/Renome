@@ -129,16 +129,20 @@ fn keys(f: &FileEntry) -> Option<(Kind, Vec<String>)> {
         let ep = crate::tv::parse(&f.stem, &folder);
         // A bare number is an episode's only when it is not a year (a
         // film's name has one).
-        let numbered = ep
-            .number
-            .is_some_and(|n| !(1900..=2100).contains(&n) && crate::tmdb::guess(&f.stem).year.is_none());
+        let numbered = ep.number.is_some_and(|n| {
+            !(1900..=2100).contains(&n) && crate::tmdb::guess(&f.stem).year.is_none()
+        });
         if !ep.episodes.is_empty() || ep.date.is_some() || numbered {
             // The show: in the name, else the folder (above a season's).
             let mut show = joined(&ep.show);
             if show.is_empty() {
                 let up = f.path.parent();
                 let season = crate::tv::folder_season(&folder).is_some();
-                let dir = if season { up.and_then(Path::parent) } else { up };
+                let dir = if season {
+                    up.and_then(Path::parent)
+                } else {
+                    up
+                };
                 show = dir
                     .and_then(|d| d.file_name())
                     .map(|n| joined(&crate::tmdb::guess(&n.to_string_lossy()).title))
@@ -211,7 +215,10 @@ fn keys(f: &FileEntry) -> Option<(Kind, Vec<String>)> {
         (!series.is_empty()).then(|| format!("comic:{series}:{volume}:{number}"))
     };
     if comic_file || ext == "pdf" || ext == "epub" {
-        if let Some(info) = f.comic_info().filter(|i| !i.series.is_empty() && !i.number.is_empty()) {
+        if let Some(info) = f
+            .comic_info()
+            .filter(|i| !i.series.is_empty() && !i.number.is_empty())
+        {
             // `volume` holds a volume number or the series' first year.
             let vol = info.volume.trim();
             let vol = if vol.len() == 4 { "" } else { vol };
@@ -229,9 +236,10 @@ fn keys(f: &FileEntry) -> Option<(Kind, Vec<String>)> {
         if own && !g.number.is_empty() {
             let vol = g.volume.map(|v| v.to_string()).unwrap_or_default();
             // From a PDF's or EPUB's name: as weak as a book's name.
-            out.extend(issue(&g.series, &vol, &g.number).map(|k| {
-                if comic_file { k } else { format!("book:{k}") }
-            }));
+            out.extend(
+                issue(&g.series, &vol, &g.number)
+                    .map(|k| if comic_file { k } else { format!("book:{k}") }),
+            );
         }
     }
     if comic_file {
@@ -298,7 +306,9 @@ fn best(kind: Kind, files: &[&FileEntry]) -> Option<PathBuf> {
             top = z;
         }
     }
-    let differ = sorted.iter().any(|f| score(f) != score(top) || f.ext != top.ext);
+    let differ = sorted
+        .iter()
+        .any(|f| score(f) != score(top) || f.ext != top.ext);
     differ.then(|| top.path.clone())
 }
 
@@ -364,7 +374,11 @@ pub fn same_works(
             return None;
         }
         let first = identical.get(&files[members[0]].path);
-        if first.is_some() && members.iter().all(|&i| identical.get(&files[i].path) == first) {
+        if first.is_some()
+            && members
+                .iter()
+                .all(|&i| identical.get(&files[i].path) == first)
+        {
             continue;
         }
         let kind = kinds[members[0]].unwrap();
@@ -394,7 +408,9 @@ pub fn same_works(
                 Item {
                     path: f.path.clone(),
                     size: f.size,
-                    picture: v.map(|v| format!("{}×{}", v.width, v.height)).unwrap_or_default(),
+                    picture: v
+                        .map(|v| format!("{}×{}", v.width, v.height))
+                        .unwrap_or_default(),
                     codec: v.map(|v| v.codec.clone()).unwrap_or_default(),
                 }
             })
@@ -479,7 +495,10 @@ mod tests {
                 ),
                 (
                     Kind::Comic,
-                    vec!["Hero #12.cbz".to_string(), "Hero 012 (2015).cbr".to_string()],
+                    vec![
+                        "Hero #12.cbz".to_string(),
+                        "Hero 012 (2015).cbr".to_string()
+                    ],
                     Some("Hero #12.cbz".to_string())
                 ),
                 (

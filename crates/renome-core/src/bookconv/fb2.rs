@@ -1184,11 +1184,19 @@ fn valid_sections(body: &str) -> String {
         let mut out = Vec::with_capacity(kids.len());
         for k in std::mem::take(kids) {
             match k {
-                Piece::Elem { name, open, kids: inner } if name == "cite" || name == "epigraph" => {
+                Piece::Elem {
+                    name,
+                    open,
+                    kids: inner,
+                } if name == "cite" || name == "epigraph" => {
                     let (pics, rest): (Vec<Piece>, Vec<Piece>) =
                         inner.into_iter().partition(|k| k.name() == Some("image"));
                     if rest.iter().any(|k| !k.blank()) || pics.is_empty() {
-                        out.push(Piece::Elem { name, open, kids: rest });
+                        out.push(Piece::Elem {
+                            name,
+                            open,
+                            kids: rest,
+                        });
                     }
                     out.extend(pics);
                 }
@@ -1707,7 +1715,8 @@ mod tests {
             valid_sections(body),
             "<body><section><title><p>A</p><p>B</p></title><cite><p>q</p></cite><image l:href=\"#i\"/><image l:href=\"#j\"/><p>x</p></section></body>"
         );
-        let two = "<body><section><image l:href=\"#a\"/><image l:href=\"#b\"/><p>x</p></section></body>";
+        let two =
+            "<body><section><image l:href=\"#a\"/><image l:href=\"#b\"/><p>x</p></section></body>";
         assert_eq!(
             valid_sections(two),
             "<body><section><image l:href=\"#a\"/><empty-line/><image l:href=\"#b\"/><p>x</p></section></body>"

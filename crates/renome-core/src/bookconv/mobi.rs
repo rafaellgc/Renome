@@ -102,7 +102,10 @@ pub fn read(path: &Path) -> Result<Book, String> {
         // Pages of pictures laid out as they are (a comic), and their
         // direction.
         // (a file with both parts may say it in the older one's header).
-        for h in [r.read(at, 64 << 10), r.read(0, 64 << 10)].into_iter().flatten() {
+        for h in [r.read(at, 64 << 10), r.read(0, 64 << 10)]
+            .into_iter()
+            .flatten()
+        {
             book.fixed |= exth(&h, 122).is_some_and(|v| v == b"true");
             book.rtl |= exth(&h, 527).is_some_and(|v| v == b"rtl");
         }

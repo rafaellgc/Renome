@@ -531,7 +531,11 @@ impl Subsource {
         }
     }
 
-    async fn send(&self, path: &str, query: &[(&str, String)]) -> Result<reqwest::Response, String> {
+    async fn send(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<reqwest::Response, String> {
         {
             let mut last = LAST_SUBSOURCE.lock().await;
             if let Some(t) = *last {
@@ -585,7 +589,10 @@ impl Subsource {
                     .as_array()
                     .into_iter()
                     .flatten()
-                    .find(|m| item.season.is_none_or(|s| m["season"].as_u64() == Some(u64::from(s))))
+                    .find(|m| {
+                        item.season
+                            .is_none_or(|s| m["season"].as_u64() == Some(u64::from(s)))
+                    })
                     .and_then(|m| m["movieId"].as_u64())
             }
         };
@@ -620,7 +627,9 @@ impl Subsource {
             ];
             let v = self.get("/subtitles", &q).await?;
             for s in v["data"].as_array().into_iter().flatten() {
-                let Some(id) = s["subtitleId"].as_u64() else { continue };
+                let Some(id) = s["subtitleId"].as_u64() else {
+                    continue;
+                };
                 // Machine translations and foreign parts only are left out.
                 let kind = s["productionType"].as_str().unwrap_or_default();
                 if kind == "machine" || kind == "forced" || s["foreignParts"] == true {
@@ -638,8 +647,13 @@ impl Subsource {
                 // An episode's: those naming another episode are left out
                 // (season packs, naming none, stay).
                 if let (Some(se), Some(ep)) = (item.season, item.episode) {
-                    let read: Vec<_> = releases.iter().map(|r| renome_core::tv::parse(r, "")).collect();
-                    let named = read.iter().any(|g| g.season.is_some() && !g.episodes.is_empty());
+                    let read: Vec<_> = releases
+                        .iter()
+                        .map(|r| renome_core::tv::parse(r, ""))
+                        .collect();
+                    let named = read
+                        .iter()
+                        .any(|g| g.season.is_some() && !g.episodes.is_empty());
                     let ours = read.iter().any(|g| {
                         g.season.map(u32::from) == Some(se)
                             && g.episodes.iter().any(|&n| u32::from(n) == ep)
@@ -670,7 +684,9 @@ impl Subsource {
     }
 
     async fn download(&self, c: &Candidate) -> Result<Vec<u8>, String> {
-        let r = self.send(&format!("/subtitles/{}/download", c.id), &[]).await?;
+        let r = self
+            .send(&format!("/subtitles/{}/download", c.id), &[])
+            .await?;
         let b = r.bytes().await.map_err(|e| net_error("subsource", &e))?;
         Ok(b.to_vec())
     }
@@ -739,7 +755,9 @@ pub async fn search(
         http: http.clone(),
         key: auth.subdl_key.clone(),
     });
-    let subsource = auth.subsource().then(|| Subsource::new(http.clone(), &auth));
+    let subsource = auth
+        .subsource()
+        .then(|| Subsource::new(http.clone(), &auth));
     let (mut os_ok, mut subdl_ok, mut subsource_ok) = (true, true, true);
     let mut out = Search {
         langs: langs.iter().map(|l| l.tag.clone()).collect(),
@@ -880,18 +898,30 @@ pub async fn write(
         http: http.clone(),
         key: auth.subdl_key.clone(),
     });
-    let subsource = auth.subsource().then(|| Subsource::new(http.clone(), &auth));
+    let subsource = auth
+        .subsource()
+        .then(|| Subsource::new(http.clone(), &auth));
     let (mut os_ok, mut subdl_ok, mut subsource_ok) = (true, true, true);
     let mut out = Written::default();
     let mut items = items;
     if let Some(os) = &os {
-        let first_os = |l: &Vec<Candidate>| l.first().is_some_and(|c| c.source == Source::OpenSubtitles);
-        let need = items.iter().flat_map(|i| &i.langs).filter(|l| first_os(l)).count();
+        let first_os =
+            |l: &Vec<Candidate>| l.first().is_some_and(|c| c.source == Source::OpenSubtitles);
+        let need = items
+            .iter()
+            .flat_map(|i| &i.langs)
+            .filter(|l| first_os(l))
+            .count();
         if need > 0
             && let Some(left) = os.remaining().await
         {
             out.remaining = Some(left);
-            spare_quota(&mut items, left.max(0) as usize, subdl.is_some(), subsource.is_some());
+            spare_quota(
+                &mut items,
+                left.max(0) as usize,
+                subdl.is_some(),
+                subsource.is_some(),
+            );
         }
     }
     let total = items.iter().map(|i| i.langs.len()).sum();
@@ -941,7 +971,8 @@ pub async fn write(
                                     .file_stem()
                                     .map(|n| n.to_string_lossy().into_owned())
                                     .unwrap_or_default();
-                                subs::from_archive(&b, ep, &video).ok_or_else(|| "subsEmpty".to_string())
+                                subs::from_archive(&b, ep, &video)
+                                    .ok_or_else(|| "subsEmpty".to_string())
                             })
                             .map(|(ext, b)| (b, ext)),
                         None => continue,
@@ -957,7 +988,8 @@ pub async fn write(
                                     .file_stem()
                                     .map(|n| n.to_string_lossy().into_owned())
                                     .unwrap_or_default();
-                                subs::from_archive(&b, ep, &video).ok_or_else(|| "subsEmpty".to_string())
+                                subs::from_archive(&b, ep, &video)
+                                    .ok_or_else(|| "subsEmpty".to_string())
                             })
                             .map(|(ext, b)| (b, ext)),
                         None => continue,
@@ -1037,10 +1069,16 @@ fn spare_quota(items: &mut [Write], left: usize, subdl: bool, subsource: bool) {
         Source::Subdl => subdl,
         Source::Subsource => subsource,
     };
-    let first_os = |l: &Vec<Candidate>| l.first().is_some_and(|c| c.source == Source::OpenSubtitles);
-    let mut need = items.iter().flat_map(|i| &i.langs).filter(|l| first_os(l)).count();
+    let first_os =
+        |l: &Vec<Candidate>| l.first().is_some_and(|c| c.source == Source::OpenSubtitles);
+    let mut need = items
+        .iter()
+        .flat_map(|i| &i.langs)
+        .filter(|l| first_os(l))
+        .count();
     // Videos in order, and in each the languages as asked: the most wanted first.
-    let mut lists: Vec<&mut Vec<Candidate>> = items.iter_mut().flat_map(|i| i.langs.iter_mut()).collect();
+    let mut lists: Vec<&mut Vec<Candidate>> =
+        items.iter_mut().flat_map(|i| i.langs.iter_mut()).collect();
     for list in lists.iter_mut().rev() {
         if need <= left {
             break;
@@ -1136,24 +1174,40 @@ mod tests {
     use super::*;
 
     fn c(source: Source, lang: &str) -> Candidate {
-        Candidate { source, lang: lang.into(), ..Default::default() }
+        Candidate {
+            source,
+            lang: lang.into(),
+            ..Default::default()
+        }
     }
 
     fn firsts(items: &[Write]) -> Vec<(String, Source)> {
-        items.iter().flat_map(|i| &i.langs).map(|l| (l[0].lang.clone(), l[0].source)).collect()
+        items
+            .iter()
+            .flat_map(|i| &i.langs)
+            .map(|l| (l[0].lang.clone(), l[0].source))
+            .collect()
     }
 
     #[test]
     fn short_quota_goes_to_the_most_wanted() {
         let os = Source::OpenSubtitles;
-        let video = |langs| Write { path: "v.mkv".into(), season: None, episode: None, langs };
+        let video = |langs| Write {
+            path: "v.mkv".into(),
+            season: None,
+            episode: None,
+            langs,
+        };
         // pt-BR only on OpenSubtitles, English also on SubDL; one download left.
         let mut items = vec![video(vec![
             vec![c(os, "pt-BR"), c(os, "pt-BR")],
             vec![c(os, "en"), c(Source::Subdl, "en")],
         ])];
         spare_quota(&mut items, 1, true, false);
-        assert_eq!(firsts(&items), [("pt-BR".to_string(), os), ("en".to_string(), Source::Subdl)]);
+        assert_eq!(
+            firsts(&items),
+            [("pt-BR".to_string(), os), ("en".to_string(), Source::Subdl)]
+        );
         // Without a SubDL key, nothing changes.
         let mut same = vec![video(vec![vec![c(os, "en"), c(Source::Subdl, "en")]])];
         spare_quota(&mut same, 0, false, false);

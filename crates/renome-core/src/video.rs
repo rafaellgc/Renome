@@ -310,7 +310,11 @@ pub fn length(path: &Path) -> Option<f64> {
             let n = f.read(&mut buf).ok()?;
             let buf = &buf[..n];
             let at = buf.windows(4).position(|w| w == b"avih")? + 8;
-            let le32 = |o: usize| Some(u32::from_le_bytes(buf.get(at + o..at + o + 4)?.try_into().ok()?));
+            let le32 = |o: usize| {
+                Some(u32::from_le_bytes(
+                    buf.get(at + o..at + o + 4)?.try_into().ok()?,
+                ))
+            };
             // Microseconds per frame, then (three fields on) the frames.
             f64::from(le32(0)?) * f64::from(le32(16)?) / 1e6
         }
@@ -621,7 +625,9 @@ fn recorded_in(moov: &[u8]) -> Option<Recorded> {
     if out.gps.is_none()
         && let Some(xyz) = child(moov, b"udta").and_then(|u| child(u, b"\xa9xyz"))
     {
-        out.gps = xyz.get(4..).and_then(|t| iso6709(&String::from_utf8_lossy(t)));
+        out.gps = xyz
+            .get(4..)
+            .and_then(|t| iso6709(&String::from_utf8_lossy(t)));
     }
     if out.at.is_none()
         && let Some(mvhd) = child(moov, b"mvhd")
@@ -841,7 +847,9 @@ mod tests {
     #[test]
     #[ignore]
     fn probe_length() {
-        let Ok(dir) = std::env::var("RENOME_LENGTH_PROBE") else { return };
+        let Ok(dir) = std::env::var("RENOME_LENGTH_PROBE") else {
+            return;
+        };
         for e in walkdir::WalkDir::new(dir).into_iter().flatten() {
             if e.file_type().is_file()
                 && let Some(l) = length(e.path())
@@ -881,7 +889,10 @@ mod tests {
         .concat();
         let mkv = [
             el(&[0x1a, 0x45, 0xdf, 0xa3], &el(&[0x42, 0x82], b"matroska")),
-            el(&[0x18, 0x53, 0x80, 0x67], &el(&[0x15, 0x49, 0xa9, 0x66], &info)),
+            el(
+                &[0x18, 0x53, 0x80, 0x67],
+                &el(&[0x15, 0x49, 0xa9, 0x66], &info),
+            ),
         ]
         .concat();
         let p = d.path().join("a.mkv");
@@ -972,7 +983,11 @@ mod tests {
             mp4_box(b"ftyp", b"isom\0\0\0\0"),
             mp4_box(
                 b"moov",
-                &[mp4_box(b"mvhd", &mvhd), mp4_box(b"udta", &mp4_box(b"\xa9xyz", &xyz))].concat(),
+                &[
+                    mp4_box(b"mvhd", &mvhd),
+                    mp4_box(b"udta", &mp4_box(b"\xa9xyz", &xyz)),
+                ]
+                .concat(),
             ),
         ]
         .concat();

@@ -155,7 +155,10 @@ impl Cond {
                     .checked_mul(12)
                     .and_then(|m| now.checked_sub_months(chrono::Months::new(m))),
             };
-            return Some(then.map(|t| Cond::Age(op, t.timestamp())).ok_or_else(|| format!("invalidFilter: {term}")));
+            return Some(
+                then.map(|t| Cond::Age(op, t.timestamp()))
+                    .ok_or_else(|| format!("invalidFilter: {term}")),
+            );
         }
         if !unit.is_empty() {
             let Some(times) = size_unit(unit) else {
@@ -167,11 +170,19 @@ impl Cond {
             if !n.is_finite() || n < 0.0 {
                 return Some(bad());
             }
-            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss)]
+            #[allow(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                clippy::cast_precision_loss
+            )]
             let bytes = (n * times as f64).round() as u64;
             return Some(Ok(Cond::Size(op, bytes)));
         }
-        Some(period(rest).map(|(a, b)| Cond::Date(op, a, b)).ok_or_else(|| format!("invalidFilter: {term}")))
+        Some(
+            period(rest)
+                .map(|(a, b)| Cond::Date(op, a, b))
+                .ok_or_else(|| format!("invalidFilter: {term}")),
+        )
     }
 
     fn holds(self, size: Option<u64>, modified: Option<i64>) -> bool {
@@ -288,7 +299,11 @@ fn folder_term(term: &str) -> Option<&str> {
 /// (a folder added by itself: its own) down, folded.
 fn folders_of(file: &crate::files::FileEntry) -> Vec<String> {
     let top = file.base.parent().unwrap_or(&file.base);
-    let rel = file.dir.strip_prefix(top).ok().filter(|r| !r.as_os_str().is_empty());
+    let rel = file
+        .dir
+        .strip_prefix(top)
+        .ok()
+        .filter(|r| !r.as_os_str().is_empty());
     match rel {
         Some(rel) => rel
             .components()
@@ -384,7 +399,11 @@ impl Filter {
             };
             if let Some(folder) = folder_term(&term) {
                 let t = FolderTerm::new(folder)?;
-                if exclude { no_folders.push(t) } else { folders.push(t) }
+                if exclude {
+                    no_folders.push(t)
+                } else {
+                    folders.push(t)
+                }
                 continue;
             }
             if !quoted && let Some(cond) = Cond::parse(&term) {
@@ -548,7 +567,8 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join(name);
         std::fs::write(&p, b"").unwrap();
-        let mut f = crate::files::FileEntry::from_path(&p, &std::fs::metadata(&p).unwrap()).unwrap();
+        let mut f =
+            crate::files::FileEntry::from_path(&p, &std::fs::metadata(&p).unwrap()).unwrap();
         f.size = size;
         f.modified = modified;
         f
@@ -557,7 +577,12 @@ mod tests {
     #[test]
     fn sizes_and_dates() {
         use chrono::TimeZone;
-        let at = |y, m, d| chrono::Local.with_ymd_and_hms(y, m, d, 12, 0, 0).unwrap().timestamp();
+        let at = |y, m, d| {
+            chrono::Local
+                .with_ymd_and_hms(y, m, d, 12, 0, 0)
+                .unwrap()
+                .timestamp()
+        };
         let big = entry("Filme.mkv", 2 << 30, Some(at(2024, 5, 12)));
         let sample = entry("Filme-sample.mkv", 30 << 20, Some(at(2023, 12, 31)));
         let take = |text: &str, f: &crate::files::FileEntry| Filter::new(text).unwrap().takes(f);
@@ -594,9 +619,16 @@ mod tests {
         assert!(take("<7d", &new) && !take("<7d", &old));
         assert!(take(">1a", &old) && !take(">1 ano", &new));
         assert!(take("> 2 semanas", &old) && take("<1w", &new));
-        assert!(take(">3mes", &old) && take("<1 month", &new) && take("<4días", &new) && !take("<2 días", &new));
+        assert!(
+            take(">3mes", &old)
+                && take("<1 month", &new)
+                && take("<4días", &new)
+                && !take("<2 días", &new)
+        );
         assert!(take("-<7d", &old));
-        for bad in [">", ">10XB", ">abc", ">2024-13", ">20-1", "<-5MB", "=7d", ">3m", ">40M"] {
+        for bad in [
+            ">", ">10XB", ">abc", ">2024-13", ">20-1", "<-5MB", "=7d", ">3m", ">40M",
+        ] {
             assert!(Filter::new(bad).is_err(), "{bad}");
         }
     }

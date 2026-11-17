@@ -42,9 +42,10 @@ impl Codec {
         match id {
             "S_TEXT/UTF8" | "S_TEXT/ASCII" => Codec::Srt,
             "S_TEXT/ASS" | "S_TEXT/SSA" | "S_ASS" | "S_SSA" => Codec::Ass,
-            "S_TEXT/WEBVTT" | "D_WEBVTT/SUBTITLES" | "D_WEBVTT/CAPTIONS" | "D_WEBVTT/DESCRIPTIONS" => {
-                Codec::Vtt
-            }
+            "S_TEXT/WEBVTT"
+            | "D_WEBVTT/SUBTITLES"
+            | "D_WEBVTT/CAPTIONS"
+            | "D_WEBVTT/DESCRIPTIONS" => Codec::Vtt,
             _ => Codec::Other,
         }
     }
@@ -108,7 +109,9 @@ fn is_matroska(path: &Path) -> bool {
 }
 
 fn text(data: &[u8]) -> String {
-    String::from_utf8_lossy(data).trim_end_matches('\0').to_string()
+    String::from_utf8_lossy(data)
+        .trim_end_matches('\0')
+        .to_string()
 }
 
 /// The subtitle tracks of a Matroska video (none for other files).
@@ -410,7 +413,8 @@ fn scan(
             };
             // A cluster of unknown size ends at the next element that is
             // not one of its own.
-            if cluster_end.is_none() && !matches!(cid, 0xe7 | 0xa7 | 0xab | 0xa3 | 0xa0 | 0xaf | 0xbf | 0xec)
+            if cluster_end.is_none()
+                && !matches!(cid, 0xe7 | 0xa7 | 0xab | 0xa3 | 0xa0 | 0xaf | 0xbf | 0xec)
             {
                 pending = Some((cid, clen, ch));
                 break;
@@ -531,7 +535,11 @@ fn file_text(track: &Track, events: &[Event]) -> String {
         .iter()
         .map(|e| {
             let data = decode_block(&track.coding, &e.data).unwrap_or_else(|| e.data.clone());
-            (e.start, e.duration, String::from_utf8_lossy(&data).replace("\r\n", "\n"))
+            (
+                e.start,
+                e.duration,
+                String::from_utf8_lossy(&data).replace("\r\n", "\n"),
+            )
         })
         .collect();
     let mut sorted = decoded;
@@ -566,7 +574,11 @@ fn file_text(track: &Track, events: &[Event]) -> String {
                     continue;
                 }
                 n += 1;
-                s.push_str(&format!("{n}\n{} --> {}\n{t}\n\n", ms(*a, ','), ms(*b, ',')));
+                s.push_str(&format!(
+                    "{n}\n{} --> {}\n{t}\n\n",
+                    ms(*a, ','),
+                    ms(*b, ',')
+                ));
             }
             s
         }
@@ -617,7 +629,11 @@ fn file_text(track: &Track, events: &[Event]) -> String {
                     let order: i64 = p.next()?.trim().parse().ok()?;
                     let layer = p.next()?.trim();
                     let rest = p.next()?.trim_end_matches('\n');
-                    Some((order, *a, format!("Dialogue: {layer},{},{},{rest}", cs(*a), cs(*b))))
+                    Some((
+                        order,
+                        *a,
+                        format!("Dialogue: {layer},{},{},{rest}", cs(*a), cs(*b)),
+                    ))
                 })
                 .collect();
             lines.sort_by_key(|l| (l.0, l.1));
@@ -651,14 +667,23 @@ fn lang_tag(lang: &str) -> Option<String> {
 /// The files the text tracks of `video` would be written to: those in
 /// `langs` (all when empty), named after the video with their language,
 /// `.forced` and `.sdh`; those taken already left out.
-pub fn targets(video: &Path, tracks: &[Track], langs: &[Lang], to_srt: bool) -> Vec<(u64, PathBuf)> {
+pub fn targets(
+    video: &Path,
+    tracks: &[Track],
+    langs: &[Lang],
+    to_srt: bool,
+) -> Vec<(u64, PathBuf)> {
     let stem = video
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
     let mut out: Vec<(u64, PathBuf)> = Vec::new();
     for t in tracks.iter().filter(|t| t.readable()) {
-        if !langs.is_empty() && !langs.iter().any(|l| crate::subtitles::same_lang(&t.lang, l)) {
+        if !langs.is_empty()
+            && !langs
+                .iter()
+                .any(|l| crate::subtitles::same_lang(&t.lang, l))
+        {
             continue;
         }
         let ext = if to_srt { "srt" } else { t.codec.ext() };
@@ -846,7 +871,12 @@ pub(crate) mod tests {
         let mut c1 = uint(0xe7, 1000);
         c1.extend(simple(1, 0, &[0u8; 300]));
         c1.extend(group(2, 0, 1500, "Olá, mundo".as_bytes()));
-        c1.extend(group(3, 500, 1000, &zl(b"0,0,Default,,0,0,0,,{\\i1}Hi{\\i0}")));
+        c1.extend(group(
+            3,
+            500,
+            1000,
+            &zl(b"0,0,Default,,0,0,0,,{\\i1}Hi{\\i0}"),
+        ));
         c1.extend(simple(1, 40, &[0u8; 300]));
         let mut c2 = uint(0xe7, 5000);
         c2.extend(group(2, 0, 2000, b"<i>[MUSIC]</i>\r\nSecond"));
@@ -907,7 +937,14 @@ pub(crate) mod tests {
             to_srt: true,
             ..Default::default()
         };
-        extract(&p, &srt_tools, &crate::subtitles::langs("en"), &|| false, &|_, _| {}).unwrap();
+        extract(
+            &p,
+            &srt_tools,
+            &crate::subtitles::langs("en"),
+            &|| false,
+            &|_, _| {},
+        )
+        .unwrap();
         let s = std::fs::read_to_string(d.path().join("Movie.en.forced.srt")).unwrap();
         assert!(s.contains("00:00:01,500 --> 00:00:02,500\r\n<i>Hi</i>"));
     }
@@ -915,12 +952,16 @@ pub(crate) mod tests {
     #[test]
     fn laced_frames() {
         // Xiph lacing: 3 frames of 2, 3 and 1 bytes.
-        let data = [0x81, 0, 0, 0x02, 2, 2, 3, b'a', b'b', b'c', b'd', b'e', b'f'];
+        let data = [
+            0x81, 0, 0, 0x02, 2, 2, 3, b'a', b'b', b'c', b'd', b'e', b'f',
+        ];
         let (t, rel, parts) = frames(&data).unwrap();
         assert_eq!((t, rel), (1, 0));
         assert_eq!(parts, [&b"ab"[..], b"cde", b"f"]);
         // EBML lacing: 2 + (3) + rest.
-        let data = [0x81, 0, 0, 0x06, 2, 0x82, 0xbf, b'a', b'b', b'c', b'd', b'e', b'f'];
+        let data = [
+            0x81, 0, 0, 0x06, 2, 0x82, 0xbf, b'a', b'b', b'c', b'd', b'e', b'f',
+        ];
         let (_, _, parts) = frames(&data).unwrap();
         assert_eq!(parts, [&b"ab"[..], b"cd", b"ef"]);
     }

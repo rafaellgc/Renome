@@ -692,7 +692,8 @@ fn name_capitals(g: &Guess, title: &str) -> String {
             .collect();
         for (i, w) in words.iter().enumerate() {
             let short = (2..=5).contains(&w.chars().count());
-            let alone = !(i > 0 && caps(words[i - 1])) && !words.get(i + 1).is_some_and(|n| caps(n));
+            let alone =
+                !(i > 0 && caps(words[i - 1])) && !words.get(i + 1).is_some_and(|n| caps(n));
             if short && caps(w) && alone && !acronyms.iter().any(|a| a == w) {
                 acronyms.push(w.to_string());
             }
@@ -1431,7 +1432,8 @@ pub fn book_name(template: &str, m: &BookMatch, colon: &str) -> String {
 /// Whether a template uses one of these keys (`{parte}`, `{part:3}`).
 fn has_key(template: &str, keys: &[&str]) -> bool {
     let t = template.to_lowercase();
-    keys.iter().any(|k| t.contains(&format!("{{{k}}}")) || t.contains(&format!("{{{k}:")))
+    keys.iter()
+        .any(|k| t.contains(&format!("{{{k}}}")) || t.contains(&format!("{{{k}:")))
 }
 
 /// Removes what missing values leave behind: `()`, `[]`, `#`, and dashes
@@ -2044,13 +2046,28 @@ mod tests {
 
     #[test]
     fn acronyms_from_the_name() {
-        let g = guess("Os EUA e a Nova Ordem Mundial - Um Debate - Alexandre Dugin", &BookMeta::default());
-        assert_eq!(name_capitals(&g, "Os Eua e a Nova Ordem Mundial"), "Os EUA e a Nova Ordem Mundial");
+        let g = guess(
+            "Os EUA e a Nova Ordem Mundial - Um Debate - Alexandre Dugin",
+            &BookMeta::default(),
+        );
+        assert_eq!(
+            name_capitals(&g, "Os Eua e a Nova Ordem Mundial"),
+            "Os EUA e a Nova Ordem Mundial"
+        );
         // A name in capitals is shouting: its words stay as the catalogue has them.
-        let g = guess("O SEGREDO DOS GIRASSOIS - Adriana Matheus", &BookMeta::default());
-        assert_eq!(name_capitals(&g, "O Segredo dos Girassóis"), "O Segredo dos Girassóis");
+        let g = guess(
+            "O SEGREDO DOS GIRASSOIS - Adriana Matheus",
+            &BookMeta::default(),
+        );
+        assert_eq!(
+            name_capitals(&g, "O Segredo dos Girassóis"),
+            "O Segredo dos Girassóis"
+        );
         let g = guess("Historia da URSS vol II - Ana Prado", &BookMeta::default());
-        assert_eq!(name_capitals(&g, "História da Urss, Vol. Ii"), "História da URSS, Vol. II");
+        assert_eq!(
+            name_capitals(&g, "História da Urss, Vol. Ii"),
+            "História da URSS, Vol. II"
+        );
     }
 
     #[test]
@@ -2193,15 +2210,32 @@ mod tests {
             parts: 12,
             ..Default::default()
         };
-        assert_eq!(book_name("{autor} - {título}", &m, " - "), "Lia Marta Quaresma - Ecos - 03");
+        assert_eq!(
+            book_name("{autor} - {título}", &m, " - "),
+            "Lia Marta Quaresma - Ecos - 03"
+        );
         assert_eq!(book_name("{parte} - {título}", &m, " - "), "03 - Ecos");
-        assert_eq!(book_name("{título} {{narrador}}", &m, " - ").contains("Tomé Rocha"), true);
-        let long = BookMatch { part: 7, parts: 140, ..m.clone() };
+        assert_eq!(
+            book_name("{título} {{narrador}}", &m, " - ").contains("Tomé Rocha"),
+            true
+        );
+        let long = BookMatch {
+            part: 7,
+            parts: 140,
+            ..m.clone()
+        };
         assert_eq!(book_name("{título}", &long, " - "), "Ecos - 007");
         // One file: no part; the folders never get one.
-        let one = BookMatch { part: 1, parts: 1, ..m.clone() };
+        let one = BookMatch {
+            part: 1,
+            parts: 1,
+            ..m.clone()
+        };
         assert_eq!(book_name("{título}", &one, " - "), "Ecos");
-        assert_eq!(folders("{autor}/{título}", &m, " - "), vec!["Lia Marta Quaresma", "Ecos"]);
+        assert_eq!(
+            folders("{autor}/{título}", &m, " - "),
+            vec!["Lia Marta Quaresma", "Ecos"]
+        );
     }
 
     #[test]

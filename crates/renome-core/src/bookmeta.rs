@@ -205,7 +205,10 @@ fn fb2_write(bytes: &[u8], v: &BookValues) -> Result<Option<Vec<u8>>, String> {
         ours.insert("author", v.authors.iter().map(|a| author_xml(a)).collect());
     }
     if !v.title.is_empty() {
-        ours.insert("book-title", vec![format!("<book-title>{}</book-title>", esc(&v.title))]);
+        ours.insert(
+            "book-title",
+            vec![format!("<book-title>{}</book-title>", esc(&v.title))],
+        );
     }
     if !v.year.is_empty() {
         ours.insert("date", vec![format!("<date>{}</date>", esc(&v.year))]);
@@ -221,18 +224,33 @@ fn fb2_write(bytes: &[u8], v: &BookValues) -> Result<Option<Vec<u8>>, String> {
             .parse::<u32>()
             .map(|n| format!(" number=\"{n}\""))
             .unwrap_or_default();
-        ours.insert("sequence", vec![format!("<sequence name=\"{}\"{number}/>", esc(&v.series))]);
+        ours.insert(
+            "sequence",
+            vec![format!("<sequence name=\"{}\"{number}/>", esc(&v.series))],
+        );
     }
     const TITLE: &[&str] = &[
-        "genre", "author", "book-title", "annotation", "keywords", "date", "coverpage", "lang",
-        "src-lang", "translator", "sequence",
+        "genre",
+        "author",
+        "book-title",
+        "annotation",
+        "keywords",
+        "date",
+        "coverpage",
+        "lang",
+        "src-lang",
+        "translator",
+        "sequence",
     ];
     let new_title = rebuild(&text, title_info, TITLE, &ours, "      ");
     let mut edits: Vec<(std::ops::Range<usize>, String)> = vec![(title_info.range(), new_title)];
 
     let mut pub_ours: HashMap<&str, Vec<String>> = HashMap::new();
     if !v.publisher.is_empty() {
-        pub_ours.insert("publisher", vec![format!("<publisher>{}</publisher>", esc(&v.publisher))]);
+        pub_ours.insert(
+            "publisher",
+            vec![format!("<publisher>{}</publisher>", esc(&v.publisher))],
+        );
     }
     if !v.year.is_empty() {
         pub_ours.insert("year", vec![format!("<year>{}</year>", esc(&v.year))]);
@@ -256,7 +274,10 @@ fn fb2_write(bytes: &[u8], v: &BookValues) -> Result<Option<Vec<u8>>, String> {
                 .map(|e| format!("\n      {e}"))
                 .collect();
             let at = after.range().end;
-            edits.push((at..at, format!("\n    <publish-info>{items}\n    </publish-info>")));
+            edits.push((
+                at..at,
+                format!("\n    <publish-info>{items}\n    </publish-info>"),
+            ));
         }
         None => {}
     }
@@ -304,7 +325,9 @@ fn pdb_records(b: &[u8]) -> Option<Vec<usize>> {
         offs.push(be32(b, 78 + i * 8)? as usize);
     }
     offs.push(b.len());
-    offs.windows(2).all(|w| w[0] <= w[1] && w[1] <= b.len()).then_some(offs)
+    offs.windows(2)
+        .all(|w| w[0] <= w[1] && w[1] <= b.len())
+        .then_some(offs)
 }
 
 /// Encrypted (DRM): never touched.
@@ -425,10 +448,19 @@ fn kindle_write(b: &[u8], v: &BookValues) -> Result<Option<Vec<u8>>, String> {
     let first = kindle_header(&records[0], v).ok_or("bookUnreadable")?;
     // The KF8 part of a combined book: EXTH 121 says where it starts.
     let boundary = exth_value(&records[0], 121)
-        .and_then(|d| d.get(..4).map(|x| u32::from_be_bytes(x.try_into().unwrap()) as usize))
+        .and_then(|d| {
+            d.get(..4)
+                .map(|x| u32::from_be_bytes(x.try_into().unwrap()) as usize)
+        })
         .filter(|&i| i > 0 && i < n)
         // The header itself, or the `BOUN` record just before it.
-        .map(|i| if records[i].starts_with(b"BOUN") { i + 1 } else { i })
+        .map(|i| {
+            if records[i].starts_with(b"BOUN") {
+                i + 1
+            } else {
+                i
+            }
+        })
         .filter(|&i| i < n);
     records[0] = first;
     if let Some(i) = boundary
@@ -572,7 +604,8 @@ pub fn polish(
             format!("{opf_dir}/{href}")
         }
     };
-    let old_opf = String::from_utf8(read(&mut zip, &opf_name)?).map_err(|_| "notUtf8".to_string())?;
+    let old_opf =
+        String::from_utf8(read(&mut zip, &opf_name)?).map_err(|_| "notUtf8".to_string())?;
     let mut opf = match values {
         Some(v) => crate::inside::book_opf(&old_opf, v).unwrap_or_else(|| old_opf.clone()),
         None => old_opf.clone(),
@@ -581,14 +614,20 @@ pub fn polish(
     let mut added: Vec<(String, Vec<u8>)> = Vec::new();
     let mut replaced: HashMap<String, Vec<u8>> = HashMap::new();
     if p.epub3
-        && let Some((new_opf, nav)) = to_epub3(&opf, &mut |href| read(&mut zip, &joined(href)).ok(), &names, &joined)
+        && let Some((new_opf, nav)) = to_epub3(
+            &opf,
+            &mut |href| read(&mut zip, &joined(href)).ok(),
+            &names,
+            &joined,
+        )
     {
         opf = new_opf;
         added.push(nav);
     }
     let mut saved_bytes = 0u64;
     if p.shrink {
-        let doc = roxmltree::Document::parse(opf.trim_start_matches('\u{feff}')).map_err(|e| e.to_string())?;
+        let doc = roxmltree::Document::parse(opf.trim_start_matches('\u{feff}'))
+            .map_err(|e| e.to_string())?;
         let pictures: Vec<String> = doc
             .descendants()
             .filter(|n| n.has_tag_name("item"))
@@ -596,7 +635,9 @@ pub fn polish(
             .filter_map(|n| n.attribute("href").map(&joined))
             .collect();
         for name in pictures {
-            let Ok(old) = read(&mut zip, &name) else { continue };
+            let Ok(old) = read(&mut zip, &name) else {
+                continue;
+            };
             if let Some(new) = smaller(&old) {
                 saved_bytes += (old.len() - new.len()) as u64;
                 replaced.insert(name, new);
@@ -621,7 +662,8 @@ pub fn polish(
             let name = f.name().map_err(|e| e.to_string())?.into_owned();
             if name == opf_name {
                 drop(f);
-                zout.start_file(&name, deflated).map_err(|e| e.to_string())?;
+                zout.start_file(&name, deflated)
+                    .map_err(|e| e.to_string())?;
                 zout.write_all(opf.as_bytes()).map_err(|e| e.to_string())?;
             } else if let Some(b) = replaced.get(&name) {
                 drop(f);
@@ -714,7 +756,10 @@ fn to_epub3(
     }
     let manifest = pkg.children().find(|n| n.has_tag_name("manifest"))?;
     let metadata = pkg.children().find(|n| n.has_tag_name("metadata"))?;
-    let items: Vec<roxmltree::Node> = manifest.children().filter(|n| n.has_tag_name("item")).collect();
+    let items: Vec<roxmltree::Node> = manifest
+        .children()
+        .filter(|n| n.has_tag_name("item"))
+        .collect();
     let ncx = items
         .iter()
         .find(|n| n.attribute("media-type") == Some("application/x-dtbncx+xml"))?;
@@ -733,7 +778,10 @@ fn to_epub3(
     // Links in the NCX are relative to it; the page sits beside the OPF.
     let ncx_dir = ncx_href.rsplit_once('/').map_or("", |(d, _)| d);
     fn points(n: roxmltree::Node, dir: &str, depth: usize, out: &mut String) {
-        let kids: Vec<roxmltree::Node> = n.children().filter(|c| c.has_tag_name("navPoint")).collect();
+        let kids: Vec<roxmltree::Node> = n
+            .children()
+            .filter(|c| c.has_tag_name("navPoint"))
+            .collect();
         if kids.is_empty() || depth > 8 {
             return;
         }
@@ -757,7 +805,11 @@ fn to_epub3(
                 format!("{dir}/{src}")
             };
             let label = if label.is_empty() { "—" } else { label };
-            out.push_str(&format!("<li><a href=\"{}\">{}</a>", esc(&href), esc(label)));
+            out.push_str(&format!(
+                "<li><a href=\"{}\">{}</a>",
+                esc(&href),
+                esc(label)
+            ));
             points(p, dir, depth + 1, out);
             out.push_str("</li>");
         }
@@ -800,7 +852,10 @@ fn to_epub3(
     let q = open_tag[vpos..].find(['"', '\''])? + vpos;
     let quote = &open_tag[q..q + 1];
     let vend = open_tag[q + 1..].find(quote)? + q + 1;
-    edits.push(((pkg_open.start + q + 1)..(pkg_open.start + vend), "3.0".into()));
+    edits.push((
+        (pkg_open.start + q + 1)..(pkg_open.start + vend),
+        "3.0".into(),
+    ));
     // The navigation page in the manifest.
     let man_end = at(manifest.range()).end;
     let close = opf[..man_end].rfind("</")?;
@@ -822,7 +877,11 @@ fn to_epub3(
     {
         let r = at(item.range());
         let tag = &opf[r.clone()];
-        let end = if tag.ends_with("/>") { r.end - 2 } else { r.start + tag.find('>')? };
+        let end = if tag.ends_with("/>") {
+            r.end - 2
+        } else {
+            r.start + tag.find('>')?
+        };
         edits.push((end..end, " properties=\"cover-image\"".into()));
     }
     // EPUB 3 wants a modification date.
@@ -833,7 +892,10 @@ fn to_epub3(
         let meta_end = at(metadata.range()).end;
         let close = opf[..meta_end].rfind("</")?;
         let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
-        edits.push((close..close, format!("  <meta property=\"dcterms:modified\">{now}</meta>\n  ")));
+        edits.push((
+            close..close,
+            format!("  <meta property=\"dcterms:modified\">{now}</meta>\n  "),
+        ));
     }
     edits.sort_by_key(|e| e.0.start);
     let mut out = String::with_capacity(opf.len() + 512);
@@ -892,7 +954,10 @@ mod tests {
         assert!(text.contains("<first-name>Ana Maria</first-name><last-name>Souza</last-name>"));
         assert!(text.contains("<nickname>Rui</nickname>"));
         // Not in windows-1251: a numeric reference.
-        assert!(text.contains("<book-title>T&#237;tulo Novo</book-title>") || text.contains("Título Novo"));
+        assert!(
+            text.contains("<book-title>T&#237;tulo Novo</book-title>")
+                || text.contains("Título Novo")
+        );
         assert!(text.contains("<sequence name=\"Saga\" number=\"2\"/>"));
         assert!(text.contains("<publish-info>"));
         assert!(text.contains("<isbn>9780000000002</isbn>"));
@@ -931,7 +996,11 @@ mod tests {
         let back = crate::bookconv::mobi::read(&p).unwrap();
         assert_eq!(back.meta.title, "Título Novo");
         assert_eq!(back.meta.authors, ["Ana Maria Souza", "Rui"]);
-        assert!(back.chapters.iter().any(|c| c.body.contains("Hello there.")));
+        assert!(
+            back.chapters
+                .iter()
+                .any(|c| c.body.contains("Hello there."))
+        );
         // The text records are where they were, shifted as a whole.
         let ro = pdb_records(&old).unwrap();
         let rn = pdb_records(&new).unwrap();
@@ -945,10 +1014,14 @@ mod tests {
         let p = d.path().join("b.epub");
         // An EPUB 2 with a large picture.
         let big = {
-            let img = image::RgbImage::from_fn(3000, 2000, |x, y| image::Rgb([(x % 256) as u8, (y % 256) as u8, 90]));
+            let img = image::RgbImage::from_fn(3000, 2000, |x, y| {
+                image::Rgb([(x % 256) as u8, (y % 256) as u8, 90])
+            });
             let mut b = Vec::new();
             image::DynamicImage::ImageRgb8(img)
-                .write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(&mut b, 95))
+                .write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(
+                    &mut b, 95,
+                ))
                 .unwrap();
             b
         };
@@ -971,7 +1044,8 @@ mod tests {
 <navPoint id="p2" playOrder="2"><navLabel><text>Part</text></navLabel><content src="Text/c1.xhtml#a"/></navPoint></navPoint></navMap></ncx>"#;
         {
             let mut z = zip::ZipWriter::new(File::create(&p).unwrap());
-            let st = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+            let st = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
             z.start_file("mimetype", st).unwrap();
             z.write_all(b"application/epub+zip").unwrap();
             for (n, b) in [
@@ -988,22 +1062,40 @@ mod tests {
         }
         let old = fs::read(&p).unwrap();
         let store = d.path().join("store");
-        let done = polish(&p, Polish { epub3: true, shrink: true }, Some(&values()), &store).unwrap();
+        let done = polish(
+            &p,
+            Polish {
+                epub3: true,
+                shrink: true,
+            },
+            Some(&values()),
+            &store,
+        )
+        .unwrap();
         assert!(done.saved_bytes > 0);
         let mut z = zip::ZipArchive::new(File::open(&p).unwrap()).unwrap();
         assert_eq!(z.by_index(0).unwrap().name().unwrap(), "mimetype");
         let mut s = String::new();
-        z.by_name("OEBPS/content.opf").unwrap().read_to_string(&mut s).unwrap();
+        z.by_name("OEBPS/content.opf")
+            .unwrap()
+            .read_to_string(&mut s)
+            .unwrap();
         assert!(s.contains("version=\"3.0\""));
         assert!(s.contains("properties=\"nav\""));
         assert!(s.contains("properties=\"cover-image\""));
         assert!(s.contains("dcterms:modified"));
         assert!(s.contains("Título Novo"));
         let mut nav = String::new();
-        z.by_name("OEBPS/nav.xhtml").unwrap().read_to_string(&mut nav).unwrap();
+        z.by_name("OEBPS/nav.xhtml")
+            .unwrap()
+            .read_to_string(&mut nav)
+            .unwrap();
         assert!(nav.contains("<a href=\"Text/c1.xhtml\">Chapter &amp; One</a><ol><li><a href=\"Text/c1.xhtml#a\">Part</a>"));
         let mut pic = Vec::new();
-        z.by_name("OEBPS/Images/cover.jpg").unwrap().read_to_end(&mut pic).unwrap();
+        z.by_name("OEBPS/Images/cover.jpg")
+            .unwrap()
+            .read_to_end(&mut pic)
+            .unwrap();
         let (w, h) = image::ImageReader::new(std::io::Cursor::new(&pic))
             .with_guessed_format()
             .unwrap()
@@ -1018,7 +1110,16 @@ mod tests {
         crate::subtext::restore(&p, b.saved.as_ref().unwrap(), &store).unwrap();
         assert_eq!(fs::read(&p).unwrap(), old);
         // Nothing to do on an EPUB 3 without large pictures.
-        let none = polish(&p, Polish { epub3: false, shrink: false }, None, &store).unwrap();
+        let none = polish(
+            &p,
+            Polish {
+                epub3: false,
+                shrink: false,
+            },
+            None,
+            &store,
+        )
+        .unwrap();
         assert!(none.backup.is_none());
     }
 }
