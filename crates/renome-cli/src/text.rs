@@ -782,6 +782,14 @@ const CLI: &[(&str, [&str; 3])] = &[
         ],
     ),
     (
+        "keyStoreWouldNot",
+        [
+            "{name} guardada no arquivo de opções: o chaveiro do sistema não aceitou gravar (trancado, ou acessado por SSH?).",
+            "{name} stored in the options file: the system's password store would not save it (locked, or reached over SSH?).",
+            "{name} guardada en el archivo de opciones: el almacén de contraseñas del sistema no aceptó guardarla (¿bloqueado, o por SSH?).",
+        ],
+    ),
+    (
         "keyDeleted",
         ["{name} apagada.", "{name} deleted.", "{name} borrada."],
     ),

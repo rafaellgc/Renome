@@ -153,6 +153,29 @@ pub fn write(secrets: &Map<String, Value>) -> bool {
     done.is_ok()
 }
 
+/// The fields of `mine` that differ from what the store held when last
+/// read (all of them when it was not read): what a store that refused to
+/// write would lose, kept in the settings file instead. The rest stays
+/// only in the store, never copied out in plain text.
+pub fn unsaved(mine: &Map<String, Value>) -> Map<String, Value> {
+    let seen = STORED
+        .lock()
+        .unwrap()
+        .as_deref()
+        .and_then(parse)
+        .unwrap_or_default();
+    let text = |m: &Map<String, Value>, k: &str| {
+        m.get(k)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    mine.iter()
+        .filter(|(k, _)| text(mine, k) != text(&seen, k))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+}
+
 /// What the store holds `now`, with the fields of `mine` that differ from
 /// what was `seen` there (empty ones removed).
 fn merged(
@@ -191,6 +214,15 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), Value::from(*v)))
             .collect()
+    }
+
+    #[test]
+    fn a_refused_store_lends_the_file_only_what_changed() {
+        *STORED.lock().unwrap() = Some(r#"{"tmdbKey":"a","osKey":"b"}"#.into());
+        let mine = serde_json::json!({"tmdbKey": "a", "osKey": "", "subdlKey": "c"});
+        let got = unsaved(mine.as_object().unwrap());
+        assert_eq!(Value::Object(got), serde_json::json!({"osKey": "", "subdlKey": "c"}));
+        *STORED.lock().unwrap() = None;
     }
 
     #[test]

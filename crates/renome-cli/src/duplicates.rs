@@ -76,7 +76,7 @@ pub fn command(m: &ArgMatches, settings: Option<&Value>) -> Result<Exit, String>
     };
     let progress = |what: &'static str| {
         move |done: u64, total: u64| {
-            if !out::quiet() && total > 0 {
+            if out::live() && total > 0 {
                 eprint!("\r{}   ", t(what, &[("p", &(done * 100 / total))]));
                 if done == total {
                     eprintln!();

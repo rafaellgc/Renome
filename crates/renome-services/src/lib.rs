@@ -245,16 +245,21 @@ pub fn save_secrets(secrets: serde_json::Map<String, Value>) -> Result<bool, Str
     let _file = SETTINGS_FILE.lock().unwrap();
     let mut file = read_settings_file().unwrap_or_else(|| Value::Object(Default::default()));
     if let Some(obj) = file.as_object_mut() {
+        // A store that refused keeps what it had; only what differs from
+        // it goes to the file (the secrets given already carry the file's,
+        // see load_secrets).
+        let keep = if stored {
+            Default::default()
+        } else {
+            secrets::unsaved(&secrets)
+        };
         for k in secrets::FIELDS {
             obj.remove(k);
         }
-        if !stored {
-            obj.extend(
-                secrets
-                    .into_iter()
-                    .filter(|(_, v)| v.as_str().is_some_and(|s| !s.is_empty())),
-            );
-        }
+        obj.extend(
+            keep.into_iter()
+                .filter(|(_, v)| v.as_str().is_some_and(|s| !s.is_empty())),
+        );
     }
     write_settings_file(&file)?;
     Ok(stored)

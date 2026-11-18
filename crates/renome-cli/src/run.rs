@@ -386,7 +386,7 @@ fn rename(
         .collect();
     let shown = std::cell::Cell::new(false);
     let progress = |done: u64, total: u64| {
-        if !out::quiet() && total > 0 {
+        if out::live() && total > 0 {
             eprint!("\r{}%", done * 100 / total);
             shown.set(true);
         }

@@ -47,7 +47,7 @@ pub fn undo(m: &ArgMatches) -> Result<Exit, String> {
     }
     let _lock = renome_services::RenameLock::take(|| out::note(&t("waitingWindow", &[])))?;
     let progress = |done: u64, total: u64| {
-        if !out::quiet() && total > 0 {
+        if out::live() && total > 0 {
             eprint!("\r{}%", done * 100 / total);
         }
     };
@@ -854,11 +854,17 @@ pub fn keys(m: &ArgMatches) -> Result<Exit, String> {
                     .trim()
                     .to_string()
             };
-            let (mut all, _) = secrets()?;
+            let (mut all, had_store) = secrets()?;
             all.insert((*field).into(), Value::from(value));
             let stored = renome_services::save_secrets(all)?;
             out::note(&t(
-                if stored { "keyStored" } else { "keyInFile" },
+                match (stored, had_store) {
+                    (true, _) => "keyStored",
+                    // The store answered when read but refused the write
+                    // (macOS over SSH, a locked keychain).
+                    (false, true) => "keyStoreWouldNot",
+                    (false, false) => "keyInFile",
+                },
                 &[("name", name)],
             ));
         }
@@ -884,21 +890,30 @@ pub fn keys(m: &ArgMatches) -> Result<Exit, String> {
             out::note(&t("keyDeleted", &[("name", name)]));
         }
         _ => {
-            let (all, in_store) = secrets()?;
-            let where_ = t(
-                if in_store {
-                    "keyWhereStore"
-                } else {
-                    "keyWhereFile"
-                },
-                &[],
-            );
+            let (all, store) = secrets()?;
+            // Keys the store did not take stay in the settings file.
+            let in_file = renome_services::read_settings_file()
+                .and_then(|s| s.as_object().map(renome_services::secrets::of))
+                .unwrap_or_default();
             let mut list = Vec::new();
             for (name, field) in KEYS {
                 let set = all
                     .get(*field)
                     .and_then(Value::as_str)
                     .is_some_and(|v| !v.is_empty());
+                let in_store = store
+                    && !in_file
+                        .get(*field)
+                        .and_then(Value::as_str)
+                        .is_some_and(|v| !v.is_empty());
+                let where_ = t(
+                    if in_store {
+                        "keyWhereStore"
+                    } else {
+                        "keyWhereFile"
+                    },
+                    &[],
+                );
                 if out::json() {
                     list.push(json!({ "name": name, "set": set, "store": set && in_store }));
                 } else if set {

@@ -38,7 +38,7 @@ pub struct Cli;
 
 impl Host for Cli {
     fn report(&self, event: &str, payload: Value) {
-        if out::quiet() {
+        if !out::live() {
             return;
         }
         let (Some(done), Some(total)) = (

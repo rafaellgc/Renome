@@ -30,6 +30,13 @@ pub fn quiet() -> bool {
     QUIET.load(Ordering::Relaxed) || json()
 }
 
+/// Whether progress lines (rewritten in place with `\r`) are shown: not
+/// when quiet, nor when the errors go to a file or a pipe, where they
+/// would pile up.
+pub fn live() -> bool {
+    !quiet() && std::io::stderr().is_terminal()
+}
+
 fn paint(code: &str, s: &str) -> String {
     if COLOR.load(Ordering::Relaxed) {
         format!("\x1b[{code}m{s}\x1b[0m")
