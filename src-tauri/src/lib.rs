@@ -1643,15 +1643,30 @@ async fn subtitle_tools(
     Ok(report)
 }
 
-/// Reads each book's details and looks it up on Open Library.
+/// The book rule's search (the flow the command line runs too): books
+/// and audiobooks not `settled`, sure ones picked.
 #[tauri::command]
-async fn book_lookup(
+async fn books_search(
     app: AppHandle,
     lang: String,
-    items: Vec<openlibrary::LookupItem>,
-) -> Result<Vec<openlibrary::Lookup>, String> {
+    items: Vec<renome_services::flow::Item>,
+    settled: Vec<PathBuf>,
+    audiobooks: bool,
+) -> Result<renome_services::flow::books::Outcome, String> {
     let ol = &app.state::<AppState>().ol;
-    Ok(openlibrary::lookup(&Gui(app.clone()), ol, &lang, items).await)
+    let settled: HashSet<PathBuf> = settled.into_iter().collect();
+    renome_services::flow::books::search(&Gui(app.clone()), ol, &lang, &items, &settled, audiobooks)
+        .await
+}
+
+/// Each file's book as the rule names it, from the books chosen.
+#[tauri::command]
+fn book_matches(
+    chosen: Vec<renome_services::flow::books::Chosen>,
+    parts: HashMap<PathBuf, renome_services::flow::books::Part>,
+    audiobooks: bool,
+) -> HashMap<PathBuf, renome_core::books::BookMatch> {
+    renome_services::flow::books::matches(&chosen, &parts, audiobooks)
 }
 
 /// A search typed in the book review.
@@ -1673,16 +1688,6 @@ async fn book_search(
         ..Default::default()
     };
     Ok(app.state::<AppState>().ol.find(&guess, &lang).await?.0)
-}
-
-/// What each book says about itself (its details and name), as a start
-/// for typing them in; `names` are the names the rule reads (stems).
-/// The audiobooks these audio files make (see [`renome_core::audiobook`]).
-#[tauri::command]
-async fn audiobook_groups(paths: Vec<PathBuf>) -> Vec<renome_core::audiobook::AudioBook> {
-    tauri::async_runtime::spawn_blocking(move || renome_core::audiobook::group(&paths))
-        .await
-        .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -2199,7 +2204,6 @@ pub fn run() {
             subsource_check,
             server_check,
             server_libraries,
-            audiobook_groups,
             server_tell,
             update_check,
             update_install,
@@ -2213,7 +2217,8 @@ pub fn run() {
             write_audiobook_tags,
             playlist_dirs,
             cover_dirs,
-            book_lookup,
+            books_search,
+            book_matches,
             book_search,
             comic_guesses,
             book_guesses,

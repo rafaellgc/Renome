@@ -4,30 +4,12 @@
 
 import { modelOf, screenMm } from "../readers";
 import { api } from "$lib/api";
-import { authorSpellings } from "$lib/authors";
 import { notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
 import { isAudio, isBook, splitExt } from "$lib/rules";
 import { tmdbLang } from "$lib/settings.svelte";
-import type { AudioBook, BookCandidate, BookGuess, BookMatch, BookState, BookTarget, EditField } from "$lib/types";
+import type { BookCandidate, BookGuess, BookMatch, BookPart, BookState, BookTarget, EditField } from "$lib/types";
 import { counts, isEpub, moved, ruleOf, without, type PageCtx, isWritableBook } from "./common";
-
-/** What the rule uses of a chosen book: the edition's publisher and ISBN
- *  only when it was found by the file's ISBN (otherwise they would be
- *  another edition's), else the file's own. */
-function bookMatch(b: BookState): BookMatch {
-  const c = b.choice!;
-  return {
-    work: c.work, title: c.title, originalTitle: c.originalTitle, authors: c.authors, year: c.year,
-    editionYear: c.exact ? c.editionYear : null,
-    publisher: c.exact ? c.publisher : b.guess.publisher,
-    isbn: c.exact ? c.isbn : (b.guess.isbns[0] ?? ""),
-    series: b.guess.series, seriesIndex: b.guess.seriesIndex,
-    extra: Object.fromEntries(
-      [["language", c.exact ? c.language : b.guess.language || c.language], ["pages", c.pages ? String(c.pages) : ""]].filter(([, v]) => v),
-    ),
-  };
-}
 
 /** A book as the file says it is (its details and name), to type over. */
 function fromGuess(g: BookGuess): BookMatch {
@@ -39,14 +21,11 @@ function fromGuess(g: BookGuess): BookMatch {
 }
 const NO_GUESS: BookGuess = { title: "", author: "", year: null, isbns: [], fromFile: false, series: "", seriesIndex: "", publisher: "", language: "" };
 
-/** An audiobook's file: the file its book is looked up by (its first),
- *  its place among the book's files and what its tags say. */
-interface Part { leader: string; part: number; parts: number; narrator: string; series: string; seriesIndex: string }
 
 export class Books {
   #ctx: PageCtx;
   /** Audiobooks' files, by path. */
-  parts = $state<Record<string, Part>>({});
+  parts = $state<Record<string, BookPart>>({});
   /** Results and choices per file. */
   state = $state<Record<string, BookState>>({});
   /** Books whose details were typed in (over what the catalogue said). */
@@ -78,23 +57,18 @@ export class Books {
   leads(p: string) {
     return (this.parts[p]?.leader ?? p) === p;
   }
-  /** Each book's details for naming and writing: chosen (one spelling per
-   *  author across the list) or typed in. */
-  matches = $derived.by(() => {
-    const raw = Object.entries(this.state).filter(([p, b]) => b.choice && (this.audio || !isAudio(p))).map(([p, b]): [string, BookMatch] => [p, bookMatch(b)]);
-    const spelling = authorSpellings(raw.flatMap(([, m]) => m.authors));
-    const same = (a: string) => spelling.get(a.normalize("NFC")) ?? a.normalize("NFC");
-    const out: Record<string, BookMatch> = Object.fromEntries(
-      raw.map(([p, m]) => [p, { ...m, title: m.title.normalize("NFC"), authors: [...new Set(m.authors.map(same))] }]),
-    );
-    // An audiobook's files: its book, their part and what their tags say.
-    for (const [p, g] of this.audio ? Object.entries(this.parts) : []) {
-      const m = out[g.leader];
-      if (m && !this.edits[p])
-        out[p] = { ...m, narrator: g.narrator, part: g.part, parts: g.parts, series: m.series || g.series, seriesIndex: m.seriesIndex || g.seriesIndex };
-    }
-    return { ...out, ...this.edits };
-  });
+  /** Each chosen book's details as the rule names it (made by the shared
+   *  flow: one spelling per author across the list, an audiobook's files
+   *  with their part); rebuilt whenever the choices change. */
+  built = $state<Record<string, BookMatch>>({});
+  /** Each book's details for naming and writing: chosen or typed in. */
+  matches = $derived.by(() => ({ ...this.built, ...this.edits }));
+
+  /** Asks the shared flow for the books' details, from the choices. */
+  async rebuild() {
+    const chosen = Object.entries(this.state).flatMap(([path, b]) => (b.choice ? [{ path, guess: b.guess, choice: b.choice }] : []));
+    this.built = chosen.length ? await api.bookMatches($state.snapshot(chosen), $state.snapshot(this.parts), this.audio) : {};
+  }
   counts = $derived.by(() => counts(this.state, this.#ctx.items));
   /** The books among the rows chosen in the list. */
   selected = $derived.by(() => this.#ctx.items.filter((i) => this.#ctx.selected.has(i.path) && !i.isDir && this.takes(i.original)));
@@ -230,59 +204,31 @@ export class Books {
   }
 
   /** Looks up the visible books without a choice yet on Open Library;
-   *  books picked with confidence are done, the rest go to the review. */
+   *  books picked with confidence are done, the rest go to the review.
+   *  Which files, the audiobooks and what is sure, the shared flow says. */
   async search() {
     const open = (p: string) => this.state[p]?.status !== "auto" && this.state[p]?.status !== "chosen";
-    const items = this.#ctx.items
-      .filter((i) => !i.isDir && isBook(i.original) && open(i.path))
-      .map((i) => ({ path: i.path, name: splitExt(this.#ctx.readName(i))[0] }));
-    // Audiobooks: their files grouped into books, each looked up once by
-    // what its tags and folder say.
-    const audio = this.audio
-      ? this.#ctx.items.filter((i) => !i.isDir && isAudio(i.original) && open(this.parts[i.path]?.leader ?? i.path)).map((i) => i.path)
-      : [];
-    if (audio.length) {
-      let found: AudioBook[] = [];
-      try {
-        found = await api.audiobookGroups(audio);
-      } catch (e) {
-        await notify({ title: t("rule.book"), text: tError(e) });
-        return;
-      }
-      const next = { ...this.parts };
-      for (const b of found) {
-        const leader = b.paths[0];
-        b.paths.forEach((p, n) => {
-          next[p] = { leader, part: n + 1, parts: b.paths.length > 1 ? b.paths.length : 0, narrator: b.narrator, series: b.series, seriesIndex: b.seriesIndex };
-        });
-        const name = `${b.author ? `${b.author} - ` : ""}${b.title}${b.year ? ` (${b.year})` : ""}`;
-        if (b.title || b.author) items.push({ path: leader, name });
-      }
-      this.parts = next;
-    }
-    if (!items.length) {
-      this.#ctx.say(t("bookNoFiles"));
-      return;
-    }
-    this.progress = { done: 0, total: items.length, kind: "search" };
+    const settled = this.#ctx.items.filter((i) => !open(this.parts[i.path]?.leader ?? i.path)).map((i) => i.path);
+    this.progress = { done: 0, total: 0, kind: "search" };
     try {
-      const found = await api.bookLookup(tmdbLang(), items);
-      // Nothing was really searched (no connection): mark nothing.
-      const failed = found.find((f) => f.error);
-      if (failed && found.every((f) => f.error || (!f.guess.title && !f.guess.isbns.length))) {
-        await notify({ title: t("rule.book"), text: tError(failed.error) });
+      const res = await api.booksSearch(tmdbLang(), this.#ctx.items, settled, this.audio);
+      if (res.empty) {
+        this.#ctx.say(t("bookNoFiles"));
         return;
       }
-      for (const f of found) {
+      this.parts = { ...this.parts, ...res.parts };
+      for (const f of res.found) {
         this.state[f.path] = {
           guess: f.guess,
           candidates: f.candidates,
-          choice: f.auto ? f.candidates[0] : null,
-          status: f.auto ? "auto" : f.candidates.length ? "choose" : "none",
+          choice: f.choice,
+          status: f.choice ? "auto" : f.candidates.length ? "choose" : "none",
           error: f.error,
+          group: f.group,
         };
       }
-      if (found.some((f) => !f.auto && f.candidates.length)) this.openReview();
+      await this.rebuild();
+      if (res.found.some((f) => !f.choice && f.candidates.length)) this.openReview();
     } catch (e) {
       await notify({ title: t("rule.book"), text: tError(e) });
     } finally {
@@ -301,9 +247,9 @@ export class Books {
     this.review = queue.length ? queue : null;
   }
 
-  /** The user's pick for a book; undecided files with the same guess (the
-   *  same book in other formats) get it too. */
-  choose(path: string, choice: BookCandidate | null, candidates?: BookCandidate[]) {
+  /** The user's pick for a book; undecided files of its group (the same
+   *  book in other formats) get it too. */
+  async choose(path: string, choice: BookCandidate | null, candidates?: BookCandidate[]) {
     const b = this.state[path];
     if (!b) return;
     const set = (p: string) => {
@@ -311,9 +257,9 @@ export class Books {
     };
     set(path);
     for (const [p, o] of Object.entries(this.state)) {
-      const same = o.guess.title === b.guess.title && o.guess.author === b.guess.author;
-      if (p !== path && same && (o.status === "choose" || o.status === "none")) set(p);
+      if (p !== path && o.group === b.group && (o.status === "choose" || o.status === "none")) set(p);
     }
+    await this.rebuild();
   }
 
   /** Opens the details window on the books chosen in the list. */
@@ -365,6 +311,7 @@ export class Books {
     this.state = paths ? without(this.state, paths) : {};
     this.edits = paths ? without(this.edits, paths) : {};
     this.parts = paths ? without(this.parts, paths) : {};
+    this.built = paths ? without(this.built, paths) : {};
   }
 
   /** The files renamed: what was found and typed follows them. */
@@ -372,15 +319,17 @@ export class Books {
     this.state = moved(this.state, to);
     this.edits = moved(this.edits, to);
     this.parts = Object.fromEntries(Object.entries(moved(this.parts, to)).map(([p, g]) => [p, { ...g, leader: to(g.leader) }]));
+    this.built = moved(this.built, to);
   }
 
   /** What was found, to put back with Ctrl+Z. */
   snapshot() {
-    return { state: this.state, edits: this.edits, parts: this.parts };
+    return { state: this.state, edits: this.edits, parts: this.parts, built: this.built };
   }
   restore(s: ReturnType<Books["snapshot"]>) {
     this.state = s.state;
     this.edits = s.edits;
     this.parts = s.parts;
+    this.built = s.built;
   }
 }

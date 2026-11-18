@@ -460,6 +460,28 @@ export interface BookState {
   choice: BookCandidate | null;
   status: MovieStatus;
   error: string | null;
+  /** Files of one group share the answer given to one of them. */
+  group: string;
+}
+
+/** What the book search found for a book (`choice` when sure). */
+export interface BookFound {
+  path: string;
+  guess: BookGuess;
+  candidates: BookCandidate[];
+  choice: BookCandidate | null;
+  error: string | null;
+  group: string;
+}
+
+/** An audiobook's file: its book's first file, its place and its tags. */
+export interface BookPart {
+  leader: string;
+  part: number;
+  parts: number;
+  narrator: string;
+  series: string;
+  seriesIndex: string;
 }
 
 /** Season and episode. */

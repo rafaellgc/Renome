@@ -1194,66 +1194,15 @@ pub async fn after_music(
     notes
 }
 
-/// One file of an audiobook: its book's first file and its place.
-#[derive(Clone)]
-struct Part {
-    leader: PathBuf,
-    part: u32,
-    parts: u32,
-    narrator: String,
-    series: String,
-    series_index: String,
-}
-
 /// What the book rule found and chose.
 pub struct Books {
     pub ol: renome_services::openlibrary::Client,
     /// What each book (and audiobook's first file) was guessed as, and
     /// the one chosen.
     found: HashMap<PathBuf, (renome_core::books::Guess, renome_core::books::Candidate)>,
-    parts: HashMap<PathBuf, Part>,
+    parts: HashMap<PathBuf, flow::books::Part>,
     /// Each file's book, as the rule names it.
     pub chosen: HashMap<PathBuf, renome_core::books::BookMatch>,
-}
-
-fn book_match(
-    g: &renome_core::books::Guess,
-    c: &renome_core::books::Candidate,
-) -> renome_core::books::BookMatch {
-    let mut extra = renome_core::fields::Extra::new();
-    let language = if c.exact || g.language.is_empty() {
-        c.language.clone()
-    } else {
-        g.language.clone()
-    };
-    if !language.is_empty() {
-        extra.insert("language".into(), language);
-    }
-    if let Some(p) = c.pages {
-        extra.insert("pages".into(), p.to_string());
-    }
-    renome_core::books::BookMatch {
-        work: c.work.clone(),
-        title: c.title.clone(),
-        original_title: c.original_title.clone(),
-        authors: c.authors.clone(),
-        year: c.year,
-        edition_year: if c.exact { c.edition_year } else { None },
-        publisher: if c.exact {
-            c.publisher.clone()
-        } else {
-            g.publisher.clone()
-        },
-        isbn: if c.exact {
-            c.isbn.clone()
-        } else {
-            g.isbns.first().cloned().unwrap_or_default()
-        },
-        series: g.series.clone(),
-        series_index: g.series_index.clone(),
-        extra,
-        ..Default::default()
-    }
 }
 
 fn book_line(c: &renome_core::books::Candidate) -> String {
@@ -1302,106 +1251,40 @@ pub async fn books(
     {
         client.gb.set_key(key);
     }
-    let ext_of = |name: &str| {
-        Path::new(name)
-            .extension()
-            .map(|e| e.to_string_lossy().to_lowercase())
-            .unwrap_or_default()
-    };
-    let mut items: Vec<ol::LookupItem> = preview
-        .items
-        .iter()
-        .filter(|i| !i.is_dir && renome_core::ebook::is_book(&ext_of(&i.original)))
-        .map(|i| {
-            let name = i.lookup_name.clone().unwrap_or_else(|| i.original.clone());
-            let name = Path::new(&name)
-                .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or(name);
-            ol::LookupItem {
-                path: i.path.clone(),
-                name,
-            }
-        })
-        .collect();
-    let mut parts = HashMap::new();
-    if rule
+    let audiobooks = rule
         .get("audiobooks")
         .and_then(Value::as_bool)
-        .unwrap_or(true)
-    {
-        let audio: Vec<PathBuf> = preview
-            .items
-            .iter()
-            .filter(|i| !i.is_dir && renome_core::music::is_audio(&ext_of(&i.original)))
-            .map(|i| i.path.clone())
-            .collect();
-        if !audio.is_empty() {
-            let groups = tokio::task::spawn_blocking(move || renome_core::audiobook::group(&audio))
-                .await
-                .unwrap_or_default();
-            for b in groups {
-                let leader = b.paths[0].clone();
-                let count = b.paths.len() as u32;
-                for (n, p) in b.paths.iter().enumerate() {
-                    parts.insert(
-                        p.clone(),
-                        Part {
-                            leader: leader.clone(),
-                            part: n as u32 + 1,
-                            parts: if count > 1 { count } else { 0 },
-                            narrator: b.narrator.clone(),
-                            series: b.series.clone(),
-                            series_index: b.series_index.clone(),
-                        },
-                    );
-                }
-                if !b.title.is_empty() || !b.author.is_empty() {
-                    let author = if b.author.is_empty() {
-                        String::new()
-                    } else {
-                        format!("{} - ", b.author)
-                    };
-                    let year = b.year.map(|y| format!(" ({y})")).unwrap_or_default();
-                    items.push(ol::LookupItem {
-                        path: leader,
-                        name: format!("{author}{}{year}", b.title),
-                    });
-                }
-            }
-        }
-    }
+        .unwrap_or(true);
+    let items: Vec<flow::Item> = preview.items.iter().map(flow::Item::from).collect();
+    let found = flow::books::search(
+        &Cli,
+        &client,
+        &lang,
+        &items,
+        &Default::default(),
+        audiobooks,
+    )
+    .await
+    .map_err(|e| crate::text::error_text(&e))?;
     let mut out_books = Books {
         ol: ol::Client::default(),
         found: HashMap::new(),
-        parts,
+        parts: found.parts,
         chosen: HashMap::new(),
     };
-    if items.is_empty() {
-        return Ok(out_books);
-    }
-    let found = ol::lookup(&Cli, &client, &lang, items).await;
-    if let Some(failed) = found.iter().find_map(|f| f.error.clone())
-        && found
-            .iter()
-            .all(|f| f.error.is_some() || (f.guess.title.is_empty() && f.guess.isbns.is_empty()))
-    {
-        return Err(crate::text::error_text(&failed));
-    }
-    let mut answered: HashMap<(String, String), Option<renome_core::books::Candidate>> =
-        HashMap::new();
-    for f in found {
+    // Each group asked once: one book in several formats.
+    let mut answered: HashMap<String, Option<renome_core::books::Candidate>> = HashMap::new();
+    for f in found.found {
         let pick = if let Some(text) = ask.picks.get(&f.path) {
             book_search(&client, &lang, text).await?.into_iter().next()
-        } else if f.auto {
-            f.candidates.first().cloned()
+        } else if f.choice.is_some() {
+            f.choice
         } else if ask.choose == Choose::Ask && std::io::stdin().is_terminal() {
-            let key = (f.guess.title.clone(), f.guess.author.clone());
-            match answered.get(&key) {
+            match answered.get(&f.group) {
                 Some(p) => p.clone(),
                 None => {
                     let p = choose_book(&client, &lang, &f.path, &f.guess, f.candidates).await?;
-                    answered.insert(key, p.clone());
+                    answered.insert(f.group.clone(), p.clone());
                     p
                 }
             }
@@ -1412,43 +1295,16 @@ pub async fn books(
             out_books.found.insert(f.path, (f.guess, c));
         }
     }
-    // One spelling per author across the list.
-    let raw: Vec<(PathBuf, renome_core::books::BookMatch)> = out_books
+    let chosen: Vec<flow::books::Chosen> = out_books
         .found
         .iter()
-        .map(|(p, (g, c))| (p.clone(), book_match(g, c)))
+        .map(|(p, (g, c))| flow::books::Chosen {
+            path: p.clone(),
+            guess: g.clone(),
+            choice: c.clone(),
+        })
         .collect();
-    let names: Vec<String> = raw.iter().flat_map(|(_, m)| m.authors.clone()).collect();
-    let spelling = renome_core::books::author_spellings(&names);
-    for (p, mut m) in raw {
-        m.title = renome_core::text::nfc(&m.title);
-        let mut authors: Vec<String> = Vec::new();
-        for a in &m.authors {
-            let a = renome_core::text::nfc(a);
-            let a = spelling.get(&a).cloned().unwrap_or(a);
-            if !authors.contains(&a) {
-                authors.push(a);
-            }
-        }
-        m.authors = authors;
-        out_books.chosen.insert(p, m);
-    }
-    // An audiobook's files take its first file's book, with their part.
-    for (p, g) in out_books.parts.clone() {
-        if let Some(m) = out_books.chosen.get(&g.leader).cloned() {
-            let mut m = m;
-            m.narrator = g.narrator.clone();
-            m.part = g.part;
-            m.parts = g.parts;
-            if m.series.is_empty() {
-                m.series = g.series.clone();
-            }
-            if m.series_index.is_empty() {
-                m.series_index = g.series_index.clone();
-            }
-            out_books.chosen.insert(p, m);
-        }
-    }
+    out_books.chosen = flow::books::matches(&chosen, &out_books.parts, audiobooks);
     out_books.ol = client;
     Ok(out_books)
 }

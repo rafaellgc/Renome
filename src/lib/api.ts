@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AlbumLookup, BookTarget, ComicFormat, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, MbCandidate, SongMatch, HistoryEntry, ListedTrack, EpisodeMatch, MovieFound, PreviewItem, SeriesOutcome, AudioBook, ServerCall, ServerLibrary, UpdateFound, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
+import type { AlbumLookup, BookTarget, ComicFormat, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, MbCandidate, SongMatch, HistoryEntry, ListedTrack, EpisodeMatch, BookFound, BookPart, MovieFound, PreviewItem, SeriesOutcome, AudioBook, ServerCall, ServerLibrary, UpdateFound, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
 
 type Overrides = Record<string, string>;
 
@@ -159,9 +159,13 @@ export const api = {
   metronCheck: (token: string) => invoke<void>("metron_check", { token }),
   gcdAccount: (email: string, password: string) => invoke<void>("gcd_account", { email, password }),
   gcdCheck: (email: string, password: string) => invoke<void>("gcd_check", { email, password }),
-  bookLookup: (lang: string, items: { path: string; name: string }[]) =>
-    invoke<BookLookup[]>("book_lookup", { lang, items }),
-  audiobookGroups: (paths: string[]) => invoke<AudioBook[]>("audiobook_groups", { paths }),
+  /** The book rule's search (shared with the command line). An error
+   *  when nothing could be searched. */
+  booksSearch: (lang: string, items: PreviewItem[], settled: string[], audiobooks: boolean) =>
+    invoke<{ empty: boolean; parts: Record<string, BookPart>; found: BookFound[] }>("books_search", { lang, items, settled, audiobooks }),
+  /** Each file's book as the rule names it, from the books chosen. */
+  bookMatches: (chosen: { path: string; guess: BookGuess; choice: BookCandidate }[], parts: Record<string, BookPart>, audiobooks: boolean) =>
+    invoke<Record<string, BookMatch>>("book_matches", { chosen, parts, audiobooks }),
   bookGuesses: (paths: string[], names: string[]) => invoke<BookGuess[]>("book_guesses", { paths, names }),
   bookSearch: (lang: string, title: string, author: string) =>
     invoke<BookCandidate[]>("book_search", { lang, title, author }),

@@ -4,6 +4,7 @@
 //! that share its answer. The window shows the doubts in its review and
 //! the command line asks them in the terminal; neither decides on its own.
 
+pub mod books;
 pub mod movies;
 pub mod music;
 pub mod series;
