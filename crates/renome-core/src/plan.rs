@@ -1051,6 +1051,7 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
                 None => kind,
             });
         } else if let Some((up, _, _)) = home(&i.dir, own_base)
+            && !audiobooks.contains_key(&up)
             && !goes_along(i, &up)
         {
             i.stays_behind = true;
@@ -3539,7 +3540,7 @@ mod tests {
         }];
         let mut files = entries(&book.join("CD1"), &["faixa 01.mp3"]);
         files.extend(entries(&book.join("CD2"), &["faixa 01.mp3"]));
-        files.extend(entries(&book, &["cover.jpg"]));
+        files.extend(entries(&book, &["cover.jpg", "capa.jpg", "encarte.pdf"]));
         for f in &mut files {
             f.base = book.clone();
         }
@@ -3560,6 +3561,10 @@ mod tests {
         );
         assert_eq!(dest("CD2/faixa 01.mp3"), to.join("Ecos - 02.mp3"));
         assert_eq!(dest("cover.jpg"), to.join("cover.jpg"));
+        // Whatever else the book's folder holds goes too (not only the
+        // pictures a video player reads).
+        assert_eq!(dest("capa.jpg"), to.join("capa.jpg"));
+        assert_eq!(dest("encarte.pdf"), to.join("encarte.pdf"));
     }
 
     #[test]
