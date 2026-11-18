@@ -293,10 +293,13 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   folder before the new name; the folder name is
   checked like a file name. Missing folders are created when renaming,
   recorded in the history entry, and removed by undo when left empty.
-- Files with a movie, episode, book or comic (found in a catalogue) that
-  no rule changed follow it: those named after it (its old stem, then
-  `.`, `-` or a space: `Name.nfo`, `Name-poster.jpg`) get its new stem and
-  go where it goes; and, in a movie's own folder (as above, with one
+- Files with a movie, episode, book or comic (found in a catalogue)
+  follow it: those named after it (its old stem, then `.`, `-` or a
+  space: `Name.nfo`, `Name-poster.jpg`) get its new stem and go where it
+  goes, even when a text rule changed their names (a video is never
+  parted from its `.nfo` and pictures), and stay with it when it stays
+  (a conflict, the same file already there); and, when no rule changed
+  them, in a movie's own folder (as above, with one
   movie), when that movie goes to a new folder (by its rule, or sent to
   another folder), the others go there too (`backdrop.jpg`, `movie.nfo`),
   with their subfolder (`extrafanart/`, two levels at most), when they

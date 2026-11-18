@@ -278,6 +278,10 @@ pub struct PreviewItem {
     /// [`View::trash_ads`]).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub to_trash: bool,
+    /// The work (movie, episode, book, comic) this file is named after and
+    /// goes with (see [`follow_works`]): when the work stays, so does it.
+    #[serde(skip)]
+    pub follows: Option<PathBuf>,
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -842,7 +846,7 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
     let mut ids: HashMap<PathBuf, HashSet<u64>> = HashMap::new();
     // Audiobooks' folders (above disc folders) and their books.
     let mut audiobooks: HashMap<PathBuf, HashSet<String>> = HashMap::new();
-    let mut stems: HashMap<PathBuf, Vec<(String, String, Place)>> = HashMap::new();
+    let mut stems: HashMap<PathBuf, Vec<(String, String, Place, PathBuf)>> = HashMap::new();
     for i in items
         .iter()
         .filter(|i| is_work(i) && i.status != Status::Conflict)
@@ -876,10 +880,12 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
             }
         }
         let (old, new) = (split_name(&i.original).0, split_name(&i.new_name).0);
-        stems
-            .entry(i.dir.clone())
-            .or_default()
-            .push((old.to_string(), new.to_string(), here));
+        stems.entry(i.dir.clone()).or_default().push((
+            old.to_string(),
+            new.to_string(),
+            here,
+            i.path.clone(),
+        ));
     }
     // Each movie folder's files were added with: the movie's.
     let mut added: HashMap<PathBuf, &Path> = items
@@ -953,7 +959,7 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
         Some((dest.join(rel), Some(folder)))
     };
     for i in items.iter_mut() {
-        if i.is_dir || i.manual || is_work(i) || i.new_name != i.original || i.dest.is_some() {
+        if i.is_dir || i.manual || is_work(i) || i.dest.is_some() {
             continue;
         }
         // Named after a work of its folder: the longest stem it starts with.
@@ -961,22 +967,29 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
             .get(&i.dir)
             .into_iter()
             .flatten()
-            .filter(|(old, new, (dest, _))| {
+            .filter(|(old, new, (dest, _), _)| {
                 (old != new || dest.is_some())
                     && i.original.len() > old.len()
                     && i.original.starts_with(old.as_str())
                     && i.original[old.len()..].starts_with(['.', '-', ' '])
             })
-            .max_by_key(|(old, _, _)| old.len())
+            .max_by_key(|(old, _, _, _)| old.len())
             .cloned();
+        // Changed by a rule and named after no work: the rule's. Named
+        // after one, it keeps going with it (a text rule run on every file
+        // must not part a video from its .nfo and pictures).
+        if i.new_name != i.original && named.is_none() {
+            continue;
+        }
         let own_base = base.get(i.path.as_path()).copied();
         if i.release_junk {
             // Stays in the old folder, with what else does not go.
             continue;
-        } else if let Some((old, new, (dest, folder))) = named {
+        } else if let Some((old, new, (dest, folder), work)) = named {
             i.new_name = format!("{new}{}", &i.original[old.len()..]);
             i.dest = dest;
             i.folder = folder;
+            i.follows = Some(work);
         } else if let Some(kind) = i.extra.clone() {
             // In the extras folder next to the movie, whatever folder it
             // was in.
@@ -1670,6 +1683,7 @@ pub fn preview(
                 && !view.episodes.contains_key(&file.path)
                 && crate::extras::release_junk(&file.path, file.size);
             PreviewItem {
+                follows: None,
                 extra,
                 release_junk,
                 to_trash: release_junk
@@ -1876,6 +1890,23 @@ pub fn preview(
                     Problem::Exists
                 },
             );
+        }
+    }
+    // What goes with a work that stays (in conflict, or the same file
+    // already there) stays with it, as it is.
+    let staying: HashSet<PathBuf> = items
+        .iter()
+        .filter(|i| i.status == Status::Conflict)
+        .map(|i| i.path.clone())
+        .collect();
+    for i in items.iter_mut() {
+        if i.follows.as_ref().is_some_and(|w| staying.contains(w)) {
+            i.new_name = i.original.clone();
+            i.dest = None;
+            i.folder = None;
+            i.status = Status::Unchanged;
+            i.problem = None;
+            i.windows_unsafe = false;
         }
     }
 
@@ -3666,6 +3697,73 @@ mod tests {
                 assert_eq!(b.problem, Some(Problem::Exists));
             }
         }
+    }
+
+    #[test]
+    fn an_episodes_nfo_and_pictures_go_with_it_whatever_the_rules() {
+        let d = tempfile::tempdir().unwrap();
+        let season = d.path().join("baixando/Season 01");
+        let lib = d.path().join("Series");
+        fs::create_dir_all(&season).unwrap();
+        fs::create_dir_all(&lib).unwrap();
+        let ep = "Show (2010) - S01E01";
+        let files = entries(
+            &season,
+            &[
+                &format!("{ep}.mkv"),
+                &format!("{ep}.nfo"),
+                &format!("{ep}-thumb.jpg"),
+            ],
+        );
+        // A text rule run on every file first (it takes "(2010)" out).
+        let mut steps: Vec<Step> = vec![
+            serde_json::from_value(serde_json::json!({
+                "enabled": true,
+                "rule": {"type": "removeRange", "from": "text", "fromText": "(",
+                         "to": "text", "toText": ")", "inclusive": true}
+            }))
+            .unwrap(),
+        ];
+        steps.extend(series_steps());
+        let mut view = View {
+            number_clashes: true,
+            send_to: Some(SendTo {
+                dir: lib.clone(),
+                copy: false,
+            }),
+            ..View::default()
+        };
+        view.episodes.insert(files[0].path.clone(), episode(1));
+        let new = lib.join("Show (2010) [tmdbid-7]/Season 01");
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        let get = |p: &Preview, n: &str| p.items.iter().find(|i| i.original == n).unwrap().clone();
+        assert_eq!(
+            get(&p, &format!("{ep}.nfo")).target(),
+            new.join("Show - S01E01.nfo")
+        );
+        assert_eq!(
+            get(&p, &format!("{ep}-thumb.jpg")).target(),
+            new.join("Show - S01E01-thumb.jpg")
+        );
+        // The same video already there: it stays, and so do they (no
+        // "(2)", nothing left at the library's top).
+        fs::create_dir_all(&new).unwrap();
+        fs::copy(&files[0].path, new.join("Show - S01E01.mkv")).unwrap();
+        fs::write(new.join("Show - S01E01.nfo"), "other").unwrap();
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        assert_eq!(
+            get(&p, &format!("{ep}.mkv")).problem,
+            Some(Problem::SameThere)
+        );
+        for n in [format!("{ep}.nfo"), format!("{ep}-thumb.jpg")] {
+            let i = get(&p, &n);
+            assert_eq!(
+                (i.status, i.target()),
+                (Status::Unchanged, i.path.clone()),
+                "{n}"
+            );
+        }
+        assert_eq!(p.changed, 0);
     }
 
     #[test]
