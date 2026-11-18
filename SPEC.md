@@ -308,8 +308,14 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   movie), when that movie goes to a new folder (by its rule, or sent to
   another folder), the others go there too (`backdrop.jpg`, `movie.nfo`),
   with their subfolder (`extrafanart/`, two levels at most), when they
-  were added with the movie (same folder added). Before "send to another
-  folder" places what is left.
+  were added with the movie (same folder added) and a player uses them:
+  subtitles, `.nfo`, and pictures named as Jellyfin and Kodi read them
+  (`poster`, `folder`, `cover`, `fanart`, `backdrop`, `background`,
+  `logo`, `clearlogo`, `clearart`, `banner`, `disc`, `landscape`,
+  `thumb`, `keyart`, `season…`, `…-poster` and the like, with a number
+  after or not); the other texts and pictures in that folder (release
+  notes, a "Blu-ray" badge) stay in it, also when the files are sent to
+  another folder. Before "send to another folder" places what is left.
 - Movie extras (with the movie rule, `extras.rs`): a video in a folder
   named `Making Of`, `Behind The Scenes`, `Bastidores`, `Trailers`,
   `Featurettes`, `Deleted Scenes`, `Cenas deletadas`, `Interviews`,
@@ -327,7 +333,9 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
 - Release advertisements (with the movie or series rule): `.url`, `.webloc`,
   `.website`; a `.txt` named after a site, or named as a read-me
   (`leia`, `leia-me`, `readme`, `info`, `leeme`…) with a link or a site
-  in its first 64 KiB; an image named after a site; a video under 100 MB
+  in its first 64 KiB, or a how-to about torrents (named with `torrent`,
+  `semear`, `seed`…, or saying "torrent" and seeding or upload in its
+  first 64 KiB); an image named after a site; a video under 100 MB
   named after a site (a site's address with at most four words in all),
   not an extra and not matched to a movie or episode. Not looked up,
   tagged "advert" in the list, and they never follow the movie or the

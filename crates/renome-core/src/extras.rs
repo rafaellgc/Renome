@@ -148,12 +148,38 @@ fn has_links(path: &Path) -> bool {
     text.contains("http://") || text.contains("https://") || SITE.is_match(&text)
 }
 
+/// A release's how-to about torrents (`Como Configurar o Utorrent.txt`,
+/// `O Que é SEMEAR.txt`, `How to seed.txt`): named after them, or a text
+/// about torrents and seeding.
+fn torrent_howto(path: &Path, stem: &str) -> bool {
+    let name = stem.to_lowercase();
+    if ["torrent", "semear", "seed", "seeder", "semeie"]
+        .iter()
+        .any(|w| name.contains(w))
+    {
+        return true;
+    }
+    let Ok(f) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut buf = Vec::new();
+    if f.take(64 * 1024).read_to_end(&mut buf).is_err() {
+        return false;
+    }
+    let text = String::from_utf8_lossy(&buf).to_lowercase();
+    text.contains("torrent")
+        && ["semear", "semeie", "seed", "seeder", "upload"]
+            .iter()
+            .any(|w| text.contains(w))
+}
+
 /// Largest video taken for an advertisement (a real movie is far larger).
 const AD_VIDEO: u64 = 100 * 1024 * 1024;
 
 /// What a release's makers add to advertise themselves: link shortcuts
-/// (`.url`), a "read me" with links (`LEIA-ME.txt`), and a short video or
-/// an image named after a site (`COMANDOTORRENTS.COM.mp4`). A movie's
+/// (`.url`), a "read me" with links (`LEIA-ME.txt`), a how-to about
+/// torrents, and a short video or an image named after a site
+/// (`COMANDOTORRENTS.COM.mp4`). A movie's
 /// extra is never taken for one.
 pub fn release_junk(path: &Path, size: u64) -> bool {
     let ext = path
@@ -166,7 +192,9 @@ pub fn release_junk(path: &Path, size: u64) -> bool {
         .unwrap_or_default();
     match ext.as_str() {
         "url" | "webloc" | "website" => true,
-        "txt" => site_name(&stem) || (read_me(&stem) && has_links(path)),
+        "txt" => {
+            site_name(&stem) || (read_me(&stem) && has_links(path)) || torrent_howto(path, &stem)
+        }
         "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" => site_name(&stem),
         e if crate::tmdb::is_video(e) => {
             size < AD_VIDEO && site_name(&stem) && extra_kind(path).is_none()
@@ -236,5 +264,22 @@ mod tests {
         assert!(!release_junk(&movie, 20 * 1024 * 1024));
         assert!(release_junk(&w("EXEMPLO.COM.png", "x"), 30));
         assert!(!release_junk(&w("poster.jpg", "x"), 30));
+        // How-tos about torrents.
+        assert!(release_junk(
+            &w("Como Configurar o Utorrent ou Bittorrent.txt", "x"),
+            30
+        ));
+        assert!(release_junk(&w("O Que é SEMEAR.txt", "x"), 30));
+        assert!(release_junk(
+            &w(
+                "Leia antes.txt",
+                "Um torrent precisa de quem fique semeando: semear"
+            ),
+            30
+        ));
+        assert!(!release_junk(
+            &w("sinopse.txt", "Um policial vai para o interior."),
+            30
+        ));
     }
 }

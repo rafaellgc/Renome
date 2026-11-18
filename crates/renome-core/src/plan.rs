@@ -290,6 +290,10 @@ pub struct PreviewItem {
     /// when none of them moves, it stays too.
     #[serde(skip)]
     pub with_folder: Option<PathBuf>,
+    /// Left in a work's own folder that moves (a release's notes, a
+    /// badge): it stays there, even when the rest is sent elsewhere.
+    #[serde(skip)]
+    pub stays_behind: bool,
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -780,10 +784,11 @@ fn send_rest(items: &mut [PreviewItem], files: &[FileEntry], to: &SendTo) {
         .iter()
         .map(|f| (f.path.as_path(), f.base.as_path()))
         .collect();
-    // The release's advertisements stay where they were.
+    // The release's advertisements stay where they were, and so does what
+    // a moving work's own folder keeps.
     for i in items
         .iter_mut()
-        .filter(|i| i.dest.is_none() && !i.release_junk)
+        .filter(|i| i.dest.is_none() && !i.release_junk && !i.stays_behind)
     {
         let rel = base
             .get(i.path.as_path())
@@ -1045,6 +1050,11 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
                 Some(f) => format!("{f}/{kind}"),
                 None => kind,
             });
+        } else if let Some((up, _, _)) = home(&i.dir, own_base)
+            && !goes_along(i, &up)
+        {
+            i.stays_behind = true;
+            continue;
         } else if let Some((up, _, _)) = home(&i.dir, own_base)
             && let Some((dest, folder)) = place(&i.dir, own_base)
         {
@@ -1752,6 +1762,7 @@ pub fn preview(
                 follows: None,
                 companion: false,
                 with_folder: None,
+                stays_behind: false,
                 extra,
                 release_junk,
                 to_trash: release_junk
@@ -2208,6 +2219,64 @@ fn own_movie_folder(dir: &Path, video: &Path, m: &tmdb::MovieMatch, view: &View)
         && (tmdb::names_movie(dir, m)
             || named_like(dir, video)
             || only_movie_files(dir, m.id, view))
+}
+
+/// What of a work's own folder goes along with it to its new folder:
+/// what a media server or player uses (subtitles, `.nfo`, artwork under
+/// the names Jellyfin and Kodi read, what is in its subfolders such as
+/// `extrafanart/`). Other texts and pictures (a release's notes, a
+/// "Blu-ray" badge) stay in the old folder.
+fn goes_along(i: &PreviewItem, own: &Path) -> bool {
+    if i.dir != own {
+        return true;
+    }
+    let n = i.original.to_lowercase();
+    let (stem, ext) = n.rsplit_once('.').unwrap_or((n.as_str(), ""));
+    if tmdb::is_subtitle(ext) || ext == "nfo" {
+        return true;
+    }
+    if !matches!(ext, "jpg" | "jpeg" | "png" | "webp" | "gif" | "bmp" | "tbn") {
+        return false;
+    }
+    let base = stem.trim_end_matches(|c: char| c.is_ascii_digit());
+    [
+        "poster",
+        "folder",
+        "cover",
+        "default",
+        "movie",
+        "show",
+        "fanart",
+        "backdrop",
+        "background",
+        "art",
+        "banner",
+        "logo",
+        "clearlogo",
+        "clearart",
+        "disc",
+        "discart",
+        "cdart",
+        "landscape",
+        "thumb",
+        "keyart",
+        "characterart",
+        "season",
+    ]
+    .contains(&base)
+        || stem.starts_with("season")
+        || [
+            "-poster",
+            "-fanart",
+            "-landscape",
+            "-banner",
+            "-logo",
+            "-clearart",
+            "-thumb",
+            "-disc",
+        ]
+        .iter()
+        .any(|s| stem.ends_with(s))
 }
 
 /// A show's own file found in a season's folder (Kodi's and Jellyfin's
@@ -4328,6 +4397,80 @@ mod tests {
         assert_eq!((&p.left_folders[0].to, p.left_folders[0].files), (&left, 1));
         assert!(p.trash_folders.is_empty());
         assert_eq!(p.trash, vec![left.join("BAIXE MAIS FILMES.url")]);
+    }
+
+    #[test]
+    fn only_what_a_player_uses_goes_with_the_movie() {
+        let d = tempfile::tempdir().unwrap();
+        let m = MovieMatch {
+            extra: Default::default(),
+            id: 7,
+            title: "Chumbo".into(),
+            original_title: "Chumbo".into(),
+            year: Some(2007),
+        };
+        let steps = vec![Step {
+            enabled: true,
+            only: String::new(),
+            rule: Rule::Movie {
+                template: "{title} ({year})".into(),
+                colon: " - ".into(),
+                sidecar: false,
+                fanart: false,
+                folder: true,
+                missing: false,
+                subtitles: false,
+                sub_langs: String::new(),
+                video_tags: false,
+            },
+        }];
+        let release = "Chumbo (2007) 720p Dublado";
+        let downloads = d.path().join("baixando");
+        let old = downloads.join(release);
+        let lib = d.path().join("Filmes");
+        fs::create_dir_all(&old).unwrap();
+        fs::create_dir_all(&lib).unwrap();
+        let files = entries(
+            &old,
+            &[
+                &format!("{release}.mp4"),
+                "poster.jpg",
+                "fanart.jpg",
+                "Blu_Ray.jpg",
+                "Como Configurar o Utorrent.txt",
+                &format!("{release}.pt-BR.srt"),
+            ],
+        );
+        let mut view = View {
+            leftover_suffix: "additional files".into(),
+            send_to: Some(SendTo {
+                dir: lib.clone(),
+                copy: false,
+            }),
+            ..View::default()
+        };
+        view.movies.insert(files[0].path.clone(), m);
+        let p = preview(&files, &steps, &HashMap::new(), &view);
+        let new = lib.join("Chumbo (2007)");
+        let target = |n: &str| p.items.iter().find(|i| i.original == n).unwrap().target();
+        assert_eq!(target("poster.jpg"), new.join("poster.jpg"));
+        assert_eq!(target("fanart.jpg"), new.join("fanart.jpg"));
+        assert_eq!(
+            target(&format!("{release}.pt-BR.srt")),
+            new.join("Chumbo (2007).pt-BR.srt")
+        );
+        // A badge and a how-to stay where they were.
+        let left = downloads.join("Chumbo (2007) (additional files)");
+        assert_eq!(p.left_folders.len(), 1);
+        assert_eq!(p.left_folders[0].to, left);
+        assert_eq!(target("Blu_Ray.jpg"), old.join("Blu_Ray.jpg"));
+        let howto = p
+            .items
+            .iter()
+            .find(|i| i.original.starts_with("Como"))
+            .unwrap();
+        assert!(howto.release_junk);
+        assert_eq!(howto.target(), howto.path);
     }
 
     #[test]
