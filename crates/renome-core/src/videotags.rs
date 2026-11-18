@@ -720,6 +720,8 @@ fn mkv_plan(
             .collect()
     };
     let mut done: Vec<u64> = Vec::new();
+    // The SeekHeads to write again, with their entries.
+    let mut rebuilt: Vec<(Top, Vec<(Vec<u8>, u64)>)> = Vec::new();
     for sh in &heads {
         let b = body(f, sh)?;
         let mut entries = entries_of(&b);
@@ -739,7 +741,7 @@ fn mkv_plan(
             continue;
         }
         entries.dedup();
-        patches.push(seekhead_patch(sh, &entries, room_after(sh))?);
+        rebuilt.push((*sh, entries));
     }
     let missing: Vec<(u64, u64)> = moved
         .iter()
@@ -759,8 +761,17 @@ fn mkv_plan(
                 None => entries.push((want, *pos)),
             }
         }
-        patches.retain(|(at, _)| *at != first.at);
-        patches.push(seekhead_patch(&first, &entries, room_after(&first))?);
+        rebuilt.retain(|(sh, _)| sh.at != first.at);
+        rebuilt.push((first, entries));
+    }
+    for (sh, entries) in &rebuilt {
+        patches.push(seekhead_or_moved(
+            sh,
+            entries,
+            room_after(sh),
+            &mut tail,
+            seg_end - data,
+        )?);
     }
 
     // The segment's size, in as many bytes as it has.
@@ -773,6 +784,32 @@ fn mkv_plan(
         cut: len,
         tail,
     }))
+}
+
+/// A SeekHead rebuilt with `entries` where it is; when they do not fit
+/// there, the whole SeekHead goes to the end of the file (`tail`, which
+/// starts at `tail_pos` in the segment) and the old place keeps a single
+/// entry pointing to it, as Matroska allows (a SeekHead may point to
+/// another one; mkvpropedit does the same).
+fn seekhead_or_moved(
+    sh: &Top,
+    entries: &[(Vec<u8>, u64)],
+    room: u64,
+    tail: &mut Vec<u8>,
+    tail_pos: u64,
+) -> Result<(u64, Vec<u8>), String> {
+    if let Ok(p) = seekhead_patch(sh, entries, room) {
+        return Ok(p);
+    }
+    let mut kids = Vec::new();
+    for (sid, pos) in entries {
+        let mut e = el(0x53ab, sid);
+        e.extend(uint_el(0x53ac, *pos));
+        kids.extend(el(0x4dbb, &e));
+    }
+    let pos = tail_pos + tail.len() as u64;
+    tail.extend(el(SEEKHEAD, &kids));
+    seekhead_patch(sh, &[(id_bytes(SEEKHEAD), pos)], room)
 }
 
 /// A SeekHead rebuilt with `entries` where it is (with the room after
@@ -2143,6 +2180,12 @@ mod tests {
     /// A small Matroska file: SeekHead (with room after it), Info, Tracks,
     /// a Cluster, and track tags as mkvmerge writes them.
     fn mkv(with_tags: bool) -> Vec<u8> {
+        mkv_with(with_tags, true)
+    }
+
+    /// As [`mkv`]; without `room`, nothing after the SeekHead (as many
+    /// muxers write it).
+    fn mkv_with(with_tags: bool, room: bool) -> Vec<u8> {
         let info = el(
             INFO,
             &[uint_el(0x2ad7b1, 1_000_000), str_el(0x4d80, "muxer")].concat(),
@@ -2168,7 +2211,12 @@ mod tests {
         let tags = el(TAGS, &[track_tag, old_global].concat());
         // Positions inside the segment: SeekHead (fixed 64 bytes with its
         // Void), then Info, Tracks, Cluster, Tags.
-        let head_room = 64usize;
+        let head_room = if room {
+            64usize
+        } else {
+            // The SeekHead's own length: 2 or 3 entries of 15 bytes.
+            5 + 15 * (2 + usize::from(with_tags))
+        };
         let info_at = head_room as u64;
         let tracks_at = info_at + info.len() as u64;
         let cluster_at = tracks_at + tracks.len() as u64;
@@ -2184,7 +2232,9 @@ mod tests {
         }
         let mut sh = el(SEEKHEAD, &entries);
         let pad = head_room - sh.len();
-        sh.extend(void(pad as u64).unwrap());
+        if pad > 0 {
+            sh.extend(void(pad as u64).unwrap());
+        }
         let mut seg = sh;
         seg.extend(info);
         seg.extend(tracks);
@@ -2243,6 +2293,39 @@ mod tests {
                 .unwrap()
                 .unwrap();
             restore(&p, &edit2, &store).unwrap();
+            restore(&p, &edit, &store).unwrap();
+            assert_eq!(fs::read(&p).unwrap(), old);
+        }
+    }
+
+    #[test]
+    fn matroska_without_room_gets_its_seekhead_at_the_end() {
+        let d = tempfile::tempdir().unwrap();
+        let store = d.path().join("store");
+        for with_tags in [true, false] {
+            let p = d.path().join("tight.mkv");
+            let old = mkv_with(with_tags, false);
+            fs::write(&p, &old).unwrap();
+            let edit = write(&p, &meta(), &Options::default(), &store)
+                .unwrap()
+                .unwrap();
+            let (got, cover) = read(&p).unwrap();
+            assert_eq!(got.title, "Some Movie");
+            assert!(cover);
+            // The first SeekHead points to a second one, which points to
+            // the new Tags; every top element still walks.
+            let bytes = fs::read(&p).unwrap();
+            let seg = ebml(&bytes).find(|(id, _)| *id == SEGMENT).unwrap().1;
+            let first: Vec<_> = ebml(seg).take(1).collect();
+            assert_eq!(first[0].0, SEEKHEAD);
+            let entries: Vec<_> = ebml(first[0].1).collect();
+            assert_eq!(entries.len(), 1, "one entry: the moved SeekHead");
+            let mut f = File::open(&p).unwrap();
+            assert!(
+                mkv_plan(&mut f, bytes.len() as u64, &meta(), &Options::default())
+                    .unwrap()
+                    .is_some()
+            );
             restore(&p, &edit, &store).unwrap();
             assert_eq!(fs::read(&p).unwrap(), old);
         }

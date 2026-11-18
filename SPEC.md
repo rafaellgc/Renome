@@ -2000,7 +2000,9 @@ The book rule's option `audiobooks` (TS only, default on) takes audio files
   header; SeekHead entries of moved elements updated in each SeekHead
   holding them, missing ones added to the first; a SeekHead is rebuilt in
   its place plus the Voids right after it (padded with a Void; a 1-byte
-  gap absorbed by a longer size field), else `videoNoRoom`. Info (title:
+  gap absorbed by a longer size field); when it does not fit, the whole
+  SeekHead is appended and the old place keeps one entry pointing to it
+  (a SeekHead may point to another, as mkvpropedit writes them). Info (title:
   `Show - S01E02 - Title` for episodes) and, with `tracks`, Tracks are
   rewritten in a run from their own start over the following elements
   that are Void, old Tags/Attachments made Void, or each other (laid out
