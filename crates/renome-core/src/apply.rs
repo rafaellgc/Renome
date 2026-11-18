@@ -206,6 +206,11 @@ fn copy_file(
         use std::io::{Read, Write};
         use std::os::unix::io::AsRawFd;
         let mut src = File::open(from)?;
+        // Read ahead more: it is read from start to end.
+        // SAFETY: the descriptor is open for the call's duration.
+        unsafe {
+            libc::posix_fadvise(src.as_raw_fd(), 0, 0, libc::POSIX_FADV_SEQUENTIAL);
+        }
         let perm = src.metadata()?.permissions();
         let mut dst = File::options().write(true).create_new(true).open(to)?;
         let mut total = 0u64;
@@ -264,6 +269,30 @@ fn copy_file(
             };
             if n == 0 {
                 break;
+            }
+            // The piece starts on its way to the disk now, and the one
+            // before is waited for: the target disk writes while the next
+            // piece is read (rather than all at the end), and what waits
+            // in memory stays one piece.
+            // SAFETY: the descriptor is open for the call's duration.
+            unsafe {
+                let fd = dst.as_raw_fd();
+                libc::sync_file_range(
+                    fd,
+                    total as libc::off64_t,
+                    n as libc::off64_t,
+                    libc::SYNC_FILE_RANGE_WRITE,
+                );
+                if let Some(prev) = total.checked_sub(COPY_CHUNK as u64) {
+                    libc::sync_file_range(
+                        fd,
+                        prev as libc::off64_t,
+                        COPY_CHUNK as libc::off64_t,
+                        libc::SYNC_FILE_RANGE_WAIT_BEFORE
+                            | libc::SYNC_FILE_RANGE_WRITE
+                            | libc::SYNC_FILE_RANGE_WAIT_AFTER,
+                    );
+                }
             }
             total += n as u64;
             done(n as u64);
