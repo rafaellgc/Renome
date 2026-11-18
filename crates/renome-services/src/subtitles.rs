@@ -704,7 +704,7 @@ impl Subsource {
 
 /// A video to find subtitles for: its movie's (or show's) TMDB number,
 /// and the season and episode of an episode.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Item {
     pub path: PathBuf,
@@ -868,7 +868,7 @@ pub async fn search(
 
 /// A renamed video and its subtitles to download: for each language, the
 /// one chosen first, then the others to try when it cannot be had.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Write {
     pub path: PathBuf,

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AlbumLookup, BookTarget, ComicFormat, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, MbCandidate, SongMatch, HistoryEntry, ListedTrack, MovieFound, PreviewItem, SeriesOutcome, AudioBook, ServerCall, ServerLibrary, UpdateFound, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
+import type { AlbumLookup, BookTarget, ComicFormat, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, MbCandidate, SongMatch, HistoryEntry, ListedTrack, EpisodeMatch, MovieFound, PreviewItem, SeriesOutcome, AudioBook, ServerCall, ServerLibrary, UpdateFound, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
 
 type Overrides = Record<string, string>;
 
@@ -27,6 +27,7 @@ export interface PictureCard {
   image: string | null;
 }
 type TvItem = { path: string; name: string; isDir: boolean };
+type SubsItem = { path: string; tmdb: number; season?: number | null; episode?: number | null };
 
 /** The same movie, episode, comic or book in several files. */
 export interface WorkGroup {
@@ -102,9 +103,22 @@ export const api = {
   mbSearch: (query: AlbumQuery, discogs = false) => invoke<MbCandidate[]>("mb_search", { query, discogs }),
   /** The Discogs token from the options (empty: Discogs is not used). */
   discogsToken: (token: string) => invoke<void>("discogs_token", { token }),
-  subsSearch: (auth: SubsAuth, langs: string, items: { path: string; tmdb: number; season?: number; episode?: number }[]) =>
-    invoke<{ langs: string[]; found: { path: string; have: string[]; inside: string[]; candidates: SubCandidate[] }[]; errors: string[]; remaining: number | null }>("subs_search", { auth, langs, items }),
-  writeSubtitles: (auth: SubsAuth, historyId: string | null, items: { path: string; season?: number; episode?: number; langs: SubCandidate[][] }[]) =>
+  /** The videos whose subtitles are searched (shared with the command line). */
+  subsTargets: (files: { path: string; original: string; isDir: boolean; movie: number | null; episode: EpisodeMatch | null }[]) =>
+    invoke<SubsItem[]>("subs_targets", { files }),
+  subsSearch: (auth: SubsAuth, langs: string, items: SubsItem[]) =>
+    invoke<{
+      langs: string[];
+      found: { path: string; have: string[]; inside: string[]; candidates: SubCandidate[]; pick: Record<string, number> }[];
+      errors: string[];
+      remaining: number | null;
+    }>("subs_search", { auth, langs, items }),
+  /** What to download for the renamed videos, from what is picked. */
+  subsWrites: (
+    chosen: { path: string; season: number | null; episode: number | null; have: string[]; candidates: SubCandidate[]; pick: Record<string, number> }[],
+    langs: string[],
+  ) => invoke<{ path: string; season?: number | null; episode?: number | null; langs: SubCandidate[][] }[]>("subs_writes", { chosen, langs }),
+  writeSubtitles: (auth: SubsAuth, historyId: string | null, items: { path: string; season?: number | null; episode?: number | null; langs: SubCandidate[][] }[]) =>
     invoke<{ created: string[]; errors: [string, string][]; remaining: number | null }>("write_subtitles", { auth, historyId, items }),
   osCheck: (auth: SubsAuth) => invoke<number | null>("os_check", { auth }),
   subdlCheck: (key: string) => invoke<void>("subdl_check", { key }),

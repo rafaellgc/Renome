@@ -972,7 +972,7 @@
           ...r.done.filter((op) => isVideo(op.to) && subs.found[op.from]).map((op): [string, string] => [op.from, op.to]),
           ...subsUnchanged.map((p): [string, string] => [p, p]),
         ];
-        const items = subs.writes(pairs);
+        const items = await subs.writes(pairs);
         if (items.length) {
           subs.progress = { done: 0, total: items.reduce((n, i) => n + i.langs.length, 0), kind: "save" };
           try {

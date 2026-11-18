@@ -1105,16 +1105,33 @@ async fn write_tv_sidecars(
     Ok(report)
 }
 
-/// Searches subtitles for the videos, in the languages not there yet.
+/// The videos whose subtitles are searched (the flow the command line
+/// runs too).
+#[tauri::command]
+fn subs_targets(files: Vec<renome_services::flow::subtitles::Identified>) -> Vec<subtitles::Item> {
+    renome_services::flow::subtitles::targets(&files)
+}
+
+/// Searches subtitles for the videos, in the languages not there yet,
+/// with the one picked per language.
 #[tauri::command]
 async fn subs_search(
     app: AppHandle,
     auth: subtitles::Auth,
     langs: String,
     items: Vec<subtitles::Item>,
-) -> subtitles::Search {
+) -> renome_services::flow::subtitles::Outcome {
     let stop = stop_signal(&app);
-    subtitles::search(&Gui(app.clone()), auth, &langs, items, stop).await
+    renome_services::flow::subtitles::search(&Gui(app.clone()), auth, &langs, items, stop).await
+}
+
+/// What to download for the renamed videos, from what is picked.
+#[tauri::command]
+fn subs_writes(
+    chosen: Vec<renome_services::flow::subtitles::Chosen>,
+    langs: Vec<String>,
+) -> Vec<subtitles::Write> {
+    renome_services::flow::subtitles::writes(chosen, &langs)
 }
 
 /// Downloads the subtitles chosen beside the renamed videos and records
@@ -2165,6 +2182,8 @@ pub fn run() {
             write_sidecars,
             write_tv_sidecars,
             subs_search,
+            subs_targets,
+            subs_writes,
             write_subtitles,
             subtitle_tools,
             write_video_tags,

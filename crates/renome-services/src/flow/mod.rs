@@ -6,6 +6,7 @@
 
 pub mod movies;
 pub mod series;
+pub mod subtitles;
 
 use renome_core::PreviewItem;
 use serde::{Deserialize, Serialize};

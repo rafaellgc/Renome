@@ -5,7 +5,7 @@
 import { api } from "$lib/api";
 import { confirm, notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
-import { defaultSubLangs, isVideo } from "$lib/rules";
+import { defaultSubLangs } from "$lib/rules";
 import { settings } from "$lib/settings.svelte";
 import type { SubCandidate, SubsAuth } from "$lib/types";
 import { moved, without, type PageCtx } from "./common";
@@ -19,7 +19,7 @@ import type { Series } from "./series.svelte";
  *  episode, languages), to search again on a change. */
 export type SubsState = { key: string; have: string[]; inside: string[]; candidates: SubCandidate[]; pick: Record<string, number> };
 
-const subsKey = (it: { tmdb: number; season?: number; episode?: number }, langs: string) => `${it.tmdb}:${it.season ?? ""}:${it.episode ?? ""}:${langs}`;
+const subsKey = (it: { tmdb: number; season?: number | null; episode?: number | null }, langs: string) => `${it.tmdb}:${it.season ?? ""}:${it.episode ?? ""}:${langs}`;
 /** Subtitles chosen for a video, not there yet. */
 const chosen = (s: SubsState | undefined) => (s ? Object.entries(s.pick).filter(([l, i]) => i >= 0 && !s.have.includes(l)).length : 0);
 
@@ -87,17 +87,17 @@ export class Subtitles {
     };
   }
 
-  /** The visible videos identified, with what to look their subtitles up by. */
+  /** The visible videos identified, with what to look their subtitles up
+   *  by (which ones, the shared flow says). */
   items() {
-    const out: { path: string; tmdb: number; season?: number; episode?: number }[] = [];
-    for (const i of this.#ctx.items) {
-      if (i.isDir || !isVideo(i.original)) continue;
-      const m = this.#movies.rule ? this.#movies.state[i.path]?.choice : null;
-      const e = this.#series.rule ? this.#series.matches[i.path] : null;
-      if (m) out.push({ path: i.path, tmdb: m.id });
-      else if (e && !e.source && e.episodes.length === 1) out.push({ path: i.path, tmdb: e.id, season: e.season, episode: e.episodes[0] });
-    }
-    return out;
+    const files = this.#ctx.items.map((i) => ({
+      path: i.path,
+      original: i.original,
+      isDir: i.isDir,
+      movie: (this.#movies.rule ? this.#movies.state[i.path]?.choice?.id : null) ?? null,
+      episode: (this.#series.rule ? this.#series.matches[i.path] : null) ?? null,
+    }));
+    return api.subsTargets($state.snapshot(files));
   }
 
   /** Searches subtitles for the visible videos identified (those searched
@@ -111,9 +111,10 @@ export class Subtitles {
       if (ok) this.#ctx.openOptions();
       return;
     }
-    const items = this.items().filter((it) => again || this.found[it.path]?.key !== subsKey(it, langs));
+    const all = await this.items();
+    const items = all.filter((it) => again || this.found[it.path]?.key !== subsKey(it, langs));
     if (!items.length) {
-      if (!this.items().length) this.#ctx.say(t("subsNoVideos"));
+      if (!all.length) this.#ctx.say(t("subsNoVideos"));
       else if (this.counts.videos) this.review = true;
       return;
     }
@@ -124,11 +125,7 @@ export class Subtitles {
       if (r.remaining !== null) this.remaining = r.remaining;
       const asked = new Map(items.map((it) => [it.path, it]));
       for (const f of r.found) {
-        const pick: Record<string, number> = {};
-        f.candidates.forEach((c, i) => {
-          if (!(c.lang in pick)) pick[c.lang] = f.inside.includes(c.lang) ? -1 : i;
-        });
-        this.found[f.path] = { key: subsKey(asked.get(f.path)!, langs), have: f.have, inside: f.inside, candidates: f.candidates, pick };
+        this.found[f.path] = { key: subsKey(asked.get(f.path)!, langs), have: f.have, inside: f.inside, candidates: f.candidates, pick: f.pick };
       }
       if (r.errors.length) await notify({ title: t("subsTitle"), text: r.errors.map(tError).join("\n") });
       // Shown even with nothing found, to tell why.
@@ -140,23 +137,16 @@ export class Subtitles {
     }
   }
 
-  /** What to download for renamed videos (`from` → `to`): per language, the
-   *  one chosen first and the others of that language after it. */
+  /** What to download for renamed videos (`from` → `to`), from what is
+   *  picked (the order, the shared flow says). */
   writes(pairs: [string, string][]) {
-    return pairs.flatMap(([from, to]) => {
+    const chosen = pairs.flatMap(([from, to]) => {
       const s = this.found[from];
       if (!s) return [];
-      // In the order the languages were asked for: the first is the most
-      // wanted, and gets the downloads when the day's quota is short.
-      const order = (l: string) => (this.langs.indexOf(l) + 1 || 999);
-      const langs = Object.entries(s.pick)
-        .filter(([l, i]) => i >= 0 && !s.have.includes(l))
-        .sort(([a], [b]) => order(a) - order(b))
-        .map(([l, i]) => [s.candidates[i], ...s.candidates.filter((c, j) => j !== i && c.lang === l)]);
-      if (!langs.length) return [];
       const e = this.#series.matches[from];
-      return [{ path: to, season: e?.season, episode: e?.episodes[0], langs }];
+      return [{ path: to, season: e?.season ?? null, episode: e?.episodes[0] ?? null, have: s.have, candidates: s.candidates, pick: s.pick }];
     });
+    return api.subsWrites($state.snapshot(chosen), $state.snapshot(this.langs));
   }
 
   /** Forgets the files taken out of the list (all, with null). */

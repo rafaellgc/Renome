@@ -2611,93 +2611,57 @@ pub async fn download_subtitles(
         return notes;
     }
     let to: HashMap<&PathBuf, &PathBuf> = report.done.iter().map(|op| (&op.from, &op.to)).collect();
-    let video = |p: &Path| {
-        p.extension()
-            .map(|e| e.to_string_lossy().to_lowercase())
-            .is_some_and(|e| renome_core::tmdb::is_video(&e))
-    };
-    let mut items: Vec<subs::Item> = Vec::new();
-    let mut episode_of: HashMap<PathBuf, (u32, u32)> = HashMap::new();
-    for i in &preview.items {
-        if i.is_dir
-            || !video(&i.path)
-            || !(to.contains_key(&i.path) || i.status == renome_core::Status::Unchanged)
-        {
-            continue;
-        }
-        match found {
-            Found::Movies(m) => {
-                if let Some(c) = m.chosen.get(&i.path) {
-                    items.push(subs::Item {
-                        path: i.path.clone(),
-                        tmdb: c.id,
-                        season: None,
-                        episode: None,
-                    });
-                }
-            }
-            Found::Series(s) => {
-                if let Some(e) = s
-                    .chosen
-                    .get(&i.path)
-                    .filter(|e| e.source.is_empty() && e.episodes.len() == 1)
-                {
-                    let (season, episode) = (u32::from(e.season), u32::from(e.episodes[0]));
-                    episode_of.insert(i.path.clone(), (season, episode));
-                    items.push(subs::Item {
-                        path: i.path.clone(),
-                        tmdb: e.id,
-                        season: Some(season),
-                        episode: Some(episode),
-                    });
-                }
-            }
-            _ => {}
-        }
-    }
+    // The videos renamed (or already right) that were identified.
+    let files: Vec<flow::subtitles::Identified> = preview
+        .items
+        .iter()
+        .filter(|i| to.contains_key(&i.path) || i.status == renome_core::Status::Unchanged)
+        .map(|i| flow::subtitles::Identified {
+            path: i.path.clone(),
+            original: i.original.clone(),
+            is_dir: i.is_dir,
+            movie: match found {
+                Found::Movies(m) => m.chosen.get(&i.path).map(|c| c.id),
+                _ => None,
+            },
+            episode: match found {
+                Found::Series(s) => s.chosen.get(&i.path).cloned(),
+                _ => None,
+            },
+        })
+        .collect();
+    let items = flow::subtitles::targets(&files);
     if items.is_empty() {
         return notes;
     }
-    let searched = subs::search(&Cli, auth.clone(), &langs, items, crate::stop::requested).await;
+    let episode_of: HashMap<PathBuf, (Option<u32>, Option<u32>)> = items
+        .iter()
+        .map(|i| (i.path.clone(), (i.season, i.episode)))
+        .collect();
+    let searched =
+        flow::subtitles::search(&Cli, auth.clone(), &langs, items, crate::stop::requested).await;
     for e in &searched.errors {
         out::error(&crate::text::error_text(e));
     }
-    let order = |l: &str| {
-        searched
-            .langs
-            .iter()
-            .position(|x| x == l)
-            .unwrap_or(usize::MAX)
-    };
-    let writes: Vec<subs::Write> = searched
+    // Each video gets the subtitles the flow picked.
+    let chosen: Vec<flow::subtitles::Chosen> = searched
         .found
-        .iter()
-        .filter_map(|f| {
-            let mut by_lang: Vec<(String, Vec<renome_core::subtitles::Candidate>)> = Vec::new();
-            for c in &f.candidates {
-                if f.have.contains(&c.lang) || f.inside.contains(&c.lang) {
-                    continue;
-                }
-                match by_lang.iter_mut().find(|(l, _)| *l == c.lang) {
-                    Some((_, list)) => list.push(c.clone()),
-                    None => by_lang.push((c.lang.clone(), vec![c.clone()])),
-                }
-            }
-            if by_lang.is_empty() {
-                return None;
-            }
-            by_lang.sort_by_key(|(l, _)| order(l));
-            let (season, episode) = episode_of
-                .get(&f.path)
-                .map_or((None, None), |(s, e)| (Some(*s), Some(*e)));
-            Some(subs::Write {
-                path: to.get(&f.path).map_or(f.path.clone(), |p| (*p).clone()),
+        .into_iter()
+        .map(|f| {
+            let (season, episode) = episode_of.get(&f.found.path).copied().unwrap_or_default();
+            flow::subtitles::Chosen {
+                path: to
+                    .get(&f.found.path)
+                    .map_or(f.found.path.clone(), |p| (*p).clone()),
                 season,
                 episode,
-                langs: by_lang.into_iter().map(|(_, l)| l).collect(),
-            })
+                have: f.found.have,
+                candidates: f.found.candidates,
+                pick: f.pick,
+            }
         })
         .collect();
+    let writes = flow::subtitles::writes(chosen, &searched.langs);
     if writes.is_empty() {
         return notes;
     }
