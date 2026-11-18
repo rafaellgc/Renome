@@ -895,17 +895,46 @@ pub fn keys(m: &ArgMatches) -> Result<Exit, String> {
             let in_file = renome_services::read_settings_file()
                 .and_then(|s| s.as_object().map(renome_services::secrets::of))
                 .unwrap_or_default();
-            let mut list = Vec::new();
-            for (name, field) in KEYS {
-                let set = all
-                    .get(*field)
+            let filled = |m: &Map<String, Value>, field: &str| {
+                m.get(field)
                     .and_then(Value::as_str)
-                    .is_some_and(|v| !v.is_empty());
-                let in_store = store
-                    && !in_file
-                        .get(*field)
-                        .and_then(Value::as_str)
-                        .is_some_and(|v| !v.is_empty());
+                    .is_some_and(|v| !v.is_empty())
+            };
+            // (name, set, in the store)
+            let mut rows: Vec<(String, bool, bool)> = KEYS
+                .iter()
+                .map(|(name, field)| {
+                    (
+                        (*name).to_string(),
+                        filled(&all, field),
+                        store && !filled(&in_file, field),
+                    )
+                })
+                .collect();
+            // Each media server's key (kept together in `serverKeys`).
+            let server_keys: Map<String, Value> = all
+                .get("serverKeys")
+                .and_then(Value::as_str)
+                .and_then(|t| serde_json::from_str(t).ok())
+                .unwrap_or_default();
+            let servers = renome_services::read_settings_file()
+                .and_then(|s| s.get("servers")?.as_array().cloned())
+                .unwrap_or_default();
+            for srv in servers {
+                let id = srv.get("id").and_then(Value::as_str).unwrap_or_default();
+                let url = srv.get("url").and_then(Value::as_str).unwrap_or_default();
+                let set = server_keys
+                    .get(id)
+                    .and_then(Value::as_str)
+                    .is_some_and(|v| !v.trim().is_empty());
+                rows.push((
+                    format!("server {}", if url.is_empty() { id } else { url }),
+                    set,
+                    store && !filled(&in_file, "serverKeys"),
+                ));
+            }
+            let mut list = Vec::new();
+            for (name, set, in_store) in rows {
                 let where_ = t(
                     if in_store {
                         "keyWhereStore"
