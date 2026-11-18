@@ -8,7 +8,7 @@ use crate::tmdb::{self, TvItem};
 use crate::{Host, anilist};
 use renome_core::tmdb::Candidate;
 use renome_core::tv::{EpisodeGuess, Key, Show};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
@@ -278,4 +278,22 @@ pub fn episode_match(show: &Show, keys: &[Key]) -> renome_core::tv::EpisodeMatch
             .collect(),
         extra: episode_extra(show, keys[0].0, keys[0].1),
     }
+}
+
+/// A file's episodes as they stand: `show`, its show's place in the list
+/// of shows given with it.
+#[derive(Clone, Debug, Deserialize)]
+pub struct Settled {
+    pub path: PathBuf,
+    pub show: usize,
+    pub choice: Vec<Key>,
+}
+
+/// Each file's episodes as the rule names them.
+pub fn named(files: &[Settled], shows: &[Show]) -> HashMap<PathBuf, renome_core::tv::EpisodeMatch> {
+    files
+        .iter()
+        .filter(|f| !f.choice.is_empty())
+        .filter_map(|f| Some((f.path.clone(), episode_match(shows.get(f.show)?, &f.choice))))
+        .collect()
 }

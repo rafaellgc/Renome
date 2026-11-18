@@ -1053,6 +1053,15 @@ async fn series_search(
     series::search(&Gui(app.clone()), source, &typed, &items, &settled, picked).await
 }
 
+/// Each file's episodes as the rule names them.
+#[tauri::command]
+fn series_named(
+    files: Vec<renome_services::flow::series::Settled>,
+    shows: Vec<renome_core::tv::Show>,
+) -> HashMap<PathBuf, renome_core::tv::EpisodeMatch> {
+    renome_services::flow::series::named(&files, &shows)
+}
+
 /// Records created metadata files in the rename's history entry, so undo
 /// deletes them; without a rename (names already right), in an entry of
 /// their own.
@@ -2178,6 +2187,7 @@ pub fn run() {
             tmdb_check,
             movie_search,
             series_search,
+            series_named,
             flow_answer,
             tmdb_search,
             tv_search,

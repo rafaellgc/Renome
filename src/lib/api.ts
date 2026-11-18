@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AlbumLookup, BookTarget, ComicFormat, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, MbCandidate, SongMatch, HistoryEntry, ListedTrack, EpisodeMatch, BookFound, BookPart, MovieFound, PreviewItem, SeriesOutcome, AudioBook, ServerCall, ServerLibrary, UpdateFound, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
+import type { AlbumLookup, BookTarget, ComicFormat, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, MbCandidate, SongMatch, HistoryEntry, ListedTrack, EpisodeMatch, EpKey, BookFound, BookPart, MovieFound, PreviewItem, SeriesOutcome, AudioBook, ServerCall, ServerLibrary, UpdateFound, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
 
 type Overrides = Record<string, string>;
 
@@ -96,6 +96,10 @@ export const api = {
     settled: [string, number][],
     picked: Record<string, Candidate>,
   ) => invoke<SeriesOutcome>("series_search", { key, lang, source, typed, items, settled, picked }),
+  /** Each file's episodes as the rule names them (`show`: its show's
+   *  place in `shows`). */
+  seriesNamed: (files: { path: string; show: number; choice: EpKey[] }[], shows: Show[]) =>
+    invoke<Record<string, EpisodeMatch>>("series_named", { files, shows }),
   /** The answer to a flow's question (null: none fits). */
   flowAnswer: (id: number, answer: unknown) => invoke<void>("flow_answer", { id, answer }),
   /** The music rule's search (shared with the command line): albums,

@@ -9,18 +9,6 @@ import { settings, tmdbLang } from "$lib/settings.svelte";
 import type { Candidate, EpKey, EpisodeMatch, EpisodeState, Rule, Show } from "$lib/types";
 import { counts, moved, ruleOf, without, type PageCtx } from "./common";
 
-/** An episode's template fields: the show's, its air date and its number
- *  counted from the first episode (specials apart). */
-function episodeExtra(show: Show, season: number, number: number): Record<string, string> {
-  const extra: Record<string, string> = { ...(show.extra ?? {}) };
-  const ep = show.episodes.find((x) => x.season === season && x.number === number);
-  if (ep?.airDate) extra.date = ep.airDate;
-  if (season > 0 && ep) {
-    extra.absolute = String(show.episodes.filter((x) => x.season > 0 && (x.season < season || (x.season === season && x.number <= number))).length);
-  }
-  return extra;
-}
-
 /** What the show picker asks, while open. */
 export type ShowPick = { source: "tmdb" | "anilist"; query: string; candidates: Candidate[]; resolve: (c: Candidate | null) => void };
 
@@ -45,28 +33,19 @@ export class Series {
   }
 
   rule = $derived.by(() => ruleOf(this.#ctx.steps, "series"));
-  /** Each file's episode, as the rule names it. */
-  matches = $derived.by(() =>
-    Object.fromEntries(
-      Object.entries(this.state)
-        .filter(([, e]) => e.choice && this.shows[e.showId])
-        .map(([p, e]): [string, EpisodeMatch] => {
-          const show = this.shows[e.showId];
-          const keys = e.choice!;
-          return [p, {
-            source: show.source ?? "",
-            id: show.id,
-            show: show.name,
-            originalShow: show.originalName,
-            year: show.year,
-            season: keys[0][0],
-            episodes: keys.map((k) => k[1]),
-            titles: keys.map((k) => show.episodes.find((x) => x.season === k[0] && x.number === k[1])?.name ?? ""),
-            extra: episodeExtra(show, keys[0][0], keys[0][1]),
-          }];
-        }),
-    ),
-  );
+  /** Each file's episode, as the rule names it (made by the shared flow);
+   *  rebuilt whenever the choices change. */
+  matches = $state<Record<string, EpisodeMatch>>({});
+
+  /** Asks the shared flow for the episodes' details, from the choices. */
+  async rebuild() {
+    const keys = [...new Set(Object.values(this.state).map((e) => e.showId))].filter((k) => this.shows[k]);
+    const at = new Map(keys.map((k, i) => [k, i]));
+    const files = Object.entries(this.state).flatMap(([path, e]) =>
+      e.choice && at.has(e.showId) ? [{ path, show: at.get(e.showId)!, choice: e.choice }] : [],
+    );
+    this.matches = files.length ? await api.seriesNamed($state.snapshot(files), $state.snapshot(keys.map((k) => this.shows[k]))) : {};
+  }
   counts = $derived.by(() => counts(this.state, this.#ctx.items));
   /** Episodes whose names are already right but that still get metadata. */
   metaOnly = $derived.by(() => {
@@ -122,6 +101,7 @@ export class Series {
           group: f.group,
         };
       }
+      await this.rebuild();
       if (res.found.length) this.searched = res.found;
       if (!res.searched && res.found.length) this.#ctx.say(t("tvNoFiles"));
       else if (res.loose) this.#ctx.say(t("tvLoose", { n: res.loose }));
@@ -164,7 +144,7 @@ export class Series {
 
   /** The user's pick for a file; undecided files of its group (its
    *  subtitles, say) get it too. */
-  choose(path: string, choice: EpKey[] | null) {
+  async choose(path: string, choice: EpKey[] | null) {
     const e = this.state[path];
     if (!e) return;
     for (const [p, o] of Object.entries(this.state)) {
@@ -173,6 +153,7 @@ export class Series {
         this.state[p] = { ...o, choice, status: choice ? "chosen" : "none" };
       }
     }
+    await this.rebuild();
   }
 
   /** Forgets the files taken out of the list (all, with the shows picked
@@ -182,23 +163,27 @@ export class Series {
       this.state = {};
       this.picked = {};
       this.searched = [];
+      this.matches = {};
       return;
     }
     this.state = without(this.state, paths);
+    this.matches = without(this.matches, paths);
   }
 
   /** The files renamed: what was found follows them. */
   follow(to: (p: string) => string) {
     this.state = moved(this.state, to);
+    this.matches = moved(this.matches, to);
   }
 
   /** What was found, to put back with Ctrl+Z. */
   snapshot() {
-    return { state: this.state, picked: this.picked, searched: this.searched };
+    return { state: this.state, picked: this.picked, searched: this.searched, matches: this.matches };
   }
   restore(s: ReturnType<Series["snapshot"]>) {
     this.state = s.state;
     this.picked = s.picked;
     this.searched = s.searched;
+    this.matches = s.matches;
   }
 }
