@@ -5,6 +5,7 @@
 //! the command line asks them in the terminal; neither decides on its own.
 
 pub mod books;
+pub mod comics;
 pub mod movies;
 pub mod music;
 pub mod series;
@@ -35,6 +36,9 @@ pub struct Item {
     /// A song with no title in its tags.
     #[serde(default)]
     pub untagged: bool,
+    /// A folder (or comic) the comic rule converts to CBZ.
+    #[serde(default)]
+    pub convert: bool,
 }
 
 impl From<&PreviewItem> for Item {
@@ -47,6 +51,7 @@ impl From<&PreviewItem> for Item {
             extra: i.extra.clone(),
             release_junk: i.release_junk,
             untagged: i.untagged,
+            convert: i.convert,
         }
     }
 }
@@ -87,5 +92,18 @@ pub enum Question {
         source: String,
         query: String,
         candidates: Vec<renome_core::tmdb::Candidate>,
+    },
+    /// Which series a group of comics is: `query`, what was searched;
+    /// `files`, how many; `highest`, their highest number; `path` and
+    /// `comic`, the file whose cover is compared. The answer: a series.
+    ComicSeries {
+        source: String,
+        skip: String,
+        query: String,
+        files: usize,
+        highest: f64,
+        candidates: Vec<renome_core::comics::Volume>,
+        path: Option<PathBuf>,
+        comic: Option<Box<renome_core::comics::ComicMatch>>,
     },
 }

@@ -1773,21 +1773,6 @@ async fn comic_search(
         .await
 }
 
-/// A series and its issues, and the issue each comic is (by its number).
-/// A manga catalogue gives the series alone, with its details (MangaUpdates
-/// tells its authors and volumes only there).
-#[tauri::command]
-async fn comic_issues(
-    app: AppHandle,
-    source: String,
-    key: String,
-    id: String,
-    comics: Vec<renome_core::comics::ComicMatch>,
-) -> Result<renome_services::comics::ComicIssues, String> {
-    let state = app.state::<AppState>();
-    sources(&state).issues(&source, &key, &id, &comics).await
-}
-
 /// The covers, by address, of the comic's issue (or volume) in a series,
 /// to tell which series is the file's. None from the Grand Comics
 /// Database (its pictures are not for programs) nor from catalogues of
@@ -1818,35 +1803,40 @@ async fn series_covers(
         .collect())
 }
 
-/// The barcodes printed on comics (read in their first and last pages),
-/// a few at a time.
+/// The comic rule's search (the flow the command line runs too): a
+/// series it is not sure of is asked with `flow-ask`.
 #[tauri::command]
-async fn comic_barcodes(paths: Vec<PathBuf>) -> Vec<Option<String>> {
-    tauri::async_runtime::spawn_blocking(move || renome_services::comics::barcodes(&paths))
-        .await
-        .unwrap_or_default()
+async fn comics_search(
+    app: AppHandle,
+    params: renome_services::flow::comics::Params,
+    items: Vec<renome_services::flow::Item>,
+    picked: HashMap<String, renome_core::comics::Volume>,
+) -> Result<renome_services::flow::comics::Outcome, String> {
+    let state = app.state::<AppState>();
+    renome_services::flow::comics::search(
+        &Gui(app.clone()),
+        &sources(&state),
+        &params,
+        &items,
+        &HashSet::new(),
+        picked,
+    )
+    .await
 }
 
-/// The issue a barcode belongs to, on Metron.
+/// Each comic as the rule names it, with its page in the catalogue.
 #[tauri::command]
-async fn comic_by_code(
-    app: AppHandle,
-    key: String,
-    code: String,
-) -> Result<Option<metron::Coded>, String> {
-    app.state::<AppState>().mt.by_code(&key, &code).await
+fn comic_named(
+    files: Vec<renome_services::flow::comics::Settled>,
+    volumes: HashMap<String, renome_services::flow::comics::Listed>,
+) -> HashMap<PathBuf, renome_services::flow::comics::Named> {
+    renome_services::flow::comics::named(&files, &volumes)
 }
 
 /// Checks a Metron token.
 #[tauri::command]
 async fn metron_check(app: AppHandle, token: String) -> Result<(), String> {
     app.state::<AppState>().mt.check(&token).await
-}
-
-/// The Comic Vine series an issue belongs to.
-#[tauri::command]
-async fn comic_volume_of(app: AppHandle, key: String, issue: String) -> Result<String, String> {
-    app.state::<AppState>().cv.volume_of(&key, &issue).await
 }
 
 /// Saves the books' covers and `metadata.opf` files and records them like
@@ -2225,11 +2215,9 @@ pub fn run() {
             song_own_tags,
             comic_check,
             comic_search,
-            comic_issues,
-            comic_volume_of,
             anime_search,
-            comic_barcodes,
-            comic_by_code,
+            comics_search,
+            comic_named,
             metron_check,
             gcd_account,
             gcd_check,

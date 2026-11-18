@@ -5,50 +5,10 @@
 import { api } from "$lib/api";
 import { confirm, notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
-import { byFit, isComic, seriesOnly, splitExt } from "$lib/rules";
+import { isComic, splitExt } from "$lib/rules";
 import { comicKey, settings } from "$lib/settings.svelte";
 import type { ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, EditField, Rule, ComicFormat } from "$lib/types";
 import { counts, extOf, moved, ruleOf, without, type PageCtx } from "./common";
-
-/** What a file's series has after the catalogue's (as the Rust core's `story`). */
-function story(own: string, series: string): string {
-  const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
-  const name = series.trim();
-  if (!name || own.length === name.length || !fold(own).startsWith(fold(name))) return "";
-  const rest = own.slice(name.length);
-  return /^[: \-–]/.test(rest) ? rest.replace(/^[\s:\-–—,.#]+|[\s\-–—:,.#]+$/g, "") : "";
-}
-
-function withIssue(own: ComicMatch, volume: ComicVolume, issue: ComicIssue | undefined): ComicMatch {
-  const year = Number.parseInt((issue?.coverDate ?? "").slice(0, 4), 10);
-  return {
-    series: volume.name,
-    seriesYear: volume.startYear ?? own.seriesYear,
-    // A book found by its volume (`v03`, a manga's) stays a volume, and a
-    // one-shot gets no number.
-    number: own.number && issue?.number ? issue.number : own.number,
-    volume: own.volume,
-    chapter: own.chapter,
-    // Many issues have no title there: the file's stays, or what its
-    // series had after the catalogue's (`Series: Story`).
-    title: issue?.name.trim() ? issue.name : own.title || story(own.series, volume.name),
-    year: Number.isNaN(year) ? own.year : year,
-    count: volume.count > 0 ? volume.count : own.count,
-    publisher: volume.publisher || own.publisher,
-    writer: own.writer || volume.writer,
-    artist: own.artist,
-    id: issue ? issue.id : volume.id,
-    extra: withCoverDate(own.extra ?? {}, issue?.coverDate ?? ""),
-  };
-}
-
-/** The catalogue's cover date over the file's (its parts come from it). */
-function withCoverDate(extra: Record<string, string>, date: string): Record<string, string> {
-  if (!date) return extra;
-  const out = Object.fromEntries(Object.entries(extra).filter(([k]) => !["date", "month", "day"].includes(k) && !k.startsWith("month name")));
-  out.date = date;
-  return out;
-}
 
 /** A CBZ whose ComicInfo.xml the comic rule takes out: with "clear", the
  *  ones it does not write (without "write", every one; with it, none:
@@ -87,19 +47,22 @@ export class Comics {
   }
 
   rule = $derived.by(() => ruleOf(this.#ctx.steps, "comic"));
+  /** Each comic's details from its series and issue, with its page in the
+   *  catalogue (made by the shared flow); rebuilt whenever they change. */
+  built = $state<Record<string, { comic: ComicMatch; web: string; manga: boolean }>>({});
   /** Each comic's details: its issue's (or its series'), or typed in. */
   matches = $derived.by(() => ({
-    ...Object.fromEntries(
-      Object.entries(this.state).flatMap(([p, c]): [string, ComicMatch][] => {
-        const v = this.volumes[c.volumeKey];
-        if (!v || c.choice == null) return [];
-        // "": the series alone (MangaDex).
-        const issue = c.choice === "" ? undefined : v.issues.find((i) => i.id === c.choice);
-        return c.choice === "" || issue ? [[p, withIssue(c.own, v.volume, issue)]] : [];
-      }),
-    ),
+    ...Object.fromEntries(Object.entries(this.built).map(([p, n]): [string, ComicMatch] => [p, n.comic])),
     ...this.edits,
   }));
+
+  /** Asks the shared flow for the comics' details, from the choices. */
+  async rebuild() {
+    const files = Object.entries(this.state).map(([path, c]) => ({ path, volumeKey: c.volumeKey, own: c.own, choice: c.choice }));
+    const keys = new Set(files.map((f) => f.volumeKey));
+    const volumes = Object.fromEntries(Object.entries(this.volumes).filter(([k]) => keys.has(k)));
+    this.built = files.length ? await api.comicNamed($state.snapshot(files), $state.snapshot(volumes)) : {};
+  }
   /** The comics among the rows chosen in the list. */
   selected = $derived.by(() => this.#ctx.items.filter((i) => this.#ctx.selected.has(i.path) && (i.isDir ? i.convert : isComic(i.original))));
   counts = $derived.by(() => counts(this.state, this.#ctx.items));
@@ -139,23 +102,9 @@ export class Comics {
     const fresh = r?.type === "comic" && !!r.cleanInfo;
     // Typed in: no page in a catalogue.
     if (r?.type === "comic" && want && this.edits[key]) return { path, comic: this.edits[key], web: "", manga: false, convert: original, pdf, fresh };
-    if (!(r?.type === "comic" && want && this.matches[key] && this.state[key])) return { path, convert: original, pdf, fresh };
-    const c = this.state[key];
-    const [source, volume] = [c.volumeKey.slice(0, c.volumeKey.indexOf(":")), c.volumeKey.slice(c.volumeKey.indexOf(":") + 1)];
-    const issue = c.choice || "";
-    const web =
-      source === "comicvine"
-        ? issue ? `https://comicvine.gamespot.com/issue/4000-${issue}/` : `https://comicvine.gamespot.com/volume/4050-${volume}/`
-        : source === "gcd"
-          ? issue ? `https://www.comics.org/issue/${issue}/` : `https://www.comics.org/series/${volume}/`
-          : source === "mangadex"
-            ? `https://mangadex.org/title/${volume}`
-            : source === "anilist"
-              ? `https://anilist.co/manga/${volume}`
-              : source === "mangaupdates" && /^\d+$/.test(volume)
-                ? `https://www.mangaupdates.com/series/${BigInt(volume).toString(36)}`
-                : "";
-    return { path, comic: this.matches[key], web, manga: seriesOnly(source), convert: original, pdf, fresh };
+    const named = this.built[key];
+    if (!(r?.type === "comic" && want && named)) return { path, convert: original, pdf, fresh };
+    return { path, comic: named.comic, web: named.web, manga: named.manga, convert: original, pdf, fresh };
   }
   /** What making a comic an e-book needs: the format, the reader, the
    *  original's fate and, when it has some, its details. */
@@ -211,169 +160,30 @@ export class Comics {
         return;
       }
     }
-    // A folder of pictures too, when it becomes a CBZ.
-    const files = this.#ctx.items.filter((i) => (i.isDir ? i.convert : isComic(i.original)));
-    if (!files.length) {
-      this.#ctx.say(t("comicNoFiles"));
-      return;
-    }
+    // Which files, the barcodes, the series and issues and what is sure,
+    // the shared flow says; a series it is not sure of comes as a question
+    // (see {@link ask}).
     this.progress = t("comicReading");
-    const lang = settings.lang === "pt" ? "pt-br" : settings.lang;
     try {
-      const owns = await api.comicGuesses(
-        files.map((f) => f.path),
-        files.map((f) => (f.lookupName ? (f.isDir ? f.lookupName : splitExt(f.lookupName)[0]) : null)),
-        !!rule.seriesByFolder,
-      );
-      const run = this.#ctx.stopRun;
-      // On Metron, a barcode tells the issue itself.
-      const coded = new Set<string>();
-      if (source === "metron") {
-        let codes = owns.map((o) => o?.extra?.gtin?.replace(/\D/g, "") || null);
-        if (rule.barcode && codes.some((c) => !c)) {
-          this.progress = t("comicBarcodeReading");
-          const unread = files.flatMap((f, i) => (!codes[i] && owns[i] ? [i] : []));
-          const read = await api.comicBarcodes(unread.map((i) => files[i].path));
-          if (this.#ctx.stopRun !== run) return;
-          unread.forEach((i, n) => {
-            const code = read[n];
-            const own = owns[i];
-            if (!code || !own) return;
-            codes[i] = code;
-            // Written into the ComicInfo.xml with the rest.
-            own.extra = { ...(own.extra ?? {}), gtin: code };
-          });
-        }
-        const withCode = files.flatMap((f, i) => (codes[i] && owns[i] ? [i] : []));
-        for (const [n, i] of withCode.entries()) {
-          if (this.#ctx.stopRun !== run) return;
-          this.progress = t("comicBarcodeLooking", { n: `${n + 1}/${withCode.length}` });
-          const found = await api.comicByCode(key, codes[i]!);
-          if (!found) continue;
-          const vkey = `${source}:${found.volume.id}`;
-          this.volumes[vkey] = { volume: found.volume, issues: found.issues };
-          // The code tells the issue: its number too, when the name has none.
-          const own = owns[i]!;
-          const number = found.issues.find((x) => x.id === found.issue)?.number ?? "";
-          const exact = own.number || !number ? own : { ...own, number };
-          this.state[files[i].path] = { volumeKey: vkey, own: exact, choice: found.issue, status: "auto" };
-          coded.add(files[i].path);
-        }
-      }
-      const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-      const groups = new Map<string, { query: string; paths: string[]; owns: ComicMatch[] }>();
-      files.forEach((f, i) => {
-        const own = owns[i];
-        if (!own || coded.has(f.path)) return;
-        const query = rule.series.trim() || own.series;
-        const g = groups.get(fold(query)) ?? { query, paths: [], owns: [] };
-        g.paths.push(f.path);
-        g.owns.push(own);
-        groups.set(fold(query), g);
-      });
-      if (!groups.size) {
-        if (!coded.size) this.#ctx.say(t("comicNoFiles"));
+      const params = {
+        source,
+        key,
+        series: rule.series,
+        skip,
+        lang: settings.lang === "pt" ? "pt-br" : settings.lang,
+        uiLang: settings.lang,
+        byFolder: !!rule.seriesByFolder,
+        barcode: !!rule.barcode,
+      };
+      const res = await api.comicsSearch(params, this.#ctx.items, this.picked);
+      if (res.empty) {
+        this.#ctx.say(t("comicNoFiles"));
         return;
       }
-      for (const [k, g] of groups) {
-        if (this.#ctx.stopRun !== run) break;
-        // Loose chapters are no issues in the catalogues of issues.
-        if (!seriesOnly(source) && g.owns.every((o) => !o.number && o.volume == null && !!o.chapter)) continue;
-        const picked = `${source}:${k}`;
-        let volume: ComicVolume | null = this.picked[picked] ?? null;
-        // A `ComicInfo.xml` link to a Comic Vine issue tells the series.
-        const linked = source === "comicvine" ? g.owns.find((o) => o.id) : undefined;
-        if (!volume && linked) {
-          try {
-            const id = await api.comicVolumeOf(key, linked.id);
-            volume = this.volumes[`${source}:${id}`]?.volume ?? { id, name: g.query, startYear: null, publisher: "", count: 0, cover: "", country: "", language: "", format: "", writer: "" };
-          } catch {
-            volume = null;
-          }
-        }
-        if (!volume) {
-          this.progress = t("comicSearching", { series: g.query });
-          let found = await api.comicSearch(source, key, g.query, lang, null, "", skip);
-          // `Series: Story` may be a story in `Series`: the series alone.
-          const head = g.query.split(/\s*[:–]\s*|\s+-\s+/)[0].trim();
-          if (!found.length && head && head !== g.query.trim()) found = await api.comicSearch(source, key, head, lang, null, "", skip);
-          if (this.#ctx.stopRun !== run) break;
-          const year = g.owns.find((o) => o.seriesYear)?.seriesYear ?? null;
-          // A common name (`Saga`) may leave the series out of what the
-          // catalogue answers: asked again with the files' year (theirs, or
-          // their issues'), whose series come first.
-          const dated = year ?? g.owns.find((o) => o.year)?.year ?? null;
-          if (dated && !found.some((v) => fold(v.name) === k)) {
-            const more = await api.comicSearch(source, key, g.query, lang, dated, "", skip).catch(() => []);
-            if (this.#ctx.stopRun !== run) break;
-            found = [...more, ...found.filter((v) => !more.some((m) => m.id === v.id))];
-          }
-          // The highest number among the files: a series with fewer issues
-          // is not theirs.
-          const highest = Math.max(
-            0,
-            ...g.owns.map((o) => Number.parseFloat(o.number || (o.chapter ? "" : String(o.volume ?? ""))) || 0),
-          );
-          const fits = (v: ComicVolume) => !v.count || v.count >= Math.floor(highest);
-          const sorted = byFit(found, highest);
-          const same = sorted.filter((v) => fold(v.name) === k && (year == null || v.startYear === year) && fits(v));
-          // The same name in another language (a French edition for a
-          // Brazilian reader, when there is one in Portuguese) is not
-          // picked by itself.
-          const mine = (v: ComicVolume) => !v.language || v.language.toLowerCase().startsWith(settings.lang);
-          const foreign = same.length === 1 && !mine(same[0]) && found.some(mine);
-          // Without the files' year, the name alone does not tell one
-          // run from another (a translation of a newer series under an
-          // older one's name): asked when there is anything else to pick.
-          const sure = year != null || found.length === 1;
-          volume =
-            same.length === 1 && !foreign && sure
-              ? same[0]
-              : await new Promise<ComicVolume | null>((resolve) => {
-                  // The file whose cover is compared: the first with a number.
-                  const at = Math.max(0, g.owns.findIndex((o) => o.number || o.volume != null));
-                  this.pick = { source, skip, query: g.query, files: g.paths.length, highest, candidates: sorted, path: g.paths[at], comic: g.owns[at], resolve };
-                });
-          this.pick = null;
-          if (!volume) continue;
-        }
-        this.picked[picked] = volume;
-        // The manga catalogues have series, not a publisher's volumes: the
-        // file's numbers stay. MangaUpdates tells a series' authors and
-        // volumes only when asked for it.
-        if (seriesOnly(source)) {
-          const vkey = `${source}:${volume.id}`;
-          if (source === "mangaupdates") {
-            const full = await api.comicIssues(source, key, volume.id, g.owns).catch(() => null);
-            if (this.#ctx.stopRun !== run) break;
-            if (full) volume = { ...volume, ...Object.fromEntries(Object.entries(full.volume).filter(([, x]) => x !== "" && x !== null && x !== 0)) };
-          }
-          this.volumes[vkey] = { volume, issues: [] };
-          for (const [i, p] of g.paths.entries()) this.state[p] = { volumeKey: vkey, own: g.owns[i], choice: "", status: "auto" };
-          continue;
-        }
-        if (this.#ctx.stopRun !== run) break;
-        this.progress = t("comicLoading", { series: volume.name });
-        const res = await api.comicIssues(source, key, volume.id, g.owns);
-        const vkey = `${source}:${res.volume.id}`;
-        // The search's own details where the series' lack them (a cover).
-        this.volumes[vkey] = { volume: { ...volume, ...Object.fromEntries(Object.entries(res.volume).filter(([, x]) => x !== "" && x !== null && x !== 0)) }, issues: res.issues };
-        g.paths.forEach((p, i) => {
-          const found = res.found[i];
-          const own = g.owns[i];
-          // A loose chapter is no issue there: the series is all there is.
-          const chapterOnly = !own.number && !!own.chapter;
-          // A file without its issue still takes the series ("": the series
-          // alone, with its own numbers), so a series' files stay together;
-          // the review can still pick its issue.
-          this.state[p] = {
-            volumeKey: vkey,
-            own,
-            choice: found ?? "",
-            status: found != null || chapterOnly ? "auto" : "choose",
-          };
-        });
-      }
+      this.picked = res.picked;
+      for (const [k, v] of Object.entries(res.volumes)) this.volumes[k] = v;
+      for (const f of res.files) this.state[f.path] = { volumeKey: f.volumeKey, own: f.own, choice: f.choice, status: f.sure ? "auto" : "choose" };
+      await this.rebuild();
       if (Object.values(this.state).some((c) => c.status === "choose")) this.openReview();
     } catch (e) {
       const err = String(e);
@@ -400,9 +210,34 @@ export class Comics {
     this.review = queue.length ? queue : null;
   }
 
-  choose(path: string, issue: string | null) {
+  async choose(path: string, issue: string | null) {
     const c = this.state[path];
-    if (c) this.state[path] = { ...c, choice: issue, status: issue == null ? "none" : "chosen" };
+    if (!c) return;
+    this.state[path] = { ...c, choice: issue, status: issue == null ? "none" : "chosen" };
+    await this.rebuild();
+  }
+
+  /** The flow's progress: reading the files, their barcodes, searching or
+   *  loading a series. */
+  onProgress(p: { stage: string; series?: string; n?: string }) {
+    if (!this.progress) return;
+    const keys = { reading: "comicReading", barcodeReading: "comicBarcodeReading", barcodeLooking: "comicBarcodeLooking", searching: "comicSearching", loading: "comicLoading" } as const;
+    const key = keys[p.stage as keyof typeof keys];
+    if (key) this.progress = t(key, { series: p.series ?? "", n: p.n ?? "" });
+  }
+
+  /** The flow asks which series a group of comics is: the picker opens,
+   *  and its answer goes back. */
+  ask(id: number, q: Omit<ComicPick, "resolve" | "path" | "comic"> & { path: string | null; comic: ComicMatch | null }) {
+    this.pick = {
+      ...q,
+      path: q.path ?? undefined,
+      comic: q.comic ?? undefined,
+      resolve: (v) => {
+        this.pick = null;
+        api.flowAnswer(id, v);
+      },
+    };
   }
 
   /** Opens the details window on the comics chosen in the list. */
@@ -453,25 +288,29 @@ export class Comics {
       this.state = {};
       this.edits = {};
       this.picked = {};
+      this.built = {};
       return;
     }
     this.state = without(this.state, paths);
     this.edits = without(this.edits, paths);
+    this.built = without(this.built, paths);
   }
 
   /** The files renamed: what was found and typed follows them. */
   follow(to: (p: string) => string) {
     this.state = moved(this.state, to);
     this.edits = moved(this.edits, to);
+    this.built = moved(this.built, to);
   }
 
   /** What was found, to put back with Ctrl+Z. */
   snapshot() {
-    return { state: this.state, edits: this.edits, picked: this.picked };
+    return { state: this.state, edits: this.edits, picked: this.picked, built: this.built };
   }
   restore(s: ReturnType<Comics["snapshot"]>) {
     this.state = s.state;
     this.edits = s.edits;
     this.picked = s.picked;
+    this.built = s.built;
   }
 }

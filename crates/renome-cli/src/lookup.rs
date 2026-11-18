@@ -8,8 +8,8 @@ use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use renome_core::Preview;
 use renome_core::tmdb::{Candidate, Guess, MovieMatch};
-use renome_core::{Preview, PreviewItem};
 use renome_services::{Host, flow, tmdb};
 use serde_json::Value;
 
@@ -255,6 +255,16 @@ enum Answer<T> {
     Pick(T),
     Skip,
     Stop,
+}
+
+impl<T> Answer<T> {
+    fn map<U>(self, f: impl FnOnce(T) -> U) -> Answer<U> {
+        match self {
+            Answer::Pick(v) => Answer::Pick(f(v)),
+            Answer::Skip => Answer::Skip,
+            Answer::Stop => Answer::Stop,
+        }
+    }
 }
 
 /// The review window's choice, in the terminal.
@@ -544,15 +554,20 @@ fn regex_lite(text: &str) -> Option<(u16, u16, u16)> {
 
 /// The command line as the host of the series flow: the show it cannot
 /// settle is asked in the terminal (or left, with `--choose auto|skip`).
-struct ShowAsker<'a> {
+struct Asker<'a> {
     client: &'a tmdb::Client,
     anilist: &'a renome_services::anilist::Client,
+    /// The comic catalogues, with the rule's search options.
+    comics: Option<(
+        &'a renome_services::comics::Sources<'a>,
+        &'a flow::comics::Params,
+    )>,
     ask: &'a Ask,
     /// The person asked to stop (`q`).
     quit: Arc<std::sync::atomic::AtomicBool>,
 }
 
-impl Host for ShowAsker<'_> {
+impl Host for Asker<'_> {
     fn report(&self, event: &str, payload: Value) {
         Cli.report(event, payload)
     }
@@ -568,24 +583,37 @@ impl Host for ShowAsker<'_> {
         question: flow::Question,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<Value>> + Send + '_>> {
         Box::pin(async move {
-            let flow::Question::Show {
-                source,
-                query,
-                candidates,
-            } = question;
             if self.ask.choose != Choose::Ask || !std::io::stdin().is_terminal() {
                 return None;
             }
-            match choose_show(
-                self.client,
-                self.anilist,
-                source == "anilist",
-                &query,
-                candidates,
-            )
-            .await
-            {
-                Answer::Pick(c) => serde_json::to_value(c).ok(),
+            let answer = match question {
+                flow::Question::Show {
+                    source,
+                    query,
+                    candidates,
+                } => choose_show(
+                    self.client,
+                    self.anilist,
+                    source == "anilist",
+                    &query,
+                    candidates,
+                )
+                .await
+                .map(|c| serde_json::to_value(c).ok()),
+                flow::Question::ComicSeries {
+                    query,
+                    files,
+                    candidates,
+                    ..
+                } => {
+                    let (sources, p) = self.comics?;
+                    choose_volume(sources, p, &query, files, candidates)
+                        .await
+                        .map(|v| serde_json::to_value(v).ok())
+                }
+            };
+            match answer {
+                Answer::Pick(v) => v,
                 Answer::Skip => None,
                 Answer::Stop => {
                     self.quit.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -615,9 +643,10 @@ pub async fn series(
     let anilist = renome_services::anilist::Client::default();
     let typed = rule.get("show").and_then(Value::as_str).unwrap_or_default();
     let items: Vec<flow::Item> = preview.items.iter().map(flow::Item::from).collect();
-    let host = ShowAsker {
+    let host = Asker {
         client: &client,
         anilist: &anilist,
+        comics: None,
         ask,
         quit: Arc::default(),
     };
@@ -1647,122 +1676,6 @@ pub struct Comics {
     web: HashMap<PathBuf, (String, bool)>,
 }
 
-/// Catalogues of manga series, not of a publisher's issues.
-fn series_only(source: &str) -> bool {
-    matches!(source, "mangadex" | "anilist" | "mangaupdates")
-}
-
-fn fold_name(s: &str) -> String {
-    renome_core::text::strip_accents(s)
-        .to_lowercase()
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// The story title after the series in a comic's own name
-/// (`Series: The Story #3`).
-fn story(own: &str, series: &str) -> String {
-    let name = series.trim();
-    if name.is_empty() || own.len() == name.len() || !fold_name(own).starts_with(&fold_name(name)) {
-        return String::new();
-    }
-    let rest = own.get(name.len()..).unwrap_or_default();
-    if rest.starts_with([':', ' ', '-', '–']) {
-        rest.trim_matches(|c: char| c.is_whitespace() || ":-–—,.#".contains(c))
-            .to_string()
-    } else {
-        String::new()
-    }
-}
-
-/// A comic's match from its series and issue in the catalogue.
-fn with_issue(
-    own: &renome_core::comics::ComicMatch,
-    volume: &renome_core::comics::Volume,
-    issue: Option<&renome_core::comics::Issue>,
-) -> renome_core::comics::ComicMatch {
-    let year = issue.and_then(|i| i.cover_date.get(..4)?.parse::<u16>().ok());
-    let mut extra = own.extra.clone();
-    if let Some(date) = issue
-        .map(|i| i.cover_date.clone())
-        .filter(|d| !d.is_empty())
-    {
-        extra.retain(|k, _| {
-            !matches!(k.as_str(), "date" | "month" | "day") && !k.starts_with("month name")
-        });
-        extra.insert("date".into(), date);
-    }
-    renome_core::comics::ComicMatch {
-        series: volume.name.clone(),
-        series_year: volume.start_year.or(own.series_year),
-        number: match issue {
-            Some(i) if !own.number.is_empty() && !i.number.is_empty() => i.number.clone(),
-            _ => own.number.clone(),
-        },
-        volume: own.volume,
-        chapter: own.chapter.clone(),
-        title: match issue {
-            Some(i) if !i.name.trim().is_empty() => i.name.clone(),
-            _ if !own.title.is_empty() => own.title.clone(),
-            _ => story(&own.series, &volume.name),
-        },
-        year: year.or(own.year),
-        count: if volume.count > 0 {
-            Some(volume.count)
-        } else {
-            own.count
-        },
-        publisher: if volume.publisher.is_empty() {
-            own.publisher.clone()
-        } else {
-            volume.publisher.clone()
-        },
-        writer: if own.writer.is_empty() {
-            volume.writer.clone()
-        } else {
-            own.writer.clone()
-        },
-        artist: own.artist.clone(),
-        id: issue.map_or_else(|| volume.id.clone(), |i| i.id.clone()),
-        extra,
-    }
-}
-
-/// The catalogue page of a series or issue.
-fn comic_web(source: &str, volume: &str, issue: &str) -> String {
-    match source {
-        "comicvine" if !issue.is_empty() => {
-            format!("https://comicvine.gamespot.com/issue/4000-{issue}/")
-        }
-        "comicvine" => format!("https://comicvine.gamespot.com/volume/4050-{volume}/"),
-        "gcd" | "" if !issue.is_empty() => format!("https://www.comics.org/issue/{issue}/"),
-        "gcd" | "" => format!("https://www.comics.org/series/{volume}/"),
-        "mangadex" => format!("https://mangadex.org/title/{volume}"),
-        "anilist" => format!("https://anilist.co/manga/{volume}"),
-        "mangaupdates" => volume
-            .parse::<u64>()
-            .map(|n| format!("https://www.mangaupdates.com/series/{}", to_base36(n)))
-            .unwrap_or_default(),
-        _ => String::new(),
-    }
-}
-
-fn to_base36(mut n: u64) -> String {
-    let digits = b"0123456789abcdefghijklmnopqrstuvwxyz";
-    let mut out = Vec::new();
-    loop {
-        out.push(digits[(n % 36) as usize]);
-        n /= 36;
-        if n == 0 {
-            break;
-        }
-    }
-    out.reverse();
-    String::from_utf8(out).unwrap_or_default()
-}
-
 fn volume_line(v: &renome_core::comics::Volume) -> String {
     let mut details = Vec::new();
     for s in [&v.publisher, &v.country, &v.format] {
@@ -1855,359 +1768,124 @@ pub async fn comics(
         al: &al,
         mu: &mu,
     };
-    let lang = if lang() == "pt" {
-        "pt-br".to_string()
-    } else {
-        lang().to_string()
+    let params = flow::comics::Params {
+        source: source.clone(),
+        key: key.clone(),
+        series: typed.clone(),
+        skip: skip.clone(),
+        lang: if lang() == "pt" {
+            "pt-br".to_string()
+        } else {
+            lang().to_string()
+        },
+        ui_lang: lang().to_string(),
+        by_folder,
+        barcode: rule
+            .get("barcode")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     };
-    let ext_of = |name: &str| {
-        Path::new(name)
-            .extension()
-            .map(|e| e.to_string_lossy().to_lowercase())
-            .unwrap_or_default()
+    let items: Vec<flow::Item> = preview.items.iter().map(flow::Item::from).collect();
+    // A series forced with `--pick` for a file: its group's.
+    let mut picked = HashMap::new();
+    for i in &items {
+        let Some(text) = ask.picks.get(&i.path) else {
+            continue;
+        };
+        let stem = i.lookup_name.as_ref().map(|_| i.read_stem());
+        let Some(own) = renome_core::comics::from_path(&i.path, stem.as_deref(), by_folder) else {
+            continue;
+        };
+        let query = if typed.is_empty() {
+            own.series
+        } else {
+            typed.clone()
+        };
+        let found = sources
+            .search(&source, &key, text, None, "", &params.lang, &skip)
+            .await
+            .map_err(|e| crate::text::error_text(&e))?;
+        if let Some(v) = found.into_iter().next() {
+            picked.insert(flow::comics::picked_key(&source, &query), v);
+        }
+    }
+    let tv = tmdb::Client::new("", "");
+    let al_tv = renome_services::anilist::Client::default();
+    let host = Asker {
+        client: &tv,
+        anilist: &al_tv,
+        comics: Some((&sources, &params)),
+        ask,
+        quit: Arc::default(),
     };
-    let files: Vec<&PreviewItem> = preview
-        .items
-        .iter()
-        .filter(|i| {
-            if i.is_dir {
-                i.convert
-            } else {
-                renome_core::comics::is_comic(&ext_of(&i.original))
-            }
-        })
-        .collect();
+    let found = flow::comics::search(
+        &host,
+        &sources,
+        &params,
+        &items,
+        &Default::default(),
+        picked,
+    )
+    .await
+    .map_err(|e| crate::text::error_text(&e))?;
+    if host.quit.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err(t("searchStopped", &[]));
+    }
+    // The doubtful issues asked (or left).
+    let mut settled = Vec::new();
+    for f in found.files {
+        let choice = if f.sure {
+            Some(f.choice)
+        } else if ask.choose == Choose::Ask && std::io::stdin().is_terminal() {
+            let issues = found
+                .volumes
+                .get(&f.volume_key)
+                .map_or(&[][..], |l| &l.issues[..]);
+            choose_issue(&f.path, &f.own, issues)?
+        } else {
+            None
+        };
+        settled.push(flow::comics::Settled {
+            path: f.path,
+            volume_key: f.volume_key,
+            own: f.own,
+            choice,
+        });
+    }
+    let named = flow::comics::named(&settled, &found.volumes);
     let mut out_comics = Comics {
         chosen: HashMap::new(),
         listed: Vec::new(),
         web: HashMap::new(),
     };
-    if files.is_empty() {
-        return Ok(out_comics);
-    }
-    let owns: Vec<Option<renome_core::comics::ComicMatch>> = files
-        .iter()
-        .map(|f| {
-            let stem = f.lookup_name.as_ref().map(|n| {
-                if f.is_dir {
-                    n.clone()
-                } else {
-                    Path::new(n)
-                        .file_stem()
-                        .map(|s| s.to_string_lossy().into_owned())
-                        .unwrap_or_default()
-                }
-            });
-            renome_core::comics::from_path(&f.path, stem.as_deref(), by_folder)
-        })
-        .collect();
-    let mut coded: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
-    let mut out_comics_listed = Vec::new();
-    let mut take =
-        |path: &PathBuf, m: renome_core::comics::ComicMatch, web: String, manga: bool| {
-            out_comics.chosen.insert(path.clone(), m);
-            out_comics.web.insert(path.clone(), (web, manga));
-        };
-    // Metron by the barcode the files carry (or have printed, with the
-    // rule's option).
-    if source == "metron" {
-        let mut codes: Vec<Option<String>> = owns
+    for (key, listed) in &found.volumes {
+        let held: Vec<(String, renome_core::comics::ComicMatch)> = settled
             .iter()
-            .map(|o| {
-                o.as_ref()
-                    .and_then(|o| o.extra.get("gtin"))
-                    .map(|c| c.chars().filter(char::is_ascii_digit).collect::<String>())
-                    .filter(|c| !c.is_empty())
+            .filter(|s| &s.volume_key == key && named.contains_key(&s.path))
+            .filter_map(|s| {
+                let id = s.choice.clone()?;
+                (listed.issues.is_empty() || !id.is_empty()).then(|| (id, s.own.clone()))
             })
             .collect();
-        if rule
-            .get("barcode")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        {
-            let unread: Vec<usize> = (0..files.len())
-                .filter(|&i| codes[i].is_none() && owns[i].is_some())
-                .collect();
-            let paths: Vec<PathBuf> = unread.iter().map(|&i| files[i].path.clone()).collect();
-            let read = tokio::task::spawn_blocking(move || shared::barcodes(&paths))
-                .await
-                .unwrap_or_default();
-            for (n, &i) in unread.iter().enumerate() {
-                if let Some(Some(code)) = read.get(n) {
-                    codes[i] = Some(code.clone());
-                }
-            }
-        }
-        for i in 0..files.len() {
-            let (Some(code), Some(own)) = (&codes[i], &owns[i]) else {
-                continue;
-            };
-            let Ok(Some(found)) = mt.by_code(&key, code).await else {
-                continue;
-            };
-            let issue = found.issues.iter().find(|x| x.id == found.issue);
-            let mut own = own.clone();
-            if own.number.is_empty()
-                && let Some(i) = issue
-            {
-                own.number = i.number.clone();
-            }
-            let m = with_issue(&own, &found.volume, issue);
-            take(
-                &files[i].path,
-                m,
-                comic_web(&source, &found.volume.id, &found.issue),
-                false,
-            );
-            coded.insert(files[i].path.clone());
-        }
+        out_comics
+            .listed
+            .push((listed.volume.clone(), listed.issues.clone(), held));
     }
-    // The rest, by series.
-    let mut groups: Vec<(String, String, Vec<usize>)> = Vec::new();
-    for (i, f) in files.iter().enumerate() {
-        let Some(own) = &owns[i] else { continue };
-        if coded.contains(&f.path) {
-            continue;
-        }
-        let query = if typed.is_empty() {
-            own.series.clone()
-        } else {
-            typed.clone()
-        };
-        let k = fold_name(&query);
-        match groups.iter_mut().find(|g| g.0 == k) {
-            Some(g) => g.2.push(i),
-            None => groups.push((k, query, vec![i])),
-        }
+    for (p, n) in named {
+        out_comics.web.insert(p.clone(), (n.web, n.manga));
+        out_comics.chosen.insert(p, n.comic);
     }
-    for (k, query, members) in groups {
-        if crate::stop::requested() {
-            break;
-        }
-        let group_owns: Vec<renome_core::comics::ComicMatch> =
-            members.iter().filter_map(|&i| owns[i].clone()).collect();
-        if !series_only(&source)
-            && group_owns
-                .iter()
-                .all(|o| o.number.is_empty() && o.volume.is_none() && !o.chapter.is_empty())
-        {
-            continue;
-        }
-        let forced = members
-            .iter()
-            .find_map(|&i| ask.picks.get(&files[i].path))
-            .cloned();
-        let mut volume: Option<renome_core::comics::Volume> = None;
-        if let Some(text) = forced {
-            volume = sources
-                .search(&source, &key, &text, None, "", &lang, &skip)
-                .await
-                .map_err(|e| crate::text::error_text(&e))?
-                .into_iter()
-                .next();
-        }
-        if volume.is_none()
-            && source == "comicvine"
-            && let Some(linked) = group_owns.iter().find(|o| !o.id.is_empty())
-            && let Ok(id) = cv.volume_of(&key, &linked.id).await
-        {
-            volume = Some(renome_core::comics::Volume {
-                id,
-                name: query.clone(),
-                ..Default::default()
-            });
-        }
-        if volume.is_none() {
-            let mut found = sources
-                .search(&source, &key, &query, None, "", &lang, &skip)
-                .await
-                .map_err(|e| crate::text::error_text(&e))?;
-            let head = query
-                .split([':', '–'])
-                .next()
-                .unwrap_or_default()
-                .split(" - ")
-                .next()
-                .unwrap_or_default()
-                .trim()
-                .to_string();
-            if found.is_empty() && !head.is_empty() && head != query.trim() {
-                found = sources
-                    .search(&source, &key, &head, None, "", &lang, &skip)
-                    .await
-                    .unwrap_or_default();
-            }
-            let year = group_owns.iter().find_map(|o| o.series_year);
-            let dated = year.or_else(|| group_owns.iter().find_map(|o| o.year));
-            if let Some(d) = dated
-                && !found.iter().any(|v| fold_name(&v.name) == k)
-            {
-                let more = sources
-                    .search(&source, &key, &query, Some(d), "", &lang, &skip)
-                    .await
-                    .unwrap_or_default();
-                let mut merged = more.clone();
-                merged.extend(
-                    found
-                        .into_iter()
-                        .filter(|v| !more.iter().any(|m| m.id == v.id)),
-                );
-                found = merged;
-            }
-            let highest = group_owns
-                .iter()
-                .filter_map(|o| {
-                    let n = if !o.number.is_empty() {
-                        o.number.clone()
-                    } else if o.chapter.is_empty() {
-                        o.volume.map(|v| v.to_string()).unwrap_or_default()
-                    } else {
-                        String::new()
-                    };
-                    n.parse::<f64>().ok()
-                })
-                .fold(0.0, f64::max);
-            let fits = |v: &renome_core::comics::Volume| {
-                v.count == 0 || f64::from(v.count) >= highest.floor()
-            };
-            let mut sorted: Vec<renome_core::comics::Volume> =
-                found.iter().filter(|v| fits(v)).cloned().collect();
-            sorted.extend(found.iter().filter(|v| !fits(v)).cloned());
-            let same: Vec<&renome_core::comics::Volume> = sorted
-                .iter()
-                .filter(|v| {
-                    fold_name(&v.name) == k && (year.is_none() || v.start_year == year) && fits(v)
-                })
-                .collect();
-            let mine = |v: &renome_core::comics::Volume| {
-                v.language.is_empty() || v.language.to_lowercase().starts_with(crate::text::lang())
-            };
-            let foreign = same.len() == 1 && !mine(same[0]) && found.iter().any(mine);
-            let sure = year.is_some() || found.len() == 1;
-            volume = if same.len() == 1 && !foreign && sure {
-                Some(same[0].clone())
-            } else if ask.choose == Choose::Ask && std::io::stdin().is_terminal() {
-                choose_volume(
-                    &sources,
-                    &source,
-                    &key,
-                    &lang,
-                    &skip,
-                    &query,
-                    members.len(),
-                    sorted,
-                )
-                .await?
-            } else {
-                None
-            };
-        }
-        let Some(mut volume) = volume else { continue };
-        if series_only(&source) {
-            if source == "mangaupdates"
-                && let Ok(full) = sources.issues(&source, &key, &volume.id, &group_owns).await
-            {
-                volume = merge_volume(volume, full.volume);
-            }
-            out_comics_listed.push((
-                volume.clone(),
-                Vec::new(),
-                members
-                    .iter()
-                    .filter_map(|&i| owns[i].clone().map(|o| (String::new(), o)))
-                    .collect(),
-            ));
-            for &i in &members {
-                if let Some(own) = &owns[i] {
-                    take(
-                        &files[i].path,
-                        with_issue(own, &volume, None),
-                        comic_web(&source, &volume.id, ""),
-                        true,
-                    );
-                }
-            }
-            continue;
-        }
-        let res = sources
-            .issues(&source, &key, &volume.id, &group_owns)
-            .await
-            .map_err(|e| crate::text::error_text(&e))?;
-        let volume = merge_volume(volume, res.volume.clone());
-        let mut held: Vec<(String, renome_core::comics::ComicMatch)> = Vec::new();
-        for (n, &i) in members.iter().enumerate() {
-            let Some(own) = &owns[i] else { continue };
-            let chapter_only = own.number.is_empty() && !own.chapter.is_empty();
-            let issue_id = match res.found.get(n).cloned().flatten() {
-                Some(id) => Some(id),
-                None if chapter_only => Some(String::new()),
-                None if ask.choose == Choose::Ask && std::io::stdin().is_terminal() => {
-                    choose_issue(&files[i].path, own, &res.issues)?
-                }
-                None => None,
-            };
-            let Some(issue_id) = issue_id else { continue };
-            let issue = res.issues.iter().find(|x| x.id == issue_id);
-            if !issue_id.is_empty() && issue.is_none() {
-                continue;
-            }
-            if !issue_id.is_empty() {
-                held.push((issue_id.clone(), own.clone()));
-            }
-            take(
-                &files[i].path,
-                with_issue(own, &volume, issue),
-                comic_web(&source, &volume.id, &issue_id),
-                false,
-            );
-        }
-        out_comics_listed.push((volume, res.issues, held));
-    }
-    out_comics.listed = out_comics_listed;
     Ok(out_comics)
 }
 
-/// A series' details filled in from a fuller answer.
-fn merge_volume(
-    mut v: renome_core::comics::Volume,
-    full: renome_core::comics::Volume,
-) -> renome_core::comics::Volume {
-    if !full.name.is_empty() {
-        v.name = full.name;
-    }
-    v.start_year = full.start_year.or(v.start_year);
-    for (to, from) in [
-        (&mut v.publisher, full.publisher),
-        (&mut v.cover, full.cover),
-        (&mut v.country, full.country),
-        (&mut v.language, full.language),
-        (&mut v.format, full.format),
-        (&mut v.writer, full.writer),
-    ] {
-        if !from.is_empty() {
-            *to = from;
-        }
-    }
-    if full.count > 0 {
-        v.count = full.count;
-    }
-    if !full.id.is_empty() {
-        v.id = full.id;
-    }
-    v
-}
-
-#[allow(clippy::too_many_arguments)]
+/// A comic series, in the terminal; a new search with the words typed.
 async fn choose_volume(
     sources: &renome_services::comics::Sources<'_>,
-    source: &str,
-    key: &str,
-    lang: &str,
-    skip: &str,
+    p: &flow::comics::Params,
     query: &str,
     files: usize,
     mut candidates: Vec<renome_core::comics::Volume>,
-) -> Result<Option<renome_core::comics::Volume>, String> {
+) -> Answer<renome_core::comics::Volume> {
     loop {
         let lines: Vec<String> = candidates.iter().map(volume_line).collect();
         match ask_one(
@@ -2219,11 +1897,11 @@ async fn choose_volume(
             query,
             &lines,
         ) {
-            Pick::Number(n) => return Ok(Some(candidates.remove(n))),
-            Pick::Skip => return Ok(None),
-            Pick::Stop => return Err(t("searchStopped", &[])),
+            Pick::Number(n) => return Answer::Pick(candidates.remove(n)),
+            Pick::Skip => return Answer::Skip,
+            Pick::Stop => return Answer::Stop,
             Pick::Search(text) => match sources
-                .search(source, key, &text, None, "", lang, skip)
+                .search(&p.source, &p.key, &text, None, "", &p.lang, &p.skip)
                 .await
             {
                 Ok(v) => candidates = v,

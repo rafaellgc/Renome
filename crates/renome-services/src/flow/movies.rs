@@ -99,6 +99,7 @@ mod tests {
             extra: None,
             release_junk: false,
             untagged: false,
+            convert: false,
         }
     }
 

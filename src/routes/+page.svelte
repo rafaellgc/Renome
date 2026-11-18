@@ -1507,11 +1507,15 @@
     const unlistenTmdb = listen<{ done: number; total: number }>("tmdb-progress", (e) => {
       if (movies.progress) movies.progress = { ...movies.progress, ...e.payload };
     });
+    const unlistenComic = listen<{ stage: string; series?: string; n?: string }>("comic-progress", (e) => comics.onProgress(e.payload));
     const unlistenTv = listen<{ stage: "finding" | "loading"; show?: string }>("tv-progress", (e) => tv.onProgress(e.payload));
     const unlistenAsk = listen<{ id: number; question: { kind: string; source: "tmdb" | "anilist"; query: string; candidates: Candidate[] } }>(
       "flow-ask",
       (e) => {
-        if (e.payload.question.kind === "show") tv.ask(e.payload.id, e.payload.question);
+        const q = e.payload.question;
+        if (q.kind === "show") tv.ask(e.payload.id, q);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        else if (q.kind === "comicSeries") comics.ask(e.payload.id, q as any);
       },
     );
     const unlistenMb = listen<{ done: number; total: number; kind?: "listen" | "tags" }>("mb-progress", (e) => {
@@ -1586,6 +1590,7 @@
       unlistenUndo.then((f) => f());
       unlistenTmdb.then((f) => f());
       unlistenTv.then((f) => f());
+      unlistenComic.then((f) => f());
       unlistenAsk.then((f) => f());
       unlistenMb.then((f) => f());
       unlistenBooks.then((f) => f());

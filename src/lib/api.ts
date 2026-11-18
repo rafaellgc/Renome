@@ -148,14 +148,26 @@ export const api = {
   comicCheck: (key: string) => invoke<void>("comic_check", { key }),
   comicSearch: (source: ComicSource, key: string, query: string, lang: string, year: number | null = null, publisher = "", skip = "") =>
     invoke<ComicVolume[]>("comic_search", { source, key, query, year, publisher, lang, skip }),
-  comicIssues: (source: ComicSource, key: string, id: string, comics: ComicMatch[]) =>
-    invoke<{ volume: ComicVolume; issues: ComicIssue[]; found: (string | null)[] }>("comic_issues", { source, key, id, comics }),
-  comicVolumeOf: (key: string, issue: string) => invoke<string>("comic_volume_of", { key, issue }),
   /** The barcodes printed in the comics' first and last pages. */
-  comicBarcodes: (paths: string[]) => invoke<(string | null)[]>("comic_barcodes", { paths }),
   /** The issue a barcode belongs to, on Metron. */
-  comicByCode: (key: string, code: string) =>
-    invoke<{ volume: ComicVolume; issues: ComicIssue[]; issue: string } | null>("comic_by_code", { key, code }),
+  /** The comic rule's search (shared with the command line); a series
+   *  it is not sure of comes as a `flow-ask` question. */
+  comicsSearch: (
+    params: { source: string; key: string; series: string; skip: string; lang: string; uiLang: string; byFolder: boolean; barcode: boolean },
+    items: PreviewItem[],
+    picked: Record<string, ComicVolume>,
+  ) =>
+    invoke<{
+      empty: boolean;
+      volumes: Record<string, { volume: ComicVolume; issues: ComicIssue[] }>;
+      files: { path: string; volumeKey: string; own: ComicMatch; choice: string; sure: boolean }[];
+      picked: Record<string, ComicVolume>;
+    }>("comics_search", { params, items, picked }),
+  /** Each comic as the rule names it, with its page in the catalogue. */
+  comicNamed: (
+    files: { path: string; volumeKey: string; own: ComicMatch; choice: string | null }[],
+    volumes: Record<string, { volume: ComicVolume; issues: ComicIssue[] }>,
+  ) => invoke<Record<string, { comic: ComicMatch; web: string; manga: boolean }>>("comic_named", { files, volumes }),
   metronCheck: (token: string) => invoke<void>("metron_check", { token }),
   gcdAccount: (email: string, password: string) => invoke<void>("gcd_account", { email, password }),
   gcdCheck: (email: string, password: string) => invoke<void>("gcd_check", { email, password }),
