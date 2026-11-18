@@ -298,8 +298,13 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   space: `Name.nfo`, `Name-poster.jpg`) get its new stem and go where it
   goes, even when a text rule changed their names (a video is never
   parted from its `.nfo` and pictures), and stay with it when it stays
-  (a conflict, the same file already there); and, when no rule changed
-  them, in a movie's own folder (as above, with one
+  (a conflict, the same file already there); in a season's own folder
+  (only episodes of one show and what goes with them), when its episodes
+  go to one new folder the other files go there too (`season.nfo`), the
+  show's own (`tvshow.nfo`, `fanart`, `logo`, `banner`, `clearart`,
+  `landscape`, `seasonNN-*`) to the show's folder, and they stay when no
+  episode moves; such files are never numbered by "number clashes"; and,
+  when no rule changed them, in a movie's own folder (as above, with one
   movie), when that movie goes to a new folder (by its rule, or sent to
   another folder), the others go there too (`backdrop.jpg`, `movie.nfo`),
   with their subfolder (`extrafanart/`, two levels at most), when they

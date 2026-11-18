@@ -130,7 +130,7 @@ fn number_clashes(items: &mut [PreviewItem], keys: &mut PathKeys, view: &View) {
         .collect();
     let mut used: HashSet<PathBuf> = HashSet::new();
     for item in items.iter_mut() {
-        if item.status != Status::Ok || view.identical.contains_key(&item.path) {
+        if item.status != Status::Ok || view.identical.contains_key(&item.path) || item.companion {
             continue;
         }
         let taken = |keys: &mut PathKeys, used: &HashSet<PathBuf>, target: &Path| {
@@ -282,6 +282,14 @@ pub struct PreviewItem {
     /// goes with (see [`follow_works`]): when the work stays, so does it.
     #[serde(skip)]
     pub follows: Option<PathBuf>,
+    /// Goes with a work (named after it, or from its own folder): never
+    /// numbered when its place is taken (a `season (2).nfo` is no use).
+    #[serde(skip)]
+    pub companion: bool,
+    /// Goes with the works of this folder (its own folder's other files):
+    /// when none of them moves, it stays too.
+    #[serde(skip)]
+    pub with_folder: Option<PathBuf>,
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -846,6 +854,8 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
     let mut ids: HashMap<PathBuf, HashSet<u64>> = HashMap::new();
     // Audiobooks' folders (above disc folders) and their books.
     let mut audiobooks: HashMap<PathBuf, HashSet<String>> = HashMap::new();
+    // Episodes' folders (a season's) and their shows.
+    let mut shows: HashMap<PathBuf, HashSet<(String, u64)>> = HashMap::new();
     let mut stems: HashMap<PathBuf, Vec<(String, String, Place, PathBuf)>> = HashMap::new();
     for i in items
         .iter()
@@ -854,6 +864,19 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
         let here = (i.dest.clone(), i.folder.clone());
         if let Some(m) = view.movies.get(&i.path) {
             ids.entry(i.dir.clone()).or_default().insert(m.id);
+            let moving = i.dest.is_some().then(|| here.clone());
+            match places.get_mut(&i.dir) {
+                Some(p) if *p != moving => *p = None,
+                Some(_) => {}
+                None => {
+                    places.insert(i.dir.clone(), moving);
+                }
+            }
+        } else if let Some(e) = view.episodes.get(&i.path) {
+            shows
+                .entry(i.dir.clone())
+                .or_default()
+                .insert((e.source.clone(), e.id));
             let moving = i.dest.is_some().then(|| here.clone());
             match places.get_mut(&i.dir) {
                 Some(p) if *p != moving => *p = None,
@@ -901,6 +924,11 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
             added.insert(crate::audiobook::book_dir(&i.dir), b);
         }
     }
+    for i in items.iter().filter(|i| view.episodes.contains_key(&i.path)) {
+        if let Some(b) = base.get(i.path.as_path()) {
+            added.insert(i.dir.clone(), b);
+        }
+    }
     // Only a movie's own folder, or an audiobook's: every audio file in
     // it (and in its disc folders) is that book.
     for (dir, place) in places.iter_mut() {
@@ -914,6 +942,21 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
                     .all(|e| {
                         view.books.get(e.path()).map(book_key).as_ref() == books.iter().next()
                     });
+            if !own {
+                *place = None;
+            }
+            continue;
+        }
+        // A season's folder: only episodes of one show and what goes with
+        // them.
+        if let Some(show) = shows.get(dir) {
+            let own = show.len() == 1
+                && !ids.contains_key(dir)
+                && items
+                    .iter()
+                    .filter(|i| &i.dir == dir)
+                    .find_map(|i| view.episodes.get(&i.path))
+                    .is_some_and(|e| own_episode_folder(dir, e, view));
             if !own {
                 *place = None;
             }
@@ -990,6 +1033,7 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
             i.dest = dest;
             i.folder = folder;
             i.follows = Some(work);
+            i.companion = true;
         } else if let Some(kind) = i.extra.clone() {
             // In the extras folder next to the movie, whatever folder it
             // was in.
@@ -1001,9 +1045,31 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
                 Some(f) => format!("{f}/{kind}"),
                 None => kind,
             });
-        } else if let Some((dest, folder)) = place(&i.dir, own_base) {
-            i.dest = Some(dest);
-            i.folder = folder;
+        } else if let Some((up, _, _)) = home(&i.dir, own_base)
+            && let Some((dest, folder)) = place(&i.dir, own_base)
+        {
+            i.with_folder = Some(up);
+            // A season's folder: the show's own files go to the show's
+            // folder, the rest (season.nfo, its poster) to the season's.
+            let up = folder
+                .as_deref()
+                .and_then(|f| f.rsplit_once('/'))
+                .map(|(show, _)| show.to_string());
+            match (
+                shows.contains_key(&i.dir) && show_level(&i.original),
+                up,
+                dest.parent(),
+            ) {
+                (true, Some(show), Some(parent)) => {
+                    i.dest = Some(parent.to_path_buf());
+                    i.folder = Some(show);
+                }
+                _ => {
+                    i.dest = Some(dest);
+                    i.folder = folder;
+                }
+            }
+            i.companion = true;
         } else {
             continue;
         }
@@ -1684,6 +1750,8 @@ pub fn preview(
                 && crate::extras::release_junk(&file.path, file.size);
             PreviewItem {
                 follows: None,
+                companion: false,
+                with_folder: None,
                 extra,
                 release_junk,
                 to_trash: release_junk
@@ -1899,8 +1967,31 @@ pub fn preview(
         .filter(|i| i.status == Status::Conflict)
         .map(|i| i.path.clone())
         .collect();
+    // Folders where some work still moves.
+    let moving_from: HashSet<PathBuf> = items
+        .iter()
+        .filter(|i| i.status == Status::Ok && i.follows.is_none() && i.with_folder.is_none())
+        .filter(|i| {
+            view.movies.contains_key(&i.path)
+                || view.episodes.contains_key(&i.path)
+                || view.books.contains_key(&i.path)
+                || view.comics.contains_key(&i.path)
+        })
+        .flat_map(|i| {
+            i.path
+                .ancestors()
+                .skip(1)
+                .take(3)
+                .map(Path::to_path_buf)
+                .collect::<Vec<_>>()
+        })
+        .collect();
     for i in items.iter_mut() {
-        if i.follows.as_ref().is_some_and(|w| staying.contains(w)) {
+        if i.follows.as_ref().is_some_and(|w| staying.contains(w))
+            || i.with_folder
+                .as_ref()
+                .is_some_and(|d| !moving_from.contains(d))
+        {
             i.new_name = i.original.clone();
             i.dest = None;
             i.folder = None;
@@ -2117,6 +2208,28 @@ fn own_movie_folder(dir: &Path, video: &Path, m: &tmdb::MovieMatch, view: &View)
         && (tmdb::names_movie(dir, m)
             || named_like(dir, video)
             || only_movie_files(dir, m.id, view))
+}
+
+/// A show's own file found in a season's folder (Kodi's and Jellyfin's
+/// names): `tvshow.nfo`, the show's artwork and the seasons' posters.
+fn show_level(name: &str) -> bool {
+    let n = name.to_lowercase();
+    let stem = n.rsplit_once('.').map_or(n.as_str(), |(s, _)| s);
+    stem == "tvshow"
+        || [
+            "fanart",
+            "logo",
+            "clearlogo",
+            "clearart",
+            "banner",
+            "landscape",
+            "backdrop",
+        ]
+        .contains(&stem)
+        || (stem.starts_with("season")
+            && stem.contains('-')
+            && !stem.starts_with("season.")
+            && stem != "season")
 }
 
 /// Whether `dir` is a release of the show of `e`: not one of the user's
@@ -3713,6 +3826,8 @@ mod tests {
                 &format!("{ep}.mkv"),
                 &format!("{ep}.nfo"),
                 &format!("{ep}-thumb.jpg"),
+                "season.nfo",
+                "tvshow.nfo",
             ],
         );
         // A text rule run on every file first (it takes "(2010)" out).
@@ -3745,6 +3860,13 @@ mod tests {
             get(&p, &format!("{ep}-thumb.jpg")).target(),
             new.join("Show - S01E01-thumb.jpg")
         );
+        // The season's folder's own files: to the new season's folder, the
+        // show's to the show's.
+        assert_eq!(get(&p, "season.nfo").target(), new.join("season.nfo"));
+        assert_eq!(
+            get(&p, "tvshow.nfo").target(),
+            lib.join("Show (2010) [tmdbid-7]/tvshow.nfo")
+        );
         // The same video already there: it stays, and so do they (no
         // "(2)", nothing left at the library's top).
         fs::create_dir_all(&new).unwrap();
@@ -3755,7 +3877,12 @@ mod tests {
             get(&p, &format!("{ep}.mkv")).problem,
             Some(Problem::SameThere)
         );
-        for n in [format!("{ep}.nfo"), format!("{ep}-thumb.jpg")] {
+        for n in [
+            format!("{ep}.nfo"),
+            format!("{ep}-thumb.jpg"),
+            "season.nfo".into(),
+            "tvshow.nfo".into(),
+        ] {
             let i = get(&p, &n);
             assert_eq!(
                 (i.status, i.target()),
