@@ -47,6 +47,9 @@ pub enum Problem {
     Copy,
     /// A file with that name already exists outside the batch.
     Exists,
+    /// The same file is already where it goes, under that name: it stays
+    /// where it is (nothing to move, copy or number).
+    SameThere,
 }
 
 /// How the list is shown: which files are included and in what order.
@@ -138,6 +141,11 @@ fn number_clashes(items: &mut [PreviewItem], keys: &mut PathKeys, view: &View) {
                     && !same_file(target, &item.path))
         };
         let first = item.target();
+        // The same file already there: not numbered (it stays, below).
+        if !used.contains(&keys.key(&first)) && crate::identical::same_content(&item.path, &first) {
+            used.insert(keys.key(&first));
+            continue;
+        }
         if taken(keys, &used, &first) {
             let name = item.new_name.clone();
             let (stem, ext) = if item.is_dir {
@@ -1861,7 +1869,13 @@ pub fn preview(
         }
         for i in blocked {
             items[i].status = Status::Conflict;
-            items[i].problem = Some(Problem::Exists);
+            items[i].problem = Some(
+                if crate::identical::same_content(&items[i].path, &items[i].target()) {
+                    Problem::SameThere
+                } else {
+                    Problem::Exists
+                },
+            );
         }
     }
 
@@ -3607,6 +3621,51 @@ mod tests {
         assert!(old.join("show.s01e01.mkv").exists());
         assert!(d.path().join("Show/notes.txt").exists());
         assert!(!left.exists());
+    }
+
+    #[test]
+    fn the_same_file_already_there_stays_put() {
+        let d = tempfile::tempdir().unwrap();
+        let src = d.path().join("baixando");
+        let lib = d.path().join("lib");
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&lib).unwrap();
+        let big: Vec<u8> = (0..400_000u32).map(|n| (n % 251) as u8).collect();
+        fs::write(src.join("a.mkv"), &big).unwrap();
+        fs::write(lib.join("a.mkv"), &big).unwrap();
+        // The same size, another middle: not the same file.
+        let mut other = big.clone();
+        other[200_000] ^= 1;
+        fs::write(src.join("b.mkv"), &big).unwrap();
+        fs::write(lib.join("b.mkv"), &other).unwrap();
+        let files: Vec<FileEntry> = ["a.mkv", "b.mkv"]
+            .iter()
+            .map(|n| {
+                let p = src.join(n);
+                FileEntry::from_path(&p, &fs::metadata(&p).unwrap()).unwrap()
+            })
+            .collect();
+        for number in [false, true] {
+            let view = View {
+                number_clashes: number,
+                send_to: Some(SendTo {
+                    dir: lib.clone(),
+                    copy: false,
+                }),
+                ..View::default()
+            };
+            let p = preview(&files, &[], &HashMap::new(), &view);
+            let a = p.items.iter().find(|i| i.original == "a.mkv").unwrap();
+            assert_eq!(a.status, Status::Conflict);
+            assert_eq!(a.problem, Some(Problem::SameThere));
+            assert_eq!(a.new_name, "a.mkv");
+            let b = p.items.iter().find(|i| i.original == "b.mkv").unwrap();
+            if number {
+                assert_eq!((b.status, b.new_name.as_str()), (Status::Ok, "b (2).mkv"));
+            } else {
+                assert_eq!(b.problem, Some(Problem::Exists));
+            }
+        }
     }
 
     #[test]

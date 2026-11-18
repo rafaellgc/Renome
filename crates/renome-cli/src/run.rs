@@ -252,7 +252,7 @@ pub fn preview_or_apply(
     }
     if !apply {
         show(&preview, m.get_flag("all"), &missing);
-        return Ok(if preview.conflicts > 0 || doubtful > 0 {
+        return Ok(if real_conflicts(&preview) > 0 || doubtful > 0 {
             Exit::Doubts
         } else {
             Exit::Done
@@ -275,14 +275,14 @@ pub fn preview_or_apply(
                 json!({ "renamed": 0, "historyId": null, "failed": [] })
             );
         }
-        return Ok(if preview.conflicts > 0 || doubtful > 0 {
+        return Ok(if real_conflicts(&preview) > 0 || doubtful > 0 {
             Exit::Doubts
         } else {
             Exit::Done
         });
     }
-    if preview.conflicts > 0 && m.get_flag("strict") {
-        out::note(&t("strictConflicts", &[("n", &preview.conflicts)]));
+    if real_conflicts(&preview) > 0 && m.get_flag("strict") {
+        out::note(&t("strictConflicts", &[("n", &real_conflicts(&preview))]));
         return Ok(Exit::Doubts);
     }
     if !m.get_flag("yes") {
@@ -363,7 +363,7 @@ pub fn preview_or_apply(
         }
     }
     // Renamed what was certain; conflicts or doubts left say so.
-    if matches!(exit, Exit::Done) && (preview.conflicts > 0 || doubtful > 0) {
+    if matches!(exit, Exit::Done) && (real_conflicts(&preview) > 0 || doubtful > 0) {
         return Ok(Exit::Doubts);
     }
     Ok(exit)
@@ -582,8 +582,12 @@ fn show(p: &Preview, all: bool, missing: &[crate::missing::Missing]) {
         t("files", &[("n", &p.total)]),
         t("changed", &[("n", &p.changed)]),
     ];
-    if p.conflicts > 0 {
-        totals.push(out::red(&t("conflicts", &[("n", &p.conflicts)])));
+    if real_conflicts(p) > 0 {
+        totals.push(out::red(&t("conflicts", &[("n", &real_conflicts(p))])));
+    }
+    let same = p.conflicts - real_conflicts(p);
+    if same > 0 {
+        totals.push(out::dim(&t("sameThereN", &[("n", &same)])));
     }
     if unchanged > 0 && p.changed > 0 {
         totals.push(out::dim(&t("unchangedN", &[("n", &unchanged)])));
@@ -614,6 +618,16 @@ fn show(p: &Preview, all: bool, missing: &[crate::missing::Missing]) {
             println!("    {}{title}{date}", out::yellow(&x.code));
         }
     }
+}
+
+/// The conflicts, without the files already where they go (the same
+/// file is there): those stay, and nothing is wrong.
+fn real_conflicts(p: &Preview) -> usize {
+    p.conflicts
+        - p.items
+            .iter()
+            .filter(|i| i.problem == Some(renome_core::Problem::SameThere))
+            .count()
 }
 
 /// A problem's name as the page's texts call it (`problem.<name>`).

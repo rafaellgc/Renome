@@ -132,7 +132,7 @@ export interface Step {
 }
 
 export type Status = "unchanged" | "ok" | "conflict";
-export type Problem = "empty" | "slash" | "tooLong" | "windowsChars" | "diskChars" | "duplicate" | "copy" | "exists";
+export type Problem = "empty" | "slash" | "tooLong" | "windowsChars" | "diskChars" | "duplicate" | "copy" | "exists" | "sameThere";
 
 export interface PreviewItem {
   path: string;

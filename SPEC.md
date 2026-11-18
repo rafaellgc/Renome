@@ -2222,6 +2222,12 @@ The book rule's option `audiobooks` (TS only, default on) takes audio files
   while whole files are read;
   clicking it shows only those files, grouped.
 - A "same name" conflict between identical files says so.
+- The same file already at the target (outside the batch): same size,
+  not empty, not the same physical file, and the same bytes in 64 KiB at
+  the start, middle and end (remembered per pair, size and dates) →
+  conflict `sameThere`: it stays, is not numbered by "number clashes",
+  gets no sidecars; counted apart ("already there") in the footer, the
+  confirmation and renome-cli (not a conflict for the exit code).
 - **Repeated songs**: after the identical files, the same search finds
   songs that are the same music in different files (an MP3 and a FLAC,
   an album track and its compilation copy), by their tags only: same

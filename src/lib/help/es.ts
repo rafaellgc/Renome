@@ -879,6 +879,7 @@ ${ex("Película.es.ass", "Película.es.srt")}
   <li><b>Seleccione un archivo</b> y sus copias se resaltan en la lista. Pasar el ratón sobre la etiqueta muestra los nombres de las otras copias.</li>
   <li>El pie muestra cuántos archivos tienen copia. <b>Haga clic</b> para ver solo esos archivos, con las copias juntas; otro clic muestra todos. Desde ahí puede quitarlos de la lista o renombrarlos aparte.</li>
   <li>Cuando dos copias quedarían con el mismo nombre, el conflicto avisa que los archivos son idénticos.</li>
+  <li>Cuando el <b>mismo archivo ya está en el destino</b> con el nombre nuevo (un episodio copiado otra vez a la biblioteca, por ejemplo), no se mueve ni se copia, no recibe <code>(2)</code> ni <code>.nfo</code> ni imágenes: se queda donde está, marcado <b>ya en el destino</b>. El programa compara el tamaño y trozos del principio, el medio y el final de los dos archivos, sin leerlos enteros.</li>
 </ul>
 <p>La búsqueda se hace por etapas para ser rápida: solo se comparan archivos del mismo tamaño; luego solo el inicio y el final; el archivo entero solo se lee cuando todo eso coincide. Con archivos grandes, el pie muestra el progreso. Los archivos vacíos, las carpetas y los enlaces simbólicos quedan fuera.</p>
 <h4>Canciones repetidas</h4>

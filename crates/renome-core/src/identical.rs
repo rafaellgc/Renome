@@ -199,6 +199,72 @@ pub(crate) fn on_disk(path: &Path) -> Option<(Stamp, Option<(u64, u64)>)> {
     Some((stamp, id))
 }
 
+/// How much of a file [`same_content`] compares at its start, middle and
+/// end.
+const SAMPLE: u64 = 64 << 10;
+
+/// Whether `a` and `b` are two files with the same content, as far as a
+/// look can tell without reading them whole: the same size (not empty)
+/// and the same bytes at the start, the middle and the end. Videos the
+/// same size whose headers (with their own IDs) and ends match are the
+/// same release. Remembered per pair, size and dates, as the list is
+/// shown again and again.
+pub fn same_content(a: &Path, b: &Path) -> bool {
+    use std::sync::Mutex;
+    type Key = (
+        PathBuf,
+        PathBuf,
+        u64,
+        Option<std::time::SystemTime>,
+        Option<std::time::SystemTime>,
+    );
+    static SEEN: Mutex<Option<HashMap<Key, bool>>> = Mutex::new(None);
+    let (Ok(ma), Ok(mb)) = (std::fs::metadata(a), std::fs::metadata(b)) else {
+        return false;
+    };
+    if !ma.is_file() || !mb.is_file() || ma.len() != mb.len() || ma.len() == 0 {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        // The file itself (a case-only change, a hard link): not a copy.
+        if ma.dev() == mb.dev() && ma.ino() == mb.ino() {
+            return false;
+        }
+    }
+    let key: Key = (
+        a.to_path_buf(),
+        b.to_path_buf(),
+        ma.len(),
+        ma.modified().ok(),
+        mb.modified().ok(),
+    );
+    if let Some(&known) = SEEN.lock().unwrap().as_ref().and_then(|m| m.get(&key)) {
+        return known;
+    }
+    let size = ma.len();
+    let sample = |p: &Path| -> Option<Vec<u8>> {
+        let mut f = File::open(p).ok()?;
+        let mut out = Vec::new();
+        if size <= 3 * SAMPLE {
+            f.read_to_end(&mut out).ok()?;
+            return Some(out);
+        }
+        for at in [0, size / 2 - SAMPLE / 2, size - SAMPLE] {
+            f.seek(SeekFrom::Start(at)).ok()?;
+            (&mut f).take(SAMPLE).read_to_end(&mut out).ok()?;
+        }
+        Some(out)
+    };
+    let same = matches!((sample(a), sample(b)), (Some(x), Some(y)) if x == y);
+    SEEN.lock()
+        .unwrap()
+        .get_or_insert_with(HashMap::new)
+        .insert(key, same);
+    same
+}
+
 fn hash_edges(path: &Path, size: u64) -> Option<u128> {
     let mut file = File::open(path).ok()?;
     let mut buf = Vec::with_capacity((2 * EDGE).min(size) as usize);

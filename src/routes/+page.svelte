@@ -47,6 +47,9 @@
   let steps = $state<Step[]>([]);
   let overrides = $state<Record<string, string>>({});
   let preview = $state<Preview>({ items: [], ruleErrors: [], filterError: null, total: 0, changed: 0, conflicts: 0, leftFolders: [], trash: [], trashFolders: [] });
+  // Files that stay because the same file is already where they go
+  // (counted apart from the conflicts).
+  const sameThere = $derived(preview.items.filter((i) => i.problem === "sameThere").length);
   let selected = $state(new Set<string>());
   let filter = $state("");
   let sortKey = $state<ViewSort>("newName");
@@ -703,7 +706,8 @@
         toolsOnly.length ? t("confirmSubTools", { n: toolsOnly.length }) : "",
         tagOnly.length ? t("confirmInside", { n: tagOnly.length }) : "",
         subsPlanned ? t("confirmSubs", { n: subsPlanned }) : "",
-        preview.conflicts ? t("confirmConflicts", { n: preview.conflicts }) : "",
+        preview.conflicts - sameThere ? t("confirmConflicts", { n: preview.conflicts - sameThere }) : "",
+        sameThere ? t("confirmSameThere", { n: sameThere }) : "",
         ads ? t("confirmTrashAds", { n: ads, folders: adFolders.length }) : "",
       ].filter(Boolean);
       const ok = await confirm({
@@ -1848,7 +1852,8 @@
       </span>
       <span class="ok">{t("changed", { n: preview.changed })}</span>
     {/if}
-    {#if preview.conflicts}<span class="bad">{t("conflicts", { n: preview.conflicts })}</span>{/if}
+    {#if preview.conflicts - sameThere}<span class="bad">{t("conflicts", { n: preview.conflicts - sameThere })}</span>{/if}
+    {#if sameThere}<span title={t("problem.sameThere")}>{t("sameThereN", { n: sameThere })}</span>{/if}
     {#if preview.leftFolders.length}
       <span
         class="warn"

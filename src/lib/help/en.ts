@@ -879,6 +879,7 @@ ${ex("Movie.en.ass", "Movie.en.srt")}
   <li><b>Select a file</b> and its copies are highlighted in the list. Hovering over the tag shows the names of the other copies.</li>
   <li>The footer shows how many files have a copy. <b>Click it</b> to see only those files, with the copies side by side; click again to see all. From there you can remove them from the list or rename them separately.</li>
   <li>When two copies would get the same name, the conflict says the files are identical.</li>
+  <li>When the <b>same file is already where it goes</b> under the new name (an episode copied to the library again, for example), it is not moved or copied, does not get <code>(2)</code> and gets no <code>.nfo</code> or pictures: it stays where it is, marked <b>already there</b>. The program compares the size and pieces from the start, middle and end of both files, without reading them whole.</li>
 </ul>
 <p>The search runs in stages to be fast: only files of the same size are compared; then only their start and end; a whole file is read only when all of that matches. With large files, the footer shows the progress. Empty files, folders and symbolic links are left out.</p>
 <h4>Repeated songs</h4>
