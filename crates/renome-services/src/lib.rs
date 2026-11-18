@@ -12,6 +12,7 @@ pub mod anilist;
 pub mod comics;
 pub mod comicvine;
 pub mod discogs;
+pub mod flow;
 pub mod gcd;
 pub mod googlebooks;
 pub mod mangadex;

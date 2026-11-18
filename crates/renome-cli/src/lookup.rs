@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use renome_core::tmdb::{Candidate, Guess, MovieMatch};
 use renome_core::{Preview, PreviewItem};
-use renome_services::{Host, tmdb};
+use renome_services::{Host, flow, tmdb};
 use serde_json::Value;
 
 use crate::out;
@@ -129,20 +129,10 @@ pub async fn movies(
 ) -> Result<Movies, String> {
     let (key, tmdb_lang) = tmdb_access(settings)?;
     let client = tmdb::Client::new(&key, &tmdb_lang);
-    let items: Vec<&PreviewItem> = preview
-        .items
-        .iter()
-        .filter(|i| {
-            let ext = Path::new(&i.original)
-                .extension()
-                .map(|e| e.to_string_lossy().to_lowercase())
-                .unwrap_or_default();
-            (i.is_dir || renome_core::tmdb::is_screen(&ext)) && i.extra.is_none() && !i.release_junk
-        })
-        .collect();
+    let items: Vec<flow::Item> = preview.items.iter().map(flow::Item::from).collect();
     let mut chosen: HashMap<PathBuf, Candidate> = HashMap::new();
     // Forced first: no search for them.
-    for i in &items {
+    for i in flow::movies::targets(&items) {
         if let Some(pick) = ask.picks.get(&i.path) {
             let found = typed_search(&client, pick).await?;
             match found.into_iter().next() {
@@ -153,70 +143,45 @@ pub async fn movies(
             }
         }
     }
-    let to_search: Vec<tmdb::LookupItem> = items
-        .iter()
+    let rest: Vec<flow::Item> = items
+        .into_iter()
         .filter(|i| !chosen.contains_key(&i.path))
-        .map(|i| {
-            let name = i.lookup_name.clone().unwrap_or_else(|| i.original.clone());
-            let name = if i.is_dir {
-                name
-            } else {
-                Path::new(&name)
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or(name)
-            };
-            tmdb::LookupItem {
-                path: i.path.clone(),
-                name,
-            }
-        })
         .collect();
-    if !to_search.is_empty() {
-        let found = tmdb::lookup(&Cli, &client, to_search).await;
-        if let Some(failed) = found.iter().find_map(|f| f.error.clone())
-            && found
-                .iter()
-                .all(|f| f.error.is_some() || f.guess.title.is_empty())
-        {
-            return Err(crate::text::error_text(&failed));
+    let found = flow::movies::search(&Cli, &client, &rest)
+        .await
+        .map_err(|e| crate::text::error_text(&e))?;
+    // Each group asked once: a movie's subtitles share its answer.
+    let mut answered: HashMap<String, Option<Candidate>> = HashMap::new();
+    let mut stop = false;
+    for f in found {
+        if let Some(c) = f.choice {
+            chosen.insert(f.path, c);
+            continue;
         }
-        // Each guess asked once: a movie's subtitles share its answer.
-        let mut answered: HashMap<(String, Option<u16>), Option<Candidate>> = HashMap::new();
-        let mut stop = false;
-        for f in found {
-            if f.auto
-                && let Some(c) = f.candidates.first()
-            {
-                chosen.insert(f.path, c.clone());
-                continue;
-            }
-            if stop || ask.choose != Choose::Ask {
-                continue;
-            }
-            let same = (f.guess.title.clone(), f.guess.year);
-            let pick = match answered.get(&same) {
-                Some(p) => p.clone(),
-                None => {
-                    let p = match choose_movie(&client, &f.path, &f.guess, f.candidates).await? {
-                        Answer::Pick(c) => Some(c),
-                        Answer::Skip => None,
-                        Answer::Stop => {
-                            stop = true;
-                            None
-                        }
-                    };
-                    answered.insert(same, p.clone());
-                    p
-                }
-            };
-            if let Some(c) = pick {
-                chosen.insert(f.path, c);
-            }
+        if stop || ask.choose != Choose::Ask {
+            continue;
         }
-        if stop {
-            return Err(t("searchStopped", &[]));
+        let pick = match answered.get(&f.group) {
+            Some(p) => p.clone(),
+            None => {
+                let p = match choose_movie(&client, &f.path, &f.guess, f.candidates).await? {
+                    Answer::Pick(c) => Some(c),
+                    Answer::Skip => None,
+                    Answer::Stop => {
+                        stop = true;
+                        None
+                    }
+                };
+                answered.insert(f.group, p.clone());
+                p
+            }
+        };
+        if let Some(c) = pick {
+            chosen.insert(f.path, c);
         }
+    }
+    if stop {
+        return Err(t("searchStopped", &[]));
     }
     // The template fields of each movie (genre, director…).
     let ids: Vec<u64> = {

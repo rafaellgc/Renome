@@ -372,14 +372,19 @@ export interface MovieState {
   choice: Candidate | null;
   status: MovieStatus;
   error: string | null;
+  /** Files of one group share the answer given to one of them. */
+  group: string;
 }
 
-export interface Lookup {
+/** What the movie search found for a file: `choice` when sure; doubts of
+ *  one `group` share one answer. */
+export interface MovieFound {
   path: string;
   guess: Guess;
   candidates: Candidate[];
-  auto: boolean;
+  choice: Candidate | null;
   error: string | null;
+  group: string;
 }
 
 /** What a book is thought to be, from its details or its name. */

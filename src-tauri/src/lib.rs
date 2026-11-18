@@ -921,16 +921,17 @@ async fn tmdb_check(key: String) -> Result<(), String> {
     tmdb::Client::new(&key, "en-US").check().await
 }
 
-/// Guesses title and year for each file and searches TMDB for them.
+/// The movie rule's search: what is sure is picked, the rest are doubts
+/// (the flow the command line runs too).
 #[tauri::command]
-async fn tmdb_lookup(
+async fn movie_search(
     app: AppHandle,
     key: String,
     lang: String,
-    items: Vec<tmdb::LookupItem>,
-) -> Result<Vec<tmdb::Lookup>, String> {
+    items: Vec<renome_services::flow::Item>,
+) -> Result<Vec<renome_services::flow::movies::Found>, String> {
     let client = tmdb::Client::new(&key, &lang);
-    Ok(tmdb::lookup(&Gui(app.clone()), &client, items).await)
+    renome_services::flow::movies::search(&Gui(app.clone()), &client, &items).await
 }
 
 /// The collections the chosen movies belong to, for those missing.
@@ -2131,7 +2132,7 @@ pub fn run() {
             preview,
             find_identical,
             tmdb_check,
-            tmdb_lookup,
+            movie_search,
             tmdb_search,
             tv_search,
             tv_lookup,

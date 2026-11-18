@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AlbumLookup, BookTarget, ComicFormat, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, EpisodeLookup, MbCandidate, SongMatch, HistoryEntry, ListedTrack, Lookup, AudioBook, ServerCall, ServerLibrary, UpdateFound, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
+import type { AlbumLookup, BookTarget, ComicFormat, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, EpisodeLookup, MbCandidate, SongMatch, HistoryEntry, ListedTrack, MovieFound, PreviewItem, AudioBook, ServerCall, ServerLibrary, UpdateFound, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
 
 type Overrides = Record<string, string>;
 
@@ -70,8 +70,10 @@ export const api = {
     invoke<ApplyReport>("apply", { steps, overrides, view }),
   history: () => invoke<HistoryEntry[]>("history"),
   tmdbCheck: (key: string) => invoke<void>("tmdb_check", { key }),
-  tmdbLookup: (key: string, lang: string, items: { path: string; name: string }[]) =>
-    invoke<Lookup[]>("tmdb_lookup", { key, lang, items }),
+  /** The movie rule's search (shared with the command line): sure picks
+   *  and doubts. An error when nothing could be searched. */
+  movieSearch: (key: string, lang: string, items: PreviewItem[]) =>
+    invoke<MovieFound[]>("movie_search", { key, lang, items }),
   /** Each movie's template fields and collection (null: none), and,
    *  with `sets`, the collections. */
   tmdbCollections: (key: string, lang: string, ids: number[], sets: boolean) =>

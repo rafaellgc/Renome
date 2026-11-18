@@ -5,7 +5,7 @@
 import { api } from "$lib/api";
 import { confirm, notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
-import { isScreen, isVideo, splitExt } from "$lib/rules";
+import { isVideo } from "$lib/rules";
 import { settings, tmdbLang } from "$lib/settings.svelte";
 import type { Candidate, MovieMatch, MovieSet, MovieState } from "$lib/types";
 import { counts, moved, ruleOf, without, type PageCtx } from "./common";
@@ -81,32 +81,27 @@ export class Movies {
       if (ok) this.#ctx.openOptions();
       return;
     }
-    const items = this.#ctx.items
-      .filter((i) => (i.isDir || isScreen(i.original)) && !i.extra && !i.releaseJunk && this.state[i.path]?.status !== "auto" && this.state[i.path]?.status !== "chosen")
-      .map((i) => ({ path: i.path, name: i.isDir ? this.#ctx.readName(i) : splitExt(this.#ctx.readName(i))[0] }));
-    if (!items.length) {
-      this.#ctx.say(t("tmdbNoFiles"));
-      return;
-    }
+    // Those already settled are not searched again; which of the rest are
+    // movies, and what is sure, the shared flow says.
+    const items = this.#ctx.items.filter((i) => this.state[i.path]?.status !== "auto" && this.state[i.path]?.status !== "chosen");
     this.progress = { done: 0, total: items.length, kind: "search" };
     try {
-      const found = await api.tmdbLookup(settings.tmdbKey, tmdbLang(), items);
-      // Nothing was really searched (bad key, no connection): mark nothing.
-      const failed = found.find((f) => f.error);
-      if (failed && found.every((f) => f.error || !f.guess.title)) {
-        await notify({ title: t("rule.movie"), text: tError(failed.error) });
+      const found = await api.movieSearch(settings.tmdbKey, tmdbLang(), items);
+      if (!found.length) {
+        this.#ctx.say(t("tmdbNoFiles"));
         return;
       }
       for (const f of found) {
         this.state[f.path] = {
           guess: f.guess,
           candidates: f.candidates,
-          choice: f.auto ? f.candidates[0] : null,
-          status: f.auto ? "auto" : f.candidates.length ? "choose" : "none",
+          choice: f.choice,
+          status: f.choice ? "auto" : f.candidates.length ? "choose" : "none",
           error: f.error,
+          group: f.group,
         };
       }
-      if (found.some((f) => !f.auto && f.candidates.length)) this.openReview();
+      if (found.some((f) => !f.choice && f.candidates.length)) this.openReview();
     } catch (e) {
       await notify({ title: t("rule.movie"), text: tError(e) });
     } finally {
@@ -126,7 +121,7 @@ export class Movies {
     this.review = queue.length ? queue : null;
   }
 
-  /** The user's pick for a file; undecided files with the same guess (its
+  /** The user's pick for a file; undecided files of its group (its
    *  subtitles, say) get it too. */
   choose(path: string, choice: Candidate | null, candidates?: Candidate[]) {
     const m = this.state[path];
@@ -136,8 +131,7 @@ export class Movies {
     };
     set(path);
     for (const [p, o] of Object.entries(this.state)) {
-      const same = o.guess.title === m.guess.title && o.guess.year === m.guess.year;
-      if (p !== path && same && (o.status === "choose" || o.status === "none")) set(p);
+      if (p !== path && o.group === m.group && (o.status === "choose" || o.status === "none")) set(p);
     }
   }
 
