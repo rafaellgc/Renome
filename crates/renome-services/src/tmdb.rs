@@ -197,23 +197,28 @@ impl Client {
             };
             return Ok((vec![c], true));
         }
-        let base = [("query", guess.title.as_str()), ("include_adult", "false")];
         let mut results: Vec<SearchResult> = Vec::new();
-        if let Some(y) = guess.year {
-            let y = y.to_string();
-            let mut q = base.to_vec();
-            q.push(("year", &y));
+        for title in queries(&guess.title) {
+            let base = [("query", title), ("include_adult", "false")];
+            if let Some(y) = guess.year {
+                let y = y.to_string();
+                let mut q = base.to_vec();
+                q.push(("year", &y));
+                results.extend(
+                    self.get::<Page<SearchResult>>("/search/movie", &q)
+                        .await?
+                        .results,
+                );
+            }
             results.extend(
-                self.get::<Page<SearchResult>>("/search/movie", &q)
+                self.get::<Page<SearchResult>>("/search/movie", &base)
                     .await?
                     .results,
             );
+            if !results.is_empty() {
+                break;
+            }
         }
-        results.extend(
-            self.get::<Page<SearchResult>>("/search/movie", &base)
-                .await?
-                .results,
-        );
         Ok(tmdb::rank(guess, results))
     }
 
@@ -254,17 +259,22 @@ impl Client {
             }
             ShowQuery::Name(g) => g,
         };
-        let base = [("query", guess.title.as_str()), ("include_adult", "false")];
         let mut results: Vec<SearchResult> = Vec::new();
-        if let Some(y) = guess.year {
-            let y = y.to_string();
-            let mut q = base.to_vec();
-            q.push(("first_air_date_year", &y));
-            let page: Page<TvResult> = self.get("/search/tv", &q).await?;
+        for title in queries(&guess.title) {
+            let base = [("query", title), ("include_adult", "false")];
+            if let Some(y) = guess.year {
+                let y = y.to_string();
+                let mut q = base.to_vec();
+                q.push(("first_air_date_year", &y));
+                let page: Page<TvResult> = self.get("/search/tv", &q).await?;
+                results.extend(page.results.into_iter().map(Into::into));
+            }
+            let page: Page<TvResult> = self.get("/search/tv", &base).await?;
             results.extend(page.results.into_iter().map(Into::into));
+            if !results.is_empty() {
+                break;
+            }
         }
-        let page: Page<TvResult> = self.get("/search/tv", &base).await?;
-        results.extend(page.results.into_iter().map(Into::into));
         Ok(tmdb::rank(guess, results))
     }
 
@@ -588,6 +598,23 @@ impl TvItem {
             .map(Path::to_path_buf)
             .unwrap_or_default()
     }
+}
+
+/// What is searched for a title: the title, and when TMDB finds nothing
+/// for it, the part before a subtitle (`Name: The Subtitle`, `Name -
+/// Subtitle`), as TMDB's search finds nothing for some long titles with a
+/// colon. The ranking still compares with the whole title.
+fn queries(title: &str) -> Vec<&str> {
+    let mut out = vec![title];
+    for sep in [":", " - ", " – "] {
+        if let Some((head, _)) = title.split_once(sep) {
+            let head = head.trim();
+            if head.chars().count() >= 3 && !out.contains(&head) {
+                out.push(head);
+            }
+        }
+    }
+    out
 }
 
 #[derive(Serialize)]
@@ -1208,4 +1235,23 @@ pub async fn video_meta(
             Ok(m)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::queries;
+
+    #[test]
+    fn a_long_title_is_also_searched_before_its_subtitle() {
+        assert_eq!(
+            queries("Amada e Ultrajada: O Exército na História do Brasil"),
+            vec![
+                "Amada e Ultrajada: O Exército na História do Brasil",
+                "Amada e Ultrajada"
+            ]
+        );
+        assert_eq!(queries("Matrix"), vec!["Matrix"]);
+        // Too short before the colon: not searched alone.
+        assert_eq!(queries("X: Y"), vec!["X: Y"]);
+    }
 }
