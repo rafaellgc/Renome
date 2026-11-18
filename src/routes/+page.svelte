@@ -327,7 +327,7 @@
     return out;
   });
 
-  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, alikeOnly, similarOnly, movies: movies.matches, episodes: tv.matches, songs: music.matches, books: books.matches, comics: comics.matches, dates: photos.dates, leftoverSuffix: t("leftoverSuffix"), lang: settings.lang, numberClashes: settings.numberClashes, sendTo, trashAds: steps.some((s) => s.enabled && s.rule.type === "movie" && !!s.rule.trashAds) });
+  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, alikeOnly, similarOnly, movies: movies.matches, episodes: tv.matches, songs: music.matches, books: books.matches, comics: comics.matches, dates: photos.dates, leftoverSuffix: t("leftoverSuffix"), lang: settings.lang, numberClashes: settings.numberClashes, sendTo, trashAds: steps.some((s) => s.enabled && (s.rule.type === "movie" || s.rule.type === "series") && !!s.rule.trashAds) });
   /** Example name for rule cards: the first file in natural name order, so
    *  it does not jump around while the preview re-sorts. */
   const collator = new Intl.Collator(undefined, { numeric: true });

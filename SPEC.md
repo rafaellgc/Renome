@@ -316,15 +316,22 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   `featurettes`, `deleted scenes`, `interviews`, `scenes`, `shorts`,
   `extras`) inside the movie's new folder; one named after the movie
   (`Movie-trailer.mkv`) gets the movie's new name instead, next to it.
-- Release advertisements (with the movie rule): `.url`, `.webloc`,
+- Release advertisements (with the movie or series rule): `.url`, `.webloc`,
   `.website`; a `.txt` named after a site, or named as a read-me
   (`leia`, `leia-me`, `readme`, `info`, `leeme`…) with a link or a site
   in its first 64 KiB; an image named after a site; a video under 100 MB
   named after a site (a site's address with at most four words in all),
-  not an extra and not matched to a movie. Not looked up, tagged
-  "advert" in the list, and they never follow the movie: they stay in
-  the old folder, renamed by the leftovers rule below. Nothing is
-  deleted.
+  not an extra and not matched to a movie or episode. Not looked up,
+  tagged "advert" in the list, and they never follow the movie or the
+  episodes: they stay in the old folder, renamed by the leftovers rule
+  below. Nothing is deleted, unless "send the release's advertisements
+  to the Trash" (`trashAds`, movie and series rules) is on: after the
+  moves they go to the trash, the old folder whole when nothing else is
+  left in it. Sent to another folder, an episode's release folder (not a
+  user's own folder; holding, three levels down, only episodes of that
+  show, subtitles, images, `.nfo`, `.txt` and advertisements) is handled
+  like a movie's own folder: left with files, it is renamed after the
+  show's new folder plus the leftovers suffix, where it is.
 - With "save .nfo and poster", renaming also writes `<new name>.nfo` next
   to each renamed video, in Kodi format with every field Jellyfin's NFO
   reader takes that TMDB provides: title, originaltitle, year, premiered,

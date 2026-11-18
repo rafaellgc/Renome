@@ -373,19 +373,8 @@ pub async fn after_movies(
     let mut notes = Vec::new();
     let on = |k: &str| rule.get(k).and_then(Value::as_bool).unwrap_or(false);
     let recorded = report.done.is_empty() || report.history_id.is_some();
-    if on("trashAds")
-        && !report.done.is_empty()
-        && (!preview.trash.is_empty() || !preview.trash_folders.is_empty())
-    {
-        let (trashed, failed) =
-            renome_core::plan::trash_leftovers(&preview.trash, &preview.trash_folders);
-        let ads = preview.items.iter().filter(|i| i.to_trash).count();
-        if failed.is_empty() {
-            notes.push(t("adsTrashedN", &[("n", &ads)]));
-        } else {
-            notes.push(t("adsTrashedN", &[("n", &trashed.len())]));
-            notes.push(t("adsFailedN", &[("n", &failed.len())]));
-        }
+    if on("trashAds") {
+        trash_ads(preview, report, &mut notes);
     }
     let video = |p: &Path| {
         p.extension()
@@ -868,6 +857,22 @@ fn choose_episode(
 
 /// After the renames: each episode's `.nfo` and images (TMDB shows), and
 /// the details inside the videos.
+/// The release's advertisements to the trash, once the videos moved.
+fn trash_ads(preview: &Preview, report: &renome_core::ApplyReport, notes: &mut Vec<String>) {
+    if report.done.is_empty() || (preview.trash.is_empty() && preview.trash_folders.is_empty()) {
+        return;
+    }
+    let (trashed, failed) =
+        renome_core::plan::trash_leftovers(&preview.trash, &preview.trash_folders);
+    let ads = preview.items.iter().filter(|i| i.to_trash).count();
+    if failed.is_empty() {
+        notes.push(t("adsTrashedN", &[("n", &ads)]));
+    } else {
+        notes.push(t("adsTrashedN", &[("n", &trashed.len())]));
+        notes.push(t("adsFailedN", &[("n", &failed.len())]));
+    }
+}
+
 pub async fn after_series(
     rule: &Value,
     series: &Series,
@@ -878,6 +883,9 @@ pub async fn after_series(
     let mut notes = Vec::new();
     let on = |k: &str| rule.get(k).and_then(Value::as_bool).unwrap_or(false);
     let recorded = report.done.is_empty() || report.history_id.is_some();
+    if on("trashAds") {
+        trash_ads(preview, report, &mut notes);
+    }
     if series.anime || !recorded {
         return notes;
     }

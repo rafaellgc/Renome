@@ -632,6 +632,13 @@ pub const RULES: &[RuleSpec] = &[
                 None,
             ),
             o(
+                "trashAds",
+                Kind::Bool,
+                NO,
+                "trashAdsLabel",
+                Some("trashAdsHint"),
+            ),
+            o(
                 "source",
                 Kind::Choice(&[
                     c("tmdb", "seriesSourceTmdb"),

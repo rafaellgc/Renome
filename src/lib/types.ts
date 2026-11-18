@@ -48,6 +48,8 @@ export type Rule =
   | {
       type: "series"; template: string; colonAs: string; show: string;
       folders: boolean; folderTemplate: string; nfo: boolean; backdrop: boolean; missing: boolean;
+      /** As the movie rule's. */
+      trashAds?: boolean;
       subtitles?: boolean; subLangs?: string;
       videoTags?: boolean; videoClean?: boolean; videoTracks?: boolean;
       /** Where shows are looked up (TMDB when not set). */

@@ -885,6 +885,12 @@ impl Pipeline {
             .any(|s| matches!(s, Compiled::Plain(Rule::Movie { .. })))
     }
 
+    pub fn series(&self) -> bool {
+        self.steps
+            .iter()
+            .any(|s| matches!(s, Compiled::Plain(Rule::Series { .. })))
+    }
+
     pub fn music(&self) -> Option<(bool, bool)> {
         self.steps.iter().find_map(|s| match s {
             Compiled::Plain(Rule::Music {

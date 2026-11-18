@@ -1291,6 +1291,8 @@ pub fn preview(
 
     let music = pipeline.music();
     let movie_rule = pipeline.movie();
+    // Rules that move a release's videos out of its folder.
+    let video_rule = movie_rule || pipeline.series();
     let converts = pipeline.converts_comics();
     let book_to = pipeline.converts_books();
     let comic_ebook = pipeline.comic_ebook();
@@ -1653,10 +1655,11 @@ pub fn preview(
                 .then(|| crate::extras::extra_kind(&file.path))
                 .flatten()
                 .map(str::to_string);
-            let release_junk = movie_rule
+            let release_junk = video_rule
                 && !file.is_dir
                 && extra.is_none()
                 && !view.movies.contains_key(&file.path)
+                && !view.episodes.contains_key(&file.path)
                 && crate::extras::release_junk(&file.path, file.size);
             PreviewItem {
                 extra,
@@ -2071,6 +2074,46 @@ fn own_movie_folder(dir: &Path, video: &Path, m: &tmdb::MovieMatch, view: &View)
             || only_movie_files(dir, m.id, view))
 }
 
+/// Whether `dir` is a release of the show of `e`: not one of the user's
+/// own folders, and holding only episodes of that show and what goes with
+/// them (subtitles, images, `.nfo`, `.txt`, the release's advertisements).
+fn own_episode_folder(dir: &Path, e: &crate::tv::EpisodeMatch, view: &View) -> bool {
+    if protected(dir, view) {
+        return false;
+    }
+    let mut any = false;
+    for f in walkdir::WalkDir::new(dir).max_depth(3).into_iter() {
+        let Ok(f) = f else { return false };
+        if f.file_type().is_dir() {
+            continue;
+        }
+        let ext = f
+            .path()
+            .extension()
+            .map(|x| x.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        let found = view.episodes.get(f.path());
+        let size = f.metadata().map(|m| m.len()).unwrap_or(u64::MAX);
+        if found.is_none() && crate::extras::release_junk(f.path(), size) {
+            continue;
+        }
+        if tmdb::is_video(&ext) {
+            if found.is_none_or(|m| m.id != e.id || m.source != e.source) {
+                return false;
+            }
+            any = true;
+        } else if !(tmdb::is_subtitle(&ext)
+            || matches!(
+                ext.as_str(),
+                "jpg" | "jpeg" | "png" | "webp" | "gif" | "bmp" | "nfo" | "txt"
+            ))
+        {
+            return false;
+        }
+    }
+    any
+}
+
 /// A folder named like a file in it (`Movie.2017.1080p.WEB-DL/` holding
 /// `Movie.2017.1080p.WEB-DL.mkv`): the same title and year.
 fn named_like(dir: &Path, file: &Path) -> bool {
@@ -2141,12 +2184,24 @@ fn left_folders(items: &[PreviewItem], view: &View) -> (Vec<LeftFolder>, Vec<Pat
         if let Some(s) = &view.send_to
             && !i.dir.starts_with(root)
         {
-            if !s.copy
-                && let Some(m) = view.movies.get(&i.path)
+            // An episode's: named after its show's new folder.
+            let to = if s.copy {
+                None
+            } else if let Some(m) = view.movies.get(&i.path)
                 && i.extra.is_none()
                 && own_movie_folder(&i.dir, &i.path, m, view)
             {
-                let to = Some(dest.clone());
+                Some(dest.clone())
+            } else if let Some(e) = view.episodes.get(&i.path)
+                && let Some(show) = folder.split('/').next()
+                && own_episode_folder(&i.dir, e, view)
+            {
+                Some(root.join(show))
+            } else {
+                None
+            };
+            if let Some(to) = to {
+                let to = Some(to);
                 match pairs.iter_mut().find(|p| p.0 == i.dir) {
                     Some(p) if p.1 != to => p.1 = None,
                     Some(_) => {}
@@ -3552,6 +3607,64 @@ mod tests {
         assert!(old.join("show.s01e01.mkv").exists());
         assert!(d.path().join("Show/notes.txt").exists());
         assert!(!left.exists());
+    }
+
+    #[test]
+    fn episodes_sent_to_another_folder_leave_their_release_folder() {
+        let d = tempfile::tempdir().unwrap();
+        let release = "Show.S01E01-02.1080p.WEB-DL";
+        let downloads = d.path().join("baixando");
+        let old = downloads.join(release);
+        let library = d.path().join("Series");
+        fs::create_dir_all(&old).unwrap();
+        fs::create_dir_all(&library).unwrap();
+        let files = entries(
+            &old,
+            &[
+                "Show.S01E01.1080p.mkv",
+                "Show.S01E02.1080p.mkv",
+                "BAIXAR SERIES.url",
+            ],
+        );
+        let view_with = |trash_ads: bool| {
+            let mut view = View {
+                leftover_suffix: "additional files".into(),
+                send_to: Some(SendTo {
+                    dir: library.clone(),
+                    copy: false,
+                }),
+                trash_ads,
+                ..View::default()
+            };
+            for (n, f) in files[..2].iter().enumerate() {
+                view.episodes.insert(f.path.clone(), episode(n as u16 + 1));
+            }
+            view
+        };
+        // Kept: the old folder named after the show's new one.
+        let p = preview(&files, &series_steps(), &HashMap::new(), &view_with(false));
+        let ad = p
+            .items
+            .iter()
+            .find(|i| i.original == "BAIXAR SERIES.url")
+            .unwrap();
+        assert!(ad.release_junk && !ad.to_trash);
+        assert_eq!(p.left_folders.len(), 1);
+        assert_eq!(
+            p.left_folders[0].to,
+            downloads.join("Show (2010) [tmdbid-7] (additional files)")
+        );
+        // To the trash: only the advertisement is left, the folder goes.
+        let p = preview(&files, &series_steps(), &HashMap::new(), &view_with(true));
+        assert!(p.left_folders.is_empty());
+        assert_eq!(p.trash_folders, vec![old.clone()]);
+        // Another show's episode in it: not the release's own folder.
+        let mut view = view_with(false);
+        let mut other = episode(3);
+        other.id = 99;
+        view.episodes.insert(files[1].path.clone(), other);
+        let p = preview(&files, &series_steps(), &HashMap::new(), &view);
+        assert!(p.left_folders.is_empty());
     }
 
     use crate::music::flac;

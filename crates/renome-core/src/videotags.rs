@@ -721,7 +721,7 @@ fn mkv_plan(
     };
     let mut done: Vec<u64> = Vec::new();
     // The SeekHeads to write again, with their entries.
-    let mut rebuilt: Vec<(Top, Vec<(Vec<u8>, u64)>)> = Vec::new();
+    let mut rebuilt: Vec<(Top, Vec<SeekEntry>)> = Vec::new();
     for sh in &heads {
         let b = body(f, sh)?;
         let mut entries = entries_of(&b);
@@ -785,6 +785,9 @@ fn mkv_plan(
         tail,
     }))
 }
+
+/// A SeekHead entry: the element's ID and its place in the segment.
+type SeekEntry = (Vec<u8>, u64);
 
 /// A SeekHead rebuilt with `entries` where it is; when they do not fit
 /// there, the whole SeekHead goes to the end of the file (`tail`, which

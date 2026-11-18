@@ -432,6 +432,7 @@
         {#if r.folders}
           <label class="sub">{t("seriesFolderName")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
         {/if}
+        <label class="check"><input type="checkbox" bind:checked={r.trashAds} /> <span>{t("trashAdsLabel")}<small>{t("trashAdsHint")}</small></span></label>
         <h4 class="sect">{t("sectSearch")}</h4>
         <label>{t("seriesSource")}
           <select bind:value={r.source}>
