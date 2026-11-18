@@ -5,7 +5,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use renome_core::links::{self, Link};
-use renome_core::music::AudioTags;
 use renome_core::rules::{any_song_tags, song_tags};
 use renome_core::scan::Skipped;
 use renome_core::{
