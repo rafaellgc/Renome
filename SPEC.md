@@ -2640,7 +2640,12 @@ may be asked about the Keychain again with each version.
 Status: built. `crates/renome-services` holds what the window and the
 command line share (catalogues, keys, cache, data folders, the rename
 lock, what runs after the renames; the window's work reports through a
-`Host`), `renome_core::catalog` the rules' options, and
+`Host`; and `flow`, each lookup rule's decisions: which files are looked
+up, what is picked by itself, the doubts and which files share an answer,
+the questions asked mid-search through `Host::ask`, and each file's match
+as the rule names it — the window shows them in its review and pickers,
+the command line in the terminal, neither decides on its own),
+`renome_core::catalog` the rules' options, and
 `crates/renome-cli` the program: every command below, the lookup rules
 with their choices, `--edit`, `--missing`, Ctrl+C, the manual, man pages
 and completions, in every package. Its texts are the page's (`i18n.ts`)
