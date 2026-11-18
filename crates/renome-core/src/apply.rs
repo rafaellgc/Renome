@@ -152,14 +152,19 @@ fn size_of(path: &Path) -> u64 {
 /// Copies a file with its date and checks its size; a folder with
 /// everything in it (links as links where they can be). Putting it on the
 /// disk is left to [`flush`], once for a whole batch.
-fn copy_any(from: &Path, to: &Path, done: &mut dyn FnMut(u64)) -> std::io::Result<()> {
+fn copy_any(
+    from: &Path,
+    to: &Path,
+    done: &mut dyn FnMut(u64),
+    stop: &dyn Fn() -> bool,
+) -> std::io::Result<()> {
     let meta = fs::symlink_metadata(from)?;
     if meta.is_symlink() {
         #[cfg(unix)]
         return std::os::unix::fs::symlink(fs::read_link(from)?, to);
     }
     if !meta.is_dir() {
-        let n = fs::copy(from, to)?;
+        let n = copy_file(from, to, done, stop)?;
         let f = File::options().write(true).open(to)?;
         if let Ok(t) = meta.modified() {
             f.set_modified(t)?;
@@ -167,18 +172,116 @@ fn copy_any(from: &Path, to: &Path, done: &mut dyn FnMut(u64)) -> std::io::Resul
         if n != meta.len() || f.metadata()?.len() != meta.len() {
             return Err(std::io::Error::other("copy incomplete"));
         }
-        done(n);
         return Ok(());
     }
     fs::create_dir(to)?;
     for e in fs::read_dir(from)? {
         let e = e?;
-        copy_any(&e.path(), &to.join(e.file_name()), done)?;
+        copy_any(&e.path(), &to.join(e.file_name()), done, stop)?;
     }
     if let Ok(t) = meta.modified() {
         let _ = File::open(to).and_then(|d| d.set_modified(t));
     }
     Ok(())
+}
+
+/// How much is copied between two looks at the progress and the stop.
+#[cfg(target_os = "linux")]
+const COPY_CHUNK: usize = 32 << 20;
+
+/// Copies one file's bytes and permissions; the bytes copied go to `done`
+/// as they are (a big video moves the bar while it is copied), and `stop`
+/// ends it halfway (`Interrupted`; the caller removes what was written).
+/// Linux: `copy_file_range` in pieces, which stays in the kernel (and
+/// shares the data on file systems that can); elsewhere the system's own
+/// copy (it clones on APFS and is tuned on Windows), counted at the end.
+fn copy_file(
+    from: &Path,
+    to: &Path,
+    done: &mut dyn FnMut(u64),
+    stop: &dyn Fn() -> bool,
+) -> std::io::Result<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::io::{Read, Write};
+        use std::os::unix::io::AsRawFd;
+        let mut src = File::open(from)?;
+        let perm = src.metadata()?.permissions();
+        let mut dst = File::options().write(true).create_new(true).open(to)?;
+        let mut total = 0u64;
+        let mut kernel = true;
+        let mut buf = Vec::new();
+        loop {
+            let n = if kernel {
+                // SAFETY: both descriptors are open for the call's duration;
+                // null offsets use (and move) the files' own positions.
+                let r = unsafe {
+                    libc::copy_file_range(
+                        src.as_raw_fd(),
+                        std::ptr::null_mut(),
+                        dst.as_raw_fd(),
+                        std::ptr::null_mut(),
+                        COPY_CHUNK,
+                        0,
+                    )
+                };
+                if r < 0 {
+                    let e = std::io::Error::last_os_error();
+                    match e.raw_os_error() {
+                        // Not here (an old kernel, some file systems):
+                        // read and write, from where it stopped.
+                        Some(
+                            libc::ENOSYS
+                            | libc::EXDEV
+                            | libc::EINVAL
+                            | libc::EOPNOTSUPP
+                            | libc::EPERM,
+                        ) if total == 0 => {
+                            kernel = false;
+                            buf = vec![0u8; COPY_CHUNK.min(8 << 20)];
+                            continue;
+                        }
+                        Some(libc::EINTR) => continue,
+                        _ => return Err(e),
+                    }
+                }
+                r as usize
+            } else {
+                let mut n = 0;
+                while n < COPY_CHUNK {
+                    let r = match src.read(&mut buf) {
+                        Ok(r) => r,
+                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                        Err(e) => return Err(e),
+                    };
+                    if r == 0 {
+                        break;
+                    }
+                    dst.write_all(&buf[..r])?;
+                    n += r;
+                }
+                n
+            };
+            if n == 0 {
+                break;
+            }
+            total += n as u64;
+            done(n as u64);
+            // A whole piece: more may follow, and the stop is looked at.
+            if n >= COPY_CHUNK && stop() {
+                return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
+            }
+        }
+        dst.set_permissions(perm)?;
+        Ok(total)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = stop;
+        let n = fs::copy(from, to)?;
+        done(n);
+        Ok(n)
+    }
 }
 
 fn remove_any(path: &Path) -> std::io::Result<()> {
@@ -203,12 +306,13 @@ fn copy_part(
     to: &Path,
     part: &Path,
     done: &mut dyn FnMut(u64),
+    stop: &dyn Fn() -> bool,
 ) -> Result<(), (ErrorKind, String)> {
     if fs::symlink_metadata(to).is_ok() {
         return Err((ErrorKind::TargetExists, String::new()));
     }
     let _ = remove_any(part);
-    if let Err(e) = copy_any(from, part, done) {
+    if let Err(e) = copy_any(from, part, done, stop) {
         let _ = remove_any(part);
         return Err(io_kind(&e));
     }
@@ -566,7 +670,7 @@ fn execute_level(ops: &[(usize, &Operation)], report: &mut ApplyReport, ctx: &Co
             }
         };
         let part = part_path(&op.to, i);
-        match copy_from.and_then(|from| copy_part(from, &op.to, &part, &mut add)) {
+        match copy_from.and_then(|from| copy_part(from, &op.to, &part, &mut add, ctx.stop)) {
             Ok(()) => {
                 batch.bytes += size_of(&part);
                 batch.items.push(Copied {
@@ -578,6 +682,19 @@ fn execute_level(ops: &[(usize, &Operation)], report: &mut ApplyReport, ctx: &Co
                 if batch.items.len() >= BATCH_FILES || batch.bytes >= BATCH_BYTES {
                     batch.finish(report);
                 }
+            }
+            // Stopped halfway through it: put back, not an error.
+            Err(_) if (ctx.stop)() => {
+                for dir in made.iter().rev() {
+                    if fs::remove_dir(dir).is_ok() {
+                        report.created_dirs.retain(|d| d != dir);
+                    }
+                }
+                if !op.copy {
+                    let _ = fs::rename(&tmp, &op.from);
+                }
+                batch.finish(report);
+                report.stopped = true;
             }
             Err((kind, detail)) => failed(op, &tmp, &made, kind, detail, report),
         }
@@ -2401,6 +2518,55 @@ mod tests {
         assert!(p.join("b").exists() && !p.join("b2").exists());
         assert!(p.join("c").exists() && !p.join("c2").exists());
         assert!(h.recover().restored == 0);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn a_big_copy_shows_its_progress_and_stops_halfway() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        let big = vec![7u8; COPY_CHUNK * 2 + 1000];
+        fs::write(p.join("big"), &big).unwrap();
+        let h = History::new(p.join("hist"));
+        let steps = std::cell::RefCell::new(Vec::new());
+        let r = h.apply_with(
+            &[copy(p, "big", "big2")],
+            &Hooks {
+                progress: &|done, total| steps.borrow_mut().push((done, total)),
+                stop: &|| false,
+            },
+        );
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        assert_eq!(fs::read(p.join("big2")).unwrap(), big);
+        let steps = steps.into_inner();
+        assert!(steps.len() >= 3, "{steps:?}");
+        assert_eq!(steps.last().unwrap().0, big.len() as u64);
+
+        // Stopped after the first piece: nothing left of the copy, and
+        // no error.
+        let seen = std::cell::Cell::new(0);
+        let stop = || {
+            seen.set(seen.get() + 1);
+            seen.get() > 1
+        };
+        let r = h.apply_with(
+            &[copy(p, "big", "big3")],
+            &Hooks {
+                progress: &|_, _| {},
+                stop: &stop,
+            },
+        );
+        assert!(r.stopped && r.errors.is_empty() && r.done.is_empty());
+        assert!(!p.join("big3").exists());
+        let names: Vec<_> = fs::read_dir(p)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert!(
+            !names.iter().any(|n| n.to_string_lossy().ends_with(".part")),
+            "{names:?}"
+        );
     }
 
     #[test]
