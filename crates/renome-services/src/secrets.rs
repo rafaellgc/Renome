@@ -221,7 +221,10 @@ mod tests {
         *STORED.lock().unwrap() = Some(r#"{"tmdbKey":"a","osKey":"b"}"#.into());
         let mine = serde_json::json!({"tmdbKey": "a", "osKey": "", "subdlKey": "c"});
         let got = unsaved(mine.as_object().unwrap());
-        assert_eq!(Value::Object(got), serde_json::json!({"osKey": "", "subdlKey": "c"}));
+        assert_eq!(
+            Value::Object(got),
+            serde_json::json!({"osKey": "", "subdlKey": "c"})
+        );
         *STORED.lock().unwrap() = None;
     }
 
