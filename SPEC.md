@@ -2335,7 +2335,7 @@ The book rule's option `audiobooks` (TS only, default on) takes audio files
   folder with everything in it, links as links on Linux and macOS) is
   copied to a passing name beside its target (`.renome-<pid>-<n>.part`,
   also noted before starting), with its modification date, and checked
-  for size. Copies go to the disk in batches (100 files or 512 MB; Linux:
+  for size. Copies go to the disk in batches (100 files or 8 GB; Linux:
   `syncfs` once per file system, elsewhere each file and folder synced):
   the batch is synced, each copy renamed to its target only if that is
   free (as above), the names synced, and only then are the originals

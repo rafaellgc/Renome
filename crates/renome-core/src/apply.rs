@@ -704,9 +704,12 @@ fn execute_level(ops: &[(usize, &Operation)], report: &mut ApplyReport, ctx: &Co
 
 /// Copies (and moves to another disk) are put on the disk together, every
 /// so many files or bytes: waiting for the disk after each file made a
-/// move between two hard disks about twice as slow.
+/// move between two hard disks about twice as slow, and every 512 MB
+/// still 15 to 25% slower than `cp` with videos of a few GB (the next
+/// file is not read while the disk writes the last); every 8 GB it is
+/// as fast. The originals go only once their copies are on the disk.
 const BATCH_FILES: usize = 100;
-const BATCH_BYTES: u64 = 512 << 20;
+const BATCH_BYTES: u64 = 8 << 30;
 
 /// A copy made under its passing name, waiting for its batch.
 struct Copied<'a> {
