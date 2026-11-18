@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AlbumLookup, BookTarget, ComicFormat, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, EpisodeLookup, MbCandidate, SongMatch, HistoryEntry, ListedTrack, MovieFound, PreviewItem, AudioBook, ServerCall, ServerLibrary, UpdateFound, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
+import type { AlbumLookup, BookTarget, ComicFormat, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, MbCandidate, SongMatch, HistoryEntry, ListedTrack, MovieFound, PreviewItem, SeriesOutcome, AudioBook, ServerCall, ServerLibrary, UpdateFound, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
 
 type Overrides = Record<string, string>;
 
@@ -82,13 +82,21 @@ export const api = {
     invoke<Candidate[]>("tmdb_search", { key, lang, title, year }),
   tvSearch: (key: string, lang: string, query: string, items: TvItem[]) =>
     invoke<{ query: string; candidates: Candidate[]; auto: boolean }>("tv_search", { key, lang, query, items }),
-  tvLookup: (key: string, lang: string, id: number, items: TvItem[], typed: string) =>
-    invoke<{ show: Show; files: EpisodeLookup[] }>("tv_lookup", { key, lang, id, items, typed }),
   animeSearch: (query: string, items: TvItem[]) =>
     invoke<{ query: string; candidates: Candidate[]; auto: boolean }>("anime_search", { query, items }),
-  animeLookup: (id: number, items: TvItem[], typed: string) =>
-    invoke<{ show: Show; files: EpisodeLookup[] }>("anime_lookup", { id, items, typed }),
-  tvGroups: (items: TvItem[]) => invoke<{ groups: string[][]; loose: string[] }>("tv_groups", { items }),
+  /** The TV show rule's search (shared with the command line); its
+   *  questions come as `flow-ask` events. */
+  seriesSearch: (
+    key: string,
+    lang: string,
+    source: string,
+    typed: string,
+    items: PreviewItem[],
+    settled: [string, number][],
+    picked: Record<string, Candidate>,
+  ) => invoke<SeriesOutcome>("series_search", { key, lang, source, typed, items, settled, picked }),
+  /** The answer to a flow's question (null: none fits). */
+  flowAnswer: (id: number, answer: unknown) => invoke<void>("flow_answer", { id, answer }),
   mbLookup: (paths: string[], fromName: boolean, listen: boolean) =>
     invoke<AlbumLookup[]>("mb_lookup", { paths, fromName, listen }),
   mbSearch: (query: AlbumQuery, discogs = false) => invoke<MbCandidate[]>("mb_search", { query, discogs }),

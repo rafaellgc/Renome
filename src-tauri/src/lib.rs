@@ -65,6 +65,9 @@ struct AppState {
     /// Bumped by Stop; a search that sees a newer number than it started
     /// with stops, keeping what it found.
     stop_run: AtomicU64,
+    /// The flows' questions waiting for the page's answer, by number.
+    asks: Mutex<HashMap<u64, tokio::sync::oneshot::Sender<Option<Value>>>>,
+    ask_seq: AtomicU64,
     /// MusicBrainz, paced for all lookups together.
     mb: musicbrainz::Client,
     /// AcoustID, likewise.
@@ -397,6 +400,32 @@ impl renome_services::Host for Gui {
         page: renome_core::bookconv::print::Page,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + '_>> {
         Box::pin(async move { print_to_pdf(&self.0, &html, &pdf, page).await })
+    }
+    /// The question goes to the page (`flow-ask`), which opens its picker
+    /// and answers with `flow_answer`.
+    fn ask(
+        &self,
+        question: renome_services::flow::Question,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<Value>> + Send + '_>> {
+        Box::pin(async move {
+            let state = self.0.state::<AppState>();
+            let id = state.ask_seq.fetch_add(1, Ordering::SeqCst);
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            state.asks.lock().unwrap().insert(id, tx);
+            let _ = self.0.emit(
+                "flow-ask",
+                serde_json::json!({ "id": id, "question": question }),
+            );
+            rx.await.ok().flatten()
+        })
+    }
+}
+
+/// The page's answer to a flow's question (`None`: none fits).
+#[tauri::command]
+fn flow_answer(state: State<AppState>, id: u64, answer: Option<Value>) {
+    if let Some(tx) = state.asks.lock().unwrap().remove(&id) {
+        let _ = tx.send(answer);
     }
 }
 
@@ -985,18 +1014,6 @@ async fn tv_search(
     tmdb::search_show(&client, &query, &items).await
 }
 
-/// Fetches a show's episodes and finds each file's episode.
-#[tauri::command]
-async fn tv_lookup(
-    key: String,
-    lang: String,
-    id: u64,
-    items: Vec<tmdb::TvItem>,
-    typed: String,
-) -> Result<tmdb::TvLookup, String> {
-    tmdb::lookup_episodes(&tmdb::Client::new(&key, &lang), id, items, &typed).await
-}
-
 /// Like `tv_search`, on AniList (anime, no key).
 #[tauri::command]
 async fn anime_search(
@@ -1010,25 +1027,31 @@ async fn anime_search(
         .await
 }
 
-/// Like `tv_lookup`, on AniList: the show from its first season and the
-/// seasons after it.
+/// The TV show rule's search (the flow the command line runs too): the
+/// shows, asked with `flow-ask` when unsure, and each file's episode.
+/// `settled`: [path, show id] of the files that keep their episode.
 #[tauri::command]
-async fn anime_lookup(
+#[allow(clippy::too_many_arguments)]
+async fn series_search(
     app: AppHandle,
-    id: u64,
-    items: Vec<tmdb::TvItem>,
+    key: String,
+    lang: String,
+    source: String,
     typed: String,
-) -> Result<tmdb::TvLookup, String> {
-    app.state::<AppState>()
-        .al
-        .anime_lookup(id, &items, &typed)
-        .await
-}
-
-/// Groups the files by show, to look each one up.
-#[tauri::command]
-fn tv_groups(items: Vec<tmdb::TvItem>) -> tmdb::ShowGroups {
-    tmdb::group_shows(&items)
+    items: Vec<renome_services::flow::Item>,
+    settled: Vec<(PathBuf, u64)>,
+    picked: HashMap<String, renome_core::tmdb::Candidate>,
+) -> Result<renome_services::flow::series::Outcome, String> {
+    use renome_services::flow::series::{self, Source};
+    let client = tmdb::Client::new(&key, &lang);
+    let state = app.state::<AppState>();
+    let source = if source == "anilist" {
+        Source::Anilist(&state.al)
+    } else {
+        Source::Tmdb(&client)
+    };
+    let settled: HashSet<(PathBuf, u64)> = settled.into_iter().collect();
+    series::search(&Gui(app.clone()), source, &typed, &items, &settled, picked).await
 }
 
 /// Records created metadata files in the rename's history entry, so undo
@@ -2092,6 +2115,8 @@ pub fn run() {
             identical_run: AtomicU64::new(0),
             busy_disk: Mutex::new(()),
             stop_run: AtomicU64::new(0),
+            asks: Mutex::default(),
+            ask_seq: AtomicU64::new(0),
             mb: musicbrainz::Client::default(),
             acoustid: acoustid::Client::default(),
             heard: Mutex::new(HashMap::new()),
@@ -2133,10 +2158,10 @@ pub fn run() {
             find_identical,
             tmdb_check,
             movie_search,
+            series_search,
+            flow_answer,
             tmdb_search,
             tv_search,
-            tv_lookup,
-            tv_groups,
             write_sidecars,
             write_tv_sidecars,
             subs_search,
@@ -2172,7 +2197,6 @@ pub fn run() {
             comic_issues,
             comic_volume_of,
             anime_search,
-            anime_lookup,
             comic_barcodes,
             comic_by_code,
             metron_check,

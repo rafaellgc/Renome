@@ -4,7 +4,7 @@
 import { api } from "$lib/api";
 import { confirm, notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
-import { isScreen, isVideo } from "$lib/rules";
+import { isVideo } from "$lib/rules";
 import { settings, tmdbLang } from "$lib/settings.svelte";
 import type { Candidate, EpKey, EpisodeMatch, EpisodeState, Rule, Show } from "$lib/types";
 import { counts, moved, ruleOf, without, type PageCtx } from "./common";
@@ -84,100 +84,71 @@ export class Series {
 
   /** Finds the show (asking when unsure), then each visible file's episode;
    *  doubtful files go to the review window. With no show typed, each show
-   *  the file names (or folders) say is looked up in turn. */
+   *  the file names (or folders) say is looked up in turn. The flow is the
+   *  one the command line runs; its questions come as `flow-ask` (see
+   *  {@link ask}). */
   async search(rule: Extract<Rule, { type: "series" }>) {
     // AniList: anime, with no key; its shows are kept apart from TMDB's
     // (their ids would meet), under negative numbers.
     const anime = rule.source === "anilist";
-    const source = anime ? "anilist" : "tmdb";
     const showKey = (id: number) => (anime ? -id : id);
     if (!anime && !settings.tmdbKey.trim()) {
       const ok = await confirm({ title: t("rule.series"), text: t("tmdbNeedsKey"), ok: t("options"), cancel: t("cancel") });
       if (ok) this.#ctx.openOptions();
       return;
     }
-    const all = this.#ctx.items
-      .filter((i) => !i.isDir && isScreen(i.original))
-      .map((i) => ({ path: i.path, name: this.#ctx.readName(i), isDir: i.isDir }));
-    if (!all.length) {
-      this.#ctx.say(t("tvNoFiles"));
-      return;
-    }
-    const key = settings.tmdbKey;
-    const lang = tmdbLang();
-    const typed = rule.show.trim();
+    // Files already settled keep their episode in their show.
+    const settled = Object.entries(this.state)
+      .filter(([, e]) => (anime ? e.showId < 0 : e.showId > 0) && (e.status === "auto" || e.status === "chosen"))
+      .map(([p, e]): [string, number] => [p, Math.abs(e.showId)]);
     this.progress = t("tvFinding");
     try {
-      let groups = [all];
-      let loose = 0;
-      if (!typed) {
-        const g = await api.tvGroups(all);
-        const byPath = new Map(all.map((i) => [i.path, i]));
-        groups = g.groups.map((list) => list.map((p) => byPath.get(p)!));
-        loose = g.loose.length;
-        if (!groups.length) groups = [all];
+      const res = await api.seriesSearch(settings.tmdbKey, tmdbLang(), rule.source ?? "tmdb", rule.show, this.#ctx.items, settled, this.picked);
+      if (res.empty) {
+        this.#ctx.say(t("tvNoFiles"));
+        return;
       }
-      const found: Candidate[] = [];
-      let searched = false;
-      let review = false;
-      const run = this.#ctx.stopRun;
-      for (const group of groups) {
-        if (this.#ctx.stopRun !== run) break;
-        this.progress = t("tvFinding");
-        const res = await (anime ? api.animeSearch(typed, group) : api.tvSearch(key, lang, typed, group)).catch((e) => {
-          // A group whose show cannot be told is skipped, not the others.
-          if (groups.length > 1 && String(e) === "tvNoShow") return null;
-          throw e;
-        });
-        if (!res) continue;
-        if (this.#ctx.stopRun !== run) break;
-        const picked = `${source}:${res.query}`;
-        let show: Candidate | null = this.picked[picked] ?? null;
-        if (!show) {
-          show = res.auto
-            ? res.candidates[0]
-            : await new Promise<Candidate | null>((resolve) => (this.pick = { source, query: res.query, candidates: res.candidates, resolve }));
-          this.pick = null;
-          if (!show) continue;
-          this.picked[picked] = show;
-        }
-        const sid = showKey(show.id);
-        if (!found.some((c) => c.id === show.id)) found.push(show);
-        // Files already settled for this show keep their episode.
-        const items = group.filter((i) => {
-          const e = this.state[i.path];
-          return !(e && e.showId === sid && (e.status === "auto" || e.status === "chosen"));
-        });
-        if (!items.length) continue;
-        if (this.#ctx.stopRun !== run) break;
-        searched = true;
-        this.progress = t("tvLoading", { show: show.title });
-        const look = anime
-          ? await api.animeLookup(show.id, items, typed || res.query)
-          : await api.tvLookup(key, lang, show.id, items, typed || res.query);
-        this.shows[sid] = look.show;
-        if (look.files.some((f) => !f.choice.length)) review = true;
-        for (const f of look.files) {
-          this.state[f.path] = {
-            showId: sid,
-            guess: f.guess,
-            alternatives: f.alternatives,
-            conflict: f.conflict,
-            doubled: f.doubled,
-            choice: f.choice.length ? f.choice : null,
-            status: f.choice.length ? "auto" : f.alternatives.length ? "choose" : "none",
-          };
-        }
+      this.picked = res.picked;
+      for (const show of res.shows) this.shows[showKey(show.id)] = show;
+      for (const f of res.files) {
+        this.state[f.path] = {
+          showId: showKey(f.showId),
+          guess: f.guess,
+          alternatives: f.alternatives,
+          conflict: f.conflict,
+          doubled: f.doubled,
+          choice: f.choice.length ? f.choice : null,
+          status: f.choice.length ? "auto" : f.alternatives.length ? "choose" : "none",
+          group: f.group,
+        };
       }
-      if (found.length) this.searched = found;
-      if (!searched && found.length) this.#ctx.say(t("tvNoFiles"));
-      else if (loose) this.#ctx.say(t("tvLoose", { n: loose }));
-      if (review) this.openReview();
+      if (res.found.length) this.searched = res.found;
+      if (!res.searched && res.found.length) this.#ctx.say(t("tvNoFiles"));
+      else if (res.loose) this.#ctx.say(t("tvLoose", { n: res.loose }));
+      if (res.files.some((f) => !f.choice.length)) this.openReview();
     } catch (e) {
       await notify({ title: t("rule.series"), text: tError(e) });
     } finally {
+      this.pick = null;
       this.progress = null;
     }
+  }
+
+  /** The flow's progress: finding a show, or loading one's episodes. */
+  onProgress(p: { stage: "finding" | "loading"; show?: string }) {
+    if (this.progress) this.progress = p.stage === "loading" ? t("tvLoading", { show: p.show ?? "" }) : t("tvFinding");
+  }
+
+  /** The flow asks which show the files are: the picker opens, and its
+   *  answer goes back. */
+  ask(id: number, q: { source: "tmdb" | "anilist"; query: string; candidates: Candidate[] }) {
+    this.pick = {
+      ...q,
+      resolve: (c) => {
+        this.pick = null;
+        api.flowAnswer(id, c);
+      },
+    };
   }
 
   /** Opens the review on the files still without an episode (or on one). */
@@ -191,15 +162,14 @@ export class Series {
     this.review = queue.length ? queue : null;
   }
 
-  /** The user's pick for a file; undecided files read the same way (its
+  /** The user's pick for a file; undecided files of its group (its
    *  subtitles, say) get it too. */
   choose(path: string, choice: EpKey[] | null) {
     const e = this.state[path];
     if (!e) return;
-    const guess = JSON.stringify(e.guess);
     for (const [p, o] of Object.entries(this.state)) {
       const undecided = o.status === "choose" || o.status === "none";
-      if (p === path || (undecided && o.showId === e.showId && JSON.stringify(o.guess) === guess)) {
+      if (p === path || (undecided && o.group === e.group)) {
         this.state[p] = { ...o, choice, status: choice ? "chosen" : "none" };
       }
     }

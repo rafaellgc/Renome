@@ -5,9 +5,10 @@
 //! the command line asks them in the terminal; neither decides on its own.
 
 pub mod movies;
+pub mod series;
 
 use renome_core::PreviewItem;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// A file of the list, as the lookups see it.
@@ -66,4 +67,18 @@ impl Item {
             .map(|e| e.to_string_lossy().to_lowercase())
             .unwrap_or_default()
     }
+}
+
+/// What a flow asks the person in the middle of its work (see
+/// [`crate::Host::ask`]).
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Question {
+    /// Which show the files are: `source` is `tmdb` or `anilist`; `query`,
+    /// what was searched. The answer: one of the candidates.
+    Show {
+        source: String,
+        query: String,
+        candidates: Vec<renome_core::tmdb::Candidate>,
+    },
 }

@@ -54,6 +54,17 @@ pub trait Host: Send + Sync {
         let _ = (html, pdf, page);
         Box::pin(async { Err("pdfPrint".to_string()) })
     }
+    /// A question a lookup flow cannot settle alone (which show the files
+    /// are, say): the window opens its picker, the command line asks in
+    /// the terminal. The answer as the question's candidates are written;
+    /// `None` leaves it undecided (the default: nobody to ask).
+    fn ask(
+        &self,
+        question: flow::Question,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<Value>> + Send + '_>> {
+        let _ = question;
+        Box::pin(async { None })
+    }
 }
 
 /// Sends a report made of any serializable value.

@@ -38,7 +38,7 @@
   import { RULE_TYPES, blockedBy, isKindRule, oneLookup, isAudio, isBook, isComic, isScreen, isTaggableVideo, isVideo, listNames, newRule, newStep, pairBase, splitExt } from "$lib/rules";
   import { SECRET_FIELDS, loadSecrets, loadSettings, saveSecrets, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
-    ApplyReport, Copies, MovieStatus, HistoryEntry, OpError, Preview, PreviewItem, Rule, RuleType, Step, View, ViewSort,
+    ApplyReport, Candidate, Copies, MovieStatus, HistoryEntry, OpError, Preview, PreviewItem, Rule, RuleType, Step, View, ViewSort,
   } from "$lib/types";
   import { DETAIL_COLUMNS, type DetailColumn, type UpdateFound } from "$lib/types";
   import { COL_LABEL, detailText } from "$lib/details";
@@ -1507,6 +1507,13 @@
     const unlistenTmdb = listen<{ done: number; total: number }>("tmdb-progress", (e) => {
       if (movies.progress) movies.progress = { ...movies.progress, ...e.payload };
     });
+    const unlistenTv = listen<{ stage: "finding" | "loading"; show?: string }>("tv-progress", (e) => tv.onProgress(e.payload));
+    const unlistenAsk = listen<{ id: number; question: { kind: string; source: "tmdb" | "anilist"; query: string; candidates: Candidate[] } }>(
+      "flow-ask",
+      (e) => {
+        if (e.payload.question.kind === "show") tv.ask(e.payload.id, e.payload.question);
+      },
+    );
     const unlistenMb = listen<{ done: number; total: number; kind?: "listen" | "tags" }>("mb-progress", (e) => {
       // After listening, the albums heard are looked up.
       if (music.progress)
@@ -1578,6 +1585,8 @@
       unlistenApply.then((f) => f());
       unlistenUndo.then((f) => f());
       unlistenTmdb.then((f) => f());
+      unlistenTv.then((f) => f());
+      unlistenAsk.then((f) => f());
       unlistenMb.then((f) => f());
       unlistenBooks.then((f) => f());
       unlistenSubs.then((f) => f());

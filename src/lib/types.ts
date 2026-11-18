@@ -522,6 +522,32 @@ export interface EpisodeState {
   doubled?: number;
   choice: EpKey[] | null;
   status: MovieStatus;
+  /** Files of one group share the answer given to one of them. */
+  group: string;
+}
+
+/** What the series search found for a file (the show's id as its source
+ *  has it): `choice` empty when in doubt. */
+export interface EpisodeFound {
+  path: string;
+  showId: number;
+  guess: EpisodeGuess;
+  alternatives: EpKey[][];
+  conflict: boolean;
+  doubled?: number;
+  choice: EpKey[];
+  group: string;
+}
+
+/** What the series search came to (see the services' `flow::series`). */
+export interface SeriesOutcome {
+  empty: boolean;
+  shows: Show[];
+  files: EpisodeFound[];
+  found: Candidate[];
+  searched: boolean;
+  loose: number;
+  picked: Record<string, Candidate>;
 }
 
 /** A subtitle found for a video (see the core's `subtitles::Candidate`). */
