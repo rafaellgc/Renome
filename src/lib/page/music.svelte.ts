@@ -111,25 +111,13 @@ export class Music {
   /** Looks up the visible songs' albums on MusicBrainz; albums already
    *  settled keep their release, doubtful ones go to the review window. */
   async search(rule: Extract<Rule, { type: "music" }>) {
-    const settled = new Set(this.albums.filter((a) => a.status === "auto" || a.status === "chosen").flatMap((a) => a.files));
-    const paths = this.#ctx.items
-      // Songs without a title can still be identified by their sound.
-      .filter((i) => !i.isDir && (!i.untagged || rule.identifyBySound) && isAudio(i.original) && !settled.has(i.path))
-      .map((i) => i.path);
-    if (!paths.length) {
-      this.#ctx.say(t("mbNoFiles"));
-      return;
-    }
+    const settled = this.albums.filter((a) => a.status === "auto" || a.status === "chosen").flatMap((a) => a.files);
     this.progress = { done: 0, total: 0, kind: "search" };
     try {
-      const found = await api.mbLookup(paths, rule.fromName, rule.identifyBySound);
+      // Which songs, and what is sure, the shared flow says.
+      const found = await api.musicSearch(this.#ctx.items, settled, rule.fromName, rule.identifyBySound);
       if (!found.length) {
         this.#ctx.say(t("mbNoFiles"));
-        return;
-      }
-      const failed = found.find((f) => f.error);
-      if (failed && found.every((f) => f.error)) {
-        await notify({ title: t("rule.music"), text: tError(failed.error) });
         return;
       }
       const looked = new Set(found.flatMap((f) => f.files));

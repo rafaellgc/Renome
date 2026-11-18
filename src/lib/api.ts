@@ -98,8 +98,10 @@ export const api = {
   ) => invoke<SeriesOutcome>("series_search", { key, lang, source, typed, items, settled, picked }),
   /** The answer to a flow's question (null: none fits). */
   flowAnswer: (id: number, answer: unknown) => invoke<void>("flow_answer", { id, answer }),
-  mbLookup: (paths: string[], fromName: boolean, listen: boolean) =>
-    invoke<AlbumLookup[]>("mb_lookup", { paths, fromName, listen }),
+  /** The music rule's search (shared with the command line): albums,
+   *  sure ones with their release. An error when every album failed. */
+  musicSearch: (items: PreviewItem[], settled: string[], fromName: boolean, listen: boolean) =>
+    invoke<AlbumLookup[]>("music_search", { items, settled, fromName, listen }),
   mbSearch: (query: AlbumQuery, discogs = false) => invoke<MbCandidate[]>("mb_search", { query, discogs }),
   /** The Discogs token from the options (empty: Discogs is not used). */
   discogsToken: (token: string) => invoke<void>("discogs_token", { token }),

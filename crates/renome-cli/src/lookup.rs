@@ -960,40 +960,22 @@ pub async fn music(
     }
     let acoustid = renome_services::acoustid::Client::default();
     let heard = std::sync::Mutex::new(HashMap::new());
-    let wanted: std::collections::HashSet<&PathBuf> = preview
-        .items
-        .iter()
-        .filter(|i| {
-            let ext = Path::new(&i.original)
-                .extension()
-                .map(|e| e.to_string_lossy().to_lowercase())
-                .unwrap_or_default();
-            !i.is_dir && (!i.untagged || listen) && renome_core::music::is_audio(&ext)
-        })
-        .map(|i| &i.path)
-        .collect();
+    let items: Vec<flow::Item> = preview.items.iter().map(flow::Item::from).collect();
+    let wanted: std::collections::HashSet<PathBuf> =
+        flow::music::targets(&items, listen, &Default::default())
+            .into_iter()
+            .collect();
     let list: Vec<&renome_core::FileEntry> =
         files.iter().filter(|f| wanted.contains(&f.path)).collect();
-    let (mut named, mut unnamed) = mbs::songs_of(&list, &HashMap::new(), from_name);
-    if !listen {
-        let (guessed, none): (Vec<_>, Vec<_>) =
-            unnamed.into_iter().partition(|(_, t)| !t.title.is_empty());
-        named.extend(guessed);
-        unnamed = none;
-    }
-    let albums = mbs::albums(&named);
     let services = mbs::Services {
         mb: &mb,
         dg: &dg,
         acoustid: &acoustid,
         heard: &heard,
     };
-    let found = mbs::lookup(&Cli, &services, albums, unnamed, listen).await;
-    if let Some(failed) = found.iter().find_map(|f| f.error.clone())
-        && found.iter().all(|f| f.error.is_some())
-    {
-        return Err(crate::text::error_text(&failed));
-    }
+    let found = flow::music::search(&Cli, &services, &list, from_name, listen)
+        .await
+        .map_err(|e| crate::text::error_text(&e))?;
     let mut out_music = Music {
         chosen: HashMap::new(),
         albums: Vec::new(),
@@ -1027,10 +1009,7 @@ pub async fn music(
             .iter()
             .filter(|f| album.files.contains(&f.path))
             .collect();
-        let (songs, unnamed) = mbs::songs_of(&list, &heard.lock().unwrap(), from_name);
-        let mut songs = mbs::albums(&songs).concat();
-        songs.extend(unnamed);
-        let chosen = mbs::choose(&mb, &dg, &id, &songs)
+        let chosen = flow::music::choose(&services, &id, &list, from_name)
             .await
             .map_err(|e| crate::text::error_text(&e))?;
         for (p, m) in chosen.matches {

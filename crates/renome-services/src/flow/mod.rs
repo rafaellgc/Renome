@@ -5,6 +5,7 @@
 //! the command line asks them in the terminal; neither decides on its own.
 
 pub mod movies;
+pub mod music;
 pub mod series;
 pub mod subtitles;
 
@@ -30,6 +31,9 @@ pub struct Item {
     /// A release's advertisement: not looked up.
     #[serde(default)]
     pub release_junk: bool,
+    /// A song with no title in its tags.
+    #[serde(default)]
+    pub untagged: bool,
 }
 
 impl From<&PreviewItem> for Item {
@@ -41,6 +45,7 @@ impl From<&PreviewItem> for Item {
             is_dir: i.is_dir,
             extra: i.extra.clone(),
             release_junk: i.release_junk,
+            untagged: i.untagged,
         }
     }
 }

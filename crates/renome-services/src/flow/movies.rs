@@ -98,6 +98,7 @@ mod tests {
             is_dir: false,
             extra: None,
             release_junk: false,
+            untagged: false,
         }
     }
 

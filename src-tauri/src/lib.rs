@@ -1214,50 +1214,43 @@ async fn subsource_check(key: String) -> Result<(), String> {
     subtitles::check_subsource(key).await
 }
 
-type Songs = Vec<(PathBuf, AudioTags)>;
-
-/// The tags of the given songs in the list (with the name filled in, as
-/// the music rule does, and the recordings they were heard as): the songs
-/// with a title in their tags, and those without (a title from the file
-/// name is only a guess).
-fn songs_of(app: &AppHandle, paths: &[PathBuf], from_name: bool) -> (Songs, Songs) {
+/// The list's files at these paths.
+fn session_files(app: &AppHandle, paths: &HashSet<PathBuf>) -> Vec<FileEntry> {
     let state = app.state::<AppState>();
-    let wanted: HashSet<&PathBuf> = paths.iter().collect();
-    let files: Vec<FileEntry> = state
-        .session
-        .lock()
-        .unwrap()
+    let session = state.session.lock().unwrap();
+    session
         .files
         .iter()
-        .filter(|f| wanted.contains(&f.path))
+        .filter(|f| paths.contains(&f.path))
         .cloned()
-        .collect();
-    let heard = state.heard.lock().unwrap();
-    musicbrainz::songs_of(&files.iter().collect::<Vec<_>>(), &heard, from_name)
+        .collect()
 }
 
-/// Groups the songs in albums and looks each one up on MusicBrainz.
+/// The music rule's search (the flow the command line runs too): the
+/// songs grouped in albums and looked up; `settled`: songs whose album
+/// keeps its release.
 #[tauri::command]
-async fn mb_lookup(
+async fn music_search(
     app: AppHandle,
-    paths: Vec<PathBuf>,
+    items: Vec<renome_services::flow::Item>,
+    settled: Vec<PathBuf>,
     from_name: bool,
     listen: bool,
 ) -> Result<Vec<musicbrainz::AlbumLookup>, String> {
-    let (mut named, mut unnamed) = tauri::async_runtime::spawn_blocking({
+    use renome_services::flow::music;
+    let settled: HashSet<PathBuf> = settled.into_iter().collect();
+    let wanted: HashSet<PathBuf> = music::targets(&items, listen, &settled)
+        .into_iter()
+        .collect();
+    if wanted.is_empty() {
+        return Ok(Vec::new());
+    }
+    let files = tauri::async_runtime::spawn_blocking({
         let app = app.clone();
-        move || songs_of(&app, &paths, from_name)
+        move || session_files(&app, &wanted)
     })
     .await
     .map_err(|e| e.to_string())?;
-    if !listen {
-        // Without listening, a title from the file name is all there is.
-        let (guessed, none): (Vec<_>, Vec<_>) =
-            unnamed.into_iter().partition(|(_, t)| !t.title.is_empty());
-        named.extend(guessed);
-        unnamed = none;
-    }
-    let albums = musicbrainz::albums(&named);
     let state = app.state::<AppState>();
     let services = musicbrainz::Services {
         mb: &state.mb,
@@ -1265,7 +1258,14 @@ async fn mb_lookup(
         acoustid: &state.acoustid,
         heard: &state.heard,
     };
-    Ok(musicbrainz::lookup(&Gui(app.clone()), &services, albums, unnamed, listen).await)
+    music::search(
+        &Gui(app.clone()),
+        &services,
+        &files.iter().collect::<Vec<_>>(),
+        from_name,
+        listen,
+    )
+    .await
 }
 
 /// A search typed in the album review, on MusicBrainz or Discogs.
@@ -1329,13 +1329,21 @@ async fn mb_choose(
     paths: Vec<PathBuf>,
     from_name: bool,
 ) -> Result<musicbrainz::Chosen, String> {
-    // Songs without a title in their tags match by the recording heard, or
-    // by what their file name tells.
-    let (mut songs, unnamed) = songs_of(&app, &paths, from_name);
-    songs = musicbrainz::albums(&songs).concat();
-    songs.extend(unnamed);
+    let files = session_files(&app, &paths.into_iter().collect());
     let state = app.state::<AppState>();
-    musicbrainz::choose(&state.mb, &state.dg, &id, &songs).await
+    let services = musicbrainz::Services {
+        mb: &state.mb,
+        dg: &state.dg,
+        acoustid: &state.acoustid,
+        heard: &state.heard,
+    };
+    renome_services::flow::music::choose(
+        &services,
+        &id,
+        &files.iter().collect::<Vec<_>>(),
+        from_name,
+    )
+    .await
 }
 
 /// Saves the albums' covers and records them like `write_sidecars`.
@@ -2197,7 +2205,7 @@ pub fn run() {
             update_check,
             update_install,
             update_way,
-            mb_lookup,
+            music_search,
             mb_search,
             mb_choose,
             write_covers,
