@@ -1022,7 +1022,7 @@ ${ex("Show.S01E02.720p.WEB.mkv", "Show S01E02.mkv")}
   <li><b>Linux, .deb or .rpm package</b>: <code>renome-cli</code>, already on the system path.</li>
   <li><b>AppImage</b>: <code>./Renome.AppImage cli …</code> (the word <code>cli</code> before the command).</li>
   <li><b>Flatpak</b>: <code>flatpak run --command=renome-cli io.github.rafaellgc.Renome …</code></li>
-  <li><b>Windows</b>: <code>renome-cli.exe</code>, in the folder Renome was installed to (usually <code>%LOCALAPPDATA%\\Renome</code>). To call it from any folder, add that folder to the user's <code>PATH</code>, once, in PowerShell: <code>[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";$env:LOCALAPPDATA\\Renome", "User")</code> (for terminals opened afterwards).</li>
+  <li><b>Windows</b>: <code>renome-cli.exe</code>, in the folder Renome was installed to (usually <code>%LOCALAPPDATA%\\Renome</code>). When installing, the installer asks whether to add that folder to the user's <code>PATH</code>, to call it from any folder (for terminals opened afterwards); updates keep the answer and uninstalling takes the folder out again. To change your mind, install again and answer again.</li>
   <li><b>macOS</b>: <code>/Applications/Renome.app/Contents/MacOS/renome-cli</code>. To call it by name alone: <code>sudo mkdir -p /usr/local/bin &amp;&amp; sudo ln -s /Applications/Renome.app/Contents/MacOS/renome-cli /usr/local/bin/renome-cli</code>.</li>
 </ul>
 <h4>Look first, rename after</h4>

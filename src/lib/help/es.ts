@@ -1022,7 +1022,7 @@ ${ex("Serie.S01E02.720p.WEB.mkv", "Serie S01E02.mkv")}
   <li><b>Linux, paquete .deb o .rpm</b>: <code>renome-cli</code>, ya en la ruta del sistema.</li>
   <li><b>AppImage</b>: <code>./Renome.AppImage cli …</code> (la palabra <code>cli</code> antes del comando).</li>
   <li><b>Flatpak</b>: <code>flatpak run --command=renome-cli io.github.rafaellgc.Renome …</code></li>
-  <li><b>Windows</b>: <code>renome-cli.exe</code>, en la carpeta donde se instaló Renome (normalmente <code>%LOCALAPPDATA%\\Renome</code>). Para llamarlo desde cualquier carpeta, añada esa carpeta al <code>PATH</code> del usuario, una vez, en PowerShell: <code>[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";$env:LOCALAPPDATA\\Renome", "User")</code> (vale para las terminales abiertas después).</li>
+  <li><b>Windows</b>: <code>renome-cli.exe</code>, en la carpeta donde se instaló Renome (normalmente <code>%LOCALAPPDATA%\\Renome</code>). Al instalar, el instalador pregunta si añadir esa carpeta al <code>PATH</code> del usuario, para llamarlo desde cualquier carpeta (vale para las terminales abiertas después); las actualizaciones mantienen la respuesta y desinstalar quita la carpeta de nuevo. Para cambiar de idea, instale de nuevo y responda otra vez.</li>
   <li><b>macOS</b>: <code>/Applications/Renome.app/Contents/MacOS/renome-cli</code>. Para llamarlo solo por el nombre: <code>sudo mkdir -p /usr/local/bin &amp;&amp; sudo ln -s /Applications/Renome.app/Contents/MacOS/renome-cli /usr/local/bin/renome-cli</code>.</li>
 </ul>
 <h4>Ver antes, renombrar después</h4>

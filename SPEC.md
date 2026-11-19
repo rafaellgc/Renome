@@ -2650,9 +2650,7 @@ the command line in the terminal, neither decides on its own),
 with their choices, `--edit`, `--missing`, Ctrl+C, the manual, man pages
 and completions, in every package. Its texts are the page's (`i18n.ts`)
 and the manual's (`src/lib/help`), read at build time, plus its own in
-`text.rs`. Not done: an option in the Windows installer to add it to
-`PATH` (the manual gives the PowerShell line; NSIS cannot safely edit a
-long `PATH`).
+`text.rs`.
 
 ### 8.1 The program
 
@@ -2661,8 +2659,12 @@ long `PATH`).
   inside the AppImage (`Renome.AppImage cli …` runs it; the window's
   program hands over when its first argument is `cli`), in the Flatpak
   (`flatpak run --command=renome-cli io.github.rafaellgc.Renome`), the
-  Windows install folder (the manual gives the PowerShell line that adds
-  it to the user's `PATH`) and `Renome.app/Contents/MacOS/` (the manual
+  Windows install folder (a fresh install that shows its pages asks
+  whether to add the folder to the user's `PATH`, in the system's
+  language; silent and passive installs and updates do not ask and leave
+  `PATH` as it was; uninstalling, not for an update, takes it out. The
+  hook, `src-tauri/windows/hooks.nsh`, edits the registry value through
+  PowerShell, keeping its kind and every other entry) and `Renome.app/Contents/MacOS/` (the manual
   gives the link to make in `/usr/local/bin`). The window's program on
   Windows has no console, hence the second executable. The package
   builds pass `src-tauri/tauri.cli.conf.json` (Tauri's `externalBin`;

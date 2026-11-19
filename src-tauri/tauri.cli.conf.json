@@ -3,7 +3,9 @@
     "beforeBuildCommand": "npm run build && node scripts/cli-bin.js"
   },
   "bundle": {
-    "externalBin": ["binaries/renome-cli"],
+    "externalBin": [
+      "binaries/renome-cli"
+    ],
     "linux": {
       "deb": {
         "files": {
@@ -20,6 +22,11 @@
           "/usr/share/zsh/site-functions/_renome-cli": "../target/cli-extra/zsh/_renome-cli",
           "/usr/share/fish/vendor_completions.d/renome-cli.fish": "../target/cli-extra/fish/renome-cli.fish"
         }
+      }
+    },
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/hooks.nsh"
       }
     }
   }
