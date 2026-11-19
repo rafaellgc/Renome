@@ -1092,7 +1092,11 @@ pub fn merge(g: &ComicGuess, info: &ComicInfo) -> ComicMatch {
         number: or(&info.number, &g.number),
         volume,
         chapter: g.chapter.clone(),
-        title: or(&or(&info.title, &g.title), &rest),
+        title: title_without_number(
+            &or(&or(&info.title, &g.title), &rest),
+            volume,
+            &or(&info.number, &g.number),
+        ),
         year: info.year.or(g.year),
         count: info.count.or(g.count),
         publisher: info.publisher.clone(),
@@ -1109,6 +1113,27 @@ pub fn merge(g: &ComicGuess, info: &ComicInfo) -> ComicMatch {
             }
             e
         },
+    }
+}
+
+/// A title that starts with the volume or number the comic already has
+/// (`v01 - Story`, `Vol. 1: Story`, `#3 - Story`, as some programs write
+/// them in `ComicInfo.xml`): that part goes, `{volume}` and `{number}`
+/// say it.
+fn title_without_number(title: &str, volume: Option<u32>, number: &str) -> String {
+    static LEAD: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)^\s*(?:v|vol\.?|volume|tomo|t\.|#|n[º°o]\.?)\s*(\d+(?:\.\d+)?)\s*[-–—:.,]\s*(\S.*)$").unwrap()
+    });
+    let Some(c) = LEAD.captures(title) else {
+        return title.to_string();
+    };
+    let n: f64 = c[1].parse().unwrap_or(-1.0);
+    let same = volume.is_some_and(|v| f64::from(v) == n)
+        || number.trim().parse::<f64>().is_ok_and(|x| x == n);
+    if same {
+        c[2].trim().to_string()
+    } else {
+        title.to_string()
     }
 }
 
@@ -1746,6 +1771,21 @@ pub fn with_issue(own: &ComicMatch, volume: &Volume, issue: Option<&Issue>) -> C
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn title_without_the_volume_it_repeats() {
+        use super::title_without_number as t;
+        assert_eq!(
+            t("v01 - Mickey Mouse: The Delta Dimension", Some(1), ""),
+            "Mickey Mouse: The Delta Dimension"
+        );
+        assert_eq!(t("Vol. 2: A Queda", Some(2), ""), "A Queda");
+        assert_eq!(t("#3 - O Farol", None, "003"), "O Farol");
+        // Another number, or a title that is only a number: kept.
+        assert_eq!(t("v02 - Outra Coisa", Some(1), ""), "v02 - Outra Coisa");
+        assert_eq!(t("Volume 1", Some(1), ""), "Volume 1");
+        assert_eq!(t("Vingança", Some(1), ""), "Vingança");
+    }
+
     #[test]
     fn publishers_skipped() {
         let v = |p: &str| Volume {
