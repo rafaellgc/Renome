@@ -2,8 +2,6 @@
 //! window keeps them, their keys in the password store (`serverKeys`);
 //! told about the folders that changed after renames and undos.
 
-use std::path::PathBuf;
-
 use clap::ArgMatches;
 use renome_services::mediaserver;
 use serde_json::{Map, Value, json};
@@ -37,36 +35,6 @@ fn save_key(id: &str, key: Option<String>) -> Result<(), String> {
     renome_services::save_secrets(all).map(|_| ())
 }
 
-/// The servers to tell: with an address, a key and a folder on.
-fn callable(settings: Option<&Value>) -> Vec<(String, mediaserver::Server)> {
-    let keys = keys();
-    let list = settings
-        .and_then(|s| s.get("servers")?.as_array().cloned())
-        .unwrap_or_default();
-    list.into_iter()
-        .filter_map(|s| {
-            let id = s.get("id")?.as_str()?.to_string();
-            let key = keys.get(&id)?.as_str()?.trim().to_string();
-            let url = s.get("url")?.as_str()?.trim().to_string();
-            if key.is_empty() || url.is_empty() {
-                return None;
-            }
-            let server: mediaserver::Server = serde_json::from_value(json!({
-                "kind": s.get("kind").cloned().unwrap_or(Value::from("jellyfin")),
-                "url": url,
-                "key": key,
-                "folders": s.get("folders").cloned().unwrap_or(Value::Array(vec![])),
-            }))
-            .ok()?;
-            server
-                .folders
-                .iter()
-                .any(|f| f.on && !f.local.is_empty())
-                .then_some((name_of(&s), server))
-        })
-        .collect()
-}
-
 fn name_of(s: &Value) -> String {
     if s.get("kind").and_then(Value::as_str) == Some("plex") {
         "Plex".into()
@@ -78,26 +46,24 @@ fn name_of(s: &Value) -> String {
 /// After renames or an undo: each server told about the folders the files
 /// left and went to (those in its libraries); what was told, as notices.
 pub async fn tell(settings: Option<&Value>, ops: &[renome_core::Operation]) -> Vec<String> {
-    let mut notes = Vec::new();
-    if ops.is_empty() {
-        return notes;
-    }
-    let changed: Vec<PathBuf> = ops
-        .iter()
-        .flat_map(|op| [op.from.clone(), op.to.clone()])
-        .collect();
-    for (name, server) in callable(settings) {
-        match server.tell(&changed).await {
-            Ok(0) => {}
-            Ok(n) => notes.push(t("serverTold", &[("name", &name), ("n", &n)])),
-            Err(e) => notes.push(format!(
+    let servers = settings
+        .and_then(|s| s.get("servers"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let keys = Value::Object(keys()).to_string();
+    mediaserver::tell_all(mediaserver::callable(&servers, &keys), ops)
+        .await
+        .into_iter()
+        .filter_map(|told| match told.folders {
+            Ok(0) => None,
+            Ok(n) => Some(t("serverTold", &[("name", &told.name), ("n", &n)])),
+            Err(e) => Some(format!(
                 "{}: {}",
-                t("serverNotTold", &[("name", &name)]),
+                t("serverNotTold", &[("name", &told.name)]),
                 crate::text::error_text(&e)
             )),
-        }
-    }
-    notes
+        })
+        .collect()
 }
 
 fn settings_now() -> Value {

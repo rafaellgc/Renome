@@ -294,6 +294,66 @@ pub struct PreviewItem {
     /// badge): it stays there, even when the rest is sent elsewhere.
     #[serde(skip)]
     pub stays_behind: bool,
+    /// What the file is, by its extension, as the rules tell files apart
+    /// (`video`, `subtitle`, `audio`, `book`, `comic`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub kinds: Vec<&'static str>,
+    /// Its name for files counted as one (a video and its subtitles: see
+    /// [`crate::rules::pair_split`]); a folder's whole name.
+    pub pair: String,
+    /// The lookup rule on leaves it alone (a `.zip` in a show's folder):
+    /// that rule's type, for the list to tell.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outside: Option<&'static str>,
+}
+
+/// What a file is, by its extension (see [`PreviewItem::kinds`]).
+fn kinds_of(file: &FileEntry) -> Vec<&'static str> {
+    if file.is_dir {
+        return Vec::new();
+    }
+    let ext = file.ext.as_str();
+    [
+        ("video", crate::tmdb::is_video(ext)),
+        ("subtitle", crate::tmdb::is_subtitle(ext)),
+        ("audio", crate::music::is_audio(ext)),
+        ("book", crate::ebook::is_book(ext)),
+        ("comic", crate::comics::is_comic(ext)),
+    ]
+    .into_iter()
+    .filter_map(|(k, yes)| yes.then_some(k))
+    .collect()
+}
+
+/// Whether the lookup rule `kind` names this file (with what goes along:
+/// a song's lyrics, cue sheet, playlist and cover).
+fn rule_takes(kind: &str, audiobooks: bool, i: &PreviewItem) -> bool {
+    let is = |k| i.kinds.contains(&k);
+    let ext = Path::new(&i.original)
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    match kind {
+        "movie" => i.is_dir || is("video") || is("subtitle"),
+        "series" => !i.is_dir && (is("video") || is("subtitle")),
+        "music" => {
+            !i.is_dir
+                && (is("audio")
+                    || matches!(
+                        ext.as_str(),
+                        "lrc" | "cue" | "m3u" | "m3u8" | "pls" | "jpg" | "jpeg" | "png" | "webp"
+                    ))
+        }
+        "book" => !i.is_dir && (is("book") || (audiobooks && is("audio")) || i.book_to.is_some()),
+        "comic" => {
+            if i.is_dir {
+                i.convert
+            } else {
+                is("comic")
+            }
+        }
+        _ => true,
+    }
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -1760,6 +1820,13 @@ pub fn preview(
                 && !view.episodes.contains_key(&file.path)
                 && crate::extras::release_junk(&file.path, file.size);
             PreviewItem {
+                kinds: kinds_of(file),
+                pair: if file.is_dir {
+                    file.stem.clone()
+                } else {
+                    crate::rules::pair_split(file).0.to_string()
+                },
+                outside: None,
                 follows: None,
                 companion: false,
                 with_folder: None,
@@ -2030,6 +2097,19 @@ pub fn preview(
         items.sort_by_key(|i| view.similar.get(&i.path).copied());
     }
 
+    // Files the lookup rule on leaves alone (renamed by another rule, or
+    // an advert or extra with its own tag: nothing to tell).
+    if let Some((kind, audiobooks)) = pipeline.lookup_kind() {
+        for i in &mut items {
+            let told = (i.status == Status::Ok && !i.manual)
+                || i.release_junk
+                || i.extra.is_some()
+                || rule_takes(kind, audiobooks, i);
+            if !told {
+                i.outside = Some(kind);
+            }
+        }
+    }
     let changed = items.iter().filter(|i| i.status == Status::Ok).count();
     let conflicts = items
         .iter()
@@ -3536,6 +3616,7 @@ mod tests {
                 opf: false,
                 missing: false,
                 convert_to: String::new(),
+                audiobooks: true,
             },
         }];
         let mut files = entries(&book.join("CD1"), &["faixa 01.mp3"]);
@@ -3588,6 +3669,7 @@ mod tests {
                 opf: false,
                 missing: false,
                 convert_to: String::new(),
+                audiobooks: true,
             },
         }];
         // The same book in two formats, and a file the rule knows nothing of.
@@ -4685,6 +4767,7 @@ mod tests {
                 opf: false,
                 missing: false,
                 convert_to: String::new(),
+                audiobooks: true,
             },
         }];
         let p = preview(&files, &steps, &HashMap::new(), &view);

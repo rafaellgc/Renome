@@ -2,6 +2,7 @@
 // photos and videos whose own date is wrong or missing (a picture sent
 // through a messaging app keeps only the day it arrived).
 
+import { api } from "$lib/api";
 import { notify } from "$lib/dialogs.svelte";
 import { t } from "$lib/i18n";
 import type { EditField } from "$lib/types";
@@ -14,21 +15,6 @@ const NONE: Parts = { day: "", month: "", year: "", hour: "", minute: "" };
 function parts(text: string | undefined): Parts {
   const m = /^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}):(\d{2}))?$/.exec(text ?? "");
   return m ? { year: m[1], month: m[2], day: m[3], hour: m[4] ?? "", minute: m[5] ?? "" } : { ...NONE };
-}
-
-/** The parts as the core takes them; "" when all are empty; null when
- *  they make no date. */
-function joined(p: Parts): string | null {
-  if (Object.values(p).every((v) => !v)) return "";
-  const [y, mo, d] = [Number(p.year), Number(p.month), Number(p.day)];
-  const date = new Date(y, mo - 1, d);
-  if (p.year.length !== 4 || y < 1900 || date.getFullYear() !== y || date.getMonth() !== mo - 1 || date.getDate() !== d) return null;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const day = `${y}-${pad(mo)}-${pad(d)}`;
-  if (!p.hour && !p.minute) return day;
-  const [h, mi] = [Number(p.hour || 0), Number(p.minute || 0)];
-  if (h > 23 || mi > 59) return null;
-  return `${day} ${pad(h)}:${pad(mi)}`;
 }
 
 export class Photos {
@@ -62,21 +48,22 @@ export class Photos {
     this.edit = { paths: rows.map((i) => i.path), rows: rows.map((i) => parts(this.dates[i.path])) };
   }
 
-  /** The fields changed in the date window, for each of its photos; the
-   *  window stays open when they make no date. */
+  /** The fields changed in the date window, for each of its photos (checked
+   *  as the command line's --edit does); the window stays open when they
+   *  make no date. */
   async saveEdit(changed: Record<string, string>) {
     const edit = this.edit;
     if (!edit) return;
-    const next = { ...this.dates };
-    for (const [i, p] of edit.paths.entries()) {
-      const text = joined({ ...edit.rows[i], ...changed });
-      if (text === null) {
-        await notify({ title: t("rule.photo"), text: t("photoEditInvalid") });
-        return;
-      }
-      if (text) next[p] = text;
-      else delete next[p];
+    const dates = await api.editDates(edit.paths.map((p) => this.dates[p] ?? ""), changed);
+    if (!dates) {
+      await notify({ title: t("rule.photo"), text: t("photoEditInvalid") });
+      return;
     }
+    const next = { ...this.dates };
+    edit.paths.forEach((p, i) => {
+      if (dates[i]) next[p] = dates[i];
+      else delete next[p];
+    });
     this.dates = next;
     this.edit = null;
   }

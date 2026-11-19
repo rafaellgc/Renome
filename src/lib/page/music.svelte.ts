@@ -5,7 +5,6 @@
 import { api } from "$lib/api";
 import { notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
-import { isAudio } from "$lib/rules";
 import type { AlbumState, ApplyReport, EditField, MbCandidate, Rule, SongMatch } from "$lib/types";
 import { moved, ruleOf, without, type PageCtx } from "./common";
 
@@ -38,7 +37,7 @@ export class Music {
   /** The album each song is in. */
   albumOf = $derived.by(() => new Map(this.albums.flatMap((a, i) => a.files.map((p): [string, number] => [p, i]))));
   /** The songs among the rows chosen in the list. */
-  selected = $derived.by(() => this.#ctx.items.filter((i) => this.#ctx.selected.has(i.path) && !i.isDir && isAudio(i.original)));
+  selected = $derived.by(() => this.#ctx.items.filter((i) => this.#ctx.selected.has(i.path) && !!i.kinds?.includes("audio")));
   counts = $derived.by(() => {
     let found = 0, choose = 0, none = 0;
     for (const a of this.albums) {
@@ -146,24 +145,13 @@ export class Music {
     };
   }
 
-  /** The fields changed in the details window, for each of its songs. */
-  saveEdit(changed: Record<string, string>) {
+  /** The fields changed in the details window, for each of its songs (applied as the command line's --edit does). */
+  async saveEdit(changed: Record<string, string>) {
     const edit = this.edit;
     if (!edit) return;
+    const songs = await api.editDetails("song", $state.snapshot(edit.songs), changed);
     const next = { ...this.edits };
-    edit.paths.forEach((p, i) => {
-      const m: SongMatch = { ...edit.songs[i] };
-      for (const [k, v] of Object.entries(changed)) {
-        if (k === "year") m.year = v ? Number.parseInt(v, 10) : null;
-        else if (k === "track" || k === "trackTotal" || k === "disc" || k === "discTotal") m[k] = v ? Number.parseInt(v, 10) : 0;
-        else (m as unknown as Record<string, string>)[k] = v;
-      }
-      // Another album: the release's ids no longer tell it.
-      if (m.typed || !m.release || changed.album !== undefined || changed.albumArtist !== undefined) {
-        Object.assign(m, { typed: true, release: "", recording: "", trackId: "", releaseGroup: "", artistIds: [], albumArtistIds: [] });
-      }
-      next[p] = m;
-    });
+    edit.paths.forEach((p, i) => (next[p] = songs[i]));
     this.edits = next;
     this.edit = null;
   }

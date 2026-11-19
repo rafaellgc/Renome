@@ -54,27 +54,25 @@
     }
   });
 
-  const pixels = (c?: PictureCard) => (c?.width && c?.height ? c.width * c.height : 0);
-  /** The card worth keeping: most pixels, then the largest file. */
-  function best(paths: string[]) {
-    return [...paths].sort((a, b) => pixels(cards[b]) - pixels(cards[a]) || (cards[b]?.size ?? 0) - (cards[a]?.size ?? 0))[0];
-  }
-  /** When the photo was taken, else when the file was changed (seconds). */
-  const when = (c?: PictureCard) => (c?.taken ? Date.parse(c.taken) / 1000 : (c?.modified ?? Infinity));
-
   const loaded = $derived(group.every((p) => p in cards));
-  const largest = $derived.by(() => {
-    if (!loaded) return null;
-    const top = best(group);
-    const c = cards[top];
-    // Only when it stands out.
-    return group.some((p) => pixels(cards[p]) !== pixels(c) || cards[p].size !== c.size) ? top : null;
+  /** Which pictures stand out: the one worth keeping (most pixels, then
+   *  the largest file), shown only when not all are alike, and the oldest
+   *  (the shared choice: the command line marks the same). */
+  let picks = $state<{ best: string | null; largest: string | null; oldest: string | null }>({ best: null, largest: null, oldest: null });
+  $effect(() => {
+    const g = group;
+    if (!loaded) {
+      picks = { best: null, largest: null, oldest: null };
+      return;
+    }
+    api
+      .picturePicks(g.map((p) => ({ path: p, width: cards[p].width ?? null, height: cards[p].height ?? null, size: cards[p].size, taken: cards[p].taken ?? null, modified: cards[p].modified ?? null })))
+      .then((r) => {
+        if (g === group) picks = r;
+      }, () => {});
   });
-  const oldest = $derived.by(() => {
-    if (!loaded) return null;
-    const sorted = [...group].sort((a, b) => when(cards[a]) - when(cards[b]));
-    return when(cards[sorted[0]]) < when(cards[sorted[1]]) ? sorted[0] : null;
-  });
+  const largest = $derived(picks.largest);
+  const oldest = $derived(picks.oldest);
 
   function toggle(p: string) {
     const next = new Set(marked);
@@ -84,7 +82,7 @@
   }
 
   function keepBest() {
-    const keep = best(group);
+    const keep = picks.best ?? group[0];
     const next = new Set(marked);
     for (const p of group) {
       if (p === keep) next.delete(p);

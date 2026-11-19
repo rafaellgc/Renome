@@ -135,6 +135,12 @@ export type Status = "unchanged" | "ok" | "conflict";
 export type Problem = "empty" | "slash" | "tooLong" | "windowsChars" | "diskChars" | "duplicate" | "copy" | "exists" | "sameThere";
 
 export interface PreviewItem {
+  /** What the file is, by its extension, as the rules tell files apart. */
+  kinds?: ("video" | "subtitle" | "audio" | "book" | "comic")[];
+  /** Its name for files counted as one (a video and its subtitles), as the core counts them. */
+  pair: string;
+  /** The lookup rule on leaves it alone: that rule's type. */
+  outside?: "movie" | "series" | "music" | "book" | "comic";
   path: string;
   dir: string;
   size: number;

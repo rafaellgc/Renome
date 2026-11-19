@@ -6,19 +6,11 @@ import { modelOf, screenMm } from "../readers";
 import { api } from "$lib/api";
 import { notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
-import { isAudio, isBook, splitExt } from "$lib/rules";
+import { splitExt } from "$lib/rules";
 import { tmdbLang } from "$lib/settings.svelte";
-import type { BookCandidate, BookGuess, BookMatch, BookPart, BookState, BookTarget, EditField } from "$lib/types";
-import { counts, isEpub, moved, ruleOf, without, type PageCtx, isWritableBook } from "./common";
+import type { BookCandidate, BookGuess, BookMatch, BookPart, BookState, EditField, PreviewItem } from "$lib/types";
+import { counts, moved, ruleOf, without, type PageCtx } from "./common";
 
-/** A book as the file says it is (its details and name), to type over. */
-function fromGuess(g: BookGuess): BookMatch {
-  return {
-    work: "", title: g.title, originalTitle: "", authors: g.author ? g.author.split(/\s*[;&]\s*/).filter(Boolean) : [],
-    year: g.year, editionYear: null, publisher: g.publisher, isbn: g.isbns[0] ?? "", series: g.series, seriesIndex: g.seriesIndex,
-    extra: g.language ? { language: g.language } : {},
-  };
-}
 const NO_GUESS: BookGuess = { title: "", author: "", year: null, isbns: [], fromFile: false, series: "", seriesIndex: "", publisher: "", language: "" };
 
 
@@ -47,9 +39,9 @@ export class Books {
     return r?.type === "book" && r.audiobooks !== false;
   });
 
-  /** A file the rule names: a book, or an audiobook's audio. */
-  takes(name: string) {
-    return isBook(name) || (this.audio && isAudio(name));
+  /** A file the rule names: a book, or an audiobook's audio (by what the core says the file is). */
+  takes(i: PreviewItem) {
+    return !i.isDir && (!!i.kinds?.includes("book") || (this.audio && !!i.kinds?.includes("audio")));
   }
 
   /** Each chosen book's details as the rule names it (made by the shared
@@ -66,7 +58,7 @@ export class Books {
   }
   counts = $derived.by(() => counts(this.state, this.#ctx.items));
   /** The books among the rows chosen in the list. */
-  selected = $derived.by(() => this.#ctx.items.filter((i) => this.#ctx.selected.has(i.path) && !i.isDir && this.takes(i.original)));
+  selected = $derived.by(() => this.#ctx.items.filter((i) => this.#ctx.selected.has(i.path) && this.takes(i)));
 
 
 
@@ -174,34 +166,21 @@ export class Books {
       const got = await api.bookGuesses(missing.map((i) => i.path), missing.map((i) => splitExt(this.#ctx.readName(i))[0]));
       missing.forEach((i, n) => (guessed[i.path] = got[n]));
     }
+    // What each says about itself, where nothing was chosen or typed.
+    const starts = await api.booksFromGuesses(rows.map((i) => $state.snapshot(this.state[i.path]?.guess ?? guessed[i.path] ?? NO_GUESS)));
     this.edit = {
       paths: rows.map((i) => i.path),
-      books: rows.map((i) => $state.snapshot(this.matches[i.path] ?? fromGuess(this.state[i.path]?.guess ?? guessed[i.path] ?? NO_GUESS))),
+      books: rows.map((i, n) => $state.snapshot(this.matches[i.path]) ?? starts[n]),
     };
   }
 
-  /** The fields changed in the details window, for each of its books. */
-  saveEdit(changed: Record<string, string>) {
+  /** The fields changed in the details window, for each of its books (applied as the command line's --edit does). */
+  async saveEdit(changed: Record<string, string>) {
     const edit = this.edit;
     if (!edit) return;
+    const books = await api.editDetails("book", $state.snapshot(edit.books), changed);
     const next = { ...this.edits };
-    edit.paths.forEach((p, i) => {
-      const m: BookMatch = { ...edit.books[i], extra: { ...(edit.books[i].extra ?? {}) } };
-      for (const [k, v] of Object.entries(changed)) {
-        if (k === "authors") m.authors = v.split(";").map((a) => a.trim()).filter(Boolean);
-        else if (k === "year") {
-          m.year = v ? Number.parseInt(v, 10) : null;
-          // One year typed: the edition's goes.
-          m.editionYear = null;
-        } else if (k === "language") {
-          if (v) m.extra!.language = v;
-          else delete m.extra!.language;
-        } else (m as unknown as Record<string, string>)[k] = v;
-      }
-      // Another book: the catalogue's work (and its cover) no longer tell it.
-      if (changed.title !== undefined || changed.authors !== undefined) m.work = "";
-      next[p] = m;
-    });
+    edit.paths.forEach((p, i) => (next[p] = books[i]));
     this.edits = next;
     this.edit = null;
   }

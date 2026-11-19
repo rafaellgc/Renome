@@ -587,3 +587,71 @@ mod tests {
         assert_eq!(none.check().await.unwrap_err(), "srvOffline");
     }
 }
+
+/// The servers to tell, as the options keep them (`servers`) with their
+/// keys (`serverKeys`, a JSON text of keys by server id): those with an
+/// address, a key and a library folder on with its folder here; each with
+/// the name it is told by (Plex, Jellyfin).
+pub fn callable(servers: &serde_json::Value, keys: &str) -> Vec<(String, Server)> {
+    use serde_json::{Value, json};
+    let keys: serde_json::Map<String, Value> = serde_json::from_str(keys).unwrap_or_default();
+    servers
+        .as_array()
+        .map(|l| l.as_slice())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|s| {
+            let id = s.get("id")?.as_str()?;
+            let key = keys.get(id)?.as_str()?.trim().to_string();
+            let url = s.get("url")?.as_str()?.trim().to_string();
+            if key.is_empty() || url.is_empty() {
+                return None;
+            }
+            let server: Server = serde_json::from_value(json!({
+                "kind": s.get("kind").cloned().unwrap_or(Value::from("jellyfin")),
+                "url": url,
+                "key": key,
+                "folders": s.get("folders").cloned().unwrap_or(Value::Array(vec![])),
+            }))
+            .ok()?;
+            let name = if s.get("kind").and_then(Value::as_str) == Some("plex") {
+                "Plex"
+            } else {
+                "Jellyfin"
+            };
+            server
+                .folders
+                .iter()
+                .any(|f| f.on && !f.local.is_empty())
+                .then(|| (name.to_string(), server))
+        })
+        .collect()
+}
+
+/// What a server was told after renames or an undo.
+#[derive(Debug, serde::Serialize)]
+pub struct Told {
+    pub name: String,
+    /// How many folders (0: none of its libraries), or why not.
+    pub folders: Result<usize, String>,
+}
+
+/// Tells each server (see [`callable`]) about the folders the files left
+/// and went to.
+pub async fn tell_all(servers: Vec<(String, Server)>, ops: &[renome_core::Operation]) -> Vec<Told> {
+    let mut out = Vec::new();
+    if ops.is_empty() {
+        return out;
+    }
+    let changed: Vec<std::path::PathBuf> = ops
+        .iter()
+        .flat_map(|op| [op.from.clone(), op.to.clone()])
+        .collect();
+    for (name, server) in servers {
+        out.push(Told {
+            name,
+            folders: server.tell(&changed).await,
+        });
+    }
+    out
+}

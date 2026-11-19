@@ -2659,8 +2659,19 @@ lookups chose — done in one order by `after::run`, which records it for
 undo; the window's question before renaming and its Rename button count
 the same plan, `after::counts`, as the command line's question does; the
 command line searches the subtitles before renaming, as the window's
-review does),
-`renome_core::catalog` the rules' options, and
+review does; `flow::missing`, what is missing from the list — the
+window's faded rows and `--missing`; `flow::edit`, details typed by hand
+— the window's details windows and `--edit`; `mediaserver::callable` and
+`tell_all`, which servers are told and how; `flow::comics::by_fit`, the
+order of series found by a typed search), `renome_core::catalog` the
+rules' options, their defaults (the window loads them, `rule_table`)
+and which rules go together (`blocked_by`, `one_lookup`: the window's
+menu and the sets it opens, the command line's check), the core's
+preview each file's kinds and whether the lookup rule leaves it alone
+(`PreviewItem::kinds`, `outside`, `pair`: the window's "outside the
+rule" tag and its details windows), `text::csv` the CSV files of both,
+`similar::picks` which similar picture stands out (the window's badges,
+the command line's ★), and
 `crates/renome-cli` the program: every command below, the lookup rules
 with their choices, `--edit`, `--missing`, Ctrl+C, the manual, man pages
 and completions, in every package. Its texts are the page's (`i18n.ts`)

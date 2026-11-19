@@ -597,8 +597,110 @@ pub fn fingerprint_file(path: &Path) -> Option<u64> {
     fingerprint(&std::fs::read(path).ok()?, &ext)
 }
 
+/// What a picture of a group of similar ones is worth, to tell which to
+/// keep: its pixels, its file's size, and when it was taken (else last
+/// changed), in seconds.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct Worth {
+    pub path: std::path::PathBuf,
+    pub pixels: u64,
+    pub size: u64,
+    pub when: Option<i64>,
+}
+
+/// Which pictures of a group stand out, the same for the window and the
+/// command line.
+#[derive(Debug, Default, PartialEq, serde::Serialize)]
+pub struct Picks {
+    /// The one worth keeping: most pixels, then the largest file.
+    pub best: Option<std::path::PathBuf>,
+    /// The same, only when it stands out (not all alike).
+    pub largest: Option<std::path::PathBuf>,
+    /// The one taken (or changed) first, when it is the only first.
+    pub oldest: Option<std::path::PathBuf>,
+}
+
+impl Worth {
+    /// A picture's worth from what is known of it: its size in pixels, its
+    /// file's, when it was taken (local time) and last changed.
+    pub fn of(
+        path: &Path,
+        dims: Option<Size>,
+        size: u64,
+        taken: Option<chrono::NaiveDateTime>,
+        modified: Option<i64>,
+    ) -> Worth {
+        use chrono::TimeZone;
+        let taken = taken
+            .and_then(|t| chrono::Local.from_local_datetime(&t).earliest())
+            .map(|t| t.timestamp());
+        Worth {
+            path: path.to_path_buf(),
+            pixels: dims.map_or(0, |(w, h)| u64::from(w) * u64::from(h)),
+            size,
+            when: taken.or(modified),
+        }
+    }
+
+    /// The same, read from the file (its picture decoded for its size).
+    pub fn read(entry: &FileEntry) -> Worth {
+        let dims = std::fs::read(&entry.path)
+            .ok()
+            .and_then(|b| shown_copy(&b, &entry.ext.to_lowercase(), 64))
+            .and_then(|(_, d)| d);
+        Worth::of(&entry.path, dims, entry.size, entry.taken(), entry.modified)
+    }
+}
+
+pub fn picks(group: &[Worth]) -> Picks {
+    let Some(best) = group.iter().max_by(|a, b| {
+        a.pixels
+            .cmp(&b.pixels)
+            .then(a.size.cmp(&b.size))
+            .then(std::cmp::Ordering::Greater)
+    }) else {
+        return Picks::default();
+    };
+    let largest = group
+        .iter()
+        .any(|w| w.pixels != best.pixels || w.size != best.size)
+        .then(|| best.path.clone());
+    let when = |w: &Worth| w.when.unwrap_or(i64::MAX);
+    let mut by_age: Vec<&Worth> = group.iter().collect();
+    by_age.sort_by_key(|w| when(w));
+    let oldest =
+        (by_age.len() > 1 && when(by_age[0]) < when(by_age[1])).then(|| by_age[0].path.clone());
+    Picks {
+        best: Some(best.path.clone()),
+        largest,
+        oldest,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_largest_and_the_oldest_stand_out() {
+        let w = |p: &str, pixels, size, when| Worth {
+            path: p.into(),
+            pixels,
+            size,
+            when,
+        };
+        let p = picks(&[
+            w("a", 100, 10, Some(5)),
+            w("b", 200, 5, Some(9)),
+            w("c", 200, 5, None),
+        ]);
+        assert_eq!(p.best, Some("b".into()));
+        assert_eq!(p.largest, Some("b".into()));
+        assert_eq!(p.oldest, Some("a".into()));
+        // All alike: nothing stands out.
+        let p = picks(&[w("a", 1, 1, Some(1)), w("b", 1, 1, Some(1))]);
+        assert_eq!((p.largest, p.oldest), (None, None));
+        assert_eq!(p.best, Some("a".into()));
+    }
     use super::*;
     use image::{ImageBuffer, ImageFormat, Rgb, RgbImage};
 

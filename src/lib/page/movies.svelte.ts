@@ -5,7 +5,6 @@
 import { api } from "$lib/api";
 import { confirm, notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
-import { isVideo } from "$lib/rules";
 import { settings, tmdbLang } from "$lib/settings.svelte";
 import type { Candidate, MovieMatch, MovieSet, MovieState } from "$lib/types";
 import { counts, moved, ruleOf, without, type PageCtx } from "./common";

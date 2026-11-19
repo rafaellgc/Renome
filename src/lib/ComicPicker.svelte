@@ -5,7 +5,7 @@
   import { api, SAME_COVER, type OwnCover } from "./api";
   import CoverZoom from "./CoverZoom.svelte";
   import { t, tError } from "./i18n";
-  import { byFit, seriesOnly } from "./rules";
+  import { seriesOnly } from "./rules";
   import { comicKey, settings } from "./settings.svelte";
   import type { ComicMatch, ComicSource, ComicVolume } from "./types";
 
@@ -55,8 +55,7 @@
     const y = Number.parseInt(year, 10);
     try {
       const lang = settings.lang === "pt" ? "pt-br" : settings.lang;
-      const found = await api.comicSearch(source, comicKey(source), query.trim(), lang, y >= 1800 && y <= 2200 ? y : null, publisher.trim(), skip);
-      candidates = byFit(found, highest);
+      candidates = await api.comicSearch(source, comicKey(source), query.trim(), lang, y >= 1800 && y <= 2200 ? y : null, publisher.trim(), skip, highest);
       if (own) compareCovers(candidates);
     } catch (err) {
       searchError = tError(err);

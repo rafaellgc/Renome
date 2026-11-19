@@ -507,7 +507,7 @@ fn same_length(tr: &Track, song: &AudioTags) -> bool {
 }
 
 /// A release's track, for the list of those missing from an album.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListedTrack {
     /// The release track's id ([`SongMatch::track_id`]).

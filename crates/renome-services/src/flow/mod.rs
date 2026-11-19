@@ -7,6 +7,8 @@
 pub mod after;
 pub mod books;
 pub mod comics;
+pub mod edit;
+pub mod missing;
 pub mod movies;
 pub mod music;
 pub mod series;

@@ -5,7 +5,7 @@
 import { api } from "$lib/api";
 import { confirm, notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
-import { defaultSubLangs } from "$lib/rules";
+import { newRule } from "$lib/rules";
 import { settings } from "$lib/settings.svelte";
 import type { SubCandidate, SubsAuth } from "$lib/types";
 import { moved, without, type PageCtx } from "./common";
@@ -49,7 +49,7 @@ export class Subtitles {
     const m = this.#movies.rule?.rule;
     const s = this.#series.rule?.rule;
     const r = m?.type === "movie" ? m : s?.type === "series" && s.source !== "anilist" ? s : null;
-    return r?.subtitles ? (r.subLangs ?? defaultSubLangs()) : null;
+    return r?.subtitles ? (r.subLangs ?? (newRule("movie") as { subLangs: string }).subLangs) : null;
   });
   counts = $derived.by(() => {
     const visible = new Set(this.#ctx.items.map((i) => i.path));

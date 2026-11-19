@@ -2,7 +2,7 @@
   import { slide } from "svelte/transition";
   import Icon from "./Icon.svelte";
   import { t, type Key } from "./i18n";
-  import { comicPreset, comicPresetOf, defaultSubLangs, FPS_PAIRS, listNames, PHOTO_TEMPLATES, splitExt, splitParts, type ComicPreset } from "./rules";
+  import { comicPreset, comicPresetOf, newRule, FPS_PAIRS, listNames, PHOTO_TEMPLATES, splitExt, splitParts, type ComicPreset } from "./rules";
   import { settings } from "./settings.svelte";
   import type { ComicDevice, ComicSpread, RuleType, Step } from "./types";
   /** Rules that pick their own kind of file: no filter of their own. */
@@ -829,7 +829,7 @@
   {#if r.type === "movie" || r.type === "series"}
     <label class="check"><input type="checkbox" bind:checked={r.subtitles} /> <span>{t("subsLabel")}<small>{t("subsHint")}</small></span></label>
     {#if r.subtitles}
-      <label class="sub">{t("subsLangs")} <input value={r.subLangs ?? defaultSubLangs()} oninput={(e) => {
+      <label class="sub">{t("subsLangs")} <input value={r.subLangs ?? (newRule("movie") as { subLangs: string }).subLangs} oninput={(e) => {
         if (r.type === "movie" || r.type === "series") r.subLangs = e.currentTarget.value;
       }} placeholder="pt-BR, en" spellcheck="false" /></label>
       {#if subs}

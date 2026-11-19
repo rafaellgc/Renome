@@ -602,6 +602,40 @@ fn base64(bytes: &[u8]) -> String {
     out
 }
 
+/// A picture of a group as the comparison window knows it.
+#[derive(serde::Deserialize)]
+struct CardFacts {
+    path: PathBuf,
+    width: Option<u32>,
+    height: Option<u32>,
+    size: u64,
+    taken: Option<String>,
+    modified: Option<i64>,
+}
+
+/// Which pictures of a group stand out (see `similar::picks`: the
+/// command line marks the same).
+#[tauri::command]
+fn picture_picks(cards: Vec<CardFacts>) -> renome_core::similar::Picks {
+    let worth: Vec<renome_core::similar::Worth> = cards
+        .iter()
+        .map(|c| {
+            let taken = c
+                .taken
+                .as_deref()
+                .and_then(|t| chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%dT%H:%M:%S").ok());
+            renome_core::similar::Worth::of(
+                &c.path,
+                c.width.zip(c.height),
+                c.size,
+                taken,
+                c.modified,
+            )
+        })
+        .collect();
+    renome_core::similar::picks(&worth)
+}
+
 /// The files of a group as the comparison window shows them, pictures
 /// with a copy whose longest side is at most `max` pixels.
 #[tauri::command]
@@ -1045,6 +1079,118 @@ fn series_named(
     renome_services::flow::series::named(&files, &shows)
 }
 
+/// Each rule new, with every option at its default in this language (the
+/// command line's too), and the rules that name a whole kind of file.
+#[tauri::command]
+fn rule_table(lang: String) -> Value {
+    use renome_core::catalog;
+    let defaults: serde_json::Map<String, Value> = catalog::RULES
+        .iter()
+        .map(|spec| {
+            (
+                spec.kind.to_string(),
+                Value::Object(catalog::new_rule(spec, &lang)),
+            )
+        })
+        .collect();
+    serde_json::json!({ "defaults": defaults, "kinds": catalog::kind_rules() })
+}
+
+/// Why each rule cannot join the rules there (`types`), when it cannot.
+#[tauri::command]
+fn rule_blocks(types: Vec<String>) -> HashMap<String, Option<renome_core::catalog::Blocked>> {
+    let there: Vec<&str> = types.iter().map(String::as_str).collect();
+    renome_core::catalog::RULES
+        .iter()
+        .map(|spec| {
+            (
+                spec.kind.to_string(),
+                renome_core::catalog::blocked_by(&there, spec.kind),
+            )
+        })
+        .collect()
+}
+
+/// Steps with only their first kind rule (see `catalog::one_lookup`), and
+/// the types left out.
+#[tauri::command]
+fn one_lookup(steps: Vec<Value>) -> (Vec<Value>, Vec<String>) {
+    renome_core::catalog::one_lookup(steps)
+}
+
+/// The details typed in a details window over each file's (see
+/// `flow::edit`, the command line's `--edit` too): `kind` is `song`,
+/// `book` or `comic`.
+#[tauri::command]
+fn edit_details(
+    kind: String,
+    items: Vec<Value>,
+    changed: renome_services::flow::edit::Changed,
+) -> Result<Vec<Value>, String> {
+    use renome_services::flow::edit;
+    items
+        .into_iter()
+        .map(|v| {
+            let out = match kind.as_str() {
+                "song" => serde_json::to_value(edit::song(
+                    serde_json::from_value(v).map_err(|e| e.to_string())?,
+                    &changed,
+                )),
+                "book" => serde_json::to_value(edit::book(
+                    serde_json::from_value(v).map_err(|e| e.to_string())?,
+                    &changed,
+                )),
+                _ => serde_json::to_value(edit::comic(
+                    serde_json::from_value(v).map_err(|e| e.to_string())?,
+                    &changed,
+                )),
+            };
+            out.map_err(|e| e.to_string())
+        })
+        .collect()
+}
+
+/// Photo dates typed over the ones they had (empty: what the file says);
+/// `None` when the fields make no date.
+#[tauri::command]
+fn edit_dates(
+    old: Vec<String>,
+    changed: renome_services::flow::edit::Changed,
+) -> Option<Vec<String>> {
+    old.iter()
+        .map(|o| renome_services::flow::edit::photo_date(o, &changed))
+        .collect()
+}
+
+/// What books say about themselves, as a start for typing.
+#[tauri::command]
+fn books_from_guesses(
+    guesses: Vec<renome_core::books::Guess>,
+) -> Vec<renome_core::books::BookMatch> {
+    guesses
+        .iter()
+        .map(renome_services::flow::edit::book_from_guess)
+        .collect()
+}
+
+/// What the lookups say is missing from the list as shown (see
+/// `flow::missing`): the faded rows, beside their files.
+#[tauri::command]
+fn missing_items(
+    app: AppHandle,
+    rules: Vec<Value>,
+    known: renome_services::flow::missing::Known,
+    descending: bool,
+) -> Vec<renome_services::flow::missing::Missing> {
+    use renome_services::flow::missing;
+    let state = app.state::<AppState>();
+    let shown = state.shown.lock().unwrap();
+    match shown.as_ref() {
+        Some(p) => missing::of(&rules, &known, p, descending, &missing::today()),
+        None => Vec::new(),
+    }
+}
+
 /// What renaming the list as shown would write besides the renames (the
 /// files already named right only; subtitles for every file), for the
 /// question before renaming and the Rename button.
@@ -1183,18 +1329,16 @@ async fn server_libraries(
     server.libraries().await
 }
 
-/// Tells each server about the folders where these files were or went;
-/// for each, how many folders, or why not.
+/// Tells the servers in the options (`servers`, with their keys,
+/// `serverKeys`) about the folders the renamed files left and went to
+/// (the choice of servers is the command line's too).
 #[tauri::command]
 async fn server_tell(
-    servers: Vec<mediaserver::Server>,
-    changed: Vec<PathBuf>,
-) -> Vec<Result<usize, String>> {
-    let mut out = Vec::new();
-    for s in &servers {
-        out.push(s.tell(&changed).await);
-    }
-    out
+    servers: Value,
+    keys: String,
+    done: Vec<renome_core::Operation>,
+) -> Vec<mediaserver::Told> {
+    mediaserver::tell_all(mediaserver::callable(&servers, &keys), &done).await
 }
 
 #[tauri::command]
@@ -1582,9 +1726,10 @@ async fn comic_search(
     publisher: String,
     lang: String,
     skip: Option<String>,
+    highest: f64,
 ) -> Result<Vec<renome_core::comics::Volume>, String> {
     let state = app.state::<AppState>();
-    sources(&state)
+    let found = sources(&state)
         .search(
             &source,
             &key,
@@ -1594,7 +1739,10 @@ async fn comic_search(
             &lang,
             skip.as_deref().unwrap_or_default(),
         )
-        .await
+        .await?;
+    // Those that could hold the files' highest issue first (the command
+    // line orders them so too).
+    Ok(renome_services::flow::comics::by_fit(found, highest))
 }
 
 /// The covers, by address, of the comic's issue (or volume) in a series,
@@ -1736,9 +1884,10 @@ fn save_preset(path: PathBuf, steps: Vec<serde_json::Value>) -> Result<(), Strin
 }
 
 /// Writes a text file the user chose (the exported list).
+/// Saves rows as a CSV file (see `text::csv`: the command line's too).
 #[tauri::command]
-fn save_text(path: PathBuf, text: String) -> Result<(), String> {
-    std::fs::write(path, text).map_err(|e| e.to_string())
+fn save_csv(path: PathBuf, rows: Vec<Vec<String>>, lang: String) -> Result<(), String> {
+    std::fs::write(path, renome_core::text::csv(&rows, &lang)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1918,6 +2067,7 @@ pub fn run() {
             stop_search,
             find_similar,
             picture_cards,
+            picture_picks,
             own_cover,
             cover_distances,
             series_covers,
@@ -1956,6 +2106,13 @@ pub fn run() {
             mb_search,
             mb_choose,
             after_counts,
+            edit_details,
+            edit_dates,
+            books_from_guesses,
+            rule_table,
+            rule_blocks,
+            one_lookup,
+            missing_items,
             after_rename,
             books_search,
             book_matches,
@@ -1971,7 +2128,7 @@ pub fn run() {
             metron_check,
             gcd_account,
             gcd_check,
-            save_text,
+            save_csv,
             tmdb_images,
             recover,
             apply,

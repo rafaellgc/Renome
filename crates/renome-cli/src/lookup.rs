@@ -496,11 +496,12 @@ impl Host for Asker<'_> {
                 flow::Question::ComicSeries {
                     query,
                     files,
+                    highest,
                     candidates,
                     ..
                 } => {
                     let (sources, p) = self.comics?;
-                    choose_volume(sources, p, &query, files, candidates)
+                    choose_volume(sources, p, &query, files, highest, candidates)
                         .await
                         .map(|v| serde_json::to_value(v).ok())
                 }
@@ -1054,20 +1055,12 @@ async fn choose_book(
     }
 }
 
-/// A comic series looked up: its details, its issues (none for a manga
-/// catalogue), and its files' issue ids with their own details.
-pub type ComicSeries = (
-    renome_core::comics::Volume,
-    Vec<renome_core::comics::Issue>,
-    Vec<(String, renome_core::comics::ComicMatch)>,
-);
-
 /// What the comic rule found and chose.
 pub struct Comics {
     pub chosen: HashMap<PathBuf, renome_core::comics::ComicMatch>,
-    /// Each series looked up: its details, its issues (none for a manga
-    /// catalogue), and its files' issue ids with their own details.
-    pub listed: Vec<ComicSeries>,
+    /// Each comic's series and issue, and the series with their issues.
+    pub settled: Vec<flow::comics::Settled>,
+    pub volumes: HashMap<String, flow::comics::Listed>,
     /// Each matched file's catalogue page and whether it is a manga
     /// catalogue's (for `ComicInfo.xml`).
     web: HashMap<PathBuf, (String, bool)>,
@@ -1252,22 +1245,10 @@ pub async fn comics(
     let named = flow::comics::named(&settled, &found.volumes);
     let mut out_comics = Comics {
         chosen: HashMap::new(),
-        listed: Vec::new(),
         web: HashMap::new(),
+        settled,
+        volumes: found.volumes,
     };
-    for (key, listed) in &found.volumes {
-        let held: Vec<(String, renome_core::comics::ComicMatch)> = settled
-            .iter()
-            .filter(|s| &s.volume_key == key && named.contains_key(&s.path))
-            .filter_map(|s| {
-                let id = s.choice.clone()?;
-                (listed.issues.is_empty() || !id.is_empty()).then(|| (id, s.own.clone()))
-            })
-            .collect();
-        out_comics
-            .listed
-            .push((listed.volume.clone(), listed.issues.clone(), held));
-    }
     for (p, n) in named {
         out_comics.web.insert(p.clone(), (n.web, n.manga));
         out_comics.chosen.insert(p, n.comic);
@@ -1281,6 +1262,7 @@ async fn choose_volume(
     p: &flow::comics::Params,
     query: &str,
     files: usize,
+    highest: f64,
     mut candidates: Vec<renome_core::comics::Volume>,
 ) -> Answer<renome_core::comics::Volume> {
     loop {
@@ -1301,7 +1283,9 @@ async fn choose_volume(
                 .search(&p.source, &p.key, &text, None, "", &p.lang, &p.skip)
                 .await
             {
-                Ok(v) => candidates = v,
+                // Those that could hold the files' highest issue first, as
+                // in the window's picker.
+                Ok(v) => candidates = flow::comics::by_fit(v, highest),
                 Err(e) => out::error(&crate::text::error_text(&e)),
             },
         }

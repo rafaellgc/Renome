@@ -309,20 +309,30 @@ pub fn kind_of(step: &Value) -> &str {
         .unwrap_or_default()
 }
 
-/// Checks what the window checks when rules are put together: one rule
-/// that makes the whole name at a time.
+/// Checks what the window checks when rules are put together (the
+/// catalog decides, for both): one rule that makes the whole name at a
+/// time, the subtitle rule once and not beside music, books, comics or
+/// photos.
 pub fn check_together(steps: &[Value]) -> Result<(), String> {
-    let wholes: Vec<&str> = steps
-        .iter()
-        .map(kind_of)
-        .filter(|k| catalog::rule(k).is_some_and(|r| r.whole_name))
-        .collect();
-    if wholes.len() > 1 {
-        let name = |k: &str| t(&format!("rule.{k}"), &[]);
-        return Err(t(
-            "twoWhole",
-            &[("a", &name(wholes[0])), ("b", &name(wholes[1]))],
-        ));
+    let name = |k: &str| t(&format!("rule.{k}"), &[]);
+    let mut there: Vec<&str> = Vec::new();
+    for k in steps.iter().map(kind_of) {
+        match catalog::blocked_by(&there, k) {
+            Some(catalog::Blocked::Kind { kind }) => {
+                return Err(t("twoWhole", &[("a", &name(&kind)), ("b", &name(k))]));
+            }
+            Some(catalog::Blocked::Twice { .. }) => {
+                return Err(format!("{}: {}", name(k), t("ruleOnce", &[])));
+            }
+            Some(catalog::Blocked::Clash { clash }) => {
+                return Err(format!(
+                    "{}: {}",
+                    name(k),
+                    t("ruleClash", &[("rule", &name(&clash))])
+                ));
+            }
+            None => there.push(k),
+        }
     }
     Ok(())
 }

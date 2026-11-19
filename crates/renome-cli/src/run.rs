@@ -234,8 +234,17 @@ pub fn preview_or_apply(
             out::note(&out::yellow(&t("leftDoubtful", &[("n", &doubtful)])));
         }
     }
+    // The rules that are on, as saved: what is missing and what is written
+    // after the renames read their options from them.
+    let rules_on: Vec<Value> = steps_json
+        .iter()
+        .filter(|s| s.get("enabled") != Some(&Value::Bool(false)))
+        .map(|s| s["rule"].clone())
+        .collect();
     let missing = match &found {
-        Some(f) if m.get_flag("missing") => crate::missing::of(f, &preview),
+        Some(f) if m.get_flag("missing") => {
+            crate::missing::of(&rules_on, f, &preview, m.get_flag("desc"))
+        }
         _ => Vec::new(),
     };
     if let Some(e) = &preview.filter_error {
@@ -264,11 +273,6 @@ pub fn preview_or_apply(
     // What is written besides the renames is decided by the shared flow,
     // as in the window: from the rules that are on and what was chosen
     // (the subtitles searched now, before the videos move).
-    let rules_on: Vec<Value> = steps_json
-        .iter()
-        .filter(|s| s.get("enabled") != Some(&Value::Bool(false)))
-        .map(|s| s["rule"].clone())
-        .collect();
     let typed: std::collections::HashSet<PathBuf> = edits.keys().cloned().collect();
     let mut chosen = crate::lookup::chosen(found.as_ref(), &typed);
     let auth = crate::lookup::subs_auth(settings);
@@ -630,15 +634,7 @@ fn item_json(i: &PreviewItem) -> Value {
 
 /// "Export list": the same CSV as the window's.
 fn write_csv(path: &Path, p: &Preview) -> Result<(), String> {
-    let sep = if lang() == "en" { "," } else { ";" };
-    let cell = |v: &str| {
-        if v.contains(['"', ',', ';', '\n', '\r']) {
-            format!("\"{}\"", v.replace('"', "\"\""))
-        } else {
-            v.to_string()
-        }
-    };
-    let mut rows = vec![
+    let mut rows: Vec<Vec<String>> = vec![
         [
             "csv.folder",
             "csv.original",
@@ -648,9 +644,8 @@ fn write_csv(path: &Path, p: &Preview) -> Result<(), String> {
             "csv.problem",
         ]
         .iter()
-        .map(|k| cell(&t(k, &[])))
-        .collect::<Vec<_>>()
-        .join(sep),
+        .map(|k| t(k, &[]))
+        .collect(),
     ];
     for i in &p.items {
         let status = serde_json::to_value(i.status)
@@ -670,11 +665,8 @@ fn write_csv(path: &Path, p: &Preview) -> Result<(), String> {
                 t(&format!("csv.{status}"), &[]),
                 problem,
             ]
-            .iter()
-            .map(|v| cell(v))
-            .collect::<Vec<_>>()
-            .join(sep),
+            .to_vec(),
         );
     }
-    std::fs::write(path, format!("\u{feff}{}\r\n", rows.join("\r\n"))).map_err(|e| e.to_string())
+    std::fs::write(path, renome_core::text::csv(&rows, lang())).map_err(|e| e.to_string())
 }

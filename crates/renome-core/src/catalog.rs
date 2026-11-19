@@ -1299,6 +1299,94 @@ pub fn new_rule(spec: &RuleSpec, lang: &str) -> Map<String, Value> {
     rule
 }
 
+/// The rules that make the whole name for a kind of file (looked up in a
+/// catalogue, or from the photo's date; `whole_name`): one at a time,
+/// since each would undo the other's names (a photo rule also names
+/// videos).
+pub fn kind_rules() -> Vec<&'static str> {
+    RULES
+        .iter()
+        .filter(|r| r.whole_name)
+        .map(|r| r.kind)
+        .collect()
+}
+
+fn is_kind(kind: &str) -> bool {
+    rule(kind).is_some_and(|r| r.whole_name)
+}
+/// Rules that make sense once in the list.
+const ONCE: &[&str] = &["subtitle"];
+/// Kind rules whose files are not videos: the subtitle rule has nothing to
+/// do beside them (and they nothing beside it).
+const NOT_VIDEO: &[&str] = &["music", "book", "comic", "photo"];
+
+/// Why a rule cannot join the rules there (`types`), the same for the
+/// window's menu and the command line.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(untagged)]
+pub enum Blocked {
+    /// Another kind rule is there (named).
+    Kind { kind: String },
+    /// The same rule, allowed once, is there.
+    Twice { twice: bool },
+    /// A rule it does not go with is there (named).
+    Clash { clash: String },
+}
+
+pub fn blocked_by(types: &[&str], new: &str) -> Option<Blocked> {
+    let kind = types.iter().find(|t| is_kind(t));
+    if let Some(k) = kind
+        && is_kind(new)
+    {
+        return Some(Blocked::Kind {
+            kind: k.to_string(),
+        });
+    }
+    if ONCE.contains(&new) && types.contains(&new) {
+        return Some(Blocked::Twice { twice: true });
+    }
+    if let Some(k) = kind
+        && new == "subtitle"
+        && NOT_VIDEO.contains(k)
+    {
+        return Some(Blocked::Clash {
+            clash: k.to_string(),
+        });
+    }
+    if NOT_VIDEO.contains(&new) && types.contains(&"subtitle") {
+        return Some(Blocked::Clash {
+            clash: "subtitle".into(),
+        });
+    }
+    None
+}
+
+/// Steps with only their first kind rule (and one of each rule allowed
+/// once); the types of the others, left out (saved before they were one
+/// at a time).
+pub fn one_lookup(steps: Vec<Value>) -> (Vec<Value>, Vec<String>) {
+    let mut kept: Vec<Value> = Vec::new();
+    let mut dropped = Vec::new();
+    let type_of = |s: &Value| {
+        s.get("rule")
+            .and_then(|r| r.get("type"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    for s in steps {
+        let t = type_of(&s);
+        let there: Vec<String> = kept.iter().map(type_of).collect();
+        let there: Vec<&str> = there.iter().map(String::as_str).collect();
+        if blocked_by(&there, &t).is_some() {
+            dropped.push(t);
+        } else {
+            kept.push(s);
+        }
+    }
+    (kept, dropped)
+}
+
 /// Brings a saved rule (the `rule` of a step) up to date: options saved
 /// under their old names take the new ones (a new name already there
 /// wins), and the comic's old `split` becomes `spread`.
@@ -1367,6 +1455,31 @@ pub fn migrate_steps(value: &mut Value) {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn one_kind_rule_at_a_time() {
+        assert_eq!(
+            blocked_by(&["replace", "movie"], "music"),
+            Some(Blocked::Kind {
+                kind: "movie".into()
+            })
+        );
+        assert_eq!(
+            blocked_by(&["subtitle"], "subtitle"),
+            Some(Blocked::Twice { twice: true })
+        );
+        assert_eq!(
+            blocked_by(&["music"], "subtitle"),
+            Some(Blocked::Clash {
+                clash: "music".into()
+            })
+        );
+        assert_eq!(blocked_by(&["movie"], "subtitle"), None);
+        let step = |t: &str| serde_json::json!({ "rule": { "type": t } });
+        let (kept, dropped) = one_lookup(vec![step("movie"), step("replace"), step("series")]);
+        assert_eq!(kept.len(), 2);
+        assert_eq!(dropped, ["series"]);
+    }
     use super::*;
 
     #[test]

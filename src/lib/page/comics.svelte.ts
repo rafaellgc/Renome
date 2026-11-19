@@ -5,7 +5,7 @@
 import { api } from "$lib/api";
 import { confirm, notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
-import { isComic, splitExt } from "$lib/rules";
+import { splitExt } from "$lib/rules";
 import { comicKey, settings } from "$lib/settings.svelte";
 import type { ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, EditField, Rule, ComicFormat } from "$lib/types";
 import { counts, extOf, moved, ruleOf, without, type PageCtx } from "./common";
@@ -58,7 +58,7 @@ export class Comics {
     this.built = files.length ? await api.comicNamed($state.snapshot(files), $state.snapshot(volumes)) : {};
   }
   /** The comics among the rows chosen in the list. */
-  selected = $derived.by(() => this.#ctx.items.filter((i) => this.#ctx.selected.has(i.path) && (i.isDir ? i.convert : isComic(i.original))));
+  selected = $derived.by(() => this.#ctx.items.filter((i) => this.#ctx.selected.has(i.path) && (i.isDir ? i.convert : !!i.kinds?.includes("comic"))));
   counts = $derived.by(() => counts(this.state, this.#ctx.items));
   /** The details window's fields. */
   fields = $derived<EditField[]>([
@@ -200,22 +200,13 @@ export class Comics {
     };
   }
 
-  /** The fields changed in the details window, for each of its comics. */
-  saveEdit(changed: Record<string, string>) {
+  /** The fields changed in the details window, for each of its comics (applied as the command line's --edit does). */
+  async saveEdit(changed: Record<string, string>) {
     const edit = this.edit;
     if (!edit) return;
-    const num = (v: string) => (v ? Number.parseInt(v, 10) : null);
+    const comics = await api.editDetails("comic", $state.snapshot(edit.comics), changed);
     const next = { ...this.edits };
-    edit.paths.forEach((p, i) => {
-      const m: ComicMatch = { ...edit.comics[i] };
-      for (const [k, v] of Object.entries(changed)) {
-        if (k === "seriesYear" || k === "volume" || k === "year") m[k] = num(v);
-        else (m as unknown as Record<string, string>)[k] = v;
-      }
-      // The catalogue's issue no longer tells it.
-      if (changed.series !== undefined || changed.number !== undefined) m.id = "";
-      next[p] = m;
-    });
+    edit.paths.forEach((p, i) => (next[p] = comics[i]));
     this.edits = next;
     this.edit = null;
   }

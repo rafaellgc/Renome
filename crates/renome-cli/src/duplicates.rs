@@ -194,7 +194,19 @@ pub fn command(m: &ArgMatches, settings: Option<&Value>) -> Result<Exit, String>
             "similarCount",
             &[("n", &similar.iter().map(Vec::len).sum::<usize>())],
         ),
-        similar.into_iter().map(|g| (g, None)).collect(),
+        similar
+            .into_iter()
+            .map(|g| {
+                // The one worth keeping, when it stands out (as the window marks it).
+                let worth: Vec<renome_core::similar::Worth> = g
+                    .iter()
+                    .filter_map(|p| files.iter().find(|f| &f.path == p))
+                    .map(renome_core::similar::Worth::read)
+                    .collect();
+                let best = renome_core::similar::picks(&worth).largest;
+                (g, best)
+            })
+            .collect(),
     );
     Ok(Exit::Done)
 }

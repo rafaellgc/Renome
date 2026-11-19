@@ -85,13 +85,13 @@ pub struct Chosen {
 /// The options of the rules that are on (each a rule as saved, with its
 /// `type`); an option left out takes its default.
 #[derive(Clone, Copy)]
-struct Opts<'a> {
+pub(crate) struct Opts<'a> {
     kind: &'a str,
     rule: Option<&'a Value>,
 }
 
 impl<'a> Opts<'a> {
-    fn of(rules: &'a [Value], kind: &'a str) -> Self {
+    pub(crate) fn of(rules: &'a [Value], kind: &'a str) -> Self {
         Opts {
             kind,
             rule: rules
@@ -115,7 +115,7 @@ impl<'a> Opts<'a> {
             .unwrap_or(Value::Null)
     }
     /// An option that is on (off when the rule is not).
-    fn bool(&self, key: &str) -> bool {
+    pub(crate) fn bool(&self, key: &str) -> bool {
         self.value(key).as_bool().unwrap_or(false)
     }
     fn text(&self, key: &str) -> String {

@@ -418,6 +418,9 @@ pub enum Rule {
         /// the app converts them after renaming (see [`crate::bookconv`]).
         #[serde(default)]
         convert_to: String,
+        /// Audiobooks (their audio files, grouped in books) too.
+        #[serde(default = "yes")]
+        audiobooks: bool,
     },
     /// Names comics after their series and number: the issue chosen on
     /// Comic Vine, else what the file's `ComicInfo.xml` and name say. Files
@@ -898,6 +901,19 @@ impl Pipeline {
         self.steps
             .iter()
             .any(|s| matches!(s, Compiled::Plain(Rule::Series { .. })))
+    }
+
+    /// The lookup rule on (`movie`, `series`, `music`, `book`, `comic`),
+    /// and, for the book rule, whether it takes audiobooks too.
+    pub fn lookup_kind(&self) -> Option<(&'static str, bool)> {
+        self.steps.iter().find_map(|s| match s {
+            Compiled::Plain(Rule::Movie { .. }) => Some(("movie", false)),
+            Compiled::Plain(Rule::Series { .. }) => Some(("series", false)),
+            Compiled::Plain(Rule::Music { .. }) => Some(("music", false)),
+            Compiled::Plain(Rule::Book { audiobooks, .. }) => Some(("book", *audiobooks)),
+            Compiled::Plain(Rule::Comic { .. }) => Some(("comic", false)),
+            _ => None,
+        })
     }
 
     pub fn music(&self) -> Option<(bool, bool)> {

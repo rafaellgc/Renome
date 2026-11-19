@@ -13,7 +13,7 @@
   import { Series } from "$lib/page/series.svelte";
   import { Subtitles } from "$lib/page/subtitles.svelte";
   import { Photos } from "$lib/page/photos.svelte";
-  import { asText, counts, extOf, isEpub, moved, without, type PageCtx } from "$lib/page/common";
+  import { asText, counts, extOf, moved, without, type PageCtx } from "$lib/page/common";
   import Dialog from "$lib/Dialog.svelte";
   import Icon from "$lib/Icon.svelte";
   import RuleSets from "$lib/RuleSets.svelte";
@@ -28,14 +28,14 @@
   import PictureCompare from "$lib/PictureCompare.svelte";
   import ComicReview from "$lib/ComicReview.svelte";
   import EpisodeReview from "$lib/EpisodeReview.svelte";
-  import { missingBooks, missingEpisodes, missingFolder, missingIssues, missingMovies, missingTracks, notTypedIn, today, type Ghost } from "$lib/missing";
+  import { missingFolder, type Ghost } from "$lib/missing";
   import MovieReview from "$lib/MovieReview.svelte";
   import Options from "$lib/Options.svelte";
   import RuleCard from "$lib/RuleCard.svelte";
   import ShowPicker from "$lib/ShowPicker.svelte";
   import SubtitleReview from "$lib/SubtitleReview.svelte";
   import { LOCALES, MOD, t, tError, type Key } from "$lib/i18n";
-  import { RULE_TYPES, blockedBy, isKindRule, oneLookup, isAudio, isBook, isComic, isScreen, isTaggableVideo, isVideo, listNames, newRule, newStep, pairBase, splitExt } from "$lib/rules";
+  import { RULE_TYPES, isKindRule, setRuleTable, type Blocked, listNames, newRule, newStep, splitExt } from "$lib/rules";
   import { SECRET_FIELDS, loadSecrets, loadSettings, saveSecrets, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
     AfterCounts, AfterReport, ApplyReport, Candidate, Copies, MovieStatus, HistoryEntry, OpError, Preview, PreviewItem, Rule, RuleType, Step, View, ViewSort,
@@ -238,25 +238,36 @@
    *  issues from the series the listed comics are from, tracks from the
    *  albums, released movies from the collections and volumes between a
    *  book series' files. */
-  const ghosts = $derived(notTypedIn(unique([
-    ...(tv.rule?.rule.type === "series" && tv.rule.rule.missing
-      ? missingEpisodes(tv.shows, tv.matches, preview.items, sortDesc, today())
-      : []),
-    ...(comics.rule?.rule.type === "comic" && comics.rule.rule.missing
-      ? missingIssues(comics.volumes, comics.state, preview.items, sortDesc, today())
-      : []),
-    ...(music.rule?.rule.type === "music" && music.rule.rule.missing ? missingTracks(music.albums, preview.items, sortDesc) : []),
-    ...(movies.rule?.rule.type === "movie" && movies.rule.rule.missing
-      ? missingMovies(movies.sets, movies.setOf, Object.fromEntries(Object.entries(movies.matches).map(([p, m]) => [p, m.id])), preview.items, sortDesc, today())
-      : []),
-    ...(books.rule?.rule.type === "book" && books.rule.rule.missing ? missingBooks(books.state, preview.items, sortDesc) : []),
-  ]), preview.items));
-  /** Each missing row once: the list is keyed by them, and a repeated key
-   *  stops it from being drawn at all. */
-  function unique<T extends { key: string }>(rows: T[]): T[] {
-    const seen = new Set<string>();
-    return rows.filter((r) => !seen.has(r.key) && !!seen.add(r.key));
+  let ghosts = $state<Ghost[]>([]);
+  /** What the lookups found, for what is missing (the shared flow works it out). */
+  function known() {
+    const songs = Object.assign({}, ...music.albums.filter((a) => a.choice).map((a) => a.matches));
+    return $state.snapshot({
+      shows: Object.values(tv.shows),
+      episodes: tv.matches,
+      comics: Object.entries(comics.state).map(([path, c]) => ({ path, volumeKey: c.volumeKey, own: c.own, choice: c.choice })),
+      volumes: comics.volumes,
+      albums: music.albums.filter((a) => a.choice && a.tracks?.length).map((a) => ({ dir: a.dir, release: a.choice!.id, tracks: a.tracks, files: a.files })),
+      songs,
+      movies: Object.fromEntries(Object.entries(movies.matches).map(([p, m]) => [p, m.id])),
+      setOf: movies.setOf,
+      sets: Object.values(movies.sets),
+      bookGuesses: Object.fromEntries(Object.entries(books.state).map(([p, b]) => [p, b.guess])),
+    });
   }
+  $effect(() => {
+    const p = preview;
+    const rules = onRules();
+    const k = known();
+    const desc = sortDesc;
+    if (!p.total || !rules.some((r) => ["movie", "series", "music", "book", "comic"].includes(r.type))) {
+      ghosts = [];
+      return;
+    }
+    api.missingItems(rules, k, desc).then((g) => {
+      if (p === preview) ghosts = g;
+    }, () => {});
+  });
   /** The words for each kind of missing item. */
   const MISSING = {
     episode: { count: "missingEpisodes", file: "defaultMissingName" },
@@ -320,25 +331,13 @@
   /** Files the lookup rules on leave alone (a `.zip` in a show's folder),
    *  with why: tagged in the list, which can still name them by hand. */
   const outside = $derived.by(() => {
-    const kinds: [boolean, (i: PreviewItem) => boolean, Key][] = [
-      [!!movies.rule, (i) => i.isDir || isScreen(i.original), "outsideMovie"],
-      [!!tv.rule, (i) => !i.isDir && isScreen(i.original), "outsideSeries"],
-      // Songs bring their lyrics, cue sheets, playlists and covers along.
-      [!!music.rule, (i) => !i.isDir && (isAudio(i.original) || /\.(lrc|cue|m3u8?|pls|jpe?g|png|webp)$/i.test(i.original)), "outsideMusic"],
-      [!!books.rule, (i) => !i.isDir && (books.takes(i.original) || !!i.bookTo), "outsideBook"],
-      [!!comics.rule, (i) => (i.isDir ? i.convert : isComic(i.original)), "outsideComic"],
-    ];
-    const on = kinds.filter(([enabled]) => enabled);
-    if (!on.length) return {};
+    // Which files the rule leaves alone, the Rust core says (`outside`).
+    const key = { movie: "outsideMovie", series: "outsideSeries", music: "outsideMusic", book: "outsideBook", comic: "outsideComic" } as const;
     const out: Record<string, string> = {};
-    for (const i of preview.items) {
-      // Renamed by another rule: nothing to tell.
-      // Advertisements and extras carry their own tag.
-      if ((i.status === "ok" && !i.manual) || i.releaseJunk || i.extra || on.some(([, takes]) => takes(i))) continue;
-      out[i.path] = on.length === 1 ? t(on[0][2]) : t("outsideAny");
-    }
+    for (const i of preview.items) if (i.outside) out[i.path] = t(key[i.outside]);
     return out;
   });
+;
 
   const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, alikeOnly, similarOnly, movies: movies.matches, episodes: tv.matches, songs: music.matches, books: books.matches, comics: comics.matches, dates: photos.dates, leftoverSuffix: t("leftoverSuffix"), lang: settings.lang, numberClashes: settings.numberClashes, sendTo, trashAds: steps.some((s) => s.enabled && (s.rule.type === "movie" || s.rule.type === "series") && !!s.rule.trashAds) });
   /** Example name for rule cards: the first file in natural name order, so
@@ -388,7 +387,7 @@
     const seen = new Set<string>();
     const out: string[] = [];
     for (const i of preview.items) {
-      const base = i.isDir ? i.original : pairBase(i.original);
+      const base = i.pair;
       if (seen.has(base.toLowerCase())) continue;
       seen.add(base.toLowerCase());
       out.push(base);
@@ -602,12 +601,25 @@
     await refresh();
   }
 
+  /** The language the rules' defaults were loaded in: new rules take the interface's. */
+  let tableLang = "";
+  $effect(() => {
+    const lang = settings.lang;
+    if (tableLang && lang !== tableLang) {
+      tableLang = lang;
+      api.ruleTable(lang).then(setRuleTable, () => {});
+    }
+  });
+  /** Why each rule cannot join the rules there, when it cannot (the Rust catalog decides, as for the command line). */
+  let blocks = $state<Record<string, Blocked | null>>({});
+  $effect(() => {
+    const types = steps.map((s) => s.rule.type);
+    api.ruleBlocks(types).then((b) => (blocks = b), () => {});
+  });
+
   function addRule(type: RuleType) {
-    if (blockedBy(steps, type)) return;
-    const rule = newRule(type);
-    // New ones count a video and its subtitles as one (saved ones as they were).
-    if (rule.type === "number" || rule.type === "list") rule.pairs = true;
-    steps.push(newStep(rule));
+    if (blocks[type]) return;
+    steps.push(newStep(newRule(type)));
     ruleMenu = false;
   }
 
@@ -617,8 +629,8 @@
 
   /** Loaded steps with one lookup rule at most; the notice says which
    *  were left out, else `done` (when given). */
-  function loadSteps(loaded: Step[], done = "", saved = false): Step[] {
-    const { steps: kept, dropped } = oneLookup(loaded);
+  async function loadSteps(loaded: Step[], done = "", saved = false): Promise<Step[]> {
+    const [kept, dropped] = await api.oneLookup($state.snapshot(loaded) as Step[]);
     if (dropped.length) notice = t("lookupsDropped", { rules: [...new Set(dropped)].map((r) => t(`rule.${r}`)).join(", ") });
     else if (done) notice = done;
     // All off is how rules are left after renaming (an option), not a
@@ -833,34 +845,20 @@
    *  files were renamed, moved or put back (only those inside their
    *  library folders); says so in the notice. */
   function tellServer(done: { from: string; to: string }[]) {
-    let keys: Record<string, string> = {};
-    try {
-      keys = JSON.parse(settings.serverKeys || "{}");
-    } catch {
-      // No keys.
-    }
-    const servers = settings.servers.filter((s) => s.url.trim() && keys[s.id]?.trim() && s.folders.some((f) => f.on && f.local));
-    if (!done.length || !servers.length) return;
-    const name = (k: string) => (k === "plex" ? "Plex" : "Jellyfin");
+    if (!done.length || !settings.servers.length) return;
     api
-      .serverTell(
-        servers.map((s) => ({ kind: s.kind, url: s.url.trim(), key: keys[s.id].trim(), folders: $state.snapshot(s.folders) })),
-        done.flatMap((op) => [op.from, op.to]),
-      )
+      .serverTell($state.snapshot(settings.servers), settings.serverKeys || "{}", done.map((op) => ({ from: op.from, to: op.to })))
       .then((answers) => {
         const texts = answers
-          .map((a, i) =>
-            "Ok" in a
-              ? a.Ok
-                ? t("serverTold", { name: name(servers[i].kind), n: a.Ok })
-                : ""
-              : `${t("serverNotTold", { name: name(servers[i].kind) })}: ${tError(a.Err)}`,
+          .map(({ name, folders: a }) =>
+            "Ok" in a ? (a.Ok ? t("serverTold", { name, n: a.Ok }) : "") : `${t("serverNotTold", { name })}: ${tError(a.Err)}`,
           )
           .filter(Boolean);
         if (texts.length) notice = [notice, ...texts].filter(Boolean).join(" · ");
       })
       .catch(() => {});
   }
+
 
   async function openHistory() {
     history = await api.history();
@@ -1142,11 +1140,8 @@
   /** Writes rows as CSV (`;` between fields where a comma is the decimal
    *  mark, as spreadsheets there expect). */
   async function saveCsv(path: string, title: string, done: string, rows: string[][]) {
-    const sep = settings.lang === "en" ? "," : ";";
-    const cell = (v: string) => (/[",;\n\r]/.test(v) ? `"${v.replaceAll('"', '""')}"` : v);
     try {
-      // The mark at the start tells spreadsheets the file is UTF-8.
-      await api.saveText(path, "\ufeff" + rows.map((r) => r.map(cell).join(sep)).join("\r\n") + "\r\n");
+      await api.saveCsv(path, rows, settings.lang);
       notice = done;
     } catch (e) {
       await notify({ title, text: tError(e) });
@@ -1157,7 +1152,7 @@
     const path = await open({ title: t("openRules"), filters: presetFilter() });
     if (typeof path !== "string") return;
     try {
-      steps = loadSteps(await api.loadPreset(path), t("rulesLoaded"), true);
+      steps = await loadSteps(await api.loadPreset(path), t("rulesLoaded"), true);
     } catch (e) {
       await notify({ title: t("openRules"), text: tError(e) });
     }
@@ -1294,9 +1289,12 @@
     });
     (async () => {
       await loadSettings();
+      // The rules' defaults, before any rule is made or read.
+      setRuleTable(await api.ruleTable(settings.lang));
+      tableLang = settings.lang;
       // The password store may wait to be unlocked: the program does not.
       loadSecrets();
-      if (settings.rememberRules) steps = loadSteps(settings.rules);
+      if (settings.rememberRules) steps = await loadSteps(settings.rules);
       // A rename the program could not finish (it was closed, the
       // computer went off) is put back first.
       try {
@@ -1413,7 +1411,7 @@
                 <p class="menu-group">{t(g.label)}</p>
                 {#if lookupType && g.label === "ruleGroupMedia"}<p class="menu-note">{t("oneLookup", { rule: t(`rule.${lookupType}`) })}</p>{/if}
                 {#each g.types as type (type)}
-                  {@const block = blockedBy(steps, type)}
+                  {@const block = blocks[type] ?? null}
                   {@const locked = !!block}
                   {@const sub = block && "twice" in block ? t("ruleOnce") : block && "clash" in block ? t("ruleClash", { rule: t(`rule.${block.clash}`) }) : MEDIA_RULES.includes(type) ? t(`ruleSub.${type}` as Key) : ""}
                   <button role="menuitem" disabled={locked} onclick={() => addRule(type)}>
@@ -1425,7 +1423,7 @@
           {/if}
           <RuleSets
             current={() => (steps.length ? payload() : null)}
-            onload={(set) => (steps = loadSteps(set.steps, t("ruleSetLoaded", { name: set.name }), true))}
+            onload={async (set) => (steps = await loadSteps(set.steps, t("ruleSetLoaded", { name: set.name }), true))}
             onimport={loadPreset}
             onexport={savePreset}
             onnotice={(text) => (notice = text)}

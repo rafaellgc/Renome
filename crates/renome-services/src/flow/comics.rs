@@ -76,6 +76,21 @@ pub struct Outcome {
     pub picked: HashMap<String, Volume>,
 }
 
+/// Whether a series could hold issue `highest`: one with fewer issues
+/// (when the catalogue says how many) is not the files' series.
+pub fn fits(v: &Volume, highest: f64) -> bool {
+    v.count == 0 || f64::from(v.count) >= highest.floor()
+}
+
+/// Series found, those that could hold issue `highest` first (the
+/// window's picker and the command line's list order them so).
+pub fn by_fit(found: Vec<Volume>, highest: f64) -> Vec<Volume> {
+    let (mut yes, no): (Vec<Volume>, Vec<Volume>) =
+        found.into_iter().partition(|v| fits(v, highest));
+    yes.extend(no);
+    yes
+}
+
 /// Catalogues of manga series, not of a publisher's issues: the file's
 /// volume and chapter stay.
 pub fn series_only(source: &str) -> bool {
@@ -377,9 +392,8 @@ pub async fn search(
                     n.parse::<f64>().ok()
                 })
                 .fold(0.0, f64::max);
-            let fits = |v: &Volume| v.count == 0 || f64::from(v.count) >= highest.floor();
-            let mut sorted: Vec<Volume> = found.iter().filter(|v| fits(v)).cloned().collect();
-            sorted.extend(found.iter().filter(|v| !fits(v)).cloned());
+            let fits = |v: &Volume| fits(v, highest);
+            let sorted = by_fit(found.clone(), highest);
             let same: Vec<&Volume> = sorted
                 .iter()
                 .filter(|v| {

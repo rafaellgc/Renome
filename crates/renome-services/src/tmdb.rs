@@ -421,7 +421,7 @@ struct RawPart {
 }
 
 /// A collection of movies (a trilogy, say), for those missing from the list.
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct MovieSet {
     pub id: u64,
@@ -429,7 +429,7 @@ pub struct MovieSet {
     pub parts: Vec<SetPart>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SetPart {
     pub id: u64,

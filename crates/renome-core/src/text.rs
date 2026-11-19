@@ -612,8 +612,41 @@ pub fn guess_encoding(bytes: &[u8]) -> Option<&'static encoding_rs::Encoding> {
     Some(d.guess(None, chardetng::Utf8Detection::Deny))
 }
 
+/// Rows as a CSV file's text, as spreadsheets open it: `;` between cells
+/// (`,` in English, where `;` is not the custom), quotes around a cell
+/// that needs them, lines ending in CRLF, and the mark that tells the
+/// file is UTF-8.
+pub fn csv(rows: &[Vec<String>], lang: &str) -> String {
+    let sep = if lang == "en" { "," } else { ";" };
+    let cell = |v: &String| {
+        if v.contains(['"', ',', ';', '\n', '\r']) {
+            format!("\"{}\"", v.replace('"', "\"\""))
+        } else {
+            v.clone()
+        }
+    };
+    let lines: Vec<String> = rows
+        .iter()
+        .map(|r| r.iter().map(cell).collect::<Vec<_>>().join(sep))
+        .collect();
+    format!("\u{feff}{}\r\n", lines.join("\r\n"))
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn csv_as_spreadsheets_read_it() {
+        let rows = vec![
+            vec!["a;b".to_string(), "say \"hi\"".into()],
+            vec!["x".into(), String::new()],
+        ];
+        assert_eq!(
+            csv(&rows, "pt"),
+            "\u{feff}\"a;b\";\"say \"\"hi\"\"\"\r\nx;\r\n"
+        );
+        assert!(csv(&rows, "en").contains("x,"));
+    }
     use super::*;
 
     #[test]

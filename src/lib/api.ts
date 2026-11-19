@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AfterCounts, AfterReport, Rule, AlbumLookup, BookTarget, ComicFormat, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, MbCandidate, SongMatch, HistoryEntry, ListedTrack, EpisodeMatch, EpKey, BookFound, BookPart, MovieFound, PreviewItem, SeriesOutcome, AudioBook, ServerCall, ServerLibrary, UpdateFound, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
+import type { Ghost } from "./missing";
+import type { Blocked } from "./rules";
+import type { RuleType, AfterCounts, AfterReport, Rule, AlbumLookup, BookTarget, ComicFormat, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, MbCandidate, SongMatch, HistoryEntry, ListedTrack, EpisodeMatch, EpKey, BookFound, BookPart, MovieFound, PreviewItem, SeriesOutcome, AudioBook, ServerCall, ServerLibrary, UpdateFound, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
 
 type Overrides = Record<string, string>;
 
@@ -38,6 +40,20 @@ export interface WorkGroup {
 }
 
 export const api = {
+  /** Each rule new at its defaults in this language, and the rules that name a whole kind of file (the Rust catalog's). */
+  ruleTable: (lang: string) => invoke<{ defaults: Record<string, Rule>; kinds: RuleType[] }>("rule_table", { lang }),
+  /** Why each rule cannot join the rules there, when it cannot. */
+  ruleBlocks: (types: string[]) => invoke<Record<string, Blocked | null>>("rule_blocks", { types }),
+  /** Steps with only their first kind rule, and the types left out. */
+  oneLookup: (steps: Step[]) => invoke<[Step[], RuleType[]]>("one_lookup", { steps }),
+  /** The details typed in a details window over each file's (the command line's --edit does the same). */
+  editDetails: <T>(kind: "song" | "book" | "comic", items: T[], changed: Record<string, string>) => invoke<T[]>("edit_details", { kind, items, changed }),
+  /** Photo dates typed over the ones they had; null when the fields make no date. */
+  editDates: (old: string[], changed: Record<string, string>) => invoke<string[] | null>("edit_dates", { old, changed }),
+  /** What books say about themselves, as a start for typing. */
+  booksFromGuesses: (guesses: BookGuess[]) => invoke<BookMatch[]>("books_from_guesses", { guesses }),
+  /** What the lookups say is missing from the list as shown (the shared flow decides). */
+  missingItems: (rules: Rule[], known: unknown, descending: boolean) => invoke<Omit<Ghost, "ghost">[]>("missing_items", { rules, known, descending }).then((l) => l.map((g): Ghost => ({ ...g, ghost: true }))),
   /** What renaming would write besides the renames (the shared flow decides). */
   afterCounts: (rules: Rule[], chosen: unknown) => invoke<AfterCounts>("after_counts", { rules, chosen }),
   /** Everything written once the list is renamed: `done`, each renamed file's old and new path. */
@@ -67,6 +83,9 @@ export const api = {
   /** The covers of the comic's issue (or volume) in a series; none from
    *  catalogues that give no covers to programs. */
   seriesCovers: (source: ComicSource, key: string, id: string, comic: ComicMatch) => invoke<string[]>("series_covers", { source, key, id, comic }),
+  /** Which pictures of a group of similar ones stand out (the shared choice). */
+  picturePicks: (cards: { path: string; width: number | null; height: number | null; size: number; taken: string | null; modified: number | null }[]) =>
+    invoke<{ best: string | null; largest: string | null; oldest: string | null }>("picture_picks", { cards }),
   pictureCards: (paths: string[], max: number) => invoke<PictureCard[]>("picture_cards", { paths, max }),
   trashFiles: (paths: string[]) => invoke<{ trashed: string[]; failed: [string, string][] }>("trash_files", { paths }),
   preview: (steps: Step[], overrides: Overrides, view: View) =>
@@ -131,8 +150,9 @@ export const api = {
   serverCheck: (server: ServerCall) => invoke<void>("server_check", { server }),
   serverLibraries: (server: ServerCall) => invoke<ServerLibrary[]>("server_libraries", { server }),
   /** For each server, how many folders it was told about, or why not. */
-  serverTell: (servers: ServerCall[], changed: string[]) =>
-    invoke<({ Ok: number } | { Err: string })[]>("server_tell", { servers, changed }),
+  /** Tells the servers in the options about the folders the files left and went to (which servers: the shared choice). */
+  serverTell: (servers: unknown, keys: string, done: { from: string; to: string }[]) =>
+    invoke<{ name: string; folders: { Ok: number } | { Err: string } }[]>("server_tell", { servers, keys, done }),
   subsourceCheck: (key: string) => invoke<void>("subsource_check", { key }),
   discogsCheck: (token: string) => invoke<void>("discogs_check", { token }),
   googleBooksKey: (key: string) => invoke<void>("google_books_key", { key }),
@@ -140,15 +160,17 @@ export const api = {
   mbChoose: (id: string, paths: string[], fromName: boolean) =>
     invoke<{ matches: [string, SongMatch][]; tracks: ListedTrack[]; agree: number }>("mb_choose", { id, paths, fromName }),
   /** `names`: the name each file is read by (null: its own). */
-  saveText: (path: string, text: string) => invoke<void>("save_text", { path, text }),
+  /** Saves rows as a CSV file, as the command line writes them. */
+  saveCsv: (path: string, rows: string[][], lang: string) => invoke<void>("save_csv", { path, rows, lang }),
   /** Where TMDB images come from (`…/t/p`, sizes added). */
   tmdbImages: () => invoke<string>("tmdb_images"),
   comicGuesses: (paths: string[], names: (string | null)[], byFolder: boolean) =>
     invoke<(ComicMatch | null)[]>("comic_guesses", { paths, names, byFolder }),
   songTags: (paths: string[], fromName: boolean) => invoke<(SongMatch | null)[]>("song_own_tags", { paths, fromName }),
   comicCheck: (key: string) => invoke<void>("comic_check", { key }),
-  comicSearch: (source: ComicSource, key: string, query: string, lang: string, year: number | null = null, publisher = "", skip = "") =>
-    invoke<ComicVolume[]>("comic_search", { source, key, query, year, publisher, lang, skip }),
+  /** Series found, those that could hold issue `highest` first. */
+  comicSearch: (source: ComicSource, key: string, query: string, lang: string, year: number | null = null, publisher = "", skip = "", highest = 0) =>
+    invoke<ComicVolume[]>("comic_search", { source, key, query, year, publisher, lang, skip, highest }),
   /** The barcodes printed in the comics' first and last pages. */
   /** The issue a barcode belongs to, on Metron. */
   /** The comic rule's search (shared with the command line); a series
