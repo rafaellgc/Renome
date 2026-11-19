@@ -6,50 +6,41 @@
   import { secrets, settings } from "./settings.svelte";
   import type { MediaServer, ServerFolder } from "./types";
 
-  /** The keys, by server id (kept as one secret). */
-  function keys(): Record<string, string> {
-    try {
-      const k = JSON.parse(settings.serverKeys || "{}");
-      return k && typeof k === "object" ? k : {};
-    } catch {
-      return {};
-    }
-  }
-  function setKey(id: string, key: string) {
-    const k = keys();
-    if (key) k[id] = key;
-    else delete k[id];
-    settings.serverKeys = Object.keys(k).length ? JSON.stringify(k) : "";
+  /** The keys, by server id (kept as one secret; read and written as the
+   *  command line does: `mediaserver::keys_of`, `with_key`). */
+  let keyMap = $state<Record<string, string>>({});
+  $effect(() => {
+    const raw = settings.serverKeys || "";
+    api.serverKeys(raw).then((k) => (keyMap = k), () => {});
+  });
+  const keys = () => keyMap;
+  async function setKey(id: string, key: string) {
+    keyMap = { ...keyMap, [id]: key };
+    settings.serverKeys = await api.serverKeyWith(settings.serverKeys || "", id, key);
   }
 
   let show = $state<Record<string, boolean>>({});
   let status = $state<Record<string, { ok: boolean; text: string } | null>>({});
   let reading = $state<Record<string, boolean>>({});
 
-  function add() {
-    settings.servers = [...settings.servers, { id: `srv${Date.now().toString(36)}`, kind: "jellyfin", url: "", folders: [] }];
+  async function add() {
+    settings.servers = [...settings.servers, await api.serverNew()];
   }
 
-  function remove(s: MediaServer) {
-    setKey(s.id, "");
+  async function remove(s: MediaServer) {
+    await setKey(s.id, "");
     settings.servers = settings.servers.filter((x) => x.id !== s.id);
   }
 
   /** Reads the server's libraries; folders already paired keep their pair
-   *  and whether they are on. */
+   *  and whether they are on (the shared pairing, the command line's too). */
   async function read(s: MediaServer) {
     reading[s.id] = true;
     status[s.id] = null;
     try {
-      const libs = await api.serverLibraries({ kind: s.kind, url: s.url.trim(), key: (keys()[s.id] ?? "").trim(), folders: [] });
-      const folders: ServerFolder[] = [];
-      for (const lib of libs)
-        for (const p of lib.paths) {
-          const old = s.folders.find((f) => f.libraryId === lib.id && f.server === p.path);
-          folders.push(old ? { ...old, library: lib.name } : { libraryId: lib.id, library: lib.name, server: p.path, local: p.here ? p.path : "", on: true });
-        }
-      s.folders = folders;
-      status[s.id] = { ok: true, text: t("serverRead", { libs: libs.length, folders: folders.length }) };
+      const [read, libs, folders] = await api.serverRead($state.snapshot(s), (keys()[s.id] ?? "").trim());
+      s.folders = read.folders;
+      status[s.id] = { ok: true, text: t("serverRead", { libs, folders }) };
     } catch (e) {
       status[s.id] = { ok: false, text: tError(e) };
     } finally {

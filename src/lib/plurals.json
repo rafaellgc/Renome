@@ -1,0 +1,31 @@
+{
+  "irregular": {
+    "álbum(ns)": "álbuns",
+    "imagem(ns)": "imagens",
+    "edição(ões)": "edições",
+    "inútil(eis)": "inúteis",
+    "álbum(es)": "álbumes",
+    "canción(es)": "canciones",
+    "edición(es)": "ediciones",
+    "imagen(es)": "imágenes",
+    "volumen(es)": "volúmenes",
+    "inútil(es)": "inútiles",
+    "copy(ies)": "copies"
+  },
+  "cases": [
+    { "text": "{n} arquivo(s)", "vars": { "n": 1 }, "out": "{n} arquivo" },
+    { "text": "{n} arquivo(s)", "vars": { "n": 3 }, "out": "{n} arquivos" },
+    { "text": "{n} arquivo(s) fica(m)", "vars": { "n": 2 }, "out": "{n} arquivos ficam" },
+    { "text": "{n} álbum(ns)", "vars": { "n": 2 }, "out": "{n} álbuns" },
+    { "text": "{n} edição(ões)", "vars": { "n": 1 }, "out": "{n} edição" },
+    { "text": "{n} edição(ões)", "vars": { "n": 5 }, "out": "{n} edições" },
+    { "text": "{n} canción(es)", "vars": { "n": 4 }, "out": "{n} canciones" },
+    { "text": "{n} copy(ies)", "vars": { "n": 2 }, "out": "{n} copies" },
+    { "text": "{n} [tem|têm] {m} pasta(s)", "vars": { "n": 1, "m": 2 }, "out": "{n} tem {m} pastas" },
+    { "text": "{n} [tem|têm] {m} pasta(s)", "vars": { "n": 2, "m": 1 }, "out": "{n} têm {m} pasta" },
+    { "text": "arquivo(s): {n}", "vars": { "n": 2 }, "out": "arquivos: {n}" },
+    { "text": "arquivo(s) sem número", "vars": {}, "out": "arquivo(s) sem número" },
+    { "text": "{name} file(s)", "vars": { "name": "x" }, "out": "{name} file(s)" },
+    { "text": "{n} file(s)", "vars": { "n": "7" }, "out": "{n} files" }
+  ]
+}

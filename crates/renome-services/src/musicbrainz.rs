@@ -211,6 +211,7 @@ pub struct AlbumLookup {
     pub error: Option<String>,
     /// Identified by the songs' sound (AcoustID), not their tags.
     pub heard: bool,
+    pub status: crate::flow::Status,
 }
 
 #[derive(Clone, Serialize)]
@@ -359,6 +360,7 @@ async fn by_tags(
             tracks: Vec::new(),
             error: None,
             heard: false,
+            status: crate::flow::Status::None,
         };
         let tagged = &songs[0].1.mb_release;
         let same_release = !tagged.is_empty() && songs.iter().all(|(_, t)| t.mb_release == *tagged);
@@ -400,6 +402,8 @@ async fn by_tags(
         .await;
         found.error = result.err();
         found.candidates.truncate(12);
+        found.status =
+            crate::flow::Status::of(found.choice.is_some(), !found.candidates.is_empty());
         out.push((found, songs));
         progress(host, done + 1, total, None);
     }
@@ -556,6 +560,7 @@ async fn by_sound(
             tracks: Vec::new(),
             error: failed,
             heard: true,
+            status: crate::flow::Status::None,
         };
         if let Some(best) = lookup.candidates.first()
             && !stopped()
@@ -580,6 +585,8 @@ async fn by_sound(
             }
         }
         lookup.candidates.truncate(12);
+        lookup.status =
+            crate::flow::Status::of(lookup.choice.is_some(), !lookup.candidates.is_empty());
         out.push(lookup);
         progress(host, done + 1, total, None);
     }
@@ -716,4 +723,19 @@ pub fn songs_of(
         }
     }
     (named, unnamed)
+}
+
+/// Each release's small cover for the reviews: the source's picture,
+/// else the Cover Art Archive's.
+pub fn thumbs<'a>(list: impl IntoIterator<Item = &'a mut Candidate>) {
+    for c in list {
+        c.discogs = c.id.starts_with(renome_core::discogs::PREFIX);
+        c.thumb = if !c.image.is_empty() {
+            c.image.clone()
+        } else if c.id.starts_with(renome_core::discogs::PREFIX) {
+            String::new()
+        } else {
+            format!("{}/release/{}/front-250", covers_base(), c.id)
+        };
+    }
 }

@@ -19,6 +19,7 @@ pub struct Found {
     pub error: Option<String>,
     /// Doubts of one group share one answer (a movie and its subtitles).
     pub group: String,
+    pub status: super::Status,
 }
 
 /// The files the movie rule looks up: videos, subtitles and folders, not
@@ -89,6 +90,7 @@ pub async fn search(
         .into_iter()
         .map(|f| Found {
             group: group(&f.guess),
+            status: super::Status::of(f.auto && !f.candidates.is_empty(), !f.candidates.is_empty()),
             choice: if f.auto {
                 f.candidates.first().cloned()
             } else {

@@ -2,11 +2,12 @@
   import { slide } from "svelte/transition";
   import Icon from "./Icon.svelte";
   import { t, type Key } from "./i18n";
-  import { comicPreset, comicPresetOf, newRule, FPS_PAIRS, listNames, PHOTO_TEMPLATES, splitExt, splitParts, type ComicPreset } from "./rules";
+  import { TABLE, comicPreset, comicPresetOf, newRule, type ComicPreset } from "./rules";
   import { settings } from "./settings.svelte";
   import type { ComicDevice, ComicSpread, RuleType, Step } from "./types";
-  /** Rules that pick their own kind of file: no filter of their own. */
-  const BY_KIND: RuleType[] = ["movie", "series", "music", "book", "comic", "photo", "subtitle"];
+  /** Rules that pick their own kind of file: no filter of their own (the
+   *  Rust catalog's group). */
+  const byKind = (type: RuleType) => TABLE.media.includes(type);
   /** The readers a comic e-book can be made for, by maker, in the menu's
    *  order. */
   /** A reader model's label: name, screen and whether it is colour. */
@@ -29,10 +30,8 @@
   const SPREADS: ComicSpread[] = ["split", "rotate", "both", "keep"];
   const COMIC_FORMATS = ["azw3", "kepub", "epub", "cbz", "pdf"] as const;
   const FORMAT_LABEL: Record<(typeof COMIC_FORMATS)[number], Key> = { azw3: "comicEbookAzw3", kepub: "comicEbookKepub", epub: "comicEbookEpub", cbz: "comicEbookCbz", pdf: "comicEbookPdf" };
-  /** Colour ink screens (fine dots shimmer) and grey ones (16 greys). */
-  const NO_PNG = ["kindle-scribe", "kindle-scribe2025", "kindle-scribe-color", "kindle-color"];
   import { api } from "./api";
-  import { OTHER_DEVICES, POPULAR, READERS, SCREENS, chooseReader, formatsOf, isColourInk, isGreyInk, modelOf, opens, readerOf, type Format, type Reader } from "./readers";
+  import { NO_PNG, OTHER_DEVICES, POPULAR, READERS, SCREENS, chooseReader, formatsOf, isColourInk, isGreyInk, modelOf, opens, readerOf, type Format, type Reader } from "./readers";
 
   /** Whether this system can print books to PDF (asked once). */
   let canPrint = $state(false);
@@ -51,6 +50,7 @@
     edit,
     summary = null,
     currentNames = [],
+    hint = null,
   }: {
     step: Step;
     error?: string | null;
@@ -65,6 +65,9 @@
     /** The names in the table now (without extensions), in its order: what
      *  the list rule's box can start from. */
     currentNames?: string[];
+    /** What the preview says of this rule: a list rule's names, a
+     *  rearrange rule's parts of the sample. */
+    hint?: { names?: number; parts?: string[] } | null;
     /** Photo rule: dates typed in for the files chosen in the list (the
      *  button's text and hint, already translated). */
     edit?: { n: number; typed: number; label: string; hint: string; onclick: () => void };
@@ -123,7 +126,7 @@
       case "rearrange":
         return r.order ? `${t("newOrder")}: ${r.order}` : "";
       case "list": {
-        const n = listNames(r.names).length;
+        const n = hint?.names ?? 0;
         return n ? t("listOrderN", { n }) : "";
       }
       case "case":
@@ -179,12 +182,8 @@
     if (hint instanceof HTMLElement && !hint.classList.contains("open")) hint.classList.toggle("more", hint.scrollHeight > hint.clientHeight + 1);
   }
 
-  const parts = $derived.by(() => {
-    if (r.type !== "rearrange" || !sample) return [];
-    const [stem, ext] = splitExt(sample);
-    const text = r.target === "name" ? stem : r.target === "ext" ? ext : sample;
-    return splitParts(text, r.separator);
-  });
+  /** A rearrange rule's parts of the sample name (the preview's). */
+  const parts = $derived(hint?.parts ?? []);
 
   /** Appends a part number to the order (clicking a part). */
   function addPart(n: number) {
@@ -461,7 +460,7 @@
           {@render subtitles()}
         {/if}
       {:else if r.type === "photo"}
-        {@const ready = PHOTO_TEMPLATES[settings.lang]}
+        {@const ready = TABLE.photoTemplates}
         <p class="hint top">{t("photoHint")}</p>
         <h4 class="sect">{t("sectName")}</h4>
         <label>{t("photoReady")}
@@ -541,7 +540,7 @@
             }}
           >
             <option value="">{t("subFpsNone")}</option>
-            {#each FPS_PAIRS as [a, b] (`${a}:${b}`)}<option value={`${a}:${b}`}>{t("subFpsPair", { from: fps(a), to: fps(b) })}</option>{/each}
+            {#each TABLE.fpsPairs as [a, b] (`${a}:${b}`)}<option value={`${a}:${b}`}>{t("subFpsPair", { from: fps(a), to: fps(b) })}</option>{/each}
           </select>
         </label>
         <p class="hint">{t("subFpsHint")}</p>
@@ -798,7 +797,7 @@
         <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("comicMissingLabel")}<small>{t("comicMissingHint")}</small></span></label>
       {/if}
 
-      {#if !BY_KIND.includes(r.type)}
+      {#if !byKind(r.type)}
         <label class="only">{t("onlyFiles")} <input bind:value={step.only} spellcheck="false" placeholder={t("onlyFilesPlaceholder")} title={t("onlyFilesHint")} /></label>
       {/if}
       {#if summary}<p class="hint">{summary}</p>{/if}

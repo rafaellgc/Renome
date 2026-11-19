@@ -5,81 +5,50 @@
 //! id, a song moved to another album loses its release's.
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use renome_core::FileEntry;
-use renome_core::books::BookMatch;
-use renome_core::comics::ComicMatch;
 use renome_core::musicbrainz::SongMatch;
 
 use crate::text::t;
 
-pub const SONG: &[&str] = &[
-    "title",
-    "artist",
-    "albumArtist",
-    "genre",
-    "album",
-    "year",
-    "track",
-    "trackTotal",
-    "disc",
-    "discTotal",
-];
-pub const BOOK: &[&str] = &[
-    "title",
-    "authors",
-    "year",
-    "publisher",
-    "language",
-    "series",
-    "seriesIndex",
-    "isbn",
-];
-pub const COMIC: &[&str] = &[
-    "series",
-    "seriesYear",
-    "volume",
-    "number",
-    "title",
-    "year",
-    "publisher",
-    "writer",
-    "artist",
-];
-pub const PHOTO: &[&str] = &["date", "day", "month", "year", "hour", "minute"];
-const NUMERIC: &[&str] = &[
-    "year",
-    "track",
-    "trackTotal",
-    "disc",
-    "discTotal",
-    "seriesYear",
-    "volume",
-    "day",
-    "month",
-    "hour",
-    "minute",
-];
-
 /// Each file's typed fields, in the order given.
 pub type Edits = HashMap<PathBuf, BTreeMap<String, String>>;
 
-/// The fields of the editor for a rule (`music`, `book`, `comic`, `photo`).
-pub fn fields_of(kind: &str) -> &'static [&'static str] {
-    match kind {
-        "music" => SONG,
-        "book" => BOOK,
-        "comic" => COMIC,
-        "photo" => PHOTO,
-        _ => &[],
+use renome_services::flow::edit::Field;
+
+/// The fields of the editor for a rule (`music`, `book`, `comic`,
+/// `photo`; the window's), and the names `--edit` takes: the photo's
+/// date also whole (`date=`).
+pub fn fields_of(kind: &str) -> Vec<Field> {
+    let mut out = renome_services::flow::edit::fields_of(kind).to_vec();
+    if kind == "photo" {
+        out.insert(
+            0,
+            Field {
+                key: "date",
+                numeric: false,
+                wide: false,
+            },
+        );
     }
+    out
+}
+
+/// The names of an editor's fields, for the help.
+pub fn names(kind: &str) -> String {
+    fields_of(kind)
+        .iter()
+        .map(|f| f.key)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// `PATH:KEY=VALUE,KEY=VALUE`: the path ends at the last `:` followed by
 /// a field and `=` (so `C:\…` stays whole); a comma starts a new field
 /// only before `KEY=` (so values keep their commas).
-pub fn parse(specs: &[String], keys: &[&str]) -> Result<Edits, String> {
+pub fn parse(specs: &[String], fields: &[Field]) -> Result<Edits, String> {
+    let keys: Vec<&str> = fields.iter().map(|f| f.key).collect();
     let starts_field = |s: &str| {
         keys.iter()
             .any(|k| s.strip_prefix(k).is_some_and(|r| r.starts_with('=')))
@@ -99,15 +68,16 @@ pub fn parse(specs: &[String], keys: &[&str]) -> Result<Edits, String> {
                 .filter(|(i, c)| *c == ',' && starts_field(&rest[i + 1..]))
                 .map(|(i, _)| i + 1),
         );
-        let fields = out.entry(path).or_default();
+        let typed = out.entry(path).or_default();
         for (n, &from) in starts.iter().enumerate() {
             let to = starts.get(n + 1).map_or(rest.len(), |next| next - 1);
             let (key, value) = rest[from..to].split_once('=').unwrap();
             let value = value.trim();
-            if NUMERIC.contains(&key) && !value.chars().all(|c| c.is_ascii_digit()) {
+            let numeric = fields.iter().any(|f| f.key == key && f.numeric);
+            if numeric && !value.chars().all(|c| c.is_ascii_digit()) {
                 return Err(t("badEditNumber", &[("key", &key), ("value", &value)]));
             }
-            fields.insert(key.to_string(), value.to_string());
+            typed.insert(key.to_string(), value.to_string());
         }
     }
     Ok(out)
@@ -121,68 +91,69 @@ pub fn songs(
     files: &HashMap<&PathBuf, &FileEntry>,
     from_name: bool,
 ) {
+    // What each starts from, as the window's details window (see
+    // `flow::edit`).
     for (path, changed) in edits {
-        let m = chosen.get(path).cloned().unwrap_or_else(|| {
-            files
-                .get(path)
-                .and_then(|f| {
-                    renome_core::rules::song_tags(f, from_name)
-                        .or_else(|| renome_core::rules::any_song_tags(f))
-                })
-                .map(|t| SongMatch::from_tags(&t))
-                .unwrap_or_else(|| SongMatch {
-                    typed: true,
-                    ..SongMatch::default()
-                })
-        });
+        let m = edit::song_start(
+            chosen.get(path).cloned(),
+            files.get(path).copied(),
+            from_name,
+        );
         chosen.insert(path.clone(), edit::song(m, changed));
     }
 }
 
 pub fn books(
     edits: &Edits,
-    chosen: &mut HashMap<PathBuf, BookMatch>,
+    found: &mut crate::lookup::Books,
+    items: &[renome_core::PreviewItem],
     names: &HashMap<&PathBuf, String>,
+    audiobooks: bool,
 ) {
+    // An audiobook's files are edited together (as in the window).
     for (path, changed) in edits {
-        let m = chosen.get(path).cloned().unwrap_or_else(|| {
-            let stem = names
-                .get(path)
-                .map(|n| {
-                    Path::new(n)
-                        .file_stem()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .into_owned()
-                })
-                .unwrap_or_default();
-            edit::book_from_guess(&renome_core::books::guess(
-                &stem,
-                &renome_core::ebook::read(path),
-            ))
-        });
-        chosen.insert(path.clone(), edit::book(m, changed));
+        let one: std::collections::HashSet<PathBuf> = [path.clone()].into();
+        let mut rows = edit::rows("book", items, &one, &found.parts, audiobooks);
+        if rows.is_empty() {
+            rows.push(path.clone());
+        }
+        for p in rows {
+            let name = names.get(&p).cloned().unwrap_or_default();
+            let m = edit::book_start(
+                found.chosen.get(&p).cloned(),
+                found.guesses.get(&p),
+                &p,
+                &name,
+            );
+            found.chosen.insert(p, edit::book(m, changed));
+        }
     }
 }
 
 pub fn comics(
     edits: &Edits,
-    chosen: &mut HashMap<PathBuf, ComicMatch>,
+    found: &mut crate::lookup::Comics,
+    items: &[renome_core::PreviewItem],
     names: &HashMap<&PathBuf, String>,
     by_folder: bool,
 ) {
     for (path, changed) in edits {
-        let m = chosen.get(path).cloned().unwrap_or_else(|| {
-            let stem = names.get(path).map(|n| {
-                Path::new(n)
-                    .file_stem()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned()
-            });
-            renome_core::comics::from_path(path, stem.as_deref(), by_folder).unwrap_or_default()
-        });
-        chosen.insert(path.clone(), edit::comic(m, changed));
+        let own = found
+            .settled
+            .iter()
+            .find(|s| &s.path == path)
+            .map(|s| s.own.clone());
+        let name = names.get(path).cloned().unwrap_or_default();
+        let is_dir = items.iter().any(|i| &i.path == path && i.is_dir);
+        let m = edit::comic_start(
+            found.chosen.get(path).cloned(),
+            own.as_ref(),
+            path,
+            &name,
+            is_dir,
+            by_folder,
+        );
+        found.chosen.insert(path.clone(), edit::comic(m, changed));
     }
 }
 
@@ -210,13 +181,17 @@ mod tests {
 
     #[test]
     fn paths_keep_colons_and_values_keep_commas() {
-        let e = parse(&["C:/a:b/x.mp3:title=Hello, world,year=1999".into()], SONG).unwrap();
+        let e = parse(
+            &["C:/a:b/x.mp3:title=Hello, world,year=1999".into()],
+            &fields_of("music"),
+        )
+        .unwrap();
         let (p, f) = e.iter().next().unwrap();
         assert!(p.ends_with("C:/a:b/x.mp3"));
         assert_eq!(f["title"], "Hello, world");
         assert_eq!(f["year"], "1999");
-        assert!(parse(&["x.mp3:year=abc".into()], SONG).is_err());
-        assert!(parse(&["x.mp3:nope=1".into()], SONG).is_err());
+        assert!(parse(&["x.mp3:year=abc".into()], &fields_of("music")).is_err());
+        assert!(parse(&["x.mp3:nope=1".into()], &fields_of("music")).is_err());
     }
 
     #[test]
@@ -238,28 +213,19 @@ mod tests {
     #[test]
     fn a_retyped_book_loses_its_work() {
         let p = PathBuf::from("/b.epub");
-        let mut chosen = HashMap::from([(
-            p.clone(),
-            BookMatch {
-                work: "OL1W".into(),
-                title: "A".into(),
-                edition_year: Some(2001),
-                ..Default::default()
-            },
-        )]);
-        let edits = HashMap::from([(
-            p.clone(),
-            BTreeMap::from([
-                ("title".to_string(), "B".to_string()),
-                ("year".to_string(), "1990".to_string()),
-            ]),
-        )]);
-        books(&edits, &mut chosen, &HashMap::new());
-        assert_eq!(chosen[&p].title, "B");
-        assert_eq!(chosen[&p].work, "");
-        assert_eq!(
-            (chosen[&p].year, chosen[&p].edition_year),
-            (Some(1990), None)
-        );
+        let m = renome_core::books::BookMatch {
+            work: "OL1W".into(),
+            title: "A".into(),
+            edition_year: Some(2001),
+            ..Default::default()
+        };
+        let changed = BTreeMap::from([
+            ("title".to_string(), "B".to_string()),
+            ("year".to_string(), "1990".to_string()),
+        ]);
+        let b = edit::book(edit::book_start(Some(m), None, &p, "b.epub"), &changed);
+        assert_eq!(b.title, "B");
+        assert_eq!(b.work, "");
+        assert_eq!((b.year, b.edition_year), (Some(1990), None));
     }
 }

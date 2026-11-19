@@ -292,3 +292,12 @@ impl Client {
         crate::keep("mangadex", question, &body).map_err(|e| format!("mdNetwork: {e}"))
     }
 }
+
+/// A larger copy of a cover, where the catalogue keeps one (MangaDex keeps
+/// a 512 px one beside the 256 px); the same address otherwise.
+pub fn bigger(url: &str) -> String {
+    match url.strip_suffix(".256.jpg") {
+        Some(base) => format!("{base}.512.jpg"),
+        None => url.to_string(),
+    }
+}

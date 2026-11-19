@@ -5,10 +5,8 @@
 import { api } from "$lib/api";
 import { notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
-import type { AlbumState, ApplyReport, EditField, MbCandidate, Rule, SongMatch } from "$lib/types";
-import { moved, ruleOf, without, type PageCtx } from "./common";
-
-const EMPTY: SongMatch = { release: "", title: "", artist: "", albumArtist: "", album: "", year: null, track: 0, trackTotal: 0, disc: 0, discTotal: 0, typed: true };
+import type { AlbumState, EditField, MbCandidate, Rule, SongMatch } from "$lib/types";
+import { editFields, moved, ruleOf, without, type PageCtx } from "./common";
 
 export class Music {
   #ctx: PageCtx;
@@ -37,7 +35,7 @@ export class Music {
   /** The album each song is in. */
   albumOf = $derived.by(() => new Map(this.albums.flatMap((a, i) => a.files.map((p): [string, number] => [p, i]))));
   /** The songs among the rows chosen in the list. */
-  selected = $derived.by(() => this.#ctx.items.filter((i) => this.#ctx.selected.has(i.path) && !!i.kinds?.includes("audio")));
+  selected = $derived.by(() => this.#ctx.items.filter((i) => this.#ctx.selected.has(i.path) && i.editable));
   counts = $derived.by(() => {
     let found = 0, choose = 0, none = 0;
     for (const a of this.albums) {
@@ -48,18 +46,7 @@ export class Music {
     return { found, choose, none };
   });
   /** The details window's fields. */
-  fields = $derived<EditField[]>([
-    { key: "title", label: t("songEditTitle"), wide: true },
-    { key: "artist", label: t("songEditArtist") },
-    { key: "albumArtist", label: t("songEditAlbumArtist") },
-    { key: "genre", label: t("songEditGenre") },
-    { key: "album", label: t("songEditAlbum"), wide: true },
-    { key: "year", label: t("songEditYear"), numeric: true },
-    { key: "track", label: t("songEditTrack"), numeric: true },
-    { key: "trackTotal", label: t("songEditTrackTotal"), numeric: true },
-    { key: "disc", label: t("songEditDisc"), numeric: true },
-    { key: "discTotal", label: t("songEditDiscTotal"), numeric: true },
-  ]);
+  fields = $derived<EditField[]>(editFields("music"));
 
   /** Looks up the visible songs' albums on MusicBrainz; albums already
    *  settled keep their release, doubtful ones go to the review window. */
@@ -83,7 +70,7 @@ export class Music {
           candidates: f.candidates,
           choice: f.choice,
           matches: Object.fromEntries(f.matches),
-          status: f.choice ? "auto" : f.candidates.length ? "choose" : "none",
+          status: f.status,
           error: f.error,
           heard: f.heard,
           tracks: f.tracks,
@@ -128,21 +115,23 @@ export class Music {
   }
 
 
-  /** Opens the details window on the songs chosen in the list. */
+  /** Opens the details window on the songs chosen in the list; what each
+   *  starts from, the shared flow says (the command line's --edit too). */
   async openEdit() {
-    const rows = this.selected;
-    if (!rows.length) return;
+    if (!this.selected.length) return;
     const r = this.rule?.rule;
-    const missing = rows.filter((i) => !this.matches[i.path]);
-    const own: Record<string, SongMatch | null> = {};
-    if (missing.length) {
-      const got = await api.songTags(missing.map((i) => i.path), r?.type === "music" && r.fromName);
-      missing.forEach((i, n) => (own[i.path] = got[n]));
-    }
-    this.edit = {
-      paths: rows.map((i) => i.path),
-      songs: rows.map((i) => $state.snapshot(this.matches[i.path] ?? own[i.path] ?? EMPTY)),
-    };
+    const known = Object.fromEntries(this.selected.map((i) => [i.path, { current: this.matches[i.path] }]));
+    const [paths, songs] = await api.editStart<SongMatch>({
+      kind: "music",
+      chosen: this.selected.map((i) => i.path),
+      known: $state.snapshot(known),
+      parts: {},
+      dates: {},
+      fromName: r?.type === "music" && !!r.fromName,
+      byFolder: false,
+      audiobooks: false,
+    });
+    if (paths.length) this.edit = { paths, songs };
   }
 
   /** The fields changed in the details window, for each of its songs (applied as the command line's --edit does). */

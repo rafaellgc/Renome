@@ -4,12 +4,10 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use renome_core::links::{self, Link};
-use renome_core::rules::{any_song_tags, song_tags};
 use renome_core::scan::Skipped;
 use renome_core::{
-    ApplyReport, FileEntry, HashCache, History, HistoryEntry, Operation, Preview, ScanOptions,
-    SortKey, Step, View,
+    ApplyReport, FileEntry, HashCache, History, HistoryEntry, Preview, ScanOptions, SortKey, Step,
+    View,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -47,7 +45,7 @@ struct AppState {
     hashes: Mutex<HashCache>,
     /// Fingerprints of the catalogues' covers, by address (`None`: could
     /// not be read).
-    covers: tokio::sync::Mutex<HashMap<String, Option<u64>>>,
+    covers: renome_services::covers::Covers,
     /// Fingerprints of pictures, kept between sessions.
     pictures: Mutex<renome_core::similar::PictureCache>,
     /// Bumped by each search for identical files; an older search that sees
@@ -89,6 +87,8 @@ struct AppState {
     /// The list as last shown, and as last renamed: what is written after
     /// the renames is planned on them (see `flow::after`).
     shown: Mutex<Option<renome_core::Preview>>,
+    /// What is missing from the list as last shown.
+    missing: Mutex<Vec<renome_services::flow::missing::Missing>>,
     renamed: Mutex<Option<renome_core::Preview>>,
 }
 
@@ -248,51 +248,81 @@ async fn sort_files(app: AppHandle, key: SortKey, descending: bool) -> Result<()
 async fn file_details(
     app: AppHandle,
     paths: Vec<PathBuf>,
-) -> Result<HashMap<PathBuf, renome_core::details::Details>, String> {
+    lang: String,
+) -> Result<HashMap<PathBuf, HashMap<&'static str, String>>, String> {
+    // As the list shows them (see `Details::text`: the CSV saves the same).
     in_background(app, move |state| {
         let want: HashSet<PathBuf> = paths.into_iter().collect();
         let s = state.session.lock().unwrap();
         s.files
             .iter()
             .filter(|f| want.contains(&f.path))
-            .map(|f| (f.path.clone(), renome_core::details::of(f)))
+            .map(|f| (f.path.clone(), renome_core::details::of(f).texts(&lang)))
             .collect()
     })
     .await
 }
 
-/// Each song's own tags (with what its name says, with `from_name`), as
-/// a start for typing its details in; `None` for what is not a song.
+/// The list as shown, as CSV cells (see `flow::export::list`, the command
+/// line's `--csv` too): the optional columns asked for.
 #[tauri::command]
-async fn song_own_tags(
+async fn export_rows(
     app: AppHandle,
-    paths: Vec<PathBuf>,
-    from_name: bool,
-) -> Result<Vec<Option<renome_core::musicbrainz::SongMatch>>, String> {
+    columns: Vec<String>,
+    lang: String,
+) -> Result<Vec<Vec<renome_services::flow::export::Cell>>, String> {
     in_background(app, move |state| {
-        let s = state.session.lock().unwrap();
-        let by_path: HashMap<&PathBuf, &renome_core::FileEntry> =
-            s.files.iter().map(|f| (&f.path, f)).collect();
-        paths
-            .iter()
-            .map(|p| {
-                let f = by_path.get(p)?;
-                song_tags(f, from_name)
-                    .or_else(|| any_song_tags(f))
-                    .map(|t| renome_core::musicbrainz::SongMatch::from_tags(&t))
-            })
-            .collect()
+        let preview = state.shown.lock().unwrap().clone().unwrap_or_default();
+        let cols: Vec<&str> = columns.iter().map(String::as_str).collect();
+        let details: HashMap<PathBuf, renome_core::details::Details> = if cols.is_empty() {
+            HashMap::new()
+        } else {
+            let s = state.session.lock().unwrap();
+            s.files
+                .iter()
+                .map(|f| (f.path.clone(), renome_core::details::of(f)))
+                .collect()
+        };
+        renome_services::flow::export::list(&preview, &details, &cols, &lang)
     })
     .await
+}
+
+/// The missing items as CSV, where they go and under what name (see
+/// `flow::export::missing`, the command line's `--missing-csv` too).
+#[tauri::command]
+async fn export_missing(
+    app: AppHandle,
+) -> Result<renome_services::flow::export::MissingCsv, String> {
+    in_background(app, move |state| {
+        let missing = state.missing.lock().unwrap().clone();
+        let preview = state.shown.lock().unwrap().clone().unwrap_or_default();
+        let dirs: HashMap<&PathBuf, &PathBuf> =
+            preview.items.iter().map(|i| (&i.path, &i.dir)).collect();
+        renome_services::flow::export::missing(&missing, &|p| {
+            dirs.get(&p.to_path_buf()).map(|d| (*d).clone())
+        })
+    })
+    .await
+}
+
+/// The rules as the window sends them, read as the core reads them (see
+/// `catalog::normalize_steps`, the command line's too); what is asked of
+/// the release's adverts, from them.
+fn rule_steps(mut steps: Vec<Value>, view: &mut View) -> Result<Vec<Step>, String> {
+    renome_core::catalog::normalize_steps(&mut steps);
+    view.trash_ads = renome_core::catalog::trash_ads(&steps);
+    serde_json::from_value(Value::Array(steps)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn preview(
     app: AppHandle,
-    steps: Vec<Step>,
+    steps: Vec<Value>,
     overrides: Overrides,
     mut view: View,
 ) -> Result<Preview, String> {
+    let steps = rule_steps(steps, &mut view)?;
     let emitter = app.clone();
     in_background(app, move |state| {
         let _disk = state.busy_disk.lock().unwrap();
@@ -694,8 +724,7 @@ struct OwnCover {
 #[tauri::command]
 async fn own_cover(path: PathBuf) -> Option<OwnCover> {
     tauri::async_runtime::spawn_blocking(move || {
-        let bytes = renome_core::convert::cover(&path)?;
-        let hash = renome_core::similar::fingerprint(&bytes, "img")?;
+        let (bytes, hash) = renome_services::covers::own_cover(&path)?;
         let (jpeg, _) = renome_core::similar::shown_copy(&bytes, "img", 600)?;
         Some(OwnCover {
             image: format!("data:image/jpeg;base64,{}", base64(&jpeg)),
@@ -752,51 +781,65 @@ async fn cover_distances(
     hash: String,
     urls: Vec<String>,
 ) -> Result<Vec<Option<u32>>, String> {
-    use futures_util::StreamExt;
+    // Only those that are the file's cover (see `covers::SAME_COVER`).
     let own = u64::from_str_radix(&hash, 16).map_err(|e| e.to_string())?;
-    let missing: Vec<String> = {
-        let known = state.covers.lock().await;
-        let mut m: Vec<String> = urls
-            .iter()
-            .filter(|u| u.starts_with("http") && !known.contains_key(*u))
-            .cloned()
-            .collect();
-        m.sort();
-        m.dedup();
-        m
-    };
-    let found: Vec<(String, Option<u64>)> = futures_util::stream::iter(missing)
-        .map(|url| async move {
-            let bytes = match HTTP.get(&url).send().await {
-                Ok(r) if r.status().is_success() => r.bytes().await.ok(),
-                _ => None,
-            };
-            let hash = match bytes {
-                Some(b) => tauri::async_runtime::spawn_blocking(move || {
-                    renome_core::similar::fingerprint(&b, "img")
-                })
-                .await
-                .ok()
-                .flatten(),
-                None => None,
-            };
-            (url, hash)
-        })
-        .buffer_unordered(4)
-        .collect()
-        .await;
-    let mut known = state.covers.lock().await;
-    known.extend(found);
-    Ok(urls
-        .iter()
-        .map(|u| {
-            known
-                .get(u)
-                .copied()
-                .flatten()
-                .map(|h| renome_core::similar::distance(own, h))
-        })
-        .collect())
+    Ok(state.covers.same(own, &urls).await)
+}
+
+/// The series found, compared with the file's cover (see
+/// `covers::series_by_cover`, the command line's chooser too); tells how
+/// far it got as `cover-progress`.
+#[tauri::command]
+async fn series_by_cover(
+    app: AppHandle,
+    source: String,
+    key: String,
+    hash: String,
+    comic: renome_core::comics::ComicMatch,
+    candidates: Vec<renome_core::comics::Volume>,
+) -> Result<renome_services::covers::SeriesByCover, String> {
+    let own = u64::from_str_radix(&hash, 16).map_err(|e| e.to_string())?;
+    let state = app.state::<AppState>();
+    let sources = sources(&state);
+    let emitter = app.clone();
+    Ok(renome_services::covers::series_by_cover(
+        &state.covers,
+        &sources,
+        &source,
+        &key,
+        own,
+        &comic,
+        candidates,
+        &move |i, n| {
+            let _ = emitter.emit("cover-progress", serde_json::json!({ "i": i, "n": n }));
+        },
+    )
+    .await)
+}
+
+/// A series' issues in the order the review shows them, those `typed`
+/// names (see `covers::issue_order`, the command line's too).
+#[tauri::command]
+fn issue_order(
+    issues: Vec<renome_core::comics::Issue>,
+    own: renome_core::comics::ComicMatch,
+    far: HashMap<String, Option<u32>>,
+    typed: String,
+) -> Vec<usize> {
+    renome_services::covers::issue_order(&issues, &own, &far, &typed)
+}
+
+/// The covers a review compares, and whether at once (few) or when asked.
+#[tauri::command]
+fn issue_covers(
+    issues: Vec<renome_core::comics::Issue>,
+    volume_key: String,
+) -> (Vec<String>, bool, Option<&'static str>) {
+    let urls = renome_services::covers::issue_covers(&issues);
+    let now = urls.len() <= renome_services::covers::COMPARE_AT_ONCE;
+    // The GCD gives no covers to programs: said so.
+    let note = volume_key.starts_with("gcd:").then_some("coverNoneGcd");
+    (urls, now, note)
 }
 
 #[derive(Serialize)]
@@ -836,66 +879,42 @@ async fn trash_files(app: AppHandle, paths: Vec<PathBuf>) -> Result<Trashed, Str
     .await
 }
 
-/// Renames as they happened, in order: plain renames are looked up at
-/// once; a renamed folder also moves whatever was under it.
-enum Renamed<'a> {
-    Exact(HashMap<&'a Path, &'a Path>),
-    Folder(&'a Operation),
+/// Updates the session entries after renaming (see `apply::Follow`: what
+/// the window found per file follows them the same way), and tells the
+/// window where each one went (`moved`).
+fn refresh_renamed(files: &mut [FileEntry], report: &mut ApplyReport) {
+    report.moved = followed(files, &report.done);
 }
 
-/// Updates the session entries after renaming. Renames run in order, and a
-/// renamed folder also moves the entries inside it.
-fn refresh_renamed(files: &mut [FileEntry], report: &ApplyReport) {
-    if report.done.is_empty() {
-        return;
+/// [`refresh_renamed`] for renames done: where each entry went.
+fn followed(files: &mut [FileEntry], done: &[renome_core::Operation]) -> Vec<(PathBuf, PathBuf)> {
+    if done.is_empty() {
+        return Vec::new();
     }
-    let mut renames: Vec<Renamed> = Vec::new();
-    for op in &report.done {
-        if op.to.is_dir() {
-            renames.push(Renamed::Folder(op));
-        } else {
-            if !matches!(renames.last(), Some(Renamed::Exact(_))) {
-                renames.push(Renamed::Exact(HashMap::new()));
-            }
-            if let Some(Renamed::Exact(map)) = renames.last_mut() {
-                map.insert(&op.from, &op.to);
-            }
-        }
-    }
+    let follow = renome_core::apply::Follow::new(done);
+    let mut moved = Vec::new();
     for f in files.iter_mut() {
-        let mut path = f.path.clone();
-        for step in &renames {
-            match step {
-                Renamed::Exact(map) => {
-                    if let Some(to) = map.get(path.as_path()) {
-                        path = to.to_path_buf();
-                    }
-                }
-                Renamed::Folder(op) => {
-                    if path == op.from {
-                        path = op.to.clone();
-                    } else if let Ok(rest) = path.strip_prefix(&op.from) {
-                        path = op.to.join(rest);
-                    }
-                }
+        let path = follow.path(&f.path);
+        if path != f.path {
+            moved.push((f.path.clone(), path.clone()));
+            if let Ok(meta) = std::fs::symlink_metadata(&path)
+                && let Some(e) = FileEntry::from_path(&path, &meta)
+            {
+                *f = e;
             }
         }
-        if path != f.path
-            && let Ok(meta) = std::fs::symlink_metadata(&path)
-            && let Some(e) = FileEntry::from_path(&path, &meta)
-        {
-            *f = e;
-        }
     }
+    moved
 }
 
 #[tauri::command]
 async fn apply(
     app: AppHandle,
-    steps: Vec<Step>,
+    steps: Vec<Value>,
     overrides: Overrides,
     mut view: View,
 ) -> Result<ApplyReport, String> {
+    let steps = rule_steps(steps, &mut view)?;
     let stop = stop_signal(&app);
     let emitter = app.clone();
     in_background(app, move |state| {
@@ -931,7 +950,7 @@ async fn apply(
             progress: &progress,
             stop: &stop,
         };
-        let report = state.history.apply_with(&ops, &hooks);
+        let mut report = state.history.apply_with(&ops, &hooks);
         if let Some(id) = &report.history_id {
             let times: Vec<(PathBuf, i64)> = report
                 .done
@@ -942,7 +961,7 @@ async fn apply(
                 let _ = state.history.set_times(id, &times);
             }
         }
-        refresh_renamed(&mut s.files, &report);
+        refresh_renamed(&mut s.files, &mut report);
         // Earlier states point to the old names.
         s.undo.clear();
         *state.renamed.lock().unwrap() = Some(plan);
@@ -993,17 +1012,10 @@ async fn tmdb_search(
     title: String,
     year: Option<u16>,
 ) -> Result<Vec<renome_core::tmdb::Candidate>, String> {
+    // A link or id pasted: that movie (see `flow::typed`, the command
+    // line's too).
     let client = tmdb::Client::new(&key, &lang);
-    // A link or id pasted: that movie.
-    let id = match links::parse(&title) {
-        Some(Link::Tmdb { tv: true, .. }) => return Err("linkOther".into()),
-        Some(Link::Tmdb { id, .. }) => Some(id),
-        Some(Link::Imdb(tt)) => Some(client.find_imdb(&tt, false).await.ok_or("linkNotFound")?),
-        Some(_) => return Err("linkOther".into()),
-        None => None,
-    };
-    let guess = renome_core::tmdb::Guess { title, year, id };
-    Ok(client.search(&guess).await?.0)
+    renome_services::flow::typed::movie(&client, &title, year).await
 }
 
 /// Finds a show by what the user typed (a name, a TMDB id or link), or by
@@ -1016,18 +1028,7 @@ async fn tv_search(
     items: Vec<tmdb::TvItem>,
 ) -> Result<tmdb::ShowSearch, String> {
     let client = tmdb::Client::new(&key, &lang);
-    // An IMDb id pasted: the show it names.
-    let query = match links::parse(&query) {
-        Some(Link::Imdb(tt)) => client
-            .find_imdb(&tt, true)
-            .await
-            .ok_or("linkNotFound")?
-            .to_string(),
-        Some(Link::Tmdb { tv: true, .. }) | None => query,
-        Some(_) if query.contains("tmdbid") => query,
-        Some(_) => return Err("linkOther".into()),
-    };
-    tmdb::search_show(&client, &query, &items).await
+    renome_services::flow::typed::show(&client, None, &query, &items).await
 }
 
 /// Like `tv_search`, on AniList (anime, no key).
@@ -1037,10 +1038,9 @@ async fn anime_search(
     query: String,
     items: Vec<tmdb::TvItem>,
 ) -> Result<tmdb::ShowSearch, String> {
-    app.state::<AppState>()
-        .al
-        .anime_search(&query, &items)
-        .await
+    let state = app.state::<AppState>();
+    let client = tmdb::Client::new("", "");
+    renome_services::flow::typed::show(&client, Some(&state.al), &query, &items).await
 }
 
 /// The TV show rule's search (the flow the command line runs too): the
@@ -1079,21 +1079,79 @@ fn series_named(
     renome_services::flow::series::named(&files, &shows)
 }
 
-/// Each rule new, with every option at its default in this language (the
-/// command line's too), and the rules that name a whole kind of file.
+/// Everything the window builds rules, their menus and its options from,
+/// in this language (the command line's too): see `catalog::table` and
+/// `options::table`, and the details windows' fields.
 #[tauri::command]
 fn rule_table(lang: String) -> Value {
-    use renome_core::catalog;
-    let defaults: serde_json::Map<String, Value> = catalog::RULES
-        .iter()
-        .map(|spec| {
-            (
-                spec.kind.to_string(),
-                Value::Object(catalog::new_rule(spec, &lang)),
-            )
+    let mut t = renome_core::catalog::table(&lang);
+    t["options"] = renome_services::options::table();
+    t["editFields"] = renome_services::flow::edit::fields_table();
+    // The comic catalogues of whole series (a file's volume and chapter stay).
+    let sources = renome_core::catalog::rule("comic")
+        .and_then(|r| r.option("source"))
+        .map(|o| match o.kind {
+            renome_core::catalog::Kind::Choice(list) => list.iter().map(|c| c.value).collect(),
+            _ => Vec::new(),
         })
+        .unwrap_or_default();
+    t["seriesOnly"] = sources
+        .into_iter()
+        .filter(|s| renome_services::flow::comics::series_only(s))
         .collect();
-    serde_json::json!({ "defaults": defaults, "kinds": catalog::kind_rules() })
+    t
+}
+
+/// The episodes what was typed names (see `flow::series::typed`, the
+/// command line's chooser too).
+#[tauri::command]
+fn episodes_typed(
+    show: renome_core::tv::Show,
+    text: String,
+) -> renome_services::flow::series::Typed {
+    renome_services::flow::series::typed(&show, &text)
+}
+
+/// A larger copy of a catalogue's cover, where there is one.
+#[tauri::command]
+fn bigger_cover(url: String) -> String {
+    renome_services::mangadex::bigger(&url)
+}
+
+/// Where a new album search looks first (see `flow::typed`).
+#[tauri::command]
+fn album_on_discogs(first_found: Option<String>, token: bool) -> bool {
+    renome_services::flow::typed::album_on_discogs(first_found.as_deref(), token)
+}
+
+/// The files that take an answer given for `path` (see `flow::same_answer`,
+/// the command line's too).
+#[tauri::command]
+fn same_answer(
+    path: PathBuf,
+    files: Vec<(PathBuf, String, renome_services::flow::Status)>,
+) -> Vec<PathBuf> {
+    renome_services::flow::same_answer(
+        &path,
+        files.iter().map(|(p, g, s)| (p.as_path(), g.as_str(), *s)),
+    )
+}
+
+/// The list's optional columns that make sense with these rules.
+#[tauri::command]
+fn columns_for(steps: Vec<Value>) -> Vec<&'static str> {
+    renome_core::catalog::columns_for(&steps)
+}
+
+/// The languages the catalogues are asked in: TMDB's (the one chosen, else
+/// the interface's) and the comic catalogues'.
+#[tauri::command]
+fn catalog_langs(tmdb_lang: String, lang: String) -> Value {
+    let chosen = serde_json::json!({ "tmdbLang": tmdb_lang });
+    serde_json::json!({
+        "tmdb": renome_services::options::tmdb_lang(Some(&chosen), &lang),
+        "comic": renome_services::options::comic_lang(&lang),
+    })
 }
 
 /// Why each rule cannot join the rules there (`types`), when it cannot.
@@ -1111,11 +1169,11 @@ fn rule_blocks(types: Vec<String>) -> HashMap<String, Option<renome_core::catalo
         .collect()
 }
 
-/// Steps with only their first kind rule (see `catalog::one_lookup`), and
-/// the types left out.
+/// Saved steps made ready to use (see `catalog::complete_steps`, the
+/// command line's too), and the types left out.
 #[tauri::command]
-fn one_lookup(steps: Vec<Value>) -> (Vec<Value>, Vec<String>) {
-    renome_core::catalog::one_lookup(steps)
+fn complete_steps(steps: Vec<Value>, lang: String, saved: bool) -> (Vec<Value>, Vec<String>) {
+    renome_core::catalog::complete_steps(steps, &lang, saved)
 }
 
 /// The details typed in a details window over each file's (see
@@ -1150,6 +1208,86 @@ fn edit_details(
         .collect()
 }
 
+/// A value the window sent, read as `T` (unreadable: none).
+fn current<T: serde::de::DeserializeOwned>(v: &Option<Value>) -> Option<T> {
+    v.clone().and_then(|v| serde_json::from_value(v).ok())
+}
+
+/// What the window knows of a file for its details: what was chosen or
+/// typed (`current`), what the lookup read of it (`guess`: a book's
+/// guess, a comic's own details).
+#[derive(serde::Deserialize, Default)]
+struct Known {
+    #[serde(default)]
+    current: Option<Value>,
+    #[serde(default)]
+    guess: Option<Value>,
+}
+
+/// The rows a details window opens on for those chosen, and what each
+/// starts from (see `flow::edit`: the command line's `--edit` starts from
+/// the same): `kind` is the rule's (`music`, `book`, `comic`, `photo`).
+#[tauri::command]
+async fn edit_start(
+    app: AppHandle,
+    kind: String,
+    chosen: Vec<PathBuf>,
+    known: HashMap<PathBuf, Known>,
+    parts: HashMap<PathBuf, renome_services::flow::books::Part>,
+    dates: HashMap<PathBuf, String>,
+    from_name: bool,
+    by_folder: bool,
+    audiobooks: bool,
+) -> Result<(Vec<PathBuf>, Vec<Value>), String> {
+    use renome_services::flow::edit;
+    in_background(app, move |state| {
+        let items = state
+            .shown
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|p| p.items.clone())
+            .unwrap_or_default();
+        let chosen: HashSet<PathBuf> = chosen.into_iter().collect();
+        let paths = edit::rows(&kind, &items, &chosen, &parts, audiobooks);
+        let s = state.session.lock().unwrap();
+        let files: HashMap<&PathBuf, &FileEntry> = s.files.iter().map(|f| (&f.path, f)).collect();
+        let by_path: HashMap<&PathBuf, &renome_core::PreviewItem> = items.iter().map(|i| (&i.path, i)).collect();
+        let empty = Known::default();
+        let values = paths
+            .iter()
+            .map(|p| {
+                let k = known.get(p).unwrap_or(&empty);
+                let item = by_path.get(p);
+                let name = item
+                    .map(|i| i.lookup_name.clone().unwrap_or_else(|| i.original.clone()))
+                    .unwrap_or_default();
+                let is_dir = item.is_some_and(|i| i.is_dir);
+                match kind.as_str() {
+                    "music" => serde_json::to_value(edit::song_start(current(&k.current), files.get(p).copied(), from_name)),
+                    "book" => serde_json::to_value(edit::book_start(current(&k.current), current(&k.guess).as_ref(), p, &name)),
+                    "comic" => serde_json::to_value(edit::comic_start(
+                        current(&k.current),
+                        current(&k.guess).as_ref(),
+                        p,
+                        &name,
+                        is_dir,
+                        by_folder,
+                    )),
+                    _ => {
+                        let [year, month, day, hour, minute] =
+                            edit::date_parts(dates.get(p).map_or("", String::as_str));
+                        Ok(serde_json::json!({ "year": year, "month": month, "day": day, "hour": hour, "minute": minute }))
+                    }
+                }
+                .unwrap_or_default()
+            })
+            .collect();
+        (paths, values)
+    })
+    .await
+}
+
 /// Photo dates typed over the ones they had (empty: what the file says);
 /// `None` when the fields make no date.
 #[tauri::command]
@@ -1159,17 +1297,6 @@ fn edit_dates(
 ) -> Option<Vec<String>> {
     old.iter()
         .map(|o| renome_services::flow::edit::photo_date(o, &changed))
-        .collect()
-}
-
-/// What books say about themselves, as a start for typing.
-#[tauri::command]
-fn books_from_guesses(
-    guesses: Vec<renome_core::books::Guess>,
-) -> Vec<renome_core::books::BookMatch> {
-    guesses
-        .iter()
-        .map(renome_services::flow::edit::book_from_guess)
         .collect()
 }
 
@@ -1185,10 +1312,13 @@ fn missing_items(
     use renome_services::flow::missing;
     let state = app.state::<AppState>();
     let shown = state.shown.lock().unwrap();
-    match shown.as_ref() {
+    let found = match shown.as_ref() {
         Some(p) => missing::of(&rules, &known, p, descending, &missing::today()),
         None => Vec::new(),
-    }
+    };
+    // Kept for "Export the missing".
+    *state.missing.lock().unwrap() = found.clone();
+    found
 }
 
 /// What renaming the list as shown would write besides the renames (the
@@ -1242,7 +1372,7 @@ async fn after_rename(
         ol: &state.ol,
         subs,
     };
-    let report = after::run(
+    let mut report = after::run(
         &Gui(app.clone()),
         &state.history,
         history_id,
@@ -1258,13 +1388,7 @@ async fn after_rename(
             s.files
                 .retain(|f| !report.trashed.iter().any(|t| f.path.starts_with(t)));
         }
-        if !report.moved.is_empty() {
-            let moved = ApplyReport {
-                done: report.moved.clone(),
-                ..Default::default()
-            };
-            refresh_renamed(&mut s.files, &moved);
-        }
+        report.followed = followed(&mut s.files, &report.moved);
     }
     forget_tags_of(&state, report.retagged.clone());
     Ok(report)
@@ -1273,8 +1397,33 @@ async fn after_rename(
 /// The videos whose subtitles are searched (the flow the command line
 /// runs too).
 #[tauri::command]
-fn subs_targets(files: Vec<renome_services::flow::subtitles::Identified>) -> Vec<subtitles::Item> {
-    renome_services::flow::subtitles::targets(&files)
+fn subs_targets(
+    files: Vec<renome_services::flow::subtitles::Identified>,
+    langs: String,
+) -> Vec<Value> {
+    use renome_services::flow::subtitles as flow;
+    flow::targets(&files)
+        .into_iter()
+        .map(|item| {
+            let key = flow::key(&item, &langs);
+            let mut v = serde_json::to_value(&item).unwrap_or_default();
+            v["key"] = Value::from(key);
+            v
+        })
+        .collect()
+}
+
+/// Whether some subtitle service can be asked with these keys.
+#[tauri::command]
+fn subs_ready(auth: subtitles::Auth) -> bool {
+    auth.ready()
+}
+
+/// The languages whose subtitles the rules on download, if any (see
+/// `flow::subtitles::wanted`, the command line's too).
+#[tauri::command]
+fn subs_wanted(rules: Vec<Value>) -> Option<String> {
+    renome_services::flow::subtitles::wanted(&rules)
 }
 
 /// Searches subtitles for the videos, in the languages not there yet,
@@ -1323,10 +1472,50 @@ async fn server_check(server: mediaserver::Server) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn server_libraries(
-    server: mediaserver::Server,
-) -> Result<Vec<mediaserver::Library>, String> {
-    server.libraries().await
+async fn server_read(server: Value, key: String) -> Result<(Value, usize, usize), String> {
+    // Pairs kept, paths here paired with themselves (see `mediaserver::read`,
+    // the command line's `servers` too).
+    mediaserver::read(server, &key).await
+}
+
+/// The rule sets with rules saved under a name (see `options::save_set`,
+/// the command line's `sets` too); refused with `exists:<place>` when one
+/// has that name and it is not to be replaced.
+#[tauri::command]
+fn sets_save(
+    mut sets: Vec<Value>,
+    name: String,
+    steps: Vec<Value>,
+    replace: bool,
+) -> Result<Vec<Value>, String> {
+    renome_services::options::save_set(&mut sets, &name, steps, replace)
+        .map_err(|at| format!("exists:{at}"))?;
+    Ok(sets)
+}
+
+/// The rule sets with one renamed; refused when another has that name.
+#[tauri::command]
+fn sets_rename(mut sets: Vec<Value>, at: usize, name: String) -> Result<Vec<Value>, String> {
+    renome_services::options::rename_set(&mut sets, at, &name)
+        .map_err(|at| format!("exists:{at}"))?;
+    Ok(sets)
+}
+
+/// A new media server for the options.
+#[tauri::command]
+fn server_new() -> Value {
+    mediaserver::new_server("jellyfin", "")
+}
+
+/// The servers' keys (one secret) read, or with one server's set.
+#[tauri::command]
+fn server_keys(raw: String) -> serde_json::Map<String, Value> {
+    mediaserver::keys_of(&raw)
+}
+
+#[tauri::command]
+fn server_key_with(raw: String, id: String, key: String) -> String {
+    mediaserver::with_key(&raw, &id, &key)
 }
 
 /// Tells the servers in the options (`servers`, with their keys,
@@ -1390,14 +1579,18 @@ async fn music_search(
         acoustid: &state.acoustid,
         heard: &state.heard,
     };
-    music::search(
+    let mut found = music::search(
         &Gui(app.clone()),
         &services,
         &files.iter().collect::<Vec<_>>(),
         from_name,
         listen,
     )
-    .await
+    .await?;
+    for a in found.iter_mut() {
+        musicbrainz::thumbs(a.candidates.iter_mut().chain(a.choice.as_mut()));
+    }
+    Ok(found)
 }
 
 /// A search typed in the album review, on MusicBrainz or Discogs.
@@ -1408,25 +1601,11 @@ async fn mb_search(
     discogs: Option<bool>,
 ) -> Result<Vec<renome_core::musicbrainz::Candidate>, String> {
     let state = app.state::<AppState>();
-    // A link pasted: that release.
-    match links::parse(&query.album) {
-        Some(Link::MusicBrainz(id)) => {
-            let r = state.mb.release(&id).await?;
-            return Ok(vec![renome_core::musicbrainz::summary(&r, 1.0)]);
-        }
-        Some(Link::Discogs(id)) => {
-            let id = format!("{}{id}", renome_core::discogs::PREFIX);
-            let r = state.dg.release(&id).await?;
-            return Ok(vec![renome_core::musicbrainz::summary(&r, 1.0)]);
-        }
-        Some(_) => return Err("linkOther".into()),
-        None => {}
-    }
-    if discogs == Some(true) {
-        state.dg.search(&query).await
-    } else {
-        state.mb.search(&query).await
-    }
+    let mut found =
+        renome_services::flow::typed::album(&state.mb, &state.dg, &query, discogs == Some(true))
+            .await?;
+    renome_services::musicbrainz::thumbs(found.iter_mut());
+    Ok(found)
 }
 
 /// The Discogs token from the options (empty: Discogs is not used).
@@ -1623,8 +1802,19 @@ async fn books_search(
 ) -> Result<renome_services::flow::books::Outcome, String> {
     let ol = &app.state::<AppState>().ol;
     let settled: HashSet<PathBuf> = settled.into_iter().collect();
-    renome_services::flow::books::search(&Gui(app.clone()), ol, &lang, &items, &settled, audiobooks)
-        .await
+    let mut out = renome_services::flow::books::search(
+        &Gui(app.clone()),
+        ol,
+        &lang,
+        &items,
+        &settled,
+        audiobooks,
+    )
+    .await?;
+    for f in out.found.iter_mut() {
+        renome_services::openlibrary::thumbs(f.candidates.iter_mut().chain(f.choice.as_mut()));
+    }
+    Ok(out)
 }
 
 /// Each file's book as the rule names it, from the books chosen.
@@ -1645,52 +1835,10 @@ async fn book_search(
     title: String,
     author: String,
 ) -> Result<Vec<renome_core::books::Candidate>, String> {
-    // An ISBN or a link pasted: that book.
-    if let Some(link) = links::parse(&title) {
-        return app.state::<AppState>().ol.by_link(&link, &lang).await;
-    }
-    let guess = renome_core::books::Guess {
-        title,
-        author,
-        from_file: true,
-        ..Default::default()
-    };
-    Ok(app.state::<AppState>().ol.find(&guess, &lang).await?.0)
-}
-
-#[tauri::command]
-async fn book_guesses(paths: Vec<PathBuf>, names: Vec<String>) -> Vec<renome_core::books::Guess> {
-    tauri::async_runtime::spawn_blocking(move || {
-        paths
-            .iter()
-            .zip(names)
-            .map(|(p, n)| renome_core::books::guess(&n, &renome_core::ebook::read(p)))
-            .collect()
-    })
-    .await
-    .unwrap_or_default()
-}
-
-/// What each comic says about itself (its `ComicInfo.xml` and name), for
-/// grouping files by series and matching them to issues.
-#[tauri::command]
-async fn comic_guesses(
-    paths: Vec<PathBuf>,
-    names: Vec<Option<String>>,
-    by_folder: bool,
-) -> Vec<Option<renome_core::comics::ComicMatch>> {
-    tauri::async_runtime::spawn_blocking(move || {
-        paths
-            .iter()
-            .enumerate()
-            .map(|(i, p)| {
-                let stem = names.get(i).cloned().flatten();
-                renome_core::comics::from_path(p, stem.as_deref(), by_folder)
-            })
-            .collect()
-    })
-    .await
-    .unwrap_or_default()
+    let ol = &app.state::<AppState>().ol;
+    let mut found = renome_services::flow::typed::book(ol, &lang, &title, &author).await?;
+    renome_services::openlibrary::thumbs(found.iter_mut());
+    Ok(found)
 }
 
 #[tauri::command]
@@ -1743,36 +1891,6 @@ async fn comic_search(
     // Those that could hold the files' highest issue first (the command
     // line orders them so too).
     Ok(renome_services::flow::comics::by_fit(found, highest))
-}
-
-/// The covers, by address, of the comic's issue (or volume) in a series,
-/// to tell which series is the file's. None from the Grand Comics
-/// Database (its pictures are not for programs) nor from catalogues of
-/// whole series (AniList, MangaUpdates: their one cover is the series').
-#[tauri::command]
-async fn series_covers(
-    state: State<'_, AppState>,
-    source: String,
-    key: String,
-    id: String,
-    comic: renome_core::comics::ComicMatch,
-) -> Result<Vec<String>, String> {
-    let (_, issues) = match source.as_str() {
-        "mangadex" => {
-            return match comic.volume {
-                Some(v) => state.md.volume_covers(&id, v).await,
-                None => Ok(Vec::new()),
-            };
-        }
-        "comicvine" => state.cv.issues(&key, &id).await?,
-        "metron" => state.mt.issues(&key, &id).await?,
-        _ => return Ok(Vec::new()),
-    };
-    Ok(renome_core::comics::find_issue(&comic, &issues)
-        .map(|i| i.cover.clone())
-        .filter(|c| !c.is_empty())
-        .into_iter()
-        .collect())
 }
 
 /// The comic rule's search (the flow the command line runs too): a
@@ -1841,9 +1959,9 @@ async fn undo(app: AppHandle, id: String) -> Result<ApplyReport, String> {
         let tags = |done: usize, total: usize| tell("tags", done as u64, total as u64);
         // Not while the command line renames.
         let _lock = renome_services::RenameLock::take(|| ()).ok();
-        let report = state.history.undo_with(&id, &hooks, &tags)?;
+        let mut report = state.history.undo_with(&id, &hooks, &tags)?;
         let s = &mut *state.session.lock().unwrap();
-        refresh_renamed(&mut s.files, &report);
+        refresh_renamed(&mut s.files, &mut report);
         // Songs may have their old tags back: read again.
         for f in s.files.iter_mut() {
             if renome_core::music::is_audio(&f.ext) {
@@ -1874,9 +1992,10 @@ fn clear_history(state: State<AppState>) -> Result<usize, String> {
 }
 
 #[tauri::command]
-fn save_preset(path: PathBuf, steps: Vec<serde_json::Value>) -> Result<(), String> {
+fn save_preset(path: PathBuf, mut steps: Vec<serde_json::Value>) -> Result<(), String> {
     // As the window sends them: options only the window reads (a reader
     // model, comic options the core takes elsewhere) are kept.
+    renome_core::catalog::normalize_steps(&mut steps);
     serde_json::from_value::<Vec<Step>>(serde_json::Value::Array(steps.clone()))
         .map_err(|e| e.to_string())?;
     let text = serde_json::to_string_pretty(&steps).map_err(|e| e.to_string())?;
@@ -1891,16 +2010,21 @@ fn save_csv(path: PathBuf, rows: Vec<Vec<String>>, lang: String) -> Result<(), S
 }
 
 #[tauri::command]
-fn load_preset(path: PathBuf) -> Result<Vec<serde_json::Value>, String> {
+fn load_preset(
+    path: PathBuf,
+    lang: String,
+) -> Result<(Vec<serde_json::Value>, Vec<String>), String> {
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let mut steps: Vec<serde_json::Value> =
-        serde_json::from_str(&text).map_err(|e| format!("invalidPreset: {e}"))?;
-    for step in &mut steps {
-        renome_core::catalog::migrate_step(step);
-    }
+    let v: Value = serde_json::from_str(&text).map_err(|e| format!("invalidPreset: {e}"))?;
+    // A list of steps, a set or a list of sets (the command line reads the
+    // same), made ready as a saved set.
+    let Value::Array(steps) = renome_core::catalog::steps_of(v) else {
+        return Err("invalidPreset".into());
+    };
+    let (steps, dropped) = renome_core::catalog::complete_steps(steps, &lang, true);
     serde_json::from_value::<Vec<Step>>(serde_json::Value::Array(steps.clone()))
         .map_err(|e| format!("invalidPreset: {e}"))?;
-    Ok(steps)
+    Ok((steps, dropped))
 }
 
 /// The settings file is read and written whole by the settings and the
@@ -1910,8 +2034,30 @@ use renome_services::SETTINGS_FILE;
 /// Saved settings; `None` on first run. The format is defined by the UI.
 /// Secrets come apart ([`load_secrets`]), unless the file still has them.
 #[tauri::command]
-fn load_settings() -> Option<Value> {
-    read_settings_file()
+fn load_settings(fallback_lang: String) -> Result<Value, String> {
+    let _file = SETTINGS_FILE.lock().unwrap();
+    match read_settings_file() {
+        Some(saved) => Ok(renome_services::options::whole(Some(saved))),
+        // The first run: the system's language, saved.
+        None => {
+            let mut first = renome_services::options::whole(None);
+            let mut sys = renome_services::system_language();
+            if sys.is_empty() {
+                // The webview's language where the system says none.
+                sys = fallback_lang
+                    .chars()
+                    .take(2)
+                    .collect::<String>()
+                    .to_lowercase();
+            }
+            first["lang"] = Value::from(match sys.as_str() {
+                "pt" | "es" => sys.as_str(),
+                _ => "en",
+            });
+            write_settings_file(&first)?;
+            Ok(first)
+        }
+    }
 }
 
 /// Saves the settings but their secrets, which [`save_secrets`] saves:
@@ -1928,6 +2074,9 @@ async fn save_settings(mut settings: Value) -> Result<(), String> {
                 obj.remove(k);
             }
             obj.extend(old);
+            if let Some(Value::Array(rules)) = obj.get_mut("rules") {
+                renome_core::catalog::normalize_steps(rules);
+            }
         }
         ANSWERS.set_days(cache_days(Some(&settings)));
         write_settings_file(&settings)
@@ -2034,7 +2183,7 @@ pub fn run() {
             session: Mutex::new(session),
             history: History::new(history_dir),
             hashes: Mutex::default(),
-            covers: tokio::sync::Mutex::new(HashMap::new()),
+            covers: renome_services::covers::Covers::default(),
             pictures: Mutex::new(renome_core::similar::PictureCache::in_file(
                 cache_root().join("pictures"),
             )),
@@ -2055,6 +2204,7 @@ pub fn run() {
             mt: metron::Client::default(),
             dg: discogs::Client::default(),
             shown: Mutex::default(),
+            missing: Mutex::default(),
             renamed: Mutex::default(),
         })
         .invoke_handler(tauri::generate_handler![
@@ -2070,7 +2220,9 @@ pub fn run() {
             picture_picks,
             own_cover,
             cover_distances,
-            series_covers,
+            series_by_cover,
+            issue_order,
+            issue_covers,
             remote_image,
             trash_files,
             tmdb_collections,
@@ -2078,6 +2230,8 @@ pub fn run() {
             move_files,
             sort_files,
             file_details,
+            export_rows,
+            export_missing,
             discogs_token,
             google_books_key,
             google_books_check,
@@ -2093,11 +2247,18 @@ pub fn run() {
             tv_search,
             subs_search,
             subs_targets,
+            subs_wanted,
+            subs_ready,
             os_check,
             subdl_check,
             subsource_check,
             server_check,
-            server_libraries,
+            server_read,
+            server_new,
+            sets_save,
+            sets_rename,
+            server_keys,
+            server_key_with,
             server_tell,
             update_check,
             update_install,
@@ -2108,18 +2269,21 @@ pub fn run() {
             after_counts,
             edit_details,
             edit_dates,
-            books_from_guesses,
+            edit_start,
             rule_table,
             rule_blocks,
-            one_lookup,
+            complete_steps,
+            album_on_discogs,
+            bigger_cover,
+            episodes_typed,
+            same_answer,
+            columns_for,
+            catalog_langs,
             missing_items,
             after_rename,
             books_search,
             book_matches,
             book_search,
-            comic_guesses,
-            book_guesses,
-            song_own_tags,
             comic_check,
             comic_search,
             anime_search,

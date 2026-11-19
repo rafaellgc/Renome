@@ -14,7 +14,7 @@
 //! and only then gives it its name; a moved file's original goes after
 //! that. Undo deletes a copy only while it is as it was left.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -87,6 +87,62 @@ pub struct ApplyReport {
     pub copies_removed: usize,
     /// Stopped before the end: the files not reached stay as they were.
     pub stopped: bool,
+    /// Where each file of the list went (see [`Follow`]), for what was
+    /// found per file to follow it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub moved: Vec<(PathBuf, PathBuf)>,
+}
+
+/// Renames as they happened, in order: plain renames are looked up at
+/// once; a renamed folder also moves whatever was under it.
+enum Renamed<'a> {
+    Exact(HashMap<&'a Path, &'a Path>),
+    Folder(&'a Operation),
+}
+
+/// Where paths went with renames that ran in order (two files may swap
+/// names; a renamed folder carries what is inside it).
+pub struct Follow<'a>(Vec<Renamed<'a>>);
+
+impl<'a> Follow<'a> {
+    pub fn new(done: &'a [Operation]) -> Self {
+        let mut renames: Vec<Renamed> = Vec::new();
+        for op in done {
+            if op.to.is_dir() {
+                renames.push(Renamed::Folder(op));
+            } else {
+                if !matches!(renames.last(), Some(Renamed::Exact(_))) {
+                    renames.push(Renamed::Exact(HashMap::new()));
+                }
+                if let Some(Renamed::Exact(map)) = renames.last_mut() {
+                    map.insert(&op.from, &op.to);
+                }
+            }
+        }
+        Self(renames)
+    }
+
+    /// Where a path is now.
+    pub fn path(&self, from: &Path) -> PathBuf {
+        let mut path = from.to_path_buf();
+        for step in &self.0 {
+            match step {
+                Renamed::Exact(map) => {
+                    if let Some(to) = map.get(path.as_path()) {
+                        path = to.to_path_buf();
+                    }
+                }
+                Renamed::Folder(op) => {
+                    if path == op.from {
+                        path = op.to.clone();
+                    } else if let Ok(rest) = path.strip_prefix(&op.from) {
+                        path = op.to.join(rest);
+                    }
+                }
+            }
+        }
+        path
+    }
 }
 
 /// What the caller is told while files are copied, and asked whether to

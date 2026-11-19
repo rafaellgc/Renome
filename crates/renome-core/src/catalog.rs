@@ -1415,7 +1415,44 @@ pub fn migrate_rule(rule: &mut Map<String, Value>) {
         };
         rule.entry("spread").or_insert(Value::from(spread));
     }
+    // Rules from before there was a choice of comic catalogue were on
+    // Comic Vine; their default template had no title yet.
+    // (Only those: the old template is also Kavita's ready-made one.)
+    if spec.kind == "comic" && rule.contains_key("template") && !rule.contains_key("source") {
+        rule.insert("source".into(), Value::from("comicvine"));
+        let old = rule.get("template").and_then(Value::as_str).and_then(|t| {
+            OLD_COMIC_TEMPLATES
+                .iter()
+                .find(|(was, _)| *was == t)
+                .map(|(_, now)| *now)
+        });
+        if let Some(now) = old {
+            rule.insert("template".into(), Value::from(now));
+        }
+    }
+    // Counting a video and its subtitles as one is new rules' default; a
+    // rule saved before it counts them apart.
+    if matches!(spec.kind, "number" | "list") {
+        rule.entry("pairs").or_insert(Value::Bool(false));
+    }
 }
+
+/// The comic rule's old default templates (unchanged by the person), and
+/// the ones that replaced them.
+const OLD_COMIC_TEMPLATES: [(&str, &str); 3] = [
+    (
+        "{série} v{volume} #{número} c{capítulo} ({ano})",
+        "{série} v{volume} #{número} c{capítulo} - {título} ({ano})",
+    ),
+    (
+        "{series} v{volume} #{number} c{chapter} ({year})",
+        "{series} v{volume} #{number} c{chapter} - {title} ({year})",
+    ),
+    (
+        "{serie} v{volumen} #{número} c{capítulo} ({año})",
+        "{serie} v{volumen} #{número} c{capítulo} - {título} ({año})",
+    ),
+];
 
 /// [`migrate_rule`] for a step (`{id, enabled, rule, only}`) or a bare rule.
 pub fn migrate_step(step: &mut Value) {
@@ -1453,8 +1490,386 @@ pub fn migrate_steps(value: &mut Value) {
     }
 }
 
+/// The rules that look files up in a catalogue.
+pub const LOOKUPS: [&str; 5] = ["movie", "series", "music", "book", "comic"];
+
+/// Rules that work on a kind of file (the "+ Rule" menu's first group,
+/// the manual's): those that make the whole name, and the subtitle rule.
+pub fn by_kind(kind: &str) -> bool {
+    is_kind(kind) || kind == "subtitle"
+}
+
+/// Rule types, those by kind of file first.
+pub fn groups() -> (Vec<&'static str>, Vec<&'static str>) {
+    let (media, text): (Vec<&RuleSpec>, Vec<&RuleSpec>) =
+        RULES.iter().partition(|r| by_kind(r.kind));
+    (
+        media.iter().map(|r| r.kind).collect(),
+        text.iter().map(|r| r.kind).collect(),
+    )
+}
+
+/// A value of a step's rule as the core reads it: numbers within the
+/// option's bounds (an empty field is 0, a whole number has no decimals),
+/// a number with decimals not below 0, a choice among its values.
+pub fn normalize_rule(rule: &mut Map<String, Value>) {
+    let Some(spec) = rule
+        .get("type")
+        .and_then(Value::as_str)
+        .and_then(self::rule)
+    else {
+        return;
+    };
+    for opt in spec.options {
+        let Some(v) = rule.get_mut(opt.name) else {
+            continue;
+        };
+        let number = v.as_f64().filter(|n| n.is_finite());
+        match opt.kind {
+            Kind::Int { min, max } => {
+                let n = number.map_or(0, |n| n.trunc() as i64);
+                *v = Value::from(n.clamp(min, max));
+            }
+            Kind::IntChoice(list) => {
+                let n = number.map(|n| n.trunc() as i64);
+                if !n.is_some_and(|n| list.contains(&n)) {
+                    *v = default_value(opt, "en");
+                } else if let Some(n) = n {
+                    *v = Value::from(n);
+                }
+            }
+            Kind::Float => *v = Value::from(number.unwrap_or(0.0).max(0.0)),
+            Kind::Bool if v.is_null() => *v = Value::Bool(false),
+            Kind::Text | Kind::Template | Kind::Lines if v.is_null() => *v = Value::from(""),
+            _ => {}
+        }
+    }
+}
+
+/// [`normalize_rule`] for each step's rule.
+pub fn normalize_steps(steps: &mut [Value]) {
+    for s in steps {
+        if let Some(Value::Object(rule)) = s.get_mut("rule") {
+            normalize_rule(rule);
+        }
+    }
+}
+
+/// A saved rule brought up to date and whole: old option names updated
+/// ([`migrate_rule`]), the options it leaves out at their defaults in
+/// this language.
+pub fn complete_rule(mut rule: Map<String, Value>, lang: &str) -> Option<Map<String, Value>> {
+    migrate_rule(&mut rule);
+    let spec = rule
+        .get("type")
+        .and_then(Value::as_str)
+        .and_then(self::rule)?;
+    let mut full = new_rule(spec, lang);
+    full.extend(rule);
+    normalize_rule(&mut full);
+    Some(full)
+}
+
+/// Saved steps (remembered from the last session, a rule set, a preset
+/// file) made ready to use: with their first kind rule only (the types
+/// left out are returned), each rule whole ([`complete_rule`]; unknown
+/// types left out too) and an id. `saved`: a set or file whose rules
+/// are all off was saved like that by "turn the rules off after
+/// renaming", not by choice: they come back on.
+pub fn complete_steps(mut steps: Vec<Value>, lang: &str, saved: bool) -> (Vec<Value>, Vec<String>) {
+    for s in steps.iter_mut() {
+        migrate_step(s);
+    }
+    let (kept, mut dropped) = one_lookup(steps);
+    let mut out = Vec::new();
+    for (n, s) in kept.into_iter().enumerate() {
+        let Value::Object(mut step) = s else { continue };
+        let rule = match step.remove("rule") {
+            Some(Value::Object(r)) => r,
+            _ => continue,
+        };
+        let kind = rule
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let Some(rule) = complete_rule(rule, lang) else {
+            dropped.push(kind);
+            continue;
+        };
+        step.insert("rule".into(), Value::Object(rule));
+        if !step.get("enabled").is_some_and(Value::is_boolean) {
+            step.insert("enabled".into(), Value::Bool(true));
+        }
+        if !step
+            .get("id")
+            .is_some_and(|v| v.as_str().is_some_and(|s| !s.is_empty()))
+        {
+            step.insert("id".into(), Value::from(step_id(n)));
+        }
+        out.push(Value::Object(step));
+    }
+    if saved && !out.is_empty() && out.iter().all(|s| s["enabled"] == Value::Bool(false)) {
+        for s in out.iter_mut() {
+            s["enabled"] = Value::Bool(true);
+        }
+    }
+    (out, dropped)
+}
+
+/// The steps in a JSON file: a list of steps, a set (`{name, steps}`), or
+/// a list of sets (the first).
+pub fn steps_of(v: Value) -> Value {
+    match v {
+        Value::Object(mut o) => o.remove("steps").unwrap_or(Value::Array(vec![])),
+        Value::Array(items) if items.first().is_some_and(|i| i.get("steps").is_some()) => items
+            .into_iter()
+            .next()
+            .and_then(|mut s| s.get_mut("steps").map(Value::take))
+            .unwrap_or_default(),
+        other => other,
+    }
+}
+
+/// A step id, different for each step made in a run.
+pub fn step_id(n: usize) -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static RUN: AtomicU64 = AtomicU64::new(0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or_default();
+    format!("s{now:x}{}{n}", RUN.fetch_add(1, Ordering::Relaxed))
+}
+
+/// Whether the release's advertisements go to the Trash: asked by the
+/// movie or TV show rule that is on.
+pub fn trash_ads(steps: &[Value]) -> bool {
+    steps.iter().any(|s| {
+        s["enabled"] != Value::Bool(false)
+            && matches!(s["rule"]["type"].as_str(), Some("movie" | "series"))
+            && s["rule"]["trashAds"].as_bool() == Some(true)
+    })
+}
+
+/// The list's optional columns that make sense with the rules there (on
+/// or off): a song's tags with the music rule, a video's picture with the
+/// movie and TV show rules, the date taken when a rule inserts it.
+pub fn columns_for(steps: &[Value]) -> Vec<&'static str> {
+    let types: Vec<&str> = steps
+        .iter()
+        .filter_map(|s| s["rule"]["type"].as_str())
+        .collect();
+    let lookup = types.iter().find(|t| is_kind(t)).copied();
+    let mut cols = Vec::new();
+    if lookup == Some("music") {
+        cols.extend([
+            "artist", "album", "title", "track", "year", "genre", "length", "quality",
+        ]);
+    }
+    if matches!(lookup, Some("movie" | "series")) {
+        cols.extend(["resolution", "codec"]);
+    }
+    if steps
+        .iter()
+        .any(|s| s["rule"]["type"] == "insert" && s["rule"]["source"] == "taken")
+    {
+        cols.push("taken");
+    }
+    cols
+}
+
+/// Every optional column, in the list's order.
+pub const COLUMNS: [&str; 11] = [
+    "artist",
+    "album",
+    "title",
+    "track",
+    "year",
+    "genre",
+    "length",
+    "quality",
+    "resolution",
+    "codec",
+    "taken",
+];
+
+/// Frame rates the subtitle rule retimes between: the subtitle's, the
+/// video's.
+pub const FPS_PAIRS: [(f64, f64); 8] = [
+    (23.976, 25.0),
+    (25.0, 23.976),
+    (24.0, 25.0),
+    (25.0, 24.0),
+    (23.976, 24.0),
+    (24.0, 23.976),
+    (29.97, 25.0),
+    (25.0, 29.97),
+];
+
+/// Ready-made comic templates (name, folder), per language: Kavita reads
+/// `Series v01 #001 c001`; a title after " - " is not in its examples,
+/// so it is left out. Renome's own are the rule's defaults.
+pub const KAVITA_TEMPLATES: [(&str, &str); 3] = [
+    (
+        "{série} v{volume} #{número} c{capítulo} ({ano})",
+        "{série} ({ano da série})",
+    ),
+    (
+        "{series} v{volume} #{number} c{chapter} ({year})",
+        "{series} ({series year})",
+    ),
+    (
+        "{serie} v{volumen} #{número} c{capítulo} ({año})",
+        "{serie} ({año de la serie})",
+    ),
+];
+
+/// The photo rule's ready templates per language: names, then folders.
+pub const PHOTO_TEMPLATES: [([&str; 4], [&str; 4]); 3] = [
+    (
+        [
+            "{ano}-{mês}-{dia} {hora}.{minuto}.{segundo}",
+            "{ano}{mês}{dia}_{hora}{minuto}{segundo}",
+            "{ano}-{mês}-{dia} {hora}.{minuto}.{segundo} ({câmera})",
+            "{ano}-{mês}-{dia} - {nome}",
+        ],
+        [
+            "{ano}/{ano}-{mês}",
+            "{ano}/{mês} - {nome do mês}",
+            "{ano}/{ano}-{mês}-{dia}",
+            "{ano}",
+        ],
+    ),
+    (
+        [
+            "{year}-{month}-{day} {hour}.{minute}.{second}",
+            "{year}{month}{day}_{hour}{minute}{second}",
+            "{year}-{month}-{day} {hour}.{minute}.{second} ({camera})",
+            "{year}-{month}-{day} - {name}",
+        ],
+        [
+            "{year}/{year}-{month}",
+            "{year}/{month} - {month name}",
+            "{year}/{year}-{month}-{day}",
+            "{year}",
+        ],
+    ),
+    (
+        [
+            "{año}-{mes}-{día} {hora}.{minuto}.{segundo}",
+            "{año}{mes}{día}_{hora}{minuto}{segundo}",
+            "{año}-{mes}-{día} {hora}.{minuto}.{segundo} ({cámara})",
+            "{año}-{mes}-{día} - {nombre}",
+        ],
+        [
+            "{año}/{año}-{mes}",
+            "{año}/{mes} - {nombre del mes}",
+            "{año}/{año}-{mes}-{día}",
+            "{año}",
+        ],
+    ),
+];
+
+/// A language's place in the per-language tables (English when unknown).
+pub fn lang_index(lang: &str) -> usize {
+    LANGS.iter().position(|l| *l == lang).unwrap_or(1)
+}
+
+/// Everything the window builds rules and their menus from, in a
+/// language: each rule new, the rules by kind of file, the groups of the
+/// "+ Rule" menu, the ready-made templates, the frame rates, the columns.
+pub fn table(lang: &str) -> Value {
+    let defaults: Map<String, Value> = RULES
+        .iter()
+        .map(|spec| (spec.kind.to_string(), Value::Object(new_rule(spec, lang))))
+        .collect();
+    let i = lang_index(lang);
+    let (media, text) = groups();
+    let (kavita, kavita_folder) = KAVITA_TEMPLATES[i];
+    serde_json::json!({
+        "defaults": defaults,
+        "kinds": kind_rules(),
+        "lookups": LOOKUPS,
+        "media": media,
+        "text": text,
+        "comicPresets": {
+            "renome": {
+                "template": defaults["comic"]["template"],
+                "folderTemplate": defaults["comic"]["folderTemplate"],
+            },
+            "kavita": { "template": kavita, "folderTemplate": kavita_folder },
+        },
+        "photoTemplates": { "names": PHOTO_TEMPLATES[i].0, "folders": PHOTO_TEMPLATES[i].1 },
+        "fpsPairs": FPS_PAIRS,
+        "columns": COLUMNS,
+    })
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn saved_rules_come_whole_and_as_the_core_reads_them() {
+        use serde_json::json;
+        let step = |rule: Value, enabled: bool| json!({ "enabled": enabled, "rule": rule });
+        let (steps, dropped) = complete_steps(
+            vec![
+                // A frame rate keeps its decimals; an empty number is 0.
+                step(
+                    json!({ "type": "subtitle", "fpsFrom": 23.976, "fpsTo": 25, "shiftMs": null }),
+                    false,
+                ),
+                // A list rule saved before "pairs" counts them apart.
+                step(json!({ "type": "list", "names": "a" }), false),
+                // Subtitle tools go with videos, not with songs.
+                step(json!({ "type": "music" }), false),
+            ],
+            "en",
+            true,
+        );
+        assert_eq!(dropped, vec!["music".to_string()]);
+        let r = |i: usize| &steps[i]["rule"];
+        assert_eq!(r(0)["fpsFrom"], 23.976);
+        assert_eq!(r(0)["shiftMs"], 0);
+        assert_eq!(r(1)["pairs"], false);
+        // All off when saved (turned off after renaming): back on.
+        assert!(steps.iter().all(|s| s["enabled"] == true));
+        // A comic rule saved before the catalogue choice was on Comic
+        // Vine, its old template updated…
+        let (old, _) = complete_steps(
+            vec![step(
+                json!({ "type": "comic", "template": "{series} v{volume} #{number} c{chapter} ({year})" }),
+                true,
+            )],
+            "en",
+            false,
+        );
+        assert_eq!(old[0]["rule"]["source"], "comicvine");
+        assert_eq!(
+            old[0]["rule"]["template"],
+            "{series} v{volume} #{number} c{chapter} - {title} ({year})"
+        );
+        // …but the same template chosen later (Kavita's) stays.
+        let (kavita, _) = complete_steps(
+            vec![step(
+                json!({ "type": "comic", "source": "gcd", "template": KAVITA_TEMPLATES[1].0 }),
+                true,
+            )],
+            "en",
+            false,
+        );
+        assert_eq!(kavita[0]["rule"]["template"], KAVITA_TEMPLATES[1].0);
+    }
+
+    #[test]
+    fn numbers_within_bounds() {
+        let mut r: Map<String, Value> =
+            serde_json::from_value(serde_json::json!({ "type": "photo", "shiftHours": 99.7 }))
+                .unwrap();
+        normalize_rule(&mut r);
+        assert_eq!(r["shiftHours"], 48);
+    }
 
     #[test]
     fn one_kind_rule_at_a_time() {

@@ -2,16 +2,13 @@
 // others) found per file, the choices, the details typed in and what
 // writing them needs.
 
-import { modelOf, screenMm } from "../readers";
 import { api } from "$lib/api";
 import { notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
-import { splitExt } from "$lib/rules";
 import { tmdbLang } from "$lib/settings.svelte";
-import type { BookCandidate, BookGuess, BookMatch, BookPart, BookState, EditField, PreviewItem } from "$lib/types";
-import { counts, moved, ruleOf, without, type PageCtx } from "./common";
+import type { BookCandidate, BookMatch, BookPart, BookState, EditField } from "$lib/types";
+import { counts, editFields, moved, ruleOf, takers, without, type PageCtx } from "./common";
 
-const NO_GUESS: BookGuess = { title: "", author: "", year: null, isbns: [], fromFile: false, series: "", seriesIndex: "", publisher: "", language: "" };
 
 
 export class Books {
@@ -39,11 +36,6 @@ export class Books {
     return r?.type === "book" && r.audiobooks !== false;
   });
 
-  /** A file the rule names: a book, or an audiobook's audio (by what the core says the file is). */
-  takes(i: PreviewItem) {
-    return !i.isDir && (!!i.kinds?.includes("book") || (this.audio && !!i.kinds?.includes("audio")));
-  }
-
   /** Each chosen book's details as the rule names it (made by the shared
    *  flow: one spelling per author across the list, an audiobook's files
    *  with their part); rebuilt whenever the choices change. */
@@ -57,23 +49,11 @@ export class Books {
     this.built = chosen.length ? await api.bookMatches($state.snapshot(chosen), $state.snapshot(this.parts), this.audio) : {};
   }
   counts = $derived.by(() => counts(this.state, this.#ctx.items));
-  /** The books among the rows chosen in the list. */
-  selected = $derived.by(() => this.#ctx.items.filter((i) => this.#ctx.selected.has(i.path) && this.takes(i)));
-
-
+  /** The rows chosen in the list the details window edits (the core says). */
+  selected = $derived.by(() => this.#ctx.items.filter((i) => this.#ctx.selected.has(i.path) && i.editable));
 
   /** The details window's fields. */
-  fields = $derived<EditField[]>([
-    { key: "title", label: t("bookEditTitle"), wide: true },
-    { key: "authors", label: t("bookEditAuthors"), wide: true },
-    { key: "year", label: t("bookEditYear"), numeric: true },
-    { key: "publisher", label: t("bookEditPublisher") },
-    { key: "language", label: t("bookEditLanguage") },
-    { key: "series", label: t("bookEditSeries"), wide: true },
-    { key: "seriesIndex", label: t("bookEditSeriesIndex") },
-    { key: "isbn", label: t("bookEditIsbn") },
-  ]);
-
+  fields = $derived<EditField[]>(editFields("book"));
 
   /** A book's details as the window shows them. */
   text(m: BookMatch): Record<string, string> {
@@ -114,7 +94,7 @@ export class Books {
           guess: f.guess,
           candidates: f.candidates,
           choice: f.choice,
-          status: f.choice ? "auto" : f.candidates.length ? "choose" : "none",
+          status: f.status,
           error: f.error,
           group: f.group,
         };
@@ -140,38 +120,34 @@ export class Books {
   }
 
   /** The user's pick for a book; undecided files of its group (the same
-   *  book in other formats) get it too. */
+   *  book in other formats) get it too (the shared rule). */
   async choose(path: string, choice: BookCandidate | null, candidates?: BookCandidate[]) {
-    const b = this.state[path];
-    if (!b) return;
-    const set = (p: string) => {
+    if (!this.state[path]) return;
+    for (const p of await takers(path, this.state)) {
       this.state[p] = { ...this.state[p], choice, status: choice ? "chosen" : "none", candidates: candidates ?? this.state[p].candidates };
-    };
-    set(path);
-    for (const [p, o] of Object.entries(this.state)) {
-      if (p !== path && o.group === b.group && (o.status === "choose" || o.status === "none")) set(p);
     }
     await this.rebuild();
   }
 
-  /** Opens the details window on the books chosen in the list. */
+  /** Opens the details window on the books chosen in the list (an
+   *  audiobook's files together); what each starts from, the shared flow
+   *  says (the command line's --edit too). */
   async openEdit() {
-    // An audiobook's files are edited together.
-    const leaders = new Set(this.selected.map((i) => this.parts[i.path]?.leader).filter(Boolean));
-    const rows = this.#ctx.items.filter((i) => this.selected.includes(i) || (!!this.parts[i.path] && leaders.has(this.parts[i.path].leader)));
-    if (!rows.length) return;
-    const missing = rows.filter((i) => !this.matches[i.path] && !this.state[i.path]);
-    const guessed: Record<string, BookGuess> = {};
-    if (missing.length) {
-      const got = await api.bookGuesses(missing.map((i) => i.path), missing.map((i) => splitExt(this.#ctx.readName(i))[0]));
-      missing.forEach((i, n) => (guessed[i.path] = got[n]));
-    }
-    // What each says about itself, where nothing was chosen or typed.
-    const starts = await api.booksFromGuesses(rows.map((i) => $state.snapshot(this.state[i.path]?.guess ?? guessed[i.path] ?? NO_GUESS)));
-    this.edit = {
-      paths: rows.map((i) => i.path),
-      books: rows.map((i, n) => $state.snapshot(this.matches[i.path]) ?? starts[n]),
-    };
+    if (!this.#ctx.selected.size) return;
+    const known = Object.fromEntries(
+      this.#ctx.items.map((i) => [i.path, { current: this.matches[i.path], guess: this.state[i.path]?.guess }]),
+    );
+    const [paths, books] = await api.editStart<BookMatch>({
+      kind: "book",
+      chosen: [...this.#ctx.selected],
+      known: $state.snapshot(known),
+      parts: $state.snapshot(this.parts),
+      dates: {},
+      fromName: false,
+      byFolder: false,
+      audiobooks: this.audio,
+    });
+    if (paths.length) this.edit = { paths, books };
   }
 
   /** The fields changed in the details window, for each of its books (applied as the command line's --edit does). */

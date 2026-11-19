@@ -61,6 +61,9 @@ pub struct Found {
     /// Picked with confidence; else its issue is a doubt (the file keeps
     /// the series meanwhile).
     pub sure: bool,
+    pub status: super::Status,
+    /// What was read from the file (see [`read`]).
+    pub read: String,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -267,9 +270,11 @@ pub async fn search(
             out.files.push(Found {
                 path: files[i].path.clone(),
                 volume_key: vkey.clone(),
-                own,
+                own: own.clone(),
                 choice: found.issue.clone(),
                 sure: true,
+                status: super::Status::Auto,
+                read: read(&own),
             });
             out.volumes.insert(
                 vkey,
@@ -459,6 +464,8 @@ pub async fn search(
                         own: own.clone(),
                         choice: String::new(),
                         sure: true,
+                        status: super::Status::Auto,
+                        read: read(own),
                     });
                 }
             }
@@ -491,6 +498,12 @@ pub async fn search(
                 volume_key: vkey.clone(),
                 own: own.clone(),
                 sure: found.is_some() || chapter_only,
+                status: if found.is_some() || chapter_only {
+                    super::Status::Auto
+                } else {
+                    super::Status::Choose
+                },
+                read: read(own),
                 // A file without its issue still takes the series, so a
                 // series' files stay together; its issue can still be picked.
                 choice: found.unwrap_or_default(),
@@ -600,4 +613,23 @@ mod tests {
             "https://www.mangaupdates.com/series/10"
         );
     }
+}
+
+/// What was read from a comic file, for a review's header and the
+/// chooser: `Series v01 #2 c3 (1999)`.
+pub fn read(o: &ComicMatch) -> String {
+    let mut parts = vec![o.series.clone()];
+    if let Some(v) = o.volume {
+        parts.push(format!("v{v:02}"));
+    }
+    if !o.number.is_empty() {
+        parts.push(format!("#{}", o.number));
+    }
+    if !o.chapter.is_empty() {
+        parts.push(format!("c{}", o.chapter));
+    }
+    if let Some(y) = o.year {
+        parts.push(format!("({y})"));
+    }
+    parts.join(" ")
 }

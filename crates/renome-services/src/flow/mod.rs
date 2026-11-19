@@ -8,15 +8,64 @@ pub mod after;
 pub mod books;
 pub mod comics;
 pub mod edit;
+pub mod export;
 pub mod missing;
 pub mod movies;
 pub mod music;
 pub mod series;
 pub mod subtitles;
+pub mod typed;
 
 use renome_core::PreviewItem;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+
+/// How a file (or album) stands after a lookup, the same for the window's
+/// marks and reviews and the command line's questions.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Status {
+    /// Picked with confidence.
+    Auto,
+    /// Picked by the person.
+    Chosen,
+    /// Candidates to choose from.
+    Choose,
+    /// Nothing found (or none of them, by the person).
+    #[default]
+    None,
+}
+
+impl Status {
+    /// Picked with confidence, or candidates, or nothing.
+    pub fn of(picked: bool, candidates: bool) -> Self {
+        if picked {
+            Status::Auto
+        } else if candidates {
+            Status::Choose
+        } else {
+            Status::None
+        }
+    }
+}
+
+/// The files that take an answer given for `path`: it, and the files of
+/// its group still undecided (a movie's subtitles, the same book in other
+/// formats). `files`: each file's group and status.
+pub fn same_answer<'a>(
+    path: &Path,
+    files: impl IntoIterator<Item = (&'a Path, &'a str, Status)>,
+) -> Vec<PathBuf> {
+    let files: Vec<(&Path, &str, Status)> = files.into_iter().collect();
+    let Some(group) = files.iter().find(|f| f.0 == path).map(|f| f.1) else {
+        return vec![path.to_path_buf()];
+    };
+    files
+        .iter()
+        .filter(|f| f.0 == path || (f.1 == group && matches!(f.2, Status::Choose | Status::None)))
+        .map(|f| f.0.to_path_buf())
+        .collect()
+}
 
 /// A file of the list, as the lookups see it.
 #[derive(Clone, Debug, Deserialize)]

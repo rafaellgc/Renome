@@ -288,10 +288,10 @@ fn commands() -> Command {
                 .help(t(
                     "argEdit",
                     &[
-                        ("music", &edit::SONG.join(", ")),
-                        ("book", &edit::BOOK.join(", ")),
-                        ("comic", &edit::COMIC.join(", ")),
-                        ("photo", &edit::PHOTO.join(", ")),
+                        ("music", &edit::names("music")),
+                        ("book", &edit::names("book")),
+                        ("comic", &edit::names("comic")),
+                        ("photo", &edit::names("photo")),
                     ],
                 ))
                 .action(ArgAction::Append)
@@ -341,6 +341,14 @@ fn commands() -> Command {
             Arg::new("csv")
                 .long("csv")
                 .help(t("argCsv", &[]))
+                .value_name("FILE")
+                .value_parser(clap::value_parser!(std::path::PathBuf))
+                .value_hint(clap::ValueHint::FilePath),
+        )
+        .arg(
+            Arg::new("missing-csv")
+                .long("missing-csv")
+                .help(t("argMissingCsv", &[]))
                 .value_name("FILE")
                 .value_parser(clap::value_parser!(std::path::PathBuf))
                 .value_hint(clap::ValueHint::FilePath),

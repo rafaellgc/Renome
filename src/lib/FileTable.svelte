@@ -2,12 +2,13 @@
   import Icon from "./Icon.svelte";
   import { tick } from "svelte";
   import { api, type WorkGroup } from "./api";
-  import { COL_LABEL, detailText } from "./details";
+  import { COL_LABEL } from "./details";
   import { diff, type Seg } from "./diff";
   import { LOCALES, t } from "./i18n";
   import { interleave, type Ghost, type Row } from "./missing";
   import { saveSettings, settings } from "./settings.svelte";
-  import { DETAIL_COLUMNS, type Copies, type DetailColumn, type Details, type MovieStatus, type PreviewItem, type ViewSort } from "./types";
+  import { TABLE } from "./rules";
+  import type { Copies, DetailColumn, MovieStatus, PreviewItem, ViewSort } from "./types";
 
   let {
     items,
@@ -237,10 +238,6 @@
   const base = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
   function note(item: PreviewItem) {
-    // Two copies of the same file heading for the same name: say so.
-    if (item.problem === "duplicate" && copies[item.path]?.others.some((p) => byPath.get(p)?.newName === item.newName)) {
-      return t("problem.duplicateIdentical");
-    }
     if (item.problem) return t(`problem.${item.problem}`);
     if (item.windowsUnsafe && settings.warnWindows) return t("windowsUnsafe");
     return "";
@@ -252,7 +249,7 @@
     artist: "minmax(90px, 0.8fr)", album: "minmax(90px, 0.8fr)", title: "minmax(90px, 0.8fr)", genre: "minmax(70px, 0.5fr)",
     track: "48px", year: "48px", length: "56px", quality: "112px", resolution: "64px", codec: "64px", taken: "120px",
   };
-  const extra = $derived(DETAIL_COLUMNS.filter((c) => available.includes(c) && settings.columns.includes(c)));
+  const extra = $derived(TABLE.columns.filter((c) => available.includes(c) && settings.columns.includes(c)));
   $effect(() => {
     if (!available.length) columnsMenu = false;
   });
@@ -371,7 +368,7 @@
 
   /** What the optional columns show, read for the rows in view; read
    *  again when the file changed (its size or date). */
-  let details = $state<Record<string, Details>>({});
+  let details = $state<Record<string, Record<string, string>>>({});
   const readAs: Record<string, string> = {};
   const stampOf = (i: PreviewItem) => `${i.size}:${i.modified}`;
   let detailTimer: ReturnType<typeof setTimeout> | undefined;
@@ -383,7 +380,7 @@
     detailTimer = setTimeout(async () => {
       for (const i of want) readAs[i.path] = stampOf(i);
       try {
-        const got = await api.fileDetails(want.map((i) => i.path));
+        const got = await api.fileDetails(want.map((i) => i.path), settings.lang);
         details = { ...details, ...got };
       } catch {
         for (const i of want) delete readAs[i.path];
@@ -400,7 +397,7 @@
     <div class="cols-back" onclick={() => (columnsMenu = false)}></div>
     <div class="cols-menu" role="group" aria-label={t("columnsMenu")}>
       <p class="cols-title">{t("columnsMenu")}</p>
-      {#each DETAIL_COLUMNS.filter((c) => available.includes(c)) as c (c)}
+      {#each TABLE.columns.filter((c) => available.includes(c)) as c (c)}
         <label class="cols-item">
           <input type="checkbox" checked={settings.columns.includes(c)} onchange={() => toggleColumn(c)} />
           {t(COL_LABEL[c])}
@@ -532,7 +529,7 @@
             <span class="c-dir" title={item.dir}>{dir(item.dir)}</span>
           {/if}
           {#each extra as c (c)}
-            {@const v = detailText(c, details[item.path])}
+            {@const v = details[item.path]?.[c] ?? ""}
             <span class="c-x" class:num={NARROW.includes(c)} title={v}>{v}</span>
           {/each}
           <span class="c-size">{item.isDir ? "" : size(item.size)}</span>

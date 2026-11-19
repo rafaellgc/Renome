@@ -16,8 +16,13 @@
     onclose: () => void;
   } = $props();
 
-  /** A larger copy (MangaDex keeps a 512 px one beside the 256 px). */
-  const big = $derived(url.replace(/\.256\.jpg$/, ".512.jpg"));
+  /** A larger copy, where the catalogue keeps one (Rust knows which). */
+  let big = $state("");
+  $effect(() => {
+    const u = url;
+    big = u;
+    if (u) api.biggerCover(u).then((b) => { if (url === u) big = b; }, () => {});
+  });
   /** Read by the program when the page cannot show it by its address
    *  (MangaDex refuses its pictures to other pages). */
   let fetched = $state<string | null>(null);

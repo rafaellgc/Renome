@@ -5,7 +5,6 @@
 import { api } from "$lib/api";
 import { confirm, notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
-import { newRule } from "$lib/rules";
 import { settings } from "$lib/settings.svelte";
 import type { SubCandidate, SubsAuth } from "$lib/types";
 import { moved, without, type PageCtx } from "./common";
@@ -19,7 +18,6 @@ import type { Series } from "./series.svelte";
  *  episode, languages), to search again on a change. */
 export type SubsState = { key: string; have: string[]; inside: string[]; candidates: SubCandidate[]; pick: Record<string, number> };
 
-const subsKey = (it: { tmdb: number; season?: number | null; episode?: number | null }, langs: string) => `${it.tmdb}:${it.season ?? ""}:${it.episode ?? ""}:${langs}`;
 /** Subtitles chosen for a video, not there yet. */
 const chosen = (s: SubsState | undefined) => (s ? Object.entries(s.pick).filter(([l, i]) => i >= 0 && !s.have.includes(l)).length : 0);
 
@@ -41,16 +39,16 @@ export class Subtitles {
     this.#ctx = ctx;
     this.#movies = movies;
     this.#series = series;
+    $effect(() => {
+      const rules = this.#ctx.steps.filter((s) => s.enabled).map((s) => $state.snapshot(s.rule));
+      api.subsWanted(rules).then((w) => (this.wanted = w), () => {});
+    });
   }
 
   /** The languages asked for by the movie or TV show rule, when it
-   *  downloads subtitles. */
-  wanted = $derived.by(() => {
-    const m = this.#movies.rule?.rule;
-    const s = this.#series.rule?.rule;
-    const r = m?.type === "movie" ? m : s?.type === "series" && s.source !== "anilist" ? s : null;
-    return r?.subtitles ? (r.subLangs ?? (newRule("movie") as { subLangs: string }).subLangs) : null;
-  });
+   *  downloads subtitles (the shared flow says: `subtitles::wanted`). */
+  wanted = $state<string | null>(null);
+
   counts = $derived.by(() => {
     const visible = new Set(this.#ctx.items.map((i) => i.path));
     let subs = 0;
@@ -92,8 +90,9 @@ export class Subtitles {
       isDir: i.isDir,
       movie: (this.#movies.rule ? this.#movies.state[i.path]?.choice?.id : null) ?? null,
       episode: (this.#series.rule ? this.#series.matches[i.path] : null) ?? null,
+      conflict: i.status === "conflict",
     }));
-    return api.subsTargets($state.snapshot(files));
+    return api.subsTargets($state.snapshot(files), this.wanted ?? "");
   }
 
   /** Searches subtitles for the visible videos identified (those searched
@@ -102,13 +101,13 @@ export class Subtitles {
     const langs = this.wanted;
     if (langs === null) return;
     const auth = this.auth();
-    if (!auth.osKey && !auth.subdlKey && !(auth.subsourceKey && auth.tmdbKey)) {
+    if (!(await api.subsReady(auth))) {
       const ok = await confirm({ title: t("subsTitle"), text: t("subsNeedKey"), ok: t("options"), cancel: t("cancel") });
       if (ok) this.#ctx.openOptions();
       return;
     }
     const all = await this.items();
-    const items = all.filter((it) => again || this.found[it.path]?.key !== subsKey(it, langs));
+    const items = all.filter((it) => again || this.found[it.path]?.key !== it.key);
     if (!items.length) {
       if (!all.length) this.#ctx.say(t("subsNoVideos"));
       else if (this.counts.videos) this.review = true;
@@ -121,7 +120,7 @@ export class Subtitles {
       if (r.remaining !== null) this.remaining = r.remaining;
       const asked = new Map(items.map((it) => [it.path, it]));
       for (const f of r.found) {
-        this.found[f.path] = { key: subsKey(asked.get(f.path)!, langs), have: f.have, inside: f.inside, candidates: f.candidates, pick: f.pick };
+        this.found[f.path] = { key: asked.get(f.path)!.key, have: f.have, inside: f.inside, candidates: f.candidates, pick: f.pick };
       }
       if (r.errors.length) await notify({ title: t("subsTitle"), text: r.errors.map(tError).join("\n") });
       // Shown even with nothing found, to tell why.

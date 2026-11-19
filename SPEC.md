@@ -2671,7 +2671,38 @@ preview each file's kinds and whether the lookup rule leaves it alone
 (`PreviewItem::kinds`, `outside`, `pair`: the window's "outside the
 rule" tag and its details windows), `text::csv` the CSV files of both,
 `similar::picks` which similar picture stands out (the window's badges,
-the command line's ★), and
+the command line's ★). Also shared since 2026-11-19 (nothing on files is
+decided in the window's TypeScript any more): `catalog::complete_steps`
+(saved rules made whole: old options migrated — a comic rule without a
+catalogue was Comic Vine's, a list/number rule without `pairs` counts
+files apart —, one lookup rule, a set saved all off comes back on),
+`catalog::normalize_steps` (numbers as the core reads them, within each
+option's bounds), `catalog::table` (defaults, rule groups, ready-made
+templates, frame-rate pairs, the list's columns, `columns_for`),
+`renome_services::options` (every setting, its default and label: the
+window's settings load whole from it and `renome-cli options` lists it;
+rule sets by name, `save_set`/`rename_set`), `flow::Status` and
+`flow::same_answer` (how each file stands; an answer goes to the
+undecided files of its group), `flow::typed` (searches typed in a review
+or chooser: links, ids, `Title 1999`, `title / author`),
+`flow::series::typed` and `covers::issue_order` (episodes and issues a
+text names), `covers` (a file's cover compared with the catalogue's: series
+and issues with it first, in the window's pickers and the command line's
+choosers), `flow::subtitles::wanted` (which languages, none on AniList;
+no search for files in conflict), `flow::edit::{rows, *_start}` (which
+rows a details window or `--edit` edits — an audiobook's files together —
+and what each starts from), `flow::export` (the CSV of the list and of
+the missing items: columns, order, folder and name; `--csv` adds the
+optional columns chosen in the options, `--missing-csv FILE` saves the
+missing), `apply::Follow` (where each file of the list went), the core's
+`Hints` (the rule cards' counts and parts), `PreviewItem::editable`,
+`Problem::DuplicateIdentical` and `identical::copies_among` (the command
+line finds identical copies heading for one name, as the window does in
+the background: the first goes, the others stay), `mediaserver::{keys_of,
+with_key, paired, read}`. The readers' screens and the readers that get
+no PNG are read from `src/lib/readers.ts` by the core's build too. Plurals
+in texts are written twice (TypeScript for the window, Rust for the
+command line); both run the cases of `src/lib/plurals.json`. And
 `crates/renome-cli` the program: every command below, the lookup rules
 with their choices, `--edit`, `--missing`, Ctrl+C, the manual, man pages
 and completions, in every package. Its texts are the page's (`i18n.ts`)
@@ -2780,7 +2811,9 @@ English in every language; messages, help and descriptions follow
 - `preview PATHS… RULES`: the list as the window shows it: current name →
   new name, folder, tags (conflict and why, identical copy, advert →
   Trash, missing episodes/tracks/issues/volumes/movies with `--missing`),
-  the totals; `--csv FILE` writes "Export list". Lookups run (8.6); nothing
+  the totals; `--csv FILE` writes "Export list" (with the optional columns
+  chosen in the options that fit the rules), `--missing-csv FILE` "Export what is
+  missing" (implies `--missing`). Lookups run (8.6); nothing
   is written. Exit 2 when there are conflicts.
 - `apply PATHS… RULES`: preview, then renames after a confirmation
   (`-y/--yes` skips it; required when stdin is not a terminal), with

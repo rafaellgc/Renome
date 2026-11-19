@@ -43,6 +43,8 @@ pub enum Problem {
     DiskChars,
     /// Another file in the batch would get the same name.
     Duplicate,
+    /// The same, and one of those others is an identical copy of it.
+    DuplicateIdentical,
     /// An identical copy of a file that gets that name: it stays put.
     Copy,
     /// A file with that name already exists outside the batch.
@@ -298,6 +300,9 @@ pub struct PreviewItem {
     /// (`video`, `subtitle`, `audio`, `book`, `comic`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub kinds: Vec<&'static str>,
+    /// The details window of the rules on edits it (see [`editable`]).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub editable: bool,
     /// Its name for files counted as one (a video and its subtitles: see
     /// [`crate::rules::pair_split`]); a folder's whole name.
     pub pair: String,
@@ -380,6 +385,159 @@ pub struct Preview {
     /// The files are copied, not moved (see [`SendTo`]).
     #[serde(skip)]
     pub copy: bool,
+    /// What the rule cards show of the list.
+    pub hints: Hints,
+}
+
+/// What the rule cards show of the list (the window's).
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Hints {
+    /// A name to show examples with: the first in natural order, so it
+    /// does not jump while the list re-sorts.
+    pub sample: String,
+    /// The files shown, and the same with files of one name and other
+    /// extensions counted as one (as the list rule counts them).
+    pub files: usize,
+    pub pairs: usize,
+    /// The names shown without extensions, in order (what the list rule's
+    /// box can start from), when a list rule is there; the same with files
+    /// of one name and other extensions once.
+    pub names: Vec<String>,
+    pub pair_names: Vec<String>,
+    /// Per step: a list rule's names, a rearrange rule's parts of the
+    /// sample.
+    pub steps: Vec<StepHint>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StepHint {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub names: Option<usize>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<String>,
+}
+
+/// The details window the rules on offer (the lookup rule's or the photo
+/// rule's), and whether a book rule takes audiobooks.
+pub fn editor(steps: &[Step]) -> Option<(&'static str, bool)> {
+    steps
+        .iter()
+        .filter(|s| s.enabled)
+        .find_map(|s| match &s.rule {
+            Rule::Music { .. } => Some(("music", false)),
+            Rule::Book { audiobooks, .. } => Some(("book", *audiobooks)),
+            Rule::Comic { .. } => Some(("comic", false)),
+            Rule::Photo { .. } => Some(("photo", false)),
+            _ => None,
+        })
+}
+
+/// Whether a details window edits this row: a song for the music rule, a
+/// book (or an audiobook's audio) for the book rule, a comic (or a folder
+/// it converts) for the comic rule, a photo or video the photo rule reads.
+pub fn editable(kind: &str, i: &PreviewItem, audiobooks: bool) -> bool {
+    match kind {
+        "music" => i.kinds.contains(&"audio"),
+        "book" => {
+            !i.is_dir && (i.kinds.contains(&"book") || (audiobooks && i.kinds.contains(&"audio")))
+        }
+        "comic" => {
+            if i.is_dir {
+                i.convert
+            } else {
+                i.kinds.contains(&"comic")
+            }
+        }
+        "photo" => i.photo_date.is_some(),
+        _ => false,
+    }
+}
+
+/// The rule cards' [`Hints`] for these files.
+fn hints(shown: &[&FileEntry], steps: &[Step]) -> Hints {
+    let sample = shown
+        .iter()
+        .map(|f| f.file_name())
+        .min_by(|a, b| crate::files::natural_cmp(a, b))
+        .unwrap_or_default();
+    let sample_file = shown.iter().find(|f| f.file_name() == sample);
+    let pairs = {
+        let mut seen = HashSet::new();
+        for f in shown {
+            seen.insert((
+                f.dir.as_path(),
+                crate::rules::pair_split(f).0.to_lowercase(),
+            ));
+        }
+        seen.len()
+    };
+    let has_list = steps.iter().any(|s| matches!(s.rule, Rule::List { .. }));
+    let names = if has_list {
+        shown
+            .iter()
+            .map(|f| {
+                if f.is_dir {
+                    f.file_name()
+                } else {
+                    f.stem.clone()
+                }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let pair_names = if has_list {
+        let mut seen = HashSet::new();
+        shown
+            .iter()
+            .filter_map(|f| {
+                let base = crate::rules::pair_split(f).0;
+                seen.insert((f.dir.as_path(), base.to_lowercase()))
+                    .then(|| base.to_string())
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let steps = steps
+        .iter()
+        .map(|s| match &s.rule {
+            Rule::List { names, .. } => StepHint {
+                names: Some(names.lines().filter(|l| !l.trim().is_empty()).count()),
+                parts: Vec::new(),
+            },
+            Rule::Rearrange {
+                separator, target, ..
+            } if !separator.is_empty() => {
+                let text = match (target, sample_file) {
+                    (_, None) => String::new(),
+                    (crate::rules::Target::Name, Some(f)) if !f.is_dir => f.stem.clone(),
+                    (crate::rules::Target::Ext, Some(f)) => f.ext.clone(),
+                    (_, Some(f)) => f.file_name(),
+                };
+                StepHint {
+                    names: None,
+                    parts: text
+                        .split(separator.as_str())
+                        .map(str::trim)
+                        .filter(|p| !p.is_empty())
+                        .map(String::from)
+                        .collect(),
+                }
+            }
+            _ => StepHint::default(),
+        })
+        .collect();
+    Hints {
+        sample,
+        files: shown.len(),
+        pairs,
+        names,
+        pair_names,
+        steps,
+    }
 }
 
 impl PreviewItem {
@@ -1821,6 +1979,7 @@ pub fn preview(
                 && crate::extras::release_junk(&file.path, file.size);
             PreviewItem {
                 kinds: kinds_of(file),
+                editable: false,
                 pair: if file.is_dir {
                     file.stem.clone()
                 } else {
@@ -1975,9 +2134,16 @@ pub fn preview(
                 .iter()
                 .all(|&i| view.identical.get(&items[i].path) == first);
         for &i in idx.iter().skip(usize::from(copies)) {
+            let own = view.identical.get(&items[i].path);
+            let twin = own.is_some()
+                && idx
+                    .iter()
+                    .any(|&j| j != i && view.identical.get(&items[j].path) == own);
             items[i].status = Status::Conflict;
             items[i].problem = Some(if copies {
                 Problem::Copy
+            } else if twin {
+                Problem::DuplicateIdentical
             } else {
                 Problem::Duplicate
             });
@@ -2127,7 +2293,14 @@ pub fn preview(
                 .unwrap_or_else(|| i.path.clone())
         })
         .collect();
+    let hints = hints(&shown.iter().map(|&(_, _, f)| f).collect::<Vec<_>>(), steps);
+    if let Some((kind, audiobooks)) = editor(steps) {
+        for i in items.iter_mut() {
+            i.editable = editable(kind, i, audiobooks);
+        }
+    }
     Preview {
+        hints,
         items,
         rule_errors: pipeline.errors,
         filter_error,

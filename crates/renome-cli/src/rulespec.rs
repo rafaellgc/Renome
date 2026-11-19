@@ -27,6 +27,7 @@ pub fn steps(sources: &[Source], settings: Option<&Value>) -> Result<Vec<Value>,
                 let set = find_set(settings, name).ok_or_else(|| t("noSet", &[("name", name)]))?;
                 out.extend(complete(
                     set.get("steps").cloned().unwrap_or(Value::Array(vec![])),
+                    true,
                 )?);
             }
             Source::File(path) => {
@@ -41,7 +42,7 @@ pub fn steps(sources: &[Source], settings: Option<&Value>) -> Result<Vec<Value>,
                 };
                 let v: Value = serde_json::from_str(&text)
                     .map_err(|e| t("badFile", &[("file", path), ("error", &e)]))?;
-                out.extend(complete(steps_of(v))?);
+                out.extend(complete(catalog::steps_of(v), true)?);
             }
             Source::Saved => {
                 let saved = settings
@@ -51,7 +52,7 @@ pub fn steps(sources: &[Source], settings: Option<&Value>) -> Result<Vec<Value>,
                 if saved.as_array().is_none_or(Vec::is_empty) {
                     return Err(t("noSaved", &[]));
                 }
-                out.extend(complete(saved)?);
+                out.extend(complete(saved, false)?);
             }
         }
     }
@@ -60,51 +61,31 @@ pub fn steps(sources: &[Source], settings: Option<&Value>) -> Result<Vec<Value>,
 
 /// A set saved in the options, by name (case ignored).
 pub fn find_set<'a>(settings: Option<&'a Value>, name: &str) -> Option<&'a Value> {
-    settings?.get("ruleSets")?.as_array()?.iter().find(|s| {
-        s.get("name")
-            .and_then(Value::as_str)
-            .is_some_and(|n| n.to_lowercase() == name.to_lowercase())
-    })
+    let sets = settings?.get("ruleSets")?.as_array()?;
+    sets.get(renome_services::options::set_index(sets, name, None)?)
 }
 
-/// The steps in a JSON file: a list of steps, a set (`{name, steps}`), or
-/// a list of sets (the first).
-pub fn steps_of(v: Value) -> Value {
-    match v {
-        Value::Object(mut o) => o.remove("steps").unwrap_or(Value::Array(vec![])),
-        Value::Array(items) if items.first().is_some_and(|i| i.get("steps").is_some()) => items
-            .into_iter()
-            .next()
-            .and_then(|mut s| s.get_mut("steps").map(Value::take))
-            .unwrap_or_default(),
-        other => other,
-    }
-}
-
-/// Saved steps with old option names updated and the options they leave
-/// out at their defaults (as the window's `newStep`).
-fn complete(mut steps: Value) -> Result<Vec<Value>, String> {
-    catalog::migrate_steps(&mut steps);
+/// Saved steps made ready as the window makes them
+/// ([`catalog::complete_steps`]): up to date, whole, with their first
+/// lookup rule only (the others are told), all back on when the set was
+/// saved with all of them off (`saved`).
+fn complete(steps: Value, saved: bool) -> Result<Vec<Value>, String> {
     let Value::Array(items) = steps else {
         return Ok(vec![]);
     };
-    let mut out = Vec::new();
-    for mut step in items {
-        let Some(rule) = step.get_mut("rule").and_then(Value::as_object_mut) else {
-            continue;
-        };
-        let kind = rule
-            .get("type")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        let spec = catalog::rule(&kind).ok_or_else(|| t("unknownRule", &[("name", &kind)]))?;
-        let mut full = catalog::new_rule(spec, lang());
-        full.extend(std::mem::take(rule));
-        *rule = full;
-        out.push(step);
+    let (kept, dropped) = catalog::complete_steps(items, lang(), saved);
+    if let Some(bad) = dropped.iter().find(|k| catalog::rule(k).is_none()) {
+        return Err(t("unknownRule", &[("name", bad)]));
     }
-    Ok(out)
+    if !dropped.is_empty() {
+        let mut names: Vec<String> = dropped
+            .iter()
+            .map(|k| t(&format!("rule.{k}"), &[]))
+            .collect();
+        names.dedup();
+        crate::out::note(&t("lookupsDropped", &[("rules", &names.join(", "))]));
+    }
+    Ok(kept)
 }
 
 /// `TYPE[:option=value,…]` made into a step.
@@ -131,23 +112,13 @@ pub fn parse(spec: &str) -> Result<Value, String> {
         }
     }
     let mut step = Map::new();
-    step.insert("id".into(), Value::from(format!("cli{}", rand_id())));
+    step.insert("id".into(), Value::from(catalog::step_id(0)));
     step.insert("enabled".into(), Value::from(enabled));
     step.insert("rule".into(), Value::Object(rule));
     if !only.is_empty() {
         step.insert("only".into(), Value::from(only));
     }
     Ok(Value::Object(step))
-}
-
-/// A short id, different for each step of a run.
-fn rand_id() -> String {
-    use std::sync::atomic::{AtomicU32, Ordering};
-    static N: AtomicU32 = AtomicU32::new(0);
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    format!("{:x}{}", now.as_millis(), N.fetch_add(1, Ordering::Relaxed))
 }
 
 fn boolean(s: &str) -> Option<bool> {

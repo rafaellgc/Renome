@@ -52,7 +52,7 @@ pub fn preview_or_apply(
         .collect();
     let opts = ScanOptions {
         recursive: !m.get_flag("no-recursive"),
-        include_hidden: m.get_flag("hidden") || setting_bool(settings, "includeHidden", false),
+        include_hidden: m.get_flag("hidden") || setting_bool(settings, "includeHidden"),
         folders_as_items: m.get_flag("folders"),
     };
     let found = renome_core::scan(&paths, &opts, &HashSet::new());
@@ -68,7 +68,7 @@ pub fn preview_or_apply(
         filter: m.get_one::<String>("filter").cloned().unwrap_or_default(),
         lang: lang().into(),
         leftover_suffix: t("leftoverSuffix", &[]),
-        number_clashes: setting_bool(settings, "numberClashes", false),
+        number_clashes: setting_bool(settings, "numberClashes"),
         protected: renome_services::protected_dirs(),
         send_to: m
             .get_one::<PathBuf>("to")
@@ -107,10 +107,8 @@ pub fn preview_or_apply(
     let lookup_rule = steps_json
         .iter()
         .find(|s| {
-            matches!(
-                rulespec::kind_of(s),
-                "movie" | "series" | "music" | "book" | "comic"
-            ) && s.get("enabled") != Some(&Value::Bool(false))
+            renome_core::catalog::LOOKUPS.contains(&rulespec::kind_of(s))
+                && s.get("enabled") != Some(&Value::Bool(false))
         })
         .map(|s| s["rule"].clone());
     // The details typed by hand (--edit), for the lookup rule's editor or
@@ -130,16 +128,13 @@ pub fn preview_or_apply(
     if !edit_specs.is_empty() && edit_kind.is_empty() {
         return Err(t("noEditor", &[]));
     }
-    let edits = crate::edit::parse(&edit_specs, crate::edit::fields_of(edit_kind))?;
+    let edits = crate::edit::parse(&edit_specs, &crate::edit::fields_of(edit_kind))?;
     if edit_kind == "photo" {
         crate::edit::photo_dates(&edits, &mut view.dates)?;
     }
     let mut found = None;
+    view.trash_ads = renome_core::catalog::trash_ads(&steps_json);
     if let Some(rule) = &lookup_rule {
-        view.trash_ads = rule
-            .get("trashAds")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
         let first = renome_core::preview(&files, &steps, &overrides, &view);
         let names: HashMap<&PathBuf, String> = first
             .items
@@ -170,7 +165,8 @@ pub fn preview_or_apply(
                 let mut f = rt.block_on(crate::lookup::comics(&first, rule, settings, &ask))?;
                 crate::edit::comics(
                     &edits,
-                    &mut f.chosen,
+                    &mut f,
+                    &first.items,
                     &names,
                     rule.get("seriesByFolder")
                         .and_then(Value::as_bool)
@@ -181,7 +177,8 @@ pub fn preview_or_apply(
             }
             Some("book") => {
                 let mut f = rt.block_on(crate::lookup::books(&first, rule, settings, &ask))?;
-                crate::edit::books(&edits, &mut f.chosen, &names);
+                let audiobooks = rule.get("audiobooks").and_then(Value::as_bool) != Some(false);
+                crate::edit::books(&edits, &mut f, &first.items, &names, audiobooks);
                 view.books = f.chosen.clone();
                 crate::lookup::Found::Books(Box::new(f))
             }
@@ -216,7 +213,14 @@ pub fn preview_or_apply(
         }
         crate::stop::reset();
     }
-    let preview = renome_core::preview(&files, &steps, &overrides, &view);
+    let mut preview = renome_core::preview(&files, &steps, &overrides, &view);
+    // Identical copies heading for one name: the first goes, the others
+    // stay where they are (the window finds them in the background).
+    let copies = renome_core::identical::copies_among(&files, &preview);
+    if !copies.is_empty() {
+        view.identical = copies;
+        preview = renome_core::preview(&files, &steps, &overrides, &view);
+    }
     let mut doubtful = 0;
     if let Some(found) = &found {
         doubtful = preview
@@ -242,7 +246,7 @@ pub fn preview_or_apply(
         .map(|s| s["rule"].clone())
         .collect();
     let missing = match &found {
-        Some(f) if m.get_flag("missing") => {
+        Some(f) if m.get_flag("missing") || m.contains_id("missing-csv") => {
             crate::missing::of(&rules_on, f, &preview, m.get_flag("desc"))
         }
         _ => Vec::new(),
@@ -256,11 +260,48 @@ pub fn preview_or_apply(
             .unwrap_or_default());
     }
     if let Some(path) = m.get_one::<PathBuf>("csv") {
-        write_csv(path, &preview)?;
+        // The optional columns chosen in the options that make sense with
+        // these rules, as the window's list has them.
+        let chosen: Vec<String> = settings
+            .and_then(|s| s.get("columns")?.as_array().cloned())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect();
+        let available = renome_core::catalog::columns_for(&steps_json);
+        let columns: Vec<&str> = renome_core::catalog::COLUMNS
+            .iter()
+            .copied()
+            .filter(|c| available.contains(c) && chosen.iter().any(|x| x == c))
+            .collect();
+        let details: HashMap<PathBuf, renome_core::details::Details> = if columns.is_empty() {
+            HashMap::new()
+        } else {
+            files
+                .iter()
+                .map(|f| (f.path.clone(), renome_core::details::of(f)))
+                .collect()
+        };
+        let rows = renome_services::flow::export::list(&preview, &details, &columns, lang());
+        write_cells(path, &rows)?;
         out::note(&t("csvSaved", &[]));
     }
+    if let Some(path) = m.get_one::<PathBuf>("missing-csv") {
+        let dirs: HashMap<&PathBuf, &PathBuf> =
+            preview.items.iter().map(|i| (&i.path, &i.dir)).collect();
+        let csv = renome_services::flow::export::missing(&missing, &|p| {
+            dirs.get(&p.to_path_buf()).map(|d| (*d).clone())
+        });
+        write_cells(path, &csv.rows)?;
+        out::note(&t("missingSaved", &[]));
+    }
     if !apply {
-        show(&preview, m.get_flag("all"), &missing);
+        show(
+            &preview,
+            m.get_flag("all"),
+            &missing,
+            setting_bool(settings, "warnWindows"),
+        );
         return Ok(if real_conflicts(&preview) > 0 || doubtful > 0 {
             Exit::Doubts
         } else {
@@ -268,7 +309,12 @@ pub fn preview_or_apply(
         });
     }
     if !out::json() {
-        show(&preview, m.get_flag("all"), &missing);
+        show(
+            &preview,
+            m.get_flag("all"),
+            &missing,
+            setting_bool(settings, "warnWindows"),
+        );
     }
     // What is written besides the renames is decided by the shared flow,
     // as in the window: from the rules that are on and what was chosen
@@ -276,10 +322,13 @@ pub fn preview_or_apply(
     let typed: std::collections::HashSet<PathBuf> = edits.keys().cloned().collect();
     let mut chosen = crate::lookup::chosen(found.as_ref(), &typed);
     let auth = crate::lookup::subs_auth(settings);
-    if let (Some(rule), Some(crate::lookup::Found::Movies(_) | crate::lookup::Found::Series(_))) =
-        (&lookup_rule, &found)
-    {
-        runtime()?.block_on(crate::lookup::subtitles(rule, &preview, &auth, &mut chosen));
+    if let Some(crate::lookup::Found::Movies(_) | crate::lookup::Found::Series(_)) = &found {
+        runtime()?.block_on(crate::lookup::subtitles(
+            &rules_on,
+            &preview,
+            &auth,
+            &mut chosen,
+        ));
     }
     let counts = renome_services::flow::after::counts(&rules_on, &preview, &chosen);
     if preview.changed == 0 && counts.besides == 0 {
@@ -476,10 +525,16 @@ fn names_by_hand(m: &ArgMatches) -> Result<HashMap<PathBuf, String>, String> {
     Ok(out)
 }
 
-fn setting_bool(settings: Option<&Value>, key: &str, default: bool) -> bool {
+/// An option that is yes or no: as saved, else its default (see
+/// `renome_services::options`).
+fn setting_bool(settings: Option<&Value>, key: &str) -> bool {
     settings
         .and_then(|s| s.get(key)?.as_bool())
-        .unwrap_or(default)
+        .or_else(|| {
+            renome_services::options::setting(key)
+                .and_then(|s| renome_services::options::default_of(s).as_bool())
+        })
+        .unwrap_or(false)
 }
 
 /// Asks a yes/no question on the terminal.
@@ -498,7 +553,7 @@ pub fn ask(question: &str) -> bool {
 
 /// The list: one line per changed file (all with `all`), grouped by
 /// folder, then the totals.
-fn show(p: &Preview, all: bool, missing: &[crate::missing::Missing]) {
+fn show(p: &Preview, all: bool, missing: &[crate::missing::Missing], warn_windows: bool) {
     if out::json() {
         let items: Vec<Value> = p
             .items
@@ -545,8 +600,13 @@ fn show(p: &Preview, all: bool, missing: &[crate::missing::Missing]) {
                 out::dim(&i.original),
                 out::yellow(&format!("({})", t("junkRowTrash", &[])))
             ),
-            Status::Unchanged => println!("  {}", out::dim(&i.original)),
-            Status::Ok => println!("  {} → {}", i.original, out::green(&new)),
+            Status::Unchanged => println!("  {}{}", out::dim(&i.original), note(i, warn_windows)),
+            Status::Ok => println!(
+                "  {} → {}{}",
+                i.original,
+                out::green(&new),
+                note(i, warn_windows)
+            ),
             Status::Conflict => {
                 let why = i
                     .problem
@@ -614,6 +674,32 @@ fn real_conflicts(p: &Preview) -> usize {
 }
 
 /// A problem's name as the page's texts call it (`problem.<name>`).
+/// What the window tags a row with besides its problem: a name Windows
+/// does not take (when asked to warn), a file the lookup rule leaves alone.
+fn note(i: &PreviewItem, warn_windows: bool) -> String {
+    let mut notes = Vec::new();
+    if i.windows_unsafe && warn_windows {
+        notes.push(t("windowsUnsafe", &[]));
+    }
+    if let Some(kind) = i.outside {
+        let key = serde_json::to_value(kind)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default();
+        let mut k = key.chars();
+        let cap = k
+            .next()
+            .map(|c| c.to_uppercase().collect::<String>() + k.as_str())
+            .unwrap_or_default();
+        notes.push(t(&format!("outside{cap}"), &[]));
+    }
+    if notes.is_empty() {
+        String::new()
+    } else {
+        format!("  {}", out::yellow(&format!("({})", notes.join(" · "))))
+    }
+}
+
 fn problem_key(p: renome_core::Problem) -> String {
     serde_json::to_value(p)
         .ok()
@@ -632,41 +718,12 @@ fn item_json(i: &PreviewItem) -> Value {
     })
 }
 
-/// "Export list": the same CSV as the window's.
-fn write_csv(path: &Path, p: &Preview) -> Result<(), String> {
-    let mut rows: Vec<Vec<String>> = vec![
-        [
-            "csv.folder",
-            "csv.original",
-            "csv.new",
-            "csv.dest",
-            "csv.status",
-            "csv.problem",
-        ]
-        .iter()
-        .map(|k| t(k, &[]))
-        .collect(),
-    ];
-    for i in &p.items {
-        let status = serde_json::to_value(i.status)
-            .ok()
-            .and_then(|v| v.as_str().map(str::to_string))
-            .unwrap_or_default();
-        let problem = i
-            .problem
-            .map(|pr| t(&format!("problem.{}", problem_key(pr)), &[]))
-            .unwrap_or_default();
-        rows.push(
-            [
-                i.dir.display().to_string(),
-                i.original.clone(),
-                i.new_name.clone(),
-                i.folder.clone().unwrap_or_default(),
-                t(&format!("csv.{status}"), &[]),
-                problem,
-            ]
-            .to_vec(),
-        );
-    }
+/// Saves CSV cells (see `flow::export`), each key in the interface's
+/// language.
+fn write_cells(
+    path: &Path,
+    rows: &[Vec<renome_services::flow::export::Cell>],
+) -> Result<(), String> {
+    let rows = renome_services::flow::export::texts(rows, &|k| t(k, &[]));
     std::fs::write(path, renome_core::text::csv(&rows, lang())).map_err(|e| e.to_string())
 }

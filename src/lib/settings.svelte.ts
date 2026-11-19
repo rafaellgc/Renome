@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { DetailColumn, MediaServer, Step } from "./types";
+import { TABLE, setRuleTable, type RuleTable } from "./rules";
 
 export type Lang = "pt" | "en" | "es";
 export type Theme = "light" | "dark" | "system";
@@ -61,82 +62,28 @@ export interface Settings {
   cacheDays: number;
 }
 
-const DEFAULTS: Settings = {
-  lang: "en",
-  theme: "system",
-  textSize: "normal",
-  includeHidden: false,
-  confirmApply: true,
-  disableRulesAfterApply: true,
-  warnWindows: true,
-  rememberRules: true,
-  numberClashes: false,
-  tmdbKey: "",
-  tmdbLang: "",
-  comicVineKey: "",
-  discogsToken: "",
-  metronToken: "",
-  googleBooksKey: "",
-  gcdEmail: "",
-  gcdPassword: "",
-  osKey: "",
-  osUser: "",
-  osPassword: "",
-  subdlKey: "",
-  subsourceKey: "",
-  servers: [],
-  serverKeys: "",
-  checkUpdates: true,
-  rules: [],
-  ruleSets: [],
-  columns: [],
-  showMissing: true,
-  cacheDays: 7,
-};
+/** Filled by {@link loadSettings} before the page shows (see
+ *  `routes/+layout.ts`): every setting comes from the Rust options table
+ *  (`options::whole`, the command line's too), at its default when not
+ *  saved, the remembered rules brought up to date. */
+export const settings = $state<Settings>({} as Settings);
 
-export const settings = $state<Settings>({ ...DEFAULTS });
-
-function toLang(code: string): Lang {
-  return code === "pt" || code === "es" ? code : "en";
-}
-
-/** Old default templates, replaced by the current ones when a saved rule
- *  still has them (the user did not change them). */
-const OLD_COMIC_TEMPLATES: Record<string, string> = {
-  "{série} v{volume} #{número} c{capítulo} ({ano})": "{série} v{volume} #{número} c{capítulo} - {título} ({ano})",
-  "{series} v{volume} #{number} c{chapter} ({year})": "{series} v{volume} #{number} c{chapter} - {title} ({year})",
-  "{serie} v{volumen} #{número} c{capítulo} ({año})": "{serie} v{volumen} #{número} c{capítulo} - {título} ({año})",
-};
-
-function upgradeRules(steps: Step[]) {
-  for (const s of steps ?? []) {
-    // Rules from before the missing episodes, issues, movies, tracks and
-    // books were shown.
-    const r = s.rule as { type?: string; missing?: boolean } | undefined;
-    if (r && ["series", "comic", "movie", "music", "book"].includes(r.type ?? "")) r.missing ??= true;
-    // Rules from before shows could be looked up on AniList.
-    if (s.rule?.type === "series") s.rule.source ??= "tmdb";
-    if (s.rule?.type !== "comic") continue;
-    if (OLD_COMIC_TEMPLATES[s.rule.template]) s.rule.template = OLD_COMIC_TEMPLATES[s.rule.template];
-    // Rules from before there was a choice of catalogue.
-    s.rule.source ??= "comicvine";
-    s.rule.seriesByFolder ??= false;
-  }
-}
-
-/** Loads the settings; on first run, uses the system language. */
+/** Loads the settings (on first run, in the system's language), then
+ *  the rules' table in that language. */
 export async function loadSettings() {
-  const saved = await invoke<Partial<Settings> | null>("load_settings");
-  if (saved) {
-    Object.assign(settings, DEFAULTS, saved);
-    upgradeRules(settings.rules);
-  } else {
-    const sys = await invoke<string>("system_language");
-    settings.lang = toLang(sys || navigator.language.slice(0, 2));
-    await saveSettings();
-  }
+  const saved = await invoke<Settings>("load_settings", { fallbackLang: navigator.language });
+  Object.assign(settings, saved);
+  setRuleTable(await invoke<RuleTable>("rule_table", { lang: settings.lang }));
+  await refreshLangs();
   applyTheme();
   applyTextSize();
+}
+
+/** The languages the catalogues are asked in (Rust's `catalog_langs`):
+ *  asked again when the interface's or TMDB's language changes. */
+export const langs = $state<{ tmdb: string; comic: string }>({ tmdb: "en-US", comic: "en" });
+export async function refreshLangs() {
+  Object.assign(langs, await invoke<{ tmdb: string; comic: string }>("catalog_langs", { tmdbLang: settings.tmdbLang ?? "", lang: settings.lang }));
 }
 
 /** The window zoomed by the text size chosen. */
@@ -146,22 +93,24 @@ export function applyTextSize() {
     .catch(() => {});
 }
 
-/** Language for TMDB titles and overviews. */
 /** The key a comic catalogue is asked with: Comic Vine's, Metron's token. */
 export function comicKey(source: string): string {
-  return (source === "metron" ? settings.metronToken : settings.comicVineKey).trim();
+  const name = (TABLE.options.comicKeys[source] ?? "comicVineKey") as keyof Settings;
+  return String(settings[name] ?? "").trim();
 }
 
+/** Language for TMDB titles and overviews. */
 export function tmdbLang() {
-  return settings.tmdbLang || { pt: "pt-BR", en: "en-US", es: "es-ES" }[settings.lang];
+  return langs.tmdb;
 }
 
 export function saveSettings() {
   return invoke<void>("save_settings", { settings: $state.snapshot(settings) });
 }
 
-/** The settings kept in the system's password store, not in the file. */
-export const SECRET_FIELDS = ["tmdbKey", "comicVineKey", "discogsToken", "metronToken", "googleBooksKey", "gcdEmail", "gcdPassword", "osKey", "osUser", "osPassword", "subdlKey", "subsourceKey", "serverKeys"] as const;
+/** The settings kept in the system's password store, not in the file
+ *  (the Rust table's). */
+export const secretFields = () => TABLE.options.secrets as (keyof Settings & string)[];
 
 /** Whether the secrets came (the store may wait to be unlocked or
  *  allowed), and where they are kept: `stored` in the password store,
@@ -173,7 +122,7 @@ export const secrets = $state<{ ready: boolean; status: "stored" | "refused" | "
 /** The secrets as last loaded or saved: only a change is saved, so a
  *  store that did not answer is never written over with empty fields. */
 let saved = "";
-const current = () => JSON.stringify(SECRET_FIELDS.map((k) => settings[k]));
+const current = () => JSON.stringify(secretFields().map((k) => settings[k]));
 
 /** Fills the secrets from the system's password store, when it answers;
  *  without a store, those in the settings file hold. */
@@ -181,18 +130,18 @@ export async function loadSecrets() {
   secrets.ready = false;
   // What the fields held before the store answered: one typed meanwhile
   // (a slow or locked store) wins over the store's, and is saved below.
-  const before = Object.fromEntries(SECRET_FIELDS.map((k) => [k, settings[k]]));
+  const before = Object.fromEntries(secretFields().map((k) => [k, settings[k]]));
   let typed = false;
   try {
     const r = await invoke<{ status: "stored" | "refused" | "missing"; secrets?: Partial<Settings> }>("load_secrets");
     const got = r.secrets ?? {};
-    for (const k of SECRET_FIELDS) {
+    for (const k of secretFields()) {
       if (settings[k] !== before[k]) typed = true;
-      else if (typeof got[k] === "string" && got[k]) settings[k] = got[k];
+      else if (typeof got[k] === "string" && got[k]) (settings as unknown as Record<string, unknown>)[k] = got[k];
     }
     secrets.status = r.status;
     // The baseline is what the store holds, so what was typed differs.
-    saved = JSON.stringify(SECRET_FIELDS.map((k) => (typeof got[k] === "string" && got[k] ? got[k] : before[k])));
+    saved = JSON.stringify(secretFields().map((k) => (typeof got[k] === "string" && got[k] ? got[k] : before[k])));
   } catch {
     secrets.status = "refused";
     saved = current();
@@ -203,7 +152,7 @@ export async function loadSecrets() {
 
 export async function saveSecrets() {
   if (!secrets.ready || current() === saved) return;
-  const values = Object.fromEntries(SECRET_FIELDS.map((k) => [k, settings[k]]));
+  const values = Object.fromEntries(secretFields().map((k) => [k, settings[k]]));
   saved = current();
   const stored = await invoke<boolean>("save_secrets", { secrets: values });
   if (secrets.status === "stored" && !stored) secrets.status = "refused";

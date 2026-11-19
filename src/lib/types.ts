@@ -132,9 +132,11 @@ export interface Step {
 }
 
 export type Status = "unchanged" | "ok" | "conflict";
-export type Problem = "empty" | "slash" | "tooLong" | "windowsChars" | "diskChars" | "duplicate" | "copy" | "exists" | "sameThere";
+export type Problem = "empty" | "slash" | "tooLong" | "windowsChars" | "diskChars" | "duplicate" | "duplicateIdentical" | "copy" | "exists" | "sameThere";
 
 export interface PreviewItem {
+  /** The details window of the rules on edits it (the core says). */
+  editable?: boolean;
   /** What the file is, by its extension, as the rules tell files apart. */
   kinds?: ("video" | "subtitle" | "audio" | "book" | "comic")[];
   /** Its name for files counted as one (a video and its subtitles), as the core counts them. */
@@ -204,6 +206,15 @@ export interface Preview {
    *  then), and old folders left with nothing else, sent whole. */
   trash: string[];
   trashFolders: string[];
+  /** What the rule cards show of the list (see the core's `Hints`). */
+  hints: {
+    sample: string;
+    files: number;
+    pairs: number;
+    names: string[];
+    pairNames: string[];
+    steps: { names?: number; parts?: string[] }[];
+  };
 }
 
 export interface ScanOptions {
@@ -242,8 +253,6 @@ export interface View {
   numberClashes?: boolean;
   /** Another folder the files go to, moved or copied. */
   sendTo: { dir: string; copy: boolean } | null;
-  /** The release's advertisements go to the trash (movie rule). */
-  trashAds?: boolean;
 }
 
 /** A MusicBrainz release offered for an album, best first. */
@@ -260,6 +269,10 @@ export interface MbCandidate {
   score: number;
   /** A small cover from the search (Discogs); else the Cover Art Archive's. */
   image?: string;
+  /** The small cover the reviews show (Rust fills it). */
+  thumb?: string;
+  /** Found on Discogs (Rust says). */
+  discogs?: boolean;
 }
 
 /** A field of the details window: its key, its label (already
@@ -314,6 +327,7 @@ export interface AlbumLookup {
   error: string | null;
   /** Identified by the songs' sound (AcoustID), not their tags. */
   heard: boolean;
+  status: MovieStatus;
 }
 
 /** A release's track, for those missing from an album. */
@@ -391,6 +405,7 @@ export interface MovieFound {
   choice: Candidate | null;
   error: string | null;
   group: string;
+  status: MovieStatus;
 }
 
 /** What a book is thought to be, from its details or its name. */
@@ -424,6 +439,8 @@ export interface BookCandidate {
   source?: string;
   /** A cover elsewhere (Google Books). */
   coverUrl?: string;
+  /** The cover the reviews show (Rust fills it). */
+  thumb?: string;
   /** A description elsewhere (Google Books). */
   description?: string;
   editions: number;
@@ -478,6 +495,7 @@ export interface BookFound {
   choice: BookCandidate | null;
   error: string | null;
   group: string;
+  status: MovieStatus;
 }
 
 /** An audiobook's file: its book's first file, its place and its tags. */
@@ -550,6 +568,8 @@ export interface EpisodeState {
   doubled?: number;
   choice: EpKey[] | null;
   status: MovieStatus;
+  /** What was read of the file, for the review's header. */
+  read?: string;
   /** Files of one group share the answer given to one of them. */
   group: string;
 }
@@ -565,6 +585,9 @@ export interface EpisodeFound {
   doubled?: number;
   choice: EpKey[];
   group: string;
+  status: MovieStatus;
+  /** What was read from the name (`S01E02 · “Title”`). */
+  read: string;
 }
 
 /** What the series search came to (see the services' `flow::series`). */
@@ -650,6 +673,8 @@ export interface ApplyReport {
   copiesRemoved?: number;
   /** Stopped before the end. */
   stopped?: boolean;
+  /** Where each file of the list went (old path, new path). */
+  moved?: [string, string][];
 }
 
 /** What renaming would write besides the renames (see `flow::after`). */
@@ -683,6 +708,8 @@ export interface AfterReport {
   subtitles: number;
   remaining: number | null;
   troubles: { stage: string; done: number; errors: [string, string][] }[];
+  /** Where each file of the list went with conversions. */
+  followed?: [string, string][];
 }
 
 export interface HistoryEntry {
@@ -708,8 +735,8 @@ export interface Copies {
 }
 
 /** The optional columns of the list: what the files hold. */
-export const DETAIL_COLUMNS = ["artist", "album", "title", "track", "year", "genre", "length", "quality", "resolution", "codec", "taken"] as const;
-export type DetailColumn = (typeof DETAIL_COLUMNS)[number];
+/** The list's optional columns (their order: the Rust catalog's `COLUMNS`). */
+export type DetailColumn = "artist" | "album" | "title" | "track" | "year" | "genre" | "length" | "quality" | "resolution" | "codec" | "taken";
 
 /** What the optional columns show about a file (empty: it has none). */
 export interface Details {
@@ -786,4 +813,6 @@ export interface ComicState {
   /** The issue chosen; "" for the series alone (the manga catalogues); null for none. */
   choice: string | null;
   status: MovieStatus;
+  /** What was read of the file, for the review's header. */
+  read?: string;
 }

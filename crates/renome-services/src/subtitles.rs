@@ -62,6 +62,11 @@ impl Auth {
     fn subsource(&self) -> bool {
         !self.subsource_key.trim().is_empty() && !self.tmdb_key.trim().is_empty()
     }
+    /// Some service can be asked (OpenSubtitles, SubDL, or SubSource with
+    /// TMDB's key).
+    pub fn ready(&self) -> bool {
+        self.os() || self.subdl() || self.subsource()
+    }
 }
 
 fn http() -> reqwest::Client {

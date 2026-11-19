@@ -1,7 +1,9 @@
 // What the main page's modules (books, comics, music…) share with it.
 
-import { splitExt } from "$lib/rules";
+import { api } from "$lib/api";
 import type { EditField, MovieStatus, PreviewItem, Step } from "$lib/types";
+import { TABLE } from "$lib/rules";
+import { t, type Key } from "$lib/i18n";
 
 /** What a module reads from the main page and tells it. */
 export interface PageCtx {
@@ -10,8 +12,6 @@ export interface PageCtx {
   /** The paths chosen in the list. */
   readonly selected: Set<string>;
   readonly steps: Step[];
-  /** The name a row is looked up by. */
-  readName(i: PreviewItem): string;
   /** A short message under the list. */
   say(text: string): void;
   /** Bumped by Stop: a search loop that sees a newer number stops. */
@@ -31,9 +31,6 @@ export function counts(state: Record<string, { status: MovieStatus }>, items: Pr
   }
   return { found, choose, none };
 }
-
-/** A path's extension, lower case. */
-export const extOf = (p: string) => splitExt(p.split(/[\\/]/).pop() ?? p)[1].toLowerCase();
 
 /** The first enabled rule of a type. */
 export const ruleOf = (steps: Step[], type: string) => steps.find((s) => s.enabled && s.rule.type === type);
@@ -56,4 +53,18 @@ export function asText(m: object, keys: EditField[]): Record<string, string> {
       return [f.key, v == null || v === 0 ? "" : String(v)];
     }),
   );
+}
+
+/** A details window's fields (the Rust table's), with their labels:
+ *  `songEditTitle`, `bookEditAuthors`… */
+export function editFields(kind: "music" | "book" | "comic" | "photo"): EditField[] {
+  const prefix = { music: "song", book: "book", comic: "comic", photo: "photo" }[kind];
+  return TABLE.editFields[kind].map((f) => ({ ...f, label: t(`${prefix}Edit${f.key[0].toUpperCase()}${f.key.slice(1)}` as Key) }));
+}
+
+/** The user's pick for a file goes to the undecided files of its group too
+ *  (the shared rule: `flow::same_answer`); the paths that take it. */
+export function takers(path: string, state: Record<string, { group?: string; status: MovieStatus }>) {
+  const files = Object.entries(state).map(([p, s]): [string, string, string] => [p, s.group ?? p, s.status]);
+  return api.sameAnswer(path, files);
 }

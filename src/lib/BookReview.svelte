@@ -1,7 +1,7 @@
 <script lang="ts">
   import { dialog } from "./modal";
   import Icon from "./Icon.svelte";
-  import { api, SAME_COVER, type OwnCover } from "./api";
+  import { api, type OwnCover } from "./api";
   import { t, tError } from "./i18n";
   import { tmdbLang } from "./settings.svelte";
   import type { BookCandidate, BookState } from "./types";
@@ -55,7 +55,7 @@
     const hash = own?.hash;
     const urls = candidates.slice(0, 12).map(cover).filter((u): u is string => !!u && !(u in far));
     if (!hash || !urls.length) return;
-    api.coverDistances(hash, urls).then((d) => {
+    api.sameCovers(hash, urls).then((d) => {
       if (own?.hash !== hash) return;
       const next = { ...far };
       urls.forEach((u, i) => (next[u] = d[i]));
@@ -69,8 +69,7 @@
   });
   const sameCover = (c: BookCandidate) => {
     const u = cover(c);
-    const d = u ? far[u] : null;
-    return d != null && d <= SAME_COVER;
+    return !!u && far[u] != null;
   };
 
   function go(delta: number) {
@@ -110,8 +109,8 @@
     if (n >= 1 && n <= candidates.length) choose(candidates[n - 1]);
   }
 
-  /** Open Library's cover, else Google Books'. */
-  const cover = (c: BookCandidate) => (c.cover && c.cover > 0 ? `https://covers.openlibrary.org/b/id/${c.cover}-M.jpg` : c.coverUrl || null);
+  /** The cover Rust picked for the review (Open Library's, else Google Books'). */
+  const cover = (c: BookCandidate) => c.thumb || null;
   const SOURCE_NAME: Record<string, string> = { google: "Google Books", brasilapi: "BrasilAPI" };
 </script>
 

@@ -197,12 +197,6 @@ fn sets_of(settings: &mut Value) -> &mut Vec<Value> {
     sets.as_array_mut().unwrap()
 }
 
-fn same_name(set: &Value, name: &str) -> bool {
-    set.get("name")
-        .and_then(Value::as_str)
-        .is_some_and(|n| n.to_lowercase() == name.to_lowercase())
-}
-
 pub fn sets(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> {
     match m.subcommand() {
         Some(("show", s)) => {
@@ -259,11 +253,9 @@ pub fn sets(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> {
             let name = s.get_one::<String>("name").unwrap();
             let mut now = settings_now();
             let sets = sets_of(&mut now);
-            let before = sets.len();
-            sets.retain(|set| !same_name(set, name));
-            if sets.len() == before {
-                return Err(t("noSet", &[("name", name)]));
-            }
+            let at = renome_services::options::set_index(sets, name, None)
+                .ok_or_else(|| t("noSet", &[("name", name)]))?;
+            sets.remove(at);
             save_settings(&now)?;
             out::note(&t("setDeleted", &[("name", name)]));
         }
@@ -272,17 +264,10 @@ pub fn sets(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> {
             let to = s.get_one::<String>("new").unwrap().trim().to_string();
             let mut now = settings_now();
             let sets = sets_of(&mut now);
-            if sets
-                .iter()
-                .any(|set| same_name(set, &to) && !same_name(set, from))
-            {
-                return Err(t("setExists", &[("name", &to)]));
-            }
-            let set = sets
-                .iter_mut()
-                .find(|set| same_name(set, from))
+            let at = renome_services::options::set_index(sets, from, None)
                 .ok_or_else(|| t("noSet", &[("name", from)]))?;
-            set["name"] = Value::from(to.clone());
+            renome_services::options::rename_set(sets, at, &to)
+                .map_err(|_| t("setExists", &[("name", &to)]))?;
             save_settings(&now)?;
             out::note(&t("setRenamed", &[("from", from), ("to", &to)]));
         }
@@ -319,12 +304,8 @@ fn put_set(name: &str, steps: Vec<Value>, replace: bool) -> Result<(), String> {
     let mut now = settings_now();
     let sets = sets_of(&mut now);
     let n = steps.len();
-    let set = json!({ "name": name, "steps": steps });
-    match sets.iter().position(|s| same_name(s, name)) {
-        Some(_) if !replace => return Err(t("setExists", &[("name", &name)])),
-        Some(at) => sets[at] = set,
-        None => sets.push(set),
-    }
+    renome_services::options::save_set(sets, name, steps, replace)
+        .map_err(|_| t("setExists", &[("name", &name)]))?;
     save_settings(&now)?;
     out::note(&t("setSaved", &[("name", &name), ("n", &n)]));
     Ok(())
@@ -485,180 +466,20 @@ pub fn rules(m: &ArgMatches) -> Result<Exit, String> {
     Ok(Exit::Done)
 }
 
-/// The Options the command line shows: key, kind, default, label key and
-/// whether only the window uses it.
-const OPTIONS: &[(&str, Kind, catalog::Default, &str, bool)] = &[
-    (
-        "lang",
-        Kind::Choice(&[
-            renome_core::catalog::Choice {
-                value: "pt",
-                word: "",
-                label: "language",
-            },
-            renome_core::catalog::Choice {
-                value: "en",
-                word: "",
-                label: "language",
-            },
-            renome_core::catalog::Choice {
-                value: "es",
-                word: "",
-                label: "language",
-            },
-        ]),
-        catalog::Default::Text("en"),
-        "language",
-        false,
-    ),
-    (
-        "includeHidden",
-        Kind::Bool,
-        catalog::Default::Bool(false),
-        "includeHidden",
-        false,
-    ),
-    (
-        "warnWindows",
-        Kind::Bool,
-        catalog::Default::Bool(true),
-        "warnWindows",
-        false,
-    ),
-    (
-        "numberClashes",
-        Kind::Bool,
-        catalog::Default::Bool(false),
-        "numberClashes",
-        false,
-    ),
-    (
-        "tmdbLang",
-        Kind::Text,
-        catalog::Default::Text(""),
-        "tmdbLangLabel",
-        false,
-    ),
-    (
-        "cacheDays",
-        Kind::IntChoice(&[0, 1, 7, 30, 180]),
-        catalog::Default::Int(7),
-        "cacheDays",
-        false,
-    ),
-    (
-        "checkUpdates",
-        Kind::Bool,
-        catalog::Default::Bool(true),
-        "checkUpdates",
-        false,
-    ),
-    (
-        "theme",
-        Kind::Choice(&[
-            renome_core::catalog::Choice {
-                value: "light",
-                word: "",
-                label: "themeLight",
-            },
-            renome_core::catalog::Choice {
-                value: "dark",
-                word: "",
-                label: "themeDark",
-            },
-            renome_core::catalog::Choice {
-                value: "system",
-                word: "",
-                label: "themeSystem",
-            },
-        ]),
-        catalog::Default::Text("system"),
-        "theme",
-        true,
-    ),
-    (
-        "textSize",
-        Kind::Choice(&[
-            renome_core::catalog::Choice {
-                value: "normal",
-                word: "",
-                label: "textSizeNormal",
-            },
-            renome_core::catalog::Choice {
-                value: "large",
-                word: "",
-                label: "textSizeLarge",
-            },
-            renome_core::catalog::Choice {
-                value: "larger",
-                word: "",
-                label: "textSizeLarger",
-            },
-        ]),
-        catalog::Default::Text("normal"),
-        "textSize",
-        true,
-    ),
-    (
-        "confirmApply",
-        Kind::Bool,
-        catalog::Default::Bool(true),
-        "confirmApply",
-        true,
-    ),
-    (
-        "disableRulesAfterApply",
-        Kind::Bool,
-        catalog::Default::Bool(true),
-        "disableAfterApply",
-        true,
-    ),
-    (
-        "rememberRules",
-        Kind::Bool,
-        catalog::Default::Bool(true),
-        "rememberRules",
-        true,
-    ),
-    (
-        "showMissing",
-        Kind::Bool,
-        catalog::Default::Bool(true),
-        "showMissingHint",
-        true,
-    ),
-];
-
 pub fn options(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> {
-    let find = |name: &str| {
-        let want = catalog::squash(name);
-        OPTIONS
-            .iter()
-            .find(|(k, ..)| catalog::squash(k) == want)
-            .ok_or_else(|| t("unknownSetting", &[("name", &name)]))
-    };
-    let value_of = |key: &'static str, default: catalog::Default| -> Value {
+    use renome_services::options::{self as opts, SETTINGS};
+    let find =
+        |name: &str| opts::setting(name).ok_or_else(|| t("unknownSetting", &[("name", &name)]));
+    let value_of = |s: &opts::Setting| -> Value {
         settings
             .as_ref()
-            .and_then(|s| s.get(key).cloned())
-            .unwrap_or_else(|| {
-                catalog::default_value(
-                    &catalog::Opt {
-                        name: key,
-                        old: None,
-                        kind: Kind::Text,
-                        default,
-                        label: "",
-                        hint: None,
-                    },
-                    lang(),
-                )
-            })
+            .and_then(|v| v.get(s.name).cloned())
+            .unwrap_or_else(|| opts::default_of(s))
     };
     match m.subcommand() {
         Some(("get", s)) => {
-            let (key, _, default, ..) = find(s.get_one::<String>("option").unwrap())?;
-            let v = value_of(key, *default);
+            let set = find(s.get_one::<String>("option").unwrap())?;
+            let v = value_of(set);
             println!(
                 "{}",
                 if out::json() {
@@ -669,7 +490,8 @@ pub fn options(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> 
             );
         }
         Some(("set", s)) => {
-            let (key, kind, ..) = find(s.get_one::<String>("option").unwrap())?;
+            let set = find(s.get_one::<String>("option").unwrap())?;
+            let (key, kind) = (&set.name, &set.kind);
             let raw = s.get_one::<String>("value").unwrap();
             let spec = catalog::RuleSpec {
                 kind: "options",
@@ -692,7 +514,7 @@ pub fn options(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> 
             out::note(&t("settingSaved", &[("name", key), ("value", &v)]));
         }
         Some(("reset", s)) => {
-            let (key, ..) = find(s.get_one::<String>("option").unwrap())?;
+            let key = &find(s.get_one::<String>("option").unwrap())?.name;
             let mut now = settings_now();
             if let Some(obj) = now.as_object_mut() {
                 obj.remove(*key);
@@ -702,8 +524,10 @@ pub fn options(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> 
         }
         _ => {
             let mut list = Vec::new();
-            for (key, kind, default, label, window) in OPTIONS {
-                let v = value_of(key, *default);
+            for set in SETTINGS {
+                let (key, kind, label, window) =
+                    (&set.name, &set.kind, &set.label, &set.window_only);
+                let v = value_of(set);
                 if out::json() {
                     list.push(json!({ "name": key, "value": v, "windowOnly": window, "label": t(label, &[]) }));
                 } else {

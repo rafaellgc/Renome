@@ -6,16 +6,9 @@ import { api } from "$lib/api";
 import { notify } from "$lib/dialogs.svelte";
 import { t } from "$lib/i18n";
 import type { EditField } from "$lib/types";
-import { moved, ruleOf, without, type PageCtx } from "./common";
+import { editFields, moved, ruleOf, without, type PageCtx } from "./common";
 
 type Parts = { day: string; month: string; year: string; hour: string; minute: string };
-const NONE: Parts = { day: "", month: "", year: "", hour: "", minute: "" };
-
-/** `2018-03-27` or `2018-03-27 14:05` in its parts. */
-function parts(text: string | undefined): Parts {
-  const m = /^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}):(\d{2}))?$/.exec(text ?? "");
-  return m ? { year: m[1], month: m[2], day: m[3], hour: m[4] ?? "", minute: m[5] ?? "" } : { ...NONE };
-}
 
 export class Photos {
   #ctx: PageCtx;
@@ -31,21 +24,25 @@ export class Photos {
   rule = $derived.by(() => ruleOf(this.#ctx.steps, "photo"));
   /** The photos and videos among the rows chosen in the list (those the
    *  rule reads). */
-  selected = $derived.by(() => this.#ctx.items.filter((i) => this.#ctx.selected.has(i.path) && i.photoDate !== undefined));
+  selected = $derived.by(() => this.#ctx.items.filter((i) => this.#ctx.selected.has(i.path) && i.editable));
   /** The date window's fields. */
-  fields = $derived<EditField[]>([
-    { key: "day", label: t("photoEditDay"), numeric: true },
-    { key: "month", label: t("photoEditMonth"), numeric: true },
-    { key: "year", label: t("photoEditYear"), numeric: true },
-    { key: "hour", label: t("photoEditHour"), numeric: true },
-    { key: "minute", label: t("photoEditMinute"), numeric: true },
-  ]);
+  fields = $derived<EditField[]>(editFields("photo"));
 
-  /** Opens the date window on the photos chosen in the list. */
-  openEdit() {
-    const rows = this.selected;
-    if (!rows.length) return;
-    this.edit = { paths: rows.map((i) => i.path), rows: rows.map((i) => parts(this.dates[i.path])) };
+  /** Opens the date window on the photos chosen in the list (each date
+   *  in its parts, as the shared flow splits it). */
+  async openEdit() {
+    if (!this.selected.length) return;
+    const [paths, rows] = await api.editStart<Parts>({
+      kind: "photo",
+      chosen: this.selected.map((i) => i.path),
+      known: {},
+      parts: {},
+      dates: $state.snapshot(this.dates),
+      fromName: false,
+      byFolder: false,
+      audiobooks: false,
+    });
+    if (paths.length) this.edit = { paths, rows };
   }
 
   /** The fields changed in the date window, for each of its photos (checked

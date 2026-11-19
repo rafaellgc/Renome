@@ -4,6 +4,7 @@
   import { dialog } from "./modal";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { api } from "./api";
+  import { TABLE } from "./rules";
   import { LANG_NAMES, MOD, t, tError, type Key } from "./i18n";
   import { applyTextSize, applyTheme, loadSecrets, secrets, settings, type Lang } from "./settings.svelte";
 
@@ -23,7 +24,8 @@
     [settings.tmdbKey, settings.osKey || settings.subdlKey || settings.subsourceKey, settings.googleBooksKey, settings.comicVineKey, settings.metronToken, settings.gcdEmail, settings.discogsToken].filter((v) => v.trim()).length,
   );
 
-  const TMDB_LANGS = ["pt-BR", "pt-PT", "en-US", "en-GB", "es-ES", "es-MX", "fr-FR", "it-IT", "de-DE", "ja-JP"];
+  /** The TMDB languages offered (the Rust options table's). */
+  const TMDB_LANGS = TABLE.options.tmdbLangs;
   let showKey = $state(false);
   let keyStatus = $state<{ ok: boolean; text: string } | null>(null);
   let testing = $state(false);

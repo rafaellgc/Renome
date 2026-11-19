@@ -66,6 +66,11 @@ export const SCREENS: Partial<Record<ComicDevice, Screen>> = {
   phone: s(1080, 2400, "lcd", 400),
 };
 
+/** Readers known to show pictures in PNG badly (blank pages): the
+ *  Scribes and the colour Kindles get JPEG only (the converter reads
+ *  this list too). */
+export const NO_PNG: ComicDevice[] = ["kindle-scribe", "kindle-scribe2025", "kindle-scribe-color", "kindle-color"];
+
 /** Colour ink screens, where fine dot patterns shimmer in colour. */
 export const isColourInk = (d: ComicDevice) => SCREENS[d]?.ink === "colour";
 /** Grey ink screens (pages saved in grey). */

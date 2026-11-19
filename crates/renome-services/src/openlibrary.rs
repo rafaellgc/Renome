@@ -530,3 +530,14 @@ pub async fn sidecars(
     }
     report
 }
+
+/// Each book's cover for the reviews: Open Library's, else the one
+/// found elsewhere (Google Books).
+pub fn thumbs<'a>(list: impl IntoIterator<Item = &'a mut renome_core::books::Candidate>) {
+    for c in list {
+        c.thumb = match c.cover {
+            Some(id) if id > 0 => format!("{}/b/id/{id}-M.jpg", covers_base()),
+            _ => c.cover_url.clone(),
+        };
+    }
+}

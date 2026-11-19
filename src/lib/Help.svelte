@@ -9,6 +9,7 @@
   import { pt } from "./help/pt";
   import { LOCALES, t } from "./i18n";
   import { settings } from "./settings.svelte";
+  import { TABLE } from "./rules";
   import type { RuleType } from "./types";
   import appLicense from "../../LICENSE?raw";
 
@@ -93,7 +94,8 @@
     "r-number": "number", "r-remove": "remove", "r-convert": "convert", "r-range": "removeRange", "r-char": "charAt", "r-ext": "extension",
     "r-movie": "movie", "r-series": "series", "r-music": "music", "r-book": "book", "r-comic": "comic", "r-photo": "photo", "r-subtitle": "subtitle",
   };
-  const MEDIA: RuleType[] = ["movie", "series", "music", "book", "comic", "photo", "subtitle"];
+  /** The rules by kind of file (the Rust catalog's group). */
+  const MEDIA: RuleType[] = TABLE.media;
   /** The rules' sections in the order of the "+ Rule" menu: those by kind
    *  of file, then those on the name's text, each alphabetical by the
    *  rule's name in the current language; the first of each group carries

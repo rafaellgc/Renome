@@ -926,6 +926,14 @@ const CLI: &[(&str, [&str; 3])] = &[
     ),
     ("missingTitle", ["Faltando", "Missing", "Faltan"]),
     (
+        "argMissingCsv",
+        [
+            "Salva o que falta num CSV (Exportar o que falta); com --missing implícito",
+            "Saves what is missing as CSV (Export what is missing); implies --missing",
+            "Guarda lo que falta en un CSV (Exportar lo que falta); implica --missing",
+        ],
+    ),
+    (
         "cmdServers",
         [
             "Servidores de mídia (Jellyfin, Emby, Plex) avisados das pastas que mudam",
@@ -1406,20 +1414,20 @@ pub fn fill(text: &str, vars: &[(&str, &dyn std::fmt::Display)]) -> String {
     out
 }
 
-/// Words whose plural is not the singular plus the letters in brackets.
-const IRREGULAR: &[(&str, &str)] = &[
-    ("álbum(ns)", "álbuns"),
-    ("imagem(ns)", "imagens"),
-    ("edição(ões)", "edições"),
-    ("inútil(eis)", "inúteis"),
-    ("álbum(es)", "álbumes"),
-    ("canción(es)", "canciones"),
-    ("edición(es)", "ediciones"),
-    ("imagen(es)", "imágenes"),
-    ("volumen(es)", "volúmenes"),
-    ("inútil(es)", "inútiles"),
-    ("copy(ies)", "copies"),
-];
+/// Words whose plural is not the singular plus the letters in brackets
+/// (the page's table, `src/lib/plurals.json`).
+static IRREGULAR: std::sync::LazyLock<Vec<(String, String)>> = std::sync::LazyLock::new(|| {
+    let v: serde_json::Value =
+        serde_json::from_str(include_str!("../../../src/lib/plurals.json")).unwrap_or_default();
+    v["irregular"]
+        .as_object()
+        .map(|o| {
+            o.iter()
+                .map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+});
 
 const ENDINGS: &[&str] = &["s", "es", "ns", "ões", "eis", "ies", "m", "n"];
 
@@ -1527,6 +1535,33 @@ fn raw_text(key: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn plurals_as_the_page() {
+        // The cases the window's plurals run too (scripts/plurals-check.ts).
+        let v: serde_json::Value =
+            serde_json::from_str(include_str!("../../../src/lib/plurals.json")).unwrap();
+        for c in v["cases"].as_array().unwrap() {
+            let vars: Vec<(&str, String)> = c["vars"]
+                .as_object()
+                .unwrap()
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        k.as_str(),
+                        v.as_str().map_or_else(|| v.to_string(), str::to_string),
+                    )
+                })
+                .collect();
+            let text = c["text"].as_str().unwrap();
+            assert_eq!(
+                super::plurals(text, &vars),
+                c["out"].as_str().unwrap(),
+                "{text}"
+            );
+        }
+    }
+
     use super::*;
 
     #[test]

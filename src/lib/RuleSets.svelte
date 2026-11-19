@@ -5,6 +5,7 @@
   import { tick } from "svelte";
   import Icon from "./Icon.svelte";
   import { confirm } from "./dialogs.svelte";
+  import { api } from "./api";
   import { LOCALES, t } from "./i18n";
   import { menu as menuNav } from "./modal";
   import { settings, type RuleSet } from "./settings.svelte";
@@ -55,6 +56,9 @@
     field?.select();
   }
 
+  /** Saves or renames by the shared rules (`options::save_set`,
+   *  `rename_set`, the command line's `sets` too): names compared without
+   *  case; a set replaced keeps its name as written. */
   async function commit() {
     const name = draft.trim();
     const at = editing;
@@ -63,30 +67,32 @@
       editing = null;
       return;
     }
-    const same = sets.findIndex((s, i) => i !== at && s.name.toLocaleLowerCase() === name.toLocaleLowerCase());
-    const list = [...sets];
+    const list = $state.snapshot(sets);
     if (at < 0) {
       const steps = current();
       if (!steps) return;
-      if (same >= 0) {
+      let saved: unknown[];
+      try {
+        saved = await api.setsSave(list, name, steps, false);
+      } catch (e) {
+        const same = Number(String(e).split(":")[1]);
         open = false;
-        const ok = await confirm({ title: t("ruleSetsTitle"), text: t("ruleSetReplace", { name: sets[same].name }), ok: t("ruleSetReplaceOk"), cancel: t("cancel") });
+        const ok = await confirm({ title: t("ruleSetsTitle"), text: t("ruleSetReplace", { name: sets[same]?.name ?? name }), ok: t("ruleSetReplaceOk"), cancel: t("cancel") });
         if (!ok) return;
-        list[same] = { name: sets[same].name, steps };
-      } else list.push({ name, steps });
-      settings.ruleSets = list;
+        saved = await api.setsSave(list, name, steps, true);
+      }
+      settings.ruleSets = saved as RuleSet[];
       onnotice(t("ruleSetSaved", { name }));
       close();
       return;
     }
-    if (same >= 0) {
+    try {
+      settings.ruleSets = (await api.setsRename(list, at, name)) as RuleSet[];
+      editing = null;
+    } catch {
       onnotice(t("ruleSetExists", { name }));
       field?.focus();
-      return;
     }
-    list[at] = { ...list[at], name };
-    settings.ruleSets = list;
-    editing = null;
   }
 
   async function remove(i: number) {

@@ -2,11 +2,12 @@
   import { dialog } from "./modal";
   import Icon from "./Icon.svelte";
   import { untrack } from "svelte";
-  import { api, SAME_COVER, type OwnCover } from "./api";
+  import { listen } from "@tauri-apps/api/event";
+  import { api, type OwnCover } from "./api";
   import CoverZoom from "./CoverZoom.svelte";
-  import { t, tError } from "./i18n";
-  import { seriesOnly } from "./rules";
-  import { comicKey, settings } from "./settings.svelte";
+  import { t, tError, type Key } from "./i18n";
+  import { TABLE } from "./rules";
+  import { comicKey, langs } from "./settings.svelte";
   import type { ComicMatch, ComicSource, ComicVolume } from "./types";
 
   let {
@@ -54,8 +55,7 @@
     searchError = "";
     const y = Number.parseInt(year, 10);
     try {
-      const lang = settings.lang === "pt" ? "pt-br" : settings.lang;
-      candidates = await api.comicSearch(source, comicKey(source), query.trim(), lang, y >= 1800 && y <= 2200 ? y : null, publisher.trim(), skip, highest);
+      candidates = await api.comicSearch(source, comicKey(source), query.trim(), langs.comic, y >= 1800 && y <= 2200 ? y : null, publisher.trim(), skip, highest);
       if (own) compareCovers(candidates);
     } catch (err) {
       searchError = tError(err);
@@ -64,12 +64,15 @@
     }
   }
 
-  /** The file's cover, and how far each series' cover is from it (by id;
-   *  `null`: nothing to compare). */
+  /** The file's cover, and the series with it (by id, how far): the
+   *  shared comparison (`covers::series_by_cover`, the command line's
+   *  chooser too) orders them, those with it first. */
   let own = $state<OwnCover | null>(null);
-  let far = $state<Record<string, number | null>>({});
+  let same = $state<Record<string, number>>({});
   let comparing = $state<{ i: number; n: number } | null>(null);
   let compared = $state(false);
+  /** Why the covers say little here (a key of the texts), if they do. */
+  let note = $state<string | null>(null);
   /** The catalogue cover each series was compared with, by id. */
   let compared_ = $state<Record<string, string>>({});
   /** The covers shown large: the file's beside a series' (or alone). */
@@ -78,54 +81,38 @@
   // svelte-ignore state_referenced_locally
   if (path) api.ownCover(path).then((c) => (own = c));
 
-  /** Catalogues of whole series have one cover: the first volume's. */
-  const firstOnly = $derived(source === "anilist" || source === "mangaupdates");
-  const isFirst = $derived(!comic || ((comic.volume ?? 1) === 1 && (!comic.number || Number.parseFloat(comic.number) === 1)));
-  /** The series compared: those of keys 1–9 (each is one or two requests). */
   let run = 0;
   async function compareCovers(list: ComicVolume[]) {
     const hash = own?.hash;
     const me = ++run;
-    far = {};
+    same = {};
     compared_ = {};
     compared = false;
-    if (!hash || !comic || source === "gcd" || (firstOnly && !isFirst)) return;
-    const top = list.slice(0, 9);
-    const next: Record<string, number | null> = {};
-    const pics: Record<string, string> = {};
-    for (const [i, v] of top.entries()) {
-      comparing = { i: i + 1, n: top.length };
-      let urls: string[] = [];
-      if (firstOnly) urls = v.cover ? [v.cover] : [];
-      // A long series is many pages of issues: left out.
-      else if (v.count <= 200) urls = await api.seriesCovers(source, comicKey(source), v.id, comic).catch(() => []);
+    if (!hash || !comic) return;
+    const stop = await listen<{ i: number; n: number }>("cover-progress", (e) => {
+      if (me === run) comparing = e.payload;
+    });
+    try {
+      const r = await api.seriesByCover(source, comicKey(source), hash, $state.snapshot(comic), $state.snapshot(list));
       if (me !== run) return;
-      const d = urls.length ? await api.coverDistances(hash, urls).catch(() => []) : [];
-      if (me !== run) return;
-      const near = d.filter((x): x is number => x != null);
-      next[v.id] = near.length ? Math.min(...near) : null;
-      far = { ...next };
-      // The cover compared (the nearest), shown on the card and enlarged.
-      const at = d.findIndex((x) => x != null && x === next[v.id]);
-      if (urls.length) pics[v.id] = urls[Math.max(0, at)];
-      compared_ = { ...pics };
+      note = r.note;
+      same = r.same;
+      compared_ = r.covers;
+      compared = r.compared;
+      candidates = r.candidates;
+    } catch {
+      // Not compared: the list stays as it came.
+    } finally {
+      stop();
+      if (me === run) comparing = null;
     }
-    comparing = null;
-    compared = true;
-    // Those with the file's cover first, once all are known (keys stay put
-    // while comparing).
-    const same = (v: ComicVolume) => (far[v.id] ?? 99) <= SAME_COVER;
-    candidates = [...list.filter(same).sort((a, b) => (far[a.id] ?? 99) - (far[b.id] ?? 99)), ...list.filter((v) => !same(v))];
   }
   // Once the file's cover is read; the list's own changes do not ask again.
   $effect(() => {
     if (own) untrack(() => compareCovers(candidates));
   });
-  const sameCover = (v: ComicVolume) => {
-    const d = far[v.id];
-    return d != null && d <= SAME_COVER;
-  };
-  const sameCount = $derived(Object.values(far).filter((d) => d != null && d <= SAME_COVER).length);
+  const sameCover = (v: ComicVolume) => v.id in same;
+  const sameCount = $derived(Object.keys(same).length);
 
   /** Covers the page could not show by their address, read by the
    *  program instead (MangaDex refuses them to other pages). */
@@ -167,7 +154,7 @@
     <form class="search" onsubmit={search}>
       <input bind:value={query} placeholder={t("comicSeriesPlaceholder")} title={t("linkHintComic")} spellcheck="false" />
       <input class="year" bind:value={year} oninput={() => (year = year.replace(/\D/g, ""))} inputmode="numeric" maxlength="4" placeholder={t("comicPickYear")} title={t("comicPickYearHint")} />
-      {#if !seriesOnly(source)}
+      {#if !TABLE.seriesOnly.includes(source)}
         <input class="publisher" bind:value={publisher} placeholder={t("comicPickPublisher")} title={t(source === "gcd" ? "comicPickPublisherGcd" : "comicPickPublisherHint")} spellcheck="false" />
       {/if}
       <button type="submit" disabled={searching}>{t("reviewSearch")}</button>
@@ -183,8 +170,7 @@
       <p class="muted hint">{t("comicPickHint")}</p>
       {#if own}
         <p class="muted hint covers" role="status">
-          {#if source === "gcd"}{t("coverNoneGcd")}
-          {:else if firstOnly}{t("coverNoneSeries")}
+          {#if note}{t(note as Key)}
           {:else if comparing}{t("coverPickComparing", comparing)}
           {:else if compared}{sameCount ? t("coverPickDone", { n: sameCount }) : t("coverPickNone")}{/if}
         </p>

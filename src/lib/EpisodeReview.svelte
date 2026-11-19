@@ -3,6 +3,7 @@
   import Icon from "./Icon.svelte";
   import { tmdbImage } from "./tmdbImages.svelte";
   import { t } from "./i18n";
+  import { api } from "./api";
   import type { EpKey, Episode, EpisodeState, Show } from "./types";
 
   let {
@@ -47,35 +48,30 @@
   const isCurrent = (e: Episode) => !!st?.choice?.some((k) => k[0] === e.season && k[1] === e.number);
   const isMarked = (e: Episode) => marked.some((k) => k[0] === e.season && k[1] === e.number);
 
-  /** What was read from the name, for the header. */
-  const read = $derived.by(() => {
-    const g = st?.guess;
-    if (!g) return "";
-    const parts: string[] = [];
-    if (g.episodes.length) {
-      parts.push(g.season !== null ? code(g.episodes.map((e): EpKey => [g.season!, e])) : g.episodes.map((e) => `E${pad(e)}`).join("-"));
-    } else if (g.number !== null) parts.push(String(g.number));
-    else if (g.date) parts.push(g.date);
-    if (g.title) parts.push(`“${g.title}”`);
-    return parts.join(" · ") || t("epReadNothing");
-  });
+  /** What was read from the name, for the header (the shared flow's). */
+  const read = $derived(st ? st.read || t("epReadNothing") : "");
 
-  const norm = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
-  /** Episodes by season (specials last), filtered by the text typed. */
-  const seasons = $derived.by(() => {
-    if (!show) return [];
-    const q = norm(query.trim());
-    const hit = (e: Episode) =>
-      !q ||
-      [e.name, ...e.names].some((n) => norm(n).includes(q)) ||
-      `s${pad(e.season)}e${pad(e.number)}`.includes(q.replace(/\s/g, "")) ||
-      `${e.season}x${pad(e.number)}`.includes(q);
-    const groups = new Map<number, Episode[]>();
-    for (const e of show.episodes.filter(hit)) {
-      if (!groups.has(e.season)) groups.set(e.season, []);
-      groups.get(e.season)!.push(e);
+  /** Episodes by season (specials last), those the text typed names: the
+   *  shared flow says (the command line's chooser too). */
+  let seasons = $state<[number, Episode[]][]>([]);
+  $effect(() => {
+    const sh = show;
+    const q = query;
+    if (!sh) {
+      seasons = [];
+      return;
     }
-    return [...groups.entries()];
+    api.episodesTyped($state.snapshot(sh), q).then((r) => {
+      if (q !== query) return;
+      const groups = new Map<number, Episode[]>();
+      for (const [season, number] of r.matches) {
+        const e = sh.episodes.find((x) => x.season === season && x.number === number);
+        if (!e) continue;
+        if (!groups.has(season)) groups.set(season, []);
+        groups.get(season)!.push(e);
+      }
+      seasons = [...groups.entries()];
+    }, () => {});
   });
 
   function go(delta: number) {

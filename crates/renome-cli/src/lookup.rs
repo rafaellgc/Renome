@@ -3,7 +3,7 @@
 //! terminal (or left, or forced with `--pick`), and what runs after the
 //! renames.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -99,15 +99,7 @@ fn tmdb_access(settings: Option<&Value>) -> Result<(String, String), String> {
     if key.is_empty() {
         return Err(t("tmdbNeedsKey", &[]));
     }
-    let tmdb_lang = settings
-        .and_then(|s| s.get("tmdbLang")?.as_str())
-        .filter(|l| !l.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| match lang() {
-            "pt" => "pt-BR".into(),
-            "es" => "es-ES".into(),
-            _ => "en-US".into(),
-        });
+    let tmdb_lang = renome_services::options::tmdb_lang(settings, lang());
     Ok((key, tmdb_lang))
 }
 
@@ -150,34 +142,39 @@ pub async fn movies(
     let found = flow::movies::search(&Cli, &client, &rest)
         .await
         .map_err(|e| crate::text::error_text(&e))?;
-    // Each group asked once: a movie's subtitles share its answer.
-    let mut answered: HashMap<String, Option<Candidate>> = HashMap::new();
+    // An answer goes to the undecided files of its group too (a movie's
+    // subtitles: see `flow::same_answer`, the window's too).
+    let states: Vec<(PathBuf, String, flow::Status)> = found
+        .iter()
+        .map(|f| (f.path.clone(), f.group.clone(), f.status))
+        .collect();
+    let mut answered: HashSet<PathBuf> = HashSet::new();
     let mut stop = false;
     for f in found {
         if let Some(c) = f.choice {
             chosen.insert(f.path, c);
             continue;
         }
-        if stop || ask.choose != Choose::Ask {
+        if stop || ask.choose != Choose::Ask || answered.contains(&f.path) {
             continue;
         }
-        let pick = match answered.get(&f.group) {
-            Some(p) => p.clone(),
-            None => {
-                let p = match choose_movie(&client, &f.path, &f.guess, f.candidates).await? {
-                    Answer::Pick(c) => Some(c),
-                    Answer::Skip => None,
-                    Answer::Stop => {
-                        stop = true;
-                        None
-                    }
-                };
-                answered.insert(f.group, p.clone());
-                p
+        let pick = match choose_movie(&client, &f.path, &f.guess, f.candidates).await? {
+            Answer::Pick(c) => Some(c),
+            Answer::Skip => None,
+            Answer::Stop => {
+                stop = true;
+                None
             }
         };
-        if let Some(c) = pick {
-            chosen.insert(f.path, c);
+        let takers = flow::same_answer(
+            &f.path,
+            states.iter().map(|(p, g, s)| (p.as_path(), g.as_str(), *s)),
+        );
+        for p in takers {
+            if let Some(c) = &pick {
+                chosen.insert(p.clone(), c.clone());
+            }
+            answered.insert(p);
         }
     }
     if stop {
@@ -218,37 +215,11 @@ pub async fn movies(
 }
 
 /// A search typed by the person: a TMDB or IMDb link or id, else a title
-/// with an optional year at the end.
+/// A search typed by the person (see `flow::typed`, the window's too).
 async fn typed_search(client: &tmdb::Client, text: &str) -> Result<Vec<Candidate>, String> {
-    use renome_core::links::{self, Link};
-    let text = text.trim().trim_start_matches("tmdb:");
-    let (id, title, year) = match links::parse(text) {
-        Some(Link::Tmdb { tv: false, id }) => (Some(id), String::new(), None),
-        Some(Link::Imdb(tt)) => (
-            Some(
-                client
-                    .find_imdb(&tt, false)
-                    .await
-                    .ok_or_else(|| t("linkNotFound", &[]))?,
-            ),
-            String::new(),
-            None,
-        ),
-        Some(_) => return Err(t("linkOther", &[])),
-        None => match text.parse::<u64>() {
-            Ok(id) => (Some(id), String::new(), None),
-            Err(_) => {
-                let (title, year) = match text.rsplit_once(' ') {
-                    Some((t, y)) if y.len() == 4 && y.parse::<u16>().is_ok() => {
-                        (t.to_string(), y.parse().ok())
-                    }
-                    _ => (text.to_string(), None),
-                };
-                (None, title, year)
-            }
-        },
-    };
-    Ok(client.search(&Guess { title, year, id }).await?.0)
+    flow::typed::movie(client, text, None)
+        .await
+        .map_err(|e| crate::text::error_text(&e))
 }
 
 enum Answer<T> {
@@ -411,38 +382,10 @@ pub struct Series {
     pub loose: usize,
 }
 
-/// `S01E05`, `1x05`, `S01E05-E06` read as episode keys of the show.
+/// `S01E05`, `1x05`, `S01E05-E06` read as episode keys of the show (see
+/// `flow::series::typed`, the window's review too).
 fn typed_episodes(text: &str, show: &renome_core::tv::Show) -> Option<Vec<renome_core::tv::Key>> {
-    let re = regex_lite(text)?;
-    let (season, first, last) = re;
-    let keys: Vec<renome_core::tv::Key> = (first..=last).map(|n| (season, n)).collect();
-    keys.iter()
-        .all(|k| {
-            show.episodes
-                .iter()
-                .any(|e| e.season == k.0 && e.number == k.1)
-        })
-        .then_some(keys)
-}
-
-/// Season and episode range from `S01E05`, `S1E5-E6`, `1x05`, `1x05-06`.
-fn regex_lite(text: &str) -> Option<(u16, u16, u16)> {
-    let t = text.trim().to_lowercase();
-    let (season, rest) = if let Some(r) = t.strip_prefix('s') {
-        let (s, r) = r.split_once('e')?;
-        (s.parse().ok()?, r.to_string())
-    } else {
-        let (s, r) = t.split_once('x')?;
-        (s.parse().ok()?, r.to_string())
-    };
-    let (a, b) = match rest.split_once('-') {
-        Some((a, b)) => (a.parse().ok()?, b.trim_start_matches('e').parse().ok()?),
-        None => {
-            let a: u16 = rest.parse().ok()?;
-            (a, a)
-        }
-    };
-    (b >= a).then_some((season, a, b))
+    flow::series::typed(show, text).exact
 }
 
 /// The command line as the host of the series flow: the show it cannot
@@ -498,12 +441,23 @@ impl Host for Asker<'_> {
                     files,
                     highest,
                     candidates,
+                    path,
+                    comic,
                     ..
                 } => {
                     let (sources, p) = self.comics?;
-                    choose_volume(sources, p, &query, files, highest, candidates)
-                        .await
-                        .map(|v| serde_json::to_value(v).ok())
+                    let file = path.zip(comic).map(|(p, c)| (p, *c));
+                    choose_volume(
+                        sources,
+                        p,
+                        &query,
+                        files,
+                        highest,
+                        candidates,
+                        file.as_ref(),
+                    )
+                    .await
+                    .map(|v| serde_json::to_value(v).ok())
                 }
             };
             match answer {
@@ -569,8 +523,14 @@ pub async fn series(
         shows: found.shows,
         loose: found.loose,
     };
-    // Each group asked once: an episode's subtitles share its answer.
-    let mut answered: HashMap<String, Option<Vec<renome_core::tv::Key>>> = HashMap::new();
+    // An answer goes to the undecided files of its group too (an episode's
+    // subtitles: see `flow::same_answer`, the window's too).
+    let states: Vec<(PathBuf, String, flow::Status)> = found
+        .files
+        .iter()
+        .map(|f| (f.path.clone(), f.group.clone(), f.status))
+        .collect();
+    let mut answered: HashMap<PathBuf, Option<Vec<renome_core::tv::Key>>> = HashMap::new();
     for f in found.files {
         let Some(show) = out_series.shows.iter().find(|s| s.id == f.show_id) else {
             continue;
@@ -579,15 +539,18 @@ pub async fn series(
             typed_episodes(pick, show)
         } else if !f.choice.is_empty() {
             Some(f.choice.clone())
+        } else if let Some(k) = answered.get(&f.path) {
+            k.clone()
         } else if ask.choose == Choose::Ask && std::io::stdin().is_terminal() {
-            match answered.get(&f.group) {
-                Some(k) => k.clone(),
-                None => {
-                    let k = choose_episode(&f.path, show, &f.alternatives)?;
-                    answered.insert(f.group.clone(), k.clone());
-                    k
-                }
+            let k = choose_episode(&f.path, show, &f.alternatives, &f.read)?;
+            let takers = flow::same_answer(
+                &f.path,
+                states.iter().map(|(p, g, s)| (p.as_path(), g.as_str(), *s)),
+            );
+            for p in takers {
+                answered.insert(p, k.clone());
             }
+            k
         } else {
             None
         };
@@ -614,11 +577,7 @@ async fn choose_show(
             Pick::Skip => return Answer::Skip,
             Pick::Stop => return Answer::Stop,
             Pick::Search(q) => {
-                let found = if anime {
-                    anilist.anime_search(&q, &[]).await
-                } else {
-                    tmdb::search_show(client, &q, &[]).await
-                };
+                let found = flow::typed::show(client, anime.then_some(anilist), &q, &[]).await;
                 match found {
                     Ok(r) => candidates = r.candidates,
                     Err(e) => out::error(&crate::text::error_text(&e)),
@@ -633,36 +592,49 @@ fn choose_episode(
     path: &Path,
     show: &renome_core::tv::Show,
     alternatives: &[Vec<renome_core::tv::Key>],
+    read: &str,
 ) -> Result<Option<Vec<renome_core::tv::Key>>, String> {
+    // As the window's review: the code, then the episodes' names.
     let label = |keys: &Vec<renome_core::tv::Key>| {
-        keys.iter()
-            .map(|k| {
-                let name = show
-                    .episodes
+        let names: Vec<String> = keys
+            .iter()
+            .filter_map(|k| {
+                show.episodes
                     .iter()
                     .find(|e| e.season == k.0 && e.number == k.1)
-                    .map(|e| e.name.clone())
-                    .unwrap_or_default();
-                format!("S{:02}E{:02} · {name}", k.0, k.1)
             })
-            .collect::<Vec<_>>()
-            .join(" + ")
+            .map(|e| e.name.clone())
+            .collect();
+        format!("{} {}", flow::series::code(keys), names.join(" & "))
     };
-    let options: Vec<String> = alternatives.iter().map(label).collect();
+    let mut alternatives: Vec<Vec<renome_core::tv::Key>> = alternatives.to_vec();
+    let mut options: Vec<String> = alternatives.iter().map(label).collect();
     let title = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let looked = format!("{} — {}", show.name, t("epTypeHint", &[]));
+    let looked = if read.is_empty() {
+        format!("{} — {}", show.name, t("epTypeHint", &[]))
+    } else {
+        format!("{} — {read} — {}", show.name, t("epTypeHint", &[]))
+    };
     loop {
         match ask_one(&title, &looked, &options) {
             Pick::Number(n) => return Ok(Some(alternatives[n].clone())),
             Pick::Skip => return Ok(None),
             Pick::Stop => return Err(t("searchStopped", &[])),
-            Pick::Search(text) => match typed_episodes(&text, show) {
-                Some(keys) => return Ok(Some(keys)),
-                None => out::error(&t("epTypeBad", &[("text", &text)])),
-            },
+            Pick::Search(text) => {
+                // A code: that episode; words: the episodes they name.
+                let typed = flow::series::typed(show, &text);
+                match typed.exact {
+                    Some(keys) => return Ok(Some(keys)),
+                    None if !typed.matches.is_empty() => {
+                        alternatives = typed.matches.iter().take(9).map(|k| vec![*k]).collect();
+                        options = alternatives.iter().map(label).collect();
+                    }
+                    None => out::error(&t("epTypeBad", &[("text", &text)])),
+                }
+            }
         }
     }
 }
@@ -835,7 +807,6 @@ async fn choose_album(
     dg: &renome_services::discogs::Client,
     album: &renome_services::musicbrainz::AlbumLookup,
 ) -> Result<Option<String>, String> {
-    use renome_core::links::{self, Link};
     let mut candidates = album.candidates.clone();
     let title = album
         .dir
@@ -857,24 +828,17 @@ async fn choose_album(
             Pick::Skip => return Ok(None),
             Pick::Stop => return Err(t("searchStopped", &[])),
             Pick::Search(text) => {
-                let found = match links::parse(&text) {
-                    Some(Link::MusicBrainz(id)) => mb
-                        .release(&id)
-                        .await
-                        .map(|r| vec![renome_core::musicbrainz::summary(&r, 1.0)]),
-                    Some(Link::Discogs(id)) => dg
-                        .release(&format!("{}{id}", renome_core::discogs::PREFIX))
-                        .await
-                        .map(|r| vec![renome_core::musicbrainz::summary(&r, 1.0)]),
-                    Some(_) => Err("linkOther".into()),
-                    None => {
-                        mb.search(&renome_core::musicbrainz::AlbumQuery {
-                            album: text.clone(),
-                            ..album.query.clone()
-                        })
-                        .await
-                    }
+                let query = renome_core::musicbrainz::AlbumQuery {
+                    album: text.clone(),
+                    ..album.query.clone()
                 };
+                let first = album
+                    .choice
+                    .as_ref()
+                    .or(album.candidates.first())
+                    .map(|c| c.id.as_str());
+                let on_discogs = flow::typed::album_on_discogs(first, dg.ready());
+                let found = flow::typed::album(mb, dg, &query, on_discogs).await;
                 match found {
                     Ok(c) => candidates = c,
                     Err(e) => out::error(&crate::text::error_text(&e)),
@@ -890,7 +854,9 @@ pub struct Books {
     /// What each book (and audiobook's first file) was guessed as, and
     /// the one chosen.
     found: HashMap<PathBuf, (renome_core::books::Guess, renome_core::books::Candidate)>,
-    parts: HashMap<PathBuf, flow::books::Part>,
+    pub parts: HashMap<PathBuf, flow::books::Part>,
+    /// What the lookup guessed of each book (chosen or not).
+    pub guesses: HashMap<PathBuf, renome_core::books::Guess>,
     /// Each file's book, as the rule names it.
     pub chosen: HashMap<PathBuf, renome_core::books::BookMatch>,
 }
@@ -923,15 +889,7 @@ pub async fn books(
     ask: &Ask,
 ) -> Result<Books, String> {
     use renome_services::openlibrary as ol;
-    let lang = settings
-        .and_then(|s| s.get("tmdbLang")?.as_str())
-        .filter(|l| !l.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| match lang() {
-            "pt" => "pt-BR".into(),
-            "es" => "es-ES".into(),
-            _ => "en-US".into(),
-        });
+    let lang = renome_services::options::tmdb_lang(settings, lang());
     let client = ol::Client::default();
     if let Some(key) = renome_services::load_secrets()
         .get("secrets")
@@ -960,24 +918,37 @@ pub async fn books(
         ol: ol::Client::default(),
         found: HashMap::new(),
         parts: found.parts,
+        guesses: found
+            .found
+            .iter()
+            .map(|f| (f.path.clone(), f.guess.clone()))
+            .collect(),
         chosen: HashMap::new(),
     };
     // Each group asked once: one book in several formats.
-    let mut answered: HashMap<String, Option<renome_core::books::Candidate>> = HashMap::new();
+    let states: Vec<(PathBuf, String, flow::Status)> = found
+        .found
+        .iter()
+        .map(|f| (f.path.clone(), f.group.clone(), f.status))
+        .collect();
+    let mut answered: HashMap<PathBuf, Option<renome_core::books::Candidate>> = HashMap::new();
     for f in found.found {
         let pick = if let Some(text) = ask.picks.get(&f.path) {
             book_search(&client, &lang, text).await?.into_iter().next()
         } else if f.choice.is_some() {
             f.choice
+        } else if let Some(p) = answered.get(&f.path) {
+            p.clone()
         } else if ask.choose == Choose::Ask && std::io::stdin().is_terminal() {
-            match answered.get(&f.group) {
-                Some(p) => p.clone(),
-                None => {
-                    let p = choose_book(&client, &lang, &f.path, &f.guess, f.candidates).await?;
-                    answered.insert(f.group.clone(), p.clone());
-                    p
-                }
+            let p = choose_book(&client, &lang, &f.path, &f.guess, f.candidates).await?;
+            let takers = flow::same_answer(
+                &f.path,
+                states.iter().map(|(q, g, s)| (q.as_path(), g.as_str(), *s)),
+            );
+            for q in takers {
+                answered.insert(q, p.clone());
             }
+            p
         } else {
             None
         };
@@ -1005,24 +976,9 @@ async fn book_search(
     lang: &str,
     text: &str,
 ) -> Result<Vec<renome_core::books::Candidate>, String> {
-    if let Some(link) = renome_core::links::parse(text.trim()) {
-        return client
-            .by_link(&link, lang)
-            .await
-            .map_err(|e| crate::text::error_text(&e));
-    }
-    let (title, author) = text.split_once(" / ").unwrap_or((text, ""));
-    let guess = renome_core::books::Guess {
-        title: title.trim().into(),
-        author: author.trim().into(),
-        from_file: true,
-        ..Default::default()
-    };
-    Ok(client
-        .find(&guess, lang)
+    flow::typed::book(client, lang, text, "")
         .await
-        .map_err(|e| crate::text::error_text(&e))?
-        .0)
+        .map_err(|e| crate::text::error_text(&e))
 }
 
 async fn choose_book(
@@ -1127,8 +1083,7 @@ pub async fn comics(
             .to_string()
     };
     let key = match source.as_str() {
-        "comicvine" => secret("comicVineKey"),
-        "metron" => secret("metronToken"),
+        "comicvine" | "metron" => secret(renome_services::options::comic_key_name(&source)),
         _ => String::new(),
     };
     if matches!(source.as_str(), "comicvine" | "metron") && key.is_empty() {
@@ -1163,11 +1118,7 @@ pub async fn comics(
         key: key.clone(),
         series: typed.clone(),
         skip: skip.clone(),
-        lang: if lang() == "pt" {
-            "pt-br".to_string()
-        } else {
-            lang().to_string()
-        },
+        lang: renome_services::options::comic_lang(lang()),
         ui_lang: lang().to_string(),
         by_folder,
         barcode: rule
@@ -1231,7 +1182,7 @@ pub async fn comics(
                 .volumes
                 .get(&f.volume_key)
                 .map_or(&[][..], |l| &l.issues[..]);
-            choose_issue(&f.path, &f.own, issues)?
+            choose_issue(&f.path, &f.own, issues).await?
         } else {
             None
         };
@@ -1264,9 +1215,50 @@ async fn choose_volume(
     files: usize,
     highest: f64,
     mut candidates: Vec<renome_core::comics::Volume>,
+    file: Option<&(PathBuf, renome_core::comics::ComicMatch)>,
 ) -> Answer<renome_core::comics::Volume> {
+    use renome_services::covers;
+    // The file's cover compared with the series' (as in the window's
+    // picker): those with it first, marked.
+    let own = file.and_then(|(path, _)| covers::own(path));
+    let cache = covers::Covers::default();
+    let compare = |list: Vec<renome_core::comics::Volume>| async {
+        match (own, file) {
+            (Some(own), Some((_, comic))) => {
+                let r = covers::series_by_cover(
+                    &cache,
+                    sources,
+                    &p.source,
+                    &p.key,
+                    own,
+                    comic,
+                    list,
+                    &|i, n| out::note(&t("coverPickComparing", &[("i", &i), ("n", &n)])),
+                )
+                .await;
+                (r.candidates, r.same)
+            }
+            _ => (list, Default::default()),
+        }
+    };
+    let mut far;
+    (candidates, far) = compare(candidates).await;
     loop {
-        let lines: Vec<String> = candidates.iter().map(volume_line).collect();
+        let lines: Vec<String> = candidates
+            .iter()
+            .map(|v| {
+                let same = far.contains_key(&v.id);
+                if same {
+                    format!(
+                        "{} {}",
+                        volume_line(v),
+                        out::green(&format!("({})", t("sameCover", &[])))
+                    )
+                } else {
+                    volume_line(v)
+                }
+            })
+            .collect();
         match ask_one(
             &format!(
                 "{} ({})",
@@ -1285,59 +1277,78 @@ async fn choose_volume(
             {
                 // Those that could hold the files' highest issue first, as
                 // in the window's picker.
-                Ok(v) => candidates = flow::comics::by_fit(v, highest),
+                Ok(v) => (candidates, far) = compare(flow::comics::by_fit(v, highest)).await,
                 Err(e) => out::error(&crate::text::error_text(&e)),
             },
         }
     }
 }
 
-/// A comic's issue, in the terminal: those near the number its name
-/// says, or the number typed.
-fn choose_issue(
+/// A comic's issue, in the terminal: in the order the window's review
+/// shows them (those with the file's cover first, then those nearest its
+/// number: see `covers::issue_order`), or the number typed.
+async fn choose_issue(
     path: &Path,
     own: &renome_core::comics::ComicMatch,
     issues: &[renome_core::comics::Issue],
 ) -> Result<Option<String>, String> {
-    let wanted: f64 = own.number.parse().unwrap_or(0.0);
-    let mut near: Vec<&renome_core::comics::Issue> = issues.iter().collect();
-    near.sort_by(|a, b| {
-        let d = |i: &renome_core::comics::Issue| {
-            (i.number.parse::<f64>().unwrap_or(f64::MAX) - wanted).abs()
-        };
-        d(a).total_cmp(&d(b))
-    });
+    use renome_services::covers;
+    let mut far = std::collections::HashMap::new();
+    let urls = covers::issue_covers(issues);
+    // Few covers: compared at once (as the window's review does).
+    if !urls.is_empty()
+        && urls.len() <= covers::COMPARE_AT_ONCE
+        && let Some(hash) = covers::own(path)
+    {
+        let d = covers::Covers::default().distances(hash, &urls).await;
+        far = urls.into_iter().zip(d).collect();
+    }
+    let line = |i: &renome_core::comics::Issue| {
+        let same = far
+            .get(&i.cover)
+            .copied()
+            .flatten()
+            .is_some_and(|d| d <= covers::SAME_COVER);
+        format!(
+            "#{}{}{}{}",
+            i.number,
+            if i.name.is_empty() {
+                String::new()
+            } else {
+                format!(" · {}", i.name)
+            },
+            out::dim(&format!(" ({})", i.cover_date)),
+            if same {
+                format!(" {}", out::green(&format!("({})", t("sameCover", &[]))))
+            } else {
+                String::new()
+            }
+        )
+    };
+    let mut near: Vec<usize> = covers::issue_order(issues, own, &far, "");
     near.truncate(9);
-    let lines: Vec<String> = near
-        .iter()
-        .map(|i| {
-            format!(
-                "#{}{}{}",
-                i.number,
-                if i.name.is_empty() {
-                    String::new()
-                } else {
-                    format!(" · {}", i.name)
-                },
-                out::dim(&format!(" ({})", i.cover_date))
-            )
-        })
-        .collect();
+    let mut lines: Vec<String> = near.iter().map(|&i| line(&issues[i])).collect();
     let title = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let looked = format!("{} #{}", own.series, own.number);
+    let looked = flow::comics::read(own);
     loop {
         match ask_one(&title, &looked, &lines) {
-            Pick::Number(n) => return Ok(Some(near[n].id.clone())),
+            Pick::Number(n) => return Ok(Some(issues[near[n]].id.clone())),
             Pick::Skip => return Ok(None),
             Pick::Stop => return Err(t("searchStopped", &[])),
             Pick::Search(text) => {
-                let number = text.trim().trim_start_matches('#');
-                match issues.iter().find(|i| i.number == number) {
-                    Some(i) => return Ok(Some(i.id.clone())),
-                    None => out::error(&t("reviewNoResults", &[])),
+                if let Some(i) = covers::issue_typed(issues, &text) {
+                    return Ok(Some(issues[i].id.clone()));
+                }
+                // Words: the issues they name, to choose from.
+                let found = covers::issue_order(issues, own, &far, &text);
+                if found.is_empty() {
+                    out::error(&t("reviewNoResults", &[]));
+                } else {
+                    near = found.into_iter().take(9).collect();
+                    lines = near.iter().map(|&i| line(&issues[i])).collect();
                 }
             }
         }
@@ -1461,40 +1472,29 @@ pub fn subs_auth(settings: Option<&Value>) -> renome_services::subtitles::Auth {
 /// one per language picked (as the window's review picks them) for
 /// downloading once it is renamed.
 pub async fn subtitles(
-    rule: &Value,
+    rules: &[Value],
     preview: &Preview,
     auth: &renome_services::subtitles::Auth,
     chosen: &mut flow::after::Chosen,
 ) {
-    if !rule
-        .get("subtitles")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
+    // Which languages, and whether at all, the shared flow says.
+    let Some(langs) = flow::subtitles::wanted(rules) else {
         return;
-    }
-    if auth.os_key.is_empty()
-        && auth.subdl_key.is_empty()
-        && (auth.subsource_key.is_empty() || auth.tmdb_key.is_empty())
-    {
+    };
+    if !auth.ready() {
         out::error(&t("subsNeedKey", &[]));
         return;
     }
-    let langs = rule
-        .get("subLangs")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
     let files: Vec<flow::subtitles::Identified> = preview
         .items
         .iter()
-        .filter(|i| i.status != renome_core::Status::Conflict)
         .map(|i| flow::subtitles::Identified {
             path: i.path.clone(),
             original: i.original.clone(),
             is_dir: i.is_dir,
             movie: chosen.movies.get(&i.path).copied(),
             episode: chosen.episodes.get(&i.path).cloned(),
+            conflict: i.status == renome_core::Status::Conflict,
         })
         .collect();
     let items = flow::subtitles::targets(&files);

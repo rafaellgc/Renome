@@ -4,7 +4,7 @@
 
 use clap::ArgMatches;
 use renome_services::mediaserver;
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
 use crate::Exit;
 use crate::out;
@@ -12,35 +12,27 @@ use crate::text::t;
 
 /// The servers' keys (`serverKeys`, a JSON text among the secrets).
 fn keys() -> Map<String, Value> {
-    let raw = crate::manage::secrets()
+    mediaserver::keys_of(&raw_keys())
+}
+
+fn raw_keys() -> String {
+    crate::manage::secrets()
         .ok()
         .and_then(|(all, _)| all.get("serverKeys")?.as_str().map(str::to_string))
-        .unwrap_or_default();
-    serde_json::from_str(&raw).unwrap_or_default()
+        .unwrap_or_default()
 }
 
 /// Sets (or removes) one server's key, keeping every other secret: from
 /// the store, or from the settings file when the system has none.
 fn save_key(id: &str, key: Option<String>) -> Result<(), String> {
     let (mut all, _) = crate::manage::secrets()?;
-    let mut k = keys();
-    match key {
-        Some(v) => k.insert(id.into(), Value::from(v)),
-        None => k.remove(id),
-    };
-    all.insert(
-        "serverKeys".into(),
-        Value::from(Value::Object(k).to_string()),
-    );
+    let raw = mediaserver::with_key(&raw_keys(), id, key.as_deref().unwrap_or_default());
+    all.insert("serverKeys".into(), Value::from(raw));
     renome_services::save_secrets(all).map(|_| ())
 }
 
 fn name_of(s: &Value) -> String {
-    if s.get("kind").and_then(Value::as_str) == Some("plex") {
-        "Plex".into()
-    } else {
-        "Jellyfin".into()
-    }
+    mediaserver::name_of(s).into()
 }
 
 /// After renames or an undo: each server told about the folders the files
@@ -91,47 +83,17 @@ fn find<'a>(list: &'a mut [Value], id: &str) -> Result<&'a mut Value, String> {
 }
 
 fn server_of(s: &Value, key: &str) -> Result<mediaserver::Server, String> {
-    serde_json::from_value(json!({
-        "kind": s.get("kind").cloned().unwrap_or(Value::from("jellyfin")),
-        "url": s.get("url").and_then(Value::as_str).unwrap_or_default().trim(),
-        "key": key,
-        "folders": s.get("folders").cloned().unwrap_or(Value::Array(vec![])),
-    }))
-    .map_err(|e| e.to_string())
+    mediaserver::server_of(s, key)
 }
 
-/// Reads a server's libraries and pairs their folders: kept pairs stay,
-/// a path that is a folder here is paired with itself.
+/// Reads a server's libraries and pairs their folders (see
+/// `mediaserver::read`, the window's too).
 async fn read(server: &mut Value, key: &str) -> Result<(usize, usize), String> {
-    let s = server_of(server, key)?;
-    let libs = s
-        .libraries()
+    let (read, libs, folders) = mediaserver::read(server.clone(), key)
         .await
         .map_err(|e| crate::text::error_text(&e))?;
-    let old: Vec<Value> = server
-        .get("folders")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let mut folders = Vec::new();
-    for lib in &libs {
-        for p in &lib.paths {
-            let kept = old
-                .iter()
-                .find(|f| f["libraryId"] == lib.id.as_str() && f["server"] == p.path.as_str());
-            folders.push(match kept {
-                Some(f) => {
-                    let mut f = f.clone();
-                    f["library"] = Value::from(lib.name.clone());
-                    f
-                }
-                None => json!({ "libraryId": lib.id, "library": lib.name, "server": p.path, "local": if p.here { p.path.clone() } else { String::new() }, "on": true }),
-            });
-        }
-    }
-    let n = folders.len();
-    server["folders"] = Value::Array(folders);
-    Ok((libs.len(), n))
+    *server = read;
+    Ok((libs, folders))
 }
 
 pub fn command(m: &ArgMatches, rt: &tokio::runtime::Runtime) -> Result<Exit, String> {
@@ -141,14 +103,8 @@ pub fn command(m: &ArgMatches, rt: &tokio::runtime::Runtime) -> Result<Exit, Str
             let kind = s.get_one::<String>("kind").unwrap().clone();
             let url = s.get_one::<String>("url").unwrap().trim().to_string();
             let key = read_key(s)?;
-            let id = format!(
-                "srv{:x}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis()
-            );
-            let mut server = json!({ "id": id, "kind": kind, "url": url, "folders": [] });
+            let mut server = mediaserver::new_server(&kind, &url);
+            let id = server["id"].as_str().unwrap_or_default().to_string();
             let (libs, folders) = rt.block_on(read(&mut server, &key))?;
             save_key(&id, Some(key))?;
             let mut now = settings_now();

@@ -713,6 +713,10 @@ pub struct Report {
     /// Files a conversion moved (the window follows them).
     #[serde(skip)]
     pub moved: Vec<Operation>,
+    /// Where each file of the window's list went with them (filled by the
+    /// window, see `apply::Follow`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub followed: Vec<(std::path::PathBuf, std::path::PathBuf)>,
 }
 
 impl Report {

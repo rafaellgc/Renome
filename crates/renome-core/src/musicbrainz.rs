@@ -295,6 +295,13 @@ pub struct Candidate {
     /// search (Discogs); else the app asks the Cover Art Archive.
     #[serde(default)]
     pub image: String,
+    /// The small cover the reviews show (the source's, else the Cover Art
+    /// Archive's: filled by `renome_services::musicbrainz::thumbs`).
+    #[serde(default)]
+    pub thumb: String,
+    /// Found on Discogs, not MusicBrainz (filled with the thumb).
+    #[serde(default)]
+    pub discogs: bool,
 }
 
 fn year_of(date: &Option<String>) -> Option<u16> {
@@ -329,6 +336,8 @@ pub fn summary(r: &Release, score: f64) -> Candidate {
             .unwrap_or_default(),
         score,
         image: String::new(),
+        thumb: String::new(),
+        discogs: false,
     }
 }
 

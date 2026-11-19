@@ -26,6 +26,39 @@ pub struct Identified {
     /// The episode chosen for it.
     #[serde(default)]
     pub episode: Option<EpisodeMatch>,
+    /// It cannot be renamed (another file takes its name): no subtitles
+    /// are searched for it.
+    #[serde(default)]
+    pub conflict: bool,
+}
+
+/// The languages whose subtitles are downloaded with the renames (as the
+/// rule has them, `pt-BR, en`), when the movie rule or the TV show rule
+/// on asks for them (AniList's shows have none).
+pub fn wanted(rules: &[serde_json::Value]) -> Option<String> {
+    let rule = rules.iter().find(|r| {
+        r["subtitles"] == true
+            && (r["type"] == "movie" || (r["type"] == "series" && r["source"] != "anilist"))
+    })?;
+    Some(match rule["subLangs"].as_str() {
+        Some(l) => l.to_string(),
+        None => renome_core::catalog::rule("movie")
+            .and_then(|r| r.option("subLangs"))
+            .map(|o| renome_core::catalog::default_value(o, "en"))
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default(),
+    })
+}
+
+/// What a video's subtitles were searched by (its movie or episode, the
+/// languages): searched again when it changes.
+pub fn key(item: &subs::Item, langs: &str) -> String {
+    format!(
+        "{}:{}:{}:{langs}",
+        item.tmdb,
+        item.season.map(|s| s.to_string()).unwrap_or_default(),
+        item.episode.map(|e| e.to_string()).unwrap_or_default()
+    )
 }
 
 /// The videos searched: a movie, or one TMDB episode (not AniList's, not
@@ -38,7 +71,7 @@ pub fn targets(files: &[Identified]) -> Vec<subs::Item> {
                 .extension()
                 .map(|e| e.to_string_lossy().to_lowercase())
                 .unwrap_or_default();
-            !f.is_dir && renome_core::tmdb::is_video(&ext)
+            !f.is_dir && !f.conflict && renome_core::tmdb::is_video(&ext)
         })
         .filter_map(|f| {
             if let Some(id) = f.movie {

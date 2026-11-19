@@ -12,6 +12,78 @@ use std::collections::BTreeMap;
 /// The fields typed, by name (as the details windows name them).
 pub type Changed = BTreeMap<String, String>;
 
+/// A field of a details window (and of `--edit`).
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+pub struct Field {
+    pub key: &'static str,
+    /// Typed as a whole number.
+    pub numeric: bool,
+    /// Shown across the window.
+    pub wide: bool,
+}
+
+const fn f(key: &'static str, numeric: bool, wide: bool) -> Field {
+    Field { key, numeric, wide }
+}
+
+pub const SONG: &[Field] = &[
+    f("title", false, true),
+    f("artist", false, false),
+    f("albumArtist", false, false),
+    f("genre", false, false),
+    f("album", false, true),
+    f("year", true, false),
+    f("track", true, false),
+    f("trackTotal", true, false),
+    f("disc", true, false),
+    f("discTotal", true, false),
+];
+pub const BOOK: &[Field] = &[
+    f("title", false, true),
+    f("authors", false, true),
+    f("year", true, false),
+    f("publisher", false, false),
+    f("language", false, false),
+    f("series", false, true),
+    f("seriesIndex", false, false),
+    f("isbn", false, false),
+];
+pub const COMIC: &[Field] = &[
+    f("series", false, true),
+    f("seriesYear", true, false),
+    f("volume", true, false),
+    f("number", false, false),
+    f("title", false, true),
+    f("year", true, false),
+    f("publisher", false, false),
+    f("writer", false, false),
+    f("artist", false, false),
+];
+/// A photo's date in its parts (`--edit` also takes `date=` whole).
+pub const PHOTO: &[Field] = &[
+    f("day", true, false),
+    f("month", true, false),
+    f("year", true, false),
+    f("hour", true, false),
+    f("minute", true, false),
+];
+
+/// The editor of a lookup rule (`music`, `book`, `comic`) or `photo`.
+pub fn fields_of(kind: &str) -> &'static [Field] {
+    match kind {
+        "music" | "song" => SONG,
+        "book" => BOOK,
+        "comic" => COMIC,
+        "photo" => PHOTO,
+        _ => &[],
+    }
+}
+
+/// Each editor's fields, by rule.
+pub fn fields_table() -> serde_json::Value {
+    serde_json::json!({ "music": SONG, "book": BOOK, "comic": COMIC, "photo": PHOTO })
+}
+
 fn int<T: std::str::FromStr>(v: &str) -> Option<T> {
     v.trim().parse().ok()
 }
@@ -252,4 +324,103 @@ mod tests {
         assert_eq!(song(s.clone(), &c(&[("title", "t")])).release, "r");
         assert!(song(s, &c(&[("album", "a")])).typed);
     }
+}
+
+/// A name's stem, as the lookups read it (a folder's whole name).
+fn stem_of(name: &str, is_dir: bool) -> String {
+    if is_dir {
+        return name.to_string();
+    }
+    std::path::Path::new(name)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| name.to_string())
+}
+
+/// Whether a details window (and `--edit`) edits this row (see the
+/// core's `plan::editable`).
+pub fn editable(kind: &str, i: &renome_core::PreviewItem, audiobooks: bool) -> bool {
+    renome_core::plan::editable(kind, i, audiobooks)
+}
+
+/// The rows a details window edits for those chosen, in the list's
+/// order: those it edits ([`editable`]), an audiobook's files all
+/// together.
+pub fn rows(
+    kind: &str,
+    items: &[renome_core::PreviewItem],
+    chosen: &std::collections::HashSet<std::path::PathBuf>,
+    parts: &std::collections::HashMap<std::path::PathBuf, super::books::Part>,
+    audiobooks: bool,
+) -> Vec<std::path::PathBuf> {
+    let leaders: std::collections::HashSet<&std::path::PathBuf> = items
+        .iter()
+        .filter(|i| chosen.contains(&i.path))
+        .filter_map(|i| parts.get(&i.path).map(|p| &p.leader))
+        .collect();
+    items
+        .iter()
+        .filter(|i| editable(kind, i, audiobooks))
+        .filter(|i| {
+            chosen.contains(&i.path)
+                || (kind == "book"
+                    && parts
+                        .get(&i.path)
+                        .is_some_and(|p| leaders.contains(&p.leader)))
+        })
+        .map(|i| i.path.clone())
+        .collect()
+}
+
+/// What a song's details start from: what was chosen or typed, else its
+/// tags, else nothing (typed).
+pub fn song_start(
+    current: Option<SongMatch>,
+    file: Option<&renome_core::FileEntry>,
+    from_name: bool,
+) -> SongMatch {
+    current
+        .or_else(|| {
+            let f = file?;
+            renome_core::rules::song_tags(f, from_name)
+                .or_else(|| renome_core::rules::any_song_tags(f))
+                .map(|t| SongMatch::from_tags(&t))
+        })
+        .unwrap_or_else(|| SongMatch {
+            typed: true,
+            ..SongMatch::default()
+        })
+}
+
+/// What a book's details start from: what was chosen or typed, else what
+/// the lookup guessed, else what the file and its name say.
+pub fn book_start(
+    current: Option<BookMatch>,
+    guess: Option<&Guess>,
+    path: &std::path::Path,
+    name: &str,
+) -> BookMatch {
+    current.unwrap_or_else(|| match guess {
+        Some(g) => book_from_guess(g),
+        None => book_from_guess(&renome_core::books::guess(
+            &stem_of(name, false),
+            &renome_core::ebook::read(path),
+        )),
+    })
+}
+
+/// What a comic's details start from: what was chosen or typed, else
+/// what the lookup read of it, else what the file and its name say.
+pub fn comic_start(
+    current: Option<ComicMatch>,
+    own: Option<&ComicMatch>,
+    path: &std::path::Path,
+    name: &str,
+    is_dir: bool,
+    by_folder: bool,
+) -> ComicMatch {
+    current
+        .or_else(|| own.cloned())
+        .or_else(|| renome_core::comics::from_path(path, Some(&stem_of(name, is_dir)), by_folder))
+        .unwrap_or_default()
 }

@@ -47,6 +47,9 @@ pub struct Found {
     /// Doubts of one group share one answer (an episode and its
     /// subtitles).
     pub group: String,
+    pub status: super::Status,
+    /// What was read from its name (see [`read`]).
+    pub read: String,
 }
 
 /// What the search came to.
@@ -214,6 +217,8 @@ pub async fn search(
                     look.show.id,
                     serde_json::to_string(&found.guess).unwrap_or_default()
                 ),
+                status: super::Status::of(!found.choice.is_empty(), !found.alternatives.is_empty()),
+                read: read(&found.guess),
                 path: f.path,
                 show_id: look.show.id,
                 guess: found.guess,
@@ -296,4 +301,134 @@ pub fn named(files: &[Settled], shows: &[Show]) -> HashMap<PathBuf, renome_core:
         .filter(|f| !f.choice.is_empty())
         .filter_map(|f| Some((f.path.clone(), episode_match(shows.get(f.show)?, &f.choice))))
         .collect()
+}
+
+/// Episodes named by what was typed in a review or chooser: `exact` when
+/// it is a code of the show's episodes (`S01E05`, `1x05`, `S01E05-E06`);
+/// `matches`, those whose name or code holds it (accents and case
+/// ignored), by season (specials last, as the show lists them).
+#[derive(Debug, Default, Serialize)]
+pub struct Typed {
+    pub exact: Option<Vec<Key>>,
+    pub matches: Vec<Key>,
+}
+
+pub fn typed(show: &Show, text: &str) -> Typed {
+    let fold = |s: &str| renome_core::text::strip_accents(s).to_lowercase();
+    let q = fold(text.trim());
+    let compact: String = q.chars().filter(|c| !c.is_whitespace()).collect();
+    let matches = show
+        .episodes
+        .iter()
+        .filter(|e| {
+            q.is_empty()
+                || std::iter::once(&e.name)
+                    .chain(&e.names)
+                    .any(|n| fold(n).contains(&q))
+                || format!("s{:02}e{:02}", e.season, e.number).contains(&compact)
+                || format!("{}x{:02}", e.season, e.number).contains(&q)
+        })
+        .map(|e| (e.season, e.number))
+        .collect();
+    let exact = read_code(&q).and_then(|(season, first, last)| {
+        let keys: Vec<Key> = (first..=last).map(|n| (season, n)).collect();
+        keys.iter()
+            .all(|k| show.episodes.iter().any(|e| (e.season, e.number) == *k))
+            .then_some(keys)
+    });
+    Typed { exact, matches }
+}
+
+/// Season and episode range from `S01E05`, `S1E5-E6`, `1x05`, `1x05-06`.
+fn read_code(text: &str) -> Option<(u16, u16, u16)> {
+    let t: String = text
+        .trim()
+        .to_lowercase()
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    let (season, rest) = if let Some(r) = t.strip_prefix('s') {
+        let (s, r) = r.split_once('e')?;
+        (s.parse().ok()?, r.to_string())
+    } else {
+        let (s, r) = t.split_once('x')?;
+        (s.parse().ok()?, r.to_string())
+    };
+    let (a, b) = match rest.split_once('-') {
+        Some((a, b)) => (a.parse().ok()?, b.trim_start_matches('e').parse().ok()?),
+        None => {
+            let a: u16 = rest.parse().ok()?;
+            (a, a)
+        }
+    };
+    (b >= a).then_some((season, a, b))
+}
+
+#[cfg(test)]
+mod typed_tests {
+    use super::*;
+
+    #[test]
+    fn codes_and_names() {
+        let ep = |season, number, name: &str| renome_core::tv::Episode {
+            season,
+            number,
+            name: name.into(),
+            names: vec![],
+            air_date: None,
+            overview: String::new(),
+            still_path: None,
+            runtime: None,
+        };
+        let show: Show = serde_json::from_value(serde_json::json!({
+            "id": 1, "name": "A", "originalName": "A", "year": null, "overview": "",
+            "posterPath": null, "episodes": [],
+        }))
+        .unwrap();
+        let show = Show {
+            episodes: vec![ep(1, 1, "Começo"), ep(1, 2, "Meio"), ep(2, 1, "Volta")],
+            ..show
+        };
+        assert_eq!(typed(&show, "S01E01-E02").exact, Some(vec![(1, 1), (1, 2)]));
+        assert_eq!(typed(&show, "2x01").exact, Some(vec![(2, 1)]));
+        assert_eq!(typed(&show, "comeco").matches, vec![(1, 1)]);
+        assert_eq!(typed(&show, "s01").matches, vec![(1, 1), (1, 2)]);
+        assert!(typed(&show, "S09E01").exact.is_none());
+    }
+}
+
+/// Episodes as file names write them: `S01E02`, `S01E02-E03`.
+pub fn code(keys: &[Key]) -> String {
+    match keys.first() {
+        None => String::new(),
+        Some((season, _)) => format!(
+            "S{season:02}E{}",
+            keys.iter()
+                .map(|k| format!("{:02}", k.1))
+                .collect::<Vec<_>>()
+                .join("-E")
+        ),
+    }
+}
+
+/// What was read from a file's name, for a review's header and the
+/// chooser: its episodes (`S01E02-E03`, `E05`), number or date, and the
+/// title after them; empty when nothing.
+pub fn read(g: &EpisodeGuess) -> String {
+    let mut parts = Vec::new();
+    if !g.episodes.is_empty() {
+        let eps: Vec<String> = g.episodes.iter().map(|e| format!("E{e:02}")).collect();
+        parts.push(match g.season {
+            Some(s) => format!("S{s:02}{}", eps.join("-")),
+            None => eps.join("-"),
+        });
+    } else if let Some(n) = g.number {
+        parts.push(n.to_string());
+    } else if let Some(d) = &g.date {
+        parts.push(d.clone());
+    }
+    if !g.title.is_empty() {
+        parts.push(format!("“{}”", g.title));
+    }
+    parts.join(" · ")
 }

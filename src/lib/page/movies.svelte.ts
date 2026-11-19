@@ -7,7 +7,7 @@ import { confirm, notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
 import { settings, tmdbLang } from "$lib/settings.svelte";
 import type { Candidate, MovieMatch, MovieSet, MovieState } from "$lib/types";
-import { counts, moved, ruleOf, without, type PageCtx } from "./common";
+import { counts, moved, ruleOf, takers, without, type PageCtx } from "./common";
 
 export class Movies {
   #ctx: PageCtx;
@@ -87,7 +87,7 @@ export class Movies {
           guess: f.guess,
           candidates: f.candidates,
           choice: f.choice,
-          status: f.choice ? "auto" : f.candidates.length ? "choose" : "none",
+          status: f.status,
           error: f.error,
           group: f.group,
         };
@@ -113,16 +113,11 @@ export class Movies {
   }
 
   /** The user's pick for a file; undecided files of its group (its
-   *  subtitles, say) get it too. */
-  choose(path: string, choice: Candidate | null, candidates?: Candidate[]) {
-    const m = this.state[path];
-    if (!m) return;
-    const set = (p: string) => {
+   *  subtitles, say) get it too (the shared rule). */
+  async choose(path: string, choice: Candidate | null, candidates?: Candidate[]) {
+    if (!this.state[path]) return;
+    for (const p of await takers(path, this.state)) {
       this.state[p] = { ...this.state[p], choice, status: choice ? "chosen" : "none", candidates: candidates ?? this.state[p].candidates };
-    };
-    set(path);
-    for (const [p, o] of Object.entries(this.state)) {
-      if (p !== path && o.group === m.group && (o.status === "choose" || o.status === "none")) set(p);
     }
   }
 

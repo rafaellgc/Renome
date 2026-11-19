@@ -41,9 +41,12 @@
     album = albums[queue[index]].query.album;
     typed = null;
     searchError = "";
-    // Found on Discogs: a new search looks there too.
+    // Found on Discogs: a new search looks there too (the shared flow says).
     const first = albums[queue[index]].choice ?? albums[queue[index]].candidates[0];
-    source = first?.id.startsWith("discogs:") && settings.discogsToken.trim() ? "discogs" : "musicbrainz";
+    const here = index;
+    api.albumOnDiscogs(first?.id ?? null, !!settings.discogsToken.trim()).then((d) => {
+      if (here === index) source = d ? "discogs" : "musicbrainz";
+    });
   });
 
   function go(delta: number) {
@@ -91,8 +94,9 @@
   }
 
   const folder = (dir: string) => dir.split(/[\\/]/).pop() ?? dir;
-  const cover = (c: MbCandidate) => c.image || `https://coverartarchive.org/release/${c.id}/front-250`;
-  const fromDiscogs = (id: string) => id.startsWith("discogs:");
+  /** The small cover Rust picked (the source's, else the Cover Art Archive's). */
+  const cover = (c: MbCandidate) => c.thumb || c.image;
+  const fromDiscogs = (c: MbCandidate) => !!c.discogs;
   const matched = $derived(a?.choice ? Object.keys(a.matches).length : 0);
 </script>
 
@@ -148,7 +152,7 @@
                 <span>{c.artist}</span>
                 <span class="muted">{[c.date, c.country, c.format, c.label, c.kind].filter(Boolean).join(" · ")}</span>
                 {#if c.tracks}<span class:same={c.tracks === a.files.length} class="tracks">{t("albumTracks", { n: c.tracks })}</span>{/if}
-                {#if fromDiscogs(c.id)}<span class="source">Discogs</span>{/if}
+                {#if fromDiscogs(c)}<span class="source">Discogs</span>{/if}
               </span>
               {#if i < 9}<kbd>{i + 1}</kbd>{/if}
             </button>

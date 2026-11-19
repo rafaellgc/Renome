@@ -593,8 +593,7 @@ mod tests {
 /// address, a key and a library folder on with its folder here; each with
 /// the name it is told by (Plex, Jellyfin).
 pub fn callable(servers: &serde_json::Value, keys: &str) -> Vec<(String, Server)> {
-    use serde_json::{Value, json};
-    let keys: serde_json::Map<String, Value> = serde_json::from_str(keys).unwrap_or_default();
+    let keys = keys_of(keys);
     servers
         .as_array()
         .map(|l| l.as_slice())
@@ -607,18 +606,8 @@ pub fn callable(servers: &serde_json::Value, keys: &str) -> Vec<(String, Server)
             if key.is_empty() || url.is_empty() {
                 return None;
             }
-            let server: Server = serde_json::from_value(json!({
-                "kind": s.get("kind").cloned().unwrap_or(Value::from("jellyfin")),
-                "url": url,
-                "key": key,
-                "folders": s.get("folders").cloned().unwrap_or(Value::Array(vec![])),
-            }))
-            .ok()?;
-            let name = if s.get("kind").and_then(Value::as_str) == Some("plex") {
-                "Plex"
-            } else {
-                "Jellyfin"
-            };
+            let server = server_of(s, &key).ok()?;
+            let name = name_of(s);
             server
                 .folders
                 .iter()
@@ -654,4 +643,118 @@ pub async fn tell_all(servers: Vec<(String, Server)>, ops: &[renome_core::Operat
         });
     }
     out
+}
+
+/// The servers' keys, kept as one secret (`serverKeys`: a JSON text of
+/// keys by server id).
+pub fn keys_of(raw: &str) -> serde_json::Map<String, serde_json::Value> {
+    serde_json::from_str(raw).unwrap_or_default()
+}
+
+/// The keys with one server's set (or, empty, removed); none left: empty.
+pub fn with_key(raw: &str, id: &str, key: &str) -> String {
+    let mut k = keys_of(raw);
+    if key.trim().is_empty() {
+        k.remove(id);
+    } else {
+        k.insert(id.into(), serde_json::Value::from(key));
+    }
+    if k.is_empty() {
+        String::new()
+    } else {
+        serde_json::Value::Object(k).to_string()
+    }
+}
+
+/// A new server for the options: Jellyfin, no address, no folders.
+pub fn new_server(kind: &str, url: &str) -> serde_json::Value {
+    let id = format!(
+        "srv{:x}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    );
+    serde_json::json!({ "id": id, "kind": kind, "url": url.trim(), "folders": [] })
+}
+
+/// A server as the options keep it, with its key.
+pub fn server_of(s: &serde_json::Value, key: &str) -> Result<Server, String> {
+    use serde_json::{Value, json};
+    serde_json::from_value(json!({
+        "kind": s.get("kind").cloned().unwrap_or(Value::from("jellyfin")),
+        "url": s.get("url").and_then(Value::as_str).unwrap_or_default().trim(),
+        "key": key.trim(),
+        "folders": s.get("folders").cloned().unwrap_or(Value::Array(vec![])),
+    }))
+    .map_err(|e| e.to_string())
+}
+
+/// The name a server is told by.
+pub fn name_of(s: &serde_json::Value) -> &'static str {
+    if s.get("kind").and_then(serde_json::Value::as_str) == Some("plex") {
+        "Plex"
+    } else {
+        "Jellyfin"
+    }
+}
+
+/// The library folders read from a server, paired: those paired before
+/// keep their pair and whether they are on; a path that is a folder here
+/// is paired with itself.
+pub fn paired(old: &[serde_json::Value], libs: &[Library]) -> Vec<serde_json::Value> {
+    use serde_json::{Value, json};
+    let mut folders = Vec::new();
+    for lib in libs {
+        for p in &lib.paths {
+            let kept = old
+                .iter()
+                .find(|f| f["libraryId"] == lib.id.as_str() && f["server"] == p.path.as_str());
+            folders.push(match kept {
+                Some(f) => {
+                    let mut f = f.clone();
+                    f["library"] = Value::from(lib.name.clone());
+                    f
+                }
+                None => json!({
+                    "libraryId": lib.id,
+                    "library": lib.name,
+                    "server": p.path,
+                    "local": if p.here { p.path.clone() } else { String::new() },
+                    "on": true,
+                }),
+            });
+        }
+    }
+    folders
+}
+
+/// Reads a server's libraries and pairs their folders (see [`paired`]):
+/// the server with them, and how many libraries and folders.
+pub async fn read(
+    mut server: serde_json::Value,
+    key: &str,
+) -> Result<(serde_json::Value, usize, usize), String> {
+    let libs = server_of(&server, key)?.libraries().await?;
+    let old: Vec<serde_json::Value> = server
+        .get("folders")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let folders = paired(&old, &libs);
+    let n = folders.len();
+    server["folders"] = serde_json::Value::Array(folders);
+    Ok((server, libs.len(), n))
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::*;
+
+    #[test]
+    fn keys_set_and_removed() {
+        let k = with_key("", "a", "x");
+        assert_eq!(keys_of(&k)["a"], "x");
+        assert_eq!(with_key(&k, "a", ""), "");
+    }
 }

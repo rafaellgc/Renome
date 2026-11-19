@@ -1,9 +1,9 @@
 <script lang="ts">
   import { dialog } from "./modal";
   import Icon from "./Icon.svelte";
-  import { api, SAME_COVER, type OwnCover } from "./api";
+  import { api, type OwnCover } from "./api";
   import CoverZoom from "./CoverZoom.svelte";
-  import { t } from "./i18n";
+  import { t, type Key } from "./i18n";
   import type { ComicIssue, ComicState, ComicVolume } from "./types";
 
   let {
@@ -37,62 +37,72 @@
     query = "";
   });
 
-  /** What was read from the file, for the header. */
-  const read = $derived.by(() => {
-    const o = st?.own;
-    if (!o) return "";
-    const parts = [o.series];
-    if (o.volume != null) parts.push(`v${String(o.volume).padStart(2, "0")}`);
-    if (o.number) parts.push(`#${o.number}`);
-    if (o.chapter) parts.push(`c${o.chapter}`);
-    if (o.year) parts.push(`(${o.year})`);
-    return parts.join(" ");
-  });
+  /** What was read from the file, for the header (the shared flow's). */
+  const read = $derived(st?.read ?? "");
 
-  /** The file's own cover, and how far each issue's cover is from it. */
+  /** The file's own cover, and the issues' covers that are it (by
+   *  address, how far: the shared comparison says). */
   let own = $state<OwnCover | null>(null);
   let far = $state<Record<string, number | null>>({});
   let comparing = $state(false);
-  /** Issues with a cover, the most compared at once. */
-  const withCover = $derived((vol?.issues ?? []).filter((i) => i.cover).slice(0, 300));
+  /** The covers compared, and whether at once (few) or when asked (many,
+   *  each a download): the shared flow says. */
+  let urls = $state<string[]>([]);
+  let atOnce = $state(false);
+  /** Why the covers say little here (a key of the texts), if they do. */
+  let note = $state<string | null>(null);
   $effect(() => {
     const p = path;
     own = null;
     far = {};
     if (p) api.ownCover(p).then((c) => { if (path === p) own = c; });
   });
+  $effect(() => {
+    const issues = vol?.issues ?? [];
+    api.issueCovers($state.snapshot(issues), st?.volumeKey ?? "").then(([u, now, n]) => {
+      urls = u;
+      atOnce = now;
+      note = n;
+    }, () => {});
+  });
   async function compareCovers() {
     const hash = own?.hash;
-    const urls = withCover.map((i) => i.cover).filter((u) => !(u in far));
-    if (!hash || !urls.length) return;
+    const todo = urls.filter((u) => !(u in far));
+    if (!hash || !todo.length) return;
     comparing = true;
     try {
-      const d = await api.coverDistances(hash, urls);
+      const d = await api.sameCovers(hash, todo);
       if (own?.hash !== hash) return;
       const next = { ...far };
-      urls.forEach((u, i) => (next[u] = d[i]));
+      todo.forEach((u, i) => (next[u] = d[i]));
       far = next;
     } finally {
       comparing = false;
     }
   }
-  // Few covers: compared at once; many: when asked (each is a download).
   $effect(() => {
-    if (own && withCover.length && withCover.length <= 60 && !withCover.some((i) => i.cover in far)) compareCovers();
+    if (own && urls.length && atOnce && !urls.some((u) => u in far)) compareCovers();
   });
-  const distance = (i: ComicIssue) => {
-    const d = far[i.cover];
-    return d != null && d <= SAME_COVER ? d : null;
-  };
-  const compared = $derived(withCover.some((i) => i.cover in far));
+  const withCover = $derived(urls);
+  const distance = (i: ComicIssue) => far[i.cover] ?? null;
+  const compared = $derived(urls.some((u) => u in far));
 
-  const norm = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
-  const shown = $derived.by(() => {
-    // The issues whose cover is the file's first, nearest first.
-    const all = [...(vol?.issues ?? [])].sort((a, b) => (distance(a) ?? 99) - (distance(b) ?? 99));
-    const q = norm(query.trim()).replace(/^#/, "");
-    if (!q) return all;
-    return all.filter((i) => norm(i.number) === q.replace(/^0+(?=\d)/, "") || norm(i.number).startsWith(q) || norm(i.name).includes(q));
+  /** The issues in the order shown (those with the file's cover first,
+   *  then nearest its number), those the text typed names: the shared
+   *  flow says (the command line's chooser too). */
+  let shown = $state<ComicIssue[]>([]);
+  $effect(() => {
+    const issues = $state.snapshot(vol?.issues ?? []);
+    const own = $state.snapshot(st?.own);
+    const q = query;
+    const f = $state.snapshot(far);
+    if (!own) {
+      shown = issues;
+      return;
+    }
+    api.issueOrder(issues, own, f, q).then((order) => {
+      if (q === query) shown = order.map((n) => issues[n]);
+    }, () => {});
   });
 
   function go(delta: number) {
@@ -142,11 +152,11 @@
     <div class="tools">
       <input class="filter" bind:value={query} placeholder={t("comicIssueFilter")} spellcheck="false" />
       {#if own && withCover.length}
-        <button disabled={comparing || withCover.every((i) => i.cover in far)} onclick={compareCovers}>
+        <button disabled={comparing || withCover.every((u) => u in far)} onclick={compareCovers}>
           {comparing ? t("coverComparing") : compared ? t("coverCompared") : t("coverCompare", { n: withCover.length })}
         </button>
-      {:else if own && st?.volumeKey.startsWith("gcd:")}
-        <span class="muted small gcdnote">{t("coverNoneGcd")}</span>
+      {:else if own && note}
+        <span class="muted small gcdnote">{t(note as Key)}</span>
       {/if}
     </div>
 

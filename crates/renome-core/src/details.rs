@@ -30,6 +30,60 @@ pub struct Details {
     pub taken: Option<i64>,
 }
 
+impl Details {
+    /// A column's value as the list shows it (and the CSV saves it):
+    /// lengths as `3:45`, the date taken as the photo's own clock in the
+    /// language's order.
+    pub fn text(&self, column: &str, lang: &str) -> String {
+        match column {
+            "artist" => self.artist.clone(),
+            "album" => self.album.clone(),
+            "title" => self.title.clone(),
+            "track" => self.track.clone(),
+            "year" => self.year.map(|y| y.to_string()).unwrap_or_default(),
+            "genre" => self.genre.clone(),
+            "length" => self
+                .length
+                .filter(|s| *s > 0)
+                .map(clock)
+                .unwrap_or_default(),
+            "quality" => self.quality.clone(),
+            "resolution" => self.resolution.clone(),
+            "codec" => self.codec.clone(),
+            "taken" => self
+                .taken
+                .and_then(|t| chrono::DateTime::from_timestamp(t, 0))
+                .map(|d| {
+                    let d = d.naive_utc();
+                    match lang {
+                        "en" => d.format("%m/%d/%Y %I:%M %p").to_string(),
+                        _ => d.format("%d/%m/%Y %H:%M").to_string(),
+                    }
+                })
+                .unwrap_or_default(),
+            _ => String::new(),
+        }
+    }
+
+    /// Every column's value as the list shows it.
+    pub fn texts(&self, lang: &str) -> std::collections::HashMap<&'static str, String> {
+        crate::catalog::COLUMNS
+            .iter()
+            .map(|c| (*c, self.text(c, lang)))
+            .collect()
+    }
+}
+
+/// `3:45`, `1:02:03`.
+fn clock(s: u32) -> String {
+    let (h, m, sec) = (s / 3600, (s % 3600) / 60, s % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{sec:02}")
+    } else {
+        format!("{m}:{sec:02}")
+    }
+}
+
 pub fn of(f: &FileEntry) -> Details {
     let mut d = Details::default();
     if let Some(t) = f.audio_tags() {

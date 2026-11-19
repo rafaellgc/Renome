@@ -5,13 +5,9 @@
 import { api } from "$lib/api";
 import { confirm, notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
-import { splitExt } from "$lib/rules";
-import { comicKey, settings } from "$lib/settings.svelte";
+import { comicKey, langs, settings } from "$lib/settings.svelte";
 import type { ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, EditField, Rule, ComicFormat } from "$lib/types";
-import { counts, extOf, moved, ruleOf, without, type PageCtx } from "./common";
-
-
-const EMPTY: ComicMatch = { series: "", seriesYear: null, number: "", volume: null, chapter: "", title: "", year: null, count: null, publisher: "", writer: "", artist: "", id: "" };
+import { counts, editFields, moved, ruleOf, without, type PageCtx } from "./common";
 
 /** What the series picker asks, while open. */
 export type ComicPick = { source: ComicSource; skip: string; query: string; files: number; highest: number; candidates: ComicVolume[]; path?: string; comic?: ComicMatch; resolve: (v: ComicVolume | null) => void };
@@ -58,20 +54,10 @@ export class Comics {
     this.built = files.length ? await api.comicNamed($state.snapshot(files), $state.snapshot(volumes)) : {};
   }
   /** The comics among the rows chosen in the list. */
-  selected = $derived.by(() => this.#ctx.items.filter((i) => this.#ctx.selected.has(i.path) && (i.isDir ? i.convert : !!i.kinds?.includes("comic"))));
+  selected = $derived.by(() => this.#ctx.items.filter((i) => this.#ctx.selected.has(i.path) && i.editable));
   counts = $derived.by(() => counts(this.state, this.#ctx.items));
   /** The details window's fields. */
-  fields = $derived<EditField[]>([
-    { key: "series", label: t("comicEditSeries"), wide: true },
-    { key: "seriesYear", label: t("comicEditSeriesYear"), numeric: true },
-    { key: "volume", label: t("comicEditVolume"), numeric: true },
-    { key: "number", label: t("comicEditNumber") },
-    { key: "title", label: t("comicEditTitle"), wide: true },
-    { key: "year", label: t("comicEditYear"), numeric: true },
-    { key: "publisher", label: t("comicEditPublisher") },
-    { key: "writer", label: t("comicEditWriter") },
-    { key: "artist", label: t("comicEditArtist") },
-  ]);
+  fields = $derived<EditField[]>(editFields("comic"));
 
 
 
@@ -109,7 +95,7 @@ export class Comics {
         key,
         series: rule.series,
         skip,
-        lang: settings.lang === "pt" ? "pt-br" : settings.lang,
+        lang: langs.comic,
         uiLang: settings.lang,
         byFolder: !!rule.seriesByFolder,
         barcode: !!rule.barcode,
@@ -121,7 +107,7 @@ export class Comics {
       }
       this.picked = res.picked;
       for (const [k, v] of Object.entries(res.volumes)) this.volumes[k] = v;
-      for (const f of res.files) this.state[f.path] = { volumeKey: f.volumeKey, own: f.own, choice: f.choice, status: f.sure ? "auto" : "choose" };
+      for (const f of res.files) this.state[f.path] = { volumeKey: f.volumeKey, own: f.own, choice: f.choice, status: f.status, read: f.read };
       await this.rebuild();
       if (Object.values(this.state).some((c) => c.status === "choose")) this.openReview();
     } catch (e) {
@@ -179,25 +165,23 @@ export class Comics {
     };
   }
 
-  /** Opens the details window on the comics chosen in the list. */
+  /** Opens the details window on the comics chosen in the list; what each
+   *  starts from, the shared flow says (the command line's --edit too). */
   async openEdit() {
-    const rows = this.selected;
-    if (!rows.length) return;
+    if (!this.selected.length) return;
     const r = this.rule?.rule;
-    const missing = rows.filter((i) => !this.matches[i.path] && !this.state[i.path]);
-    const guessed: Record<string, ComicMatch | null> = {};
-    if (missing.length) {
-      const got = await api.comicGuesses(
-        missing.map((i) => i.path),
-        missing.map((i) => (i.lookupName ? (i.isDir ? i.lookupName : splitExt(i.lookupName)[0]) : null)),
-        r?.type === "comic" && !!r.seriesByFolder,
-      );
-      missing.forEach((i, n) => (guessed[i.path] = got[n]));
-    }
-    this.edit = {
-      paths: rows.map((i) => i.path),
-      comics: rows.map((i) => $state.snapshot(this.matches[i.path] ?? this.state[i.path]?.own ?? guessed[i.path] ?? EMPTY)),
-    };
+    const known = Object.fromEntries(this.selected.map((i) => [i.path, { current: this.matches[i.path], guess: this.state[i.path]?.own }]));
+    const [paths, comics] = await api.editStart<ComicMatch>({
+      kind: "comic",
+      chosen: this.selected.map((i) => i.path),
+      known: $state.snapshot(known),
+      parts: {},
+      dates: {},
+      fromName: false,
+      byFolder: r?.type === "comic" && !!r.seriesByFolder,
+      audiobooks: false,
+    });
+    if (paths.length) this.edit = { paths, comics };
   }
 
   /** The fields changed in the details window, for each of its comics (applied as the command line's --edit does). */

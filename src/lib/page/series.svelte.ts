@@ -6,7 +6,7 @@ import { confirm, notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
 import { settings, tmdbLang } from "$lib/settings.svelte";
 import type { Candidate, EpKey, EpisodeMatch, EpisodeState, Rule, Show } from "$lib/types";
-import { counts, moved, ruleOf, without, type PageCtx } from "./common";
+import { counts, moved, ruleOf, takers, without, type PageCtx } from "./common";
 
 /** What the show picker asks, while open. */
 export type ShowPick = { source: "tmdb" | "anilist"; query: string; candidates: Candidate[]; resolve: (c: Candidate | null) => void };
@@ -84,8 +84,9 @@ export class Series {
           conflict: f.conflict,
           doubled: f.doubled,
           choice: f.choice.length ? f.choice : null,
-          status: f.choice.length ? "auto" : f.alternatives.length ? "choose" : "none",
+          status: f.status,
           group: f.group,
+          read: f.read,
         };
       }
       await this.rebuild();
@@ -132,13 +133,9 @@ export class Series {
   /** The user's pick for a file; undecided files of its group (its
    *  subtitles, say) get it too. */
   async choose(path: string, choice: EpKey[] | null) {
-    const e = this.state[path];
-    if (!e) return;
-    for (const [p, o] of Object.entries(this.state)) {
-      const undecided = o.status === "choose" || o.status === "none";
-      if (p === path || (undecided && o.group === e.group)) {
-        this.state[p] = { ...o, choice, status: choice ? "chosen" : "none" };
-      }
+    if (!this.state[path]) return;
+    for (const p of await takers(path, this.state)) {
+      this.state[p] = { ...this.state[p], choice, status: choice ? "chosen" : "none" };
     }
     await this.rebuild();
   }

@@ -13,7 +13,7 @@
   import { Series } from "$lib/page/series.svelte";
   import { Subtitles } from "$lib/page/subtitles.svelte";
   import { Photos } from "$lib/page/photos.svelte";
-  import { asText, counts, extOf, moved, without, type PageCtx } from "$lib/page/common";
+  import { asText, counts, moved, without, type PageCtx } from "$lib/page/common";
   import Dialog from "$lib/Dialog.svelte";
   import Icon from "$lib/Icon.svelte";
   import RuleSets from "$lib/RuleSets.svelte";
@@ -28,25 +28,24 @@
   import PictureCompare from "$lib/PictureCompare.svelte";
   import ComicReview from "$lib/ComicReview.svelte";
   import EpisodeReview from "$lib/EpisodeReview.svelte";
-  import { missingFolder, type Ghost } from "$lib/missing";
+  import type { Ghost } from "$lib/missing";
   import MovieReview from "$lib/MovieReview.svelte";
   import Options from "$lib/Options.svelte";
   import RuleCard from "$lib/RuleCard.svelte";
   import ShowPicker from "$lib/ShowPicker.svelte";
   import SubtitleReview from "$lib/SubtitleReview.svelte";
   import { LOCALES, MOD, t, tError, type Key } from "$lib/i18n";
-  import { RULE_TYPES, isKindRule, setRuleTable, type Blocked, listNames, newRule, newStep, splitExt } from "$lib/rules";
-  import { SECRET_FIELDS, loadSecrets, loadSettings, saveSecrets, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
+  import { TABLE, isKindRule, setRuleTable, type Blocked, newRule, newStep } from "$lib/rules";
+  import { loadSecrets, refreshLangs, saveSecrets, saveSettings, secretFields, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
     AfterCounts, AfterReport, ApplyReport, Candidate, Copies, MovieStatus, HistoryEntry, OpError, Preview, PreviewItem, Rule, RuleType, Step, View, ViewSort,
   } from "$lib/types";
-  import { DETAIL_COLUMNS, type DetailColumn, type UpdateFound } from "$lib/types";
-  import { COL_LABEL, detailText } from "$lib/details";
+  import type { DetailColumn, UpdateFound } from "$lib/types";
 
   let ready = $state(false);
   let steps = $state<Step[]>([]);
   let overrides = $state<Record<string, string>>({});
-  let preview = $state<Preview>({ items: [], ruleErrors: [], filterError: null, total: 0, changed: 0, conflicts: 0, leftFolders: [], trash: [], trashFolders: [] });
+  let preview = $state<Preview>({ items: [], ruleErrors: [], filterError: null, total: 0, changed: 0, conflicts: 0, leftFolders: [], trash: [], trashFolders: [], hints: { sample: "", files: 0, pairs: 0, names: [], pairNames: [], steps: [] } });
   // Files that stay because the same file is already where they go
   // (counted apart from the conflicts).
   const sameThere = $derived(preview.items.filter((i) => i.problem === "sameThere").length);
@@ -108,7 +107,6 @@
     get steps() {
       return steps;
     },
-    readName: (i) => readName(i),
     say: (text) => (notice = text),
     get stopRun() {
       return stopRun;
@@ -260,7 +258,7 @@
     const rules = onRules();
     const k = known();
     const desc = sortDesc;
-    if (!p.total || !rules.some((r) => ["movie", "series", "music", "book", "comic"].includes(r.type))) {
+    if (!p.total || !rules.some((r) => TABLE.lookups.includes(r.type))) {
       ghosts = [];
       return;
     }
@@ -268,17 +266,11 @@
       if (p === preview) ghosts = g;
     }, () => {});
   });
-  /** The words for each kind of missing item. */
-  const MISSING = {
-    episode: { count: "missingEpisodes", file: "defaultMissingName" },
-    issue: { count: "missingIssues", file: "defaultMissingIssuesName" },
-    track: { count: "missingTracks", file: "defaultMissingTracksName" },
-    movie: { count: "missingMovies", file: "defaultMissingMoviesName" },
-    book: { count: "missingBooks", file: "defaultMissingBooksName" },
-  } as const;
+  /** How many are missing, in the words for their kind. */
+  const MISSING = { episode: "missingEpisodes", issue: "missingIssues", track: "missingTracks", movie: "missingMovies", book: "missingBooks" } as const;
   const missingCount = $derived.by(() => {
     const kinds = [...new Set(ghosts.map((g) => g.kind))];
-    return t(kinds.length === 1 ? MISSING[kinds[0]].count : "missingItems", { n: ghosts.length });
+    return t(kinds.length === 1 ? MISSING[kinds[0]] : "missingItems", { n: ghosts.length });
   });
   /** The ✓ ? ✕ marks next to the new names. */
   const matches = $derived.by(() => {
@@ -300,7 +292,7 @@
     if (music.rule) {
       const tip = { auto: "albumAuto", chosen: "albumChosen", choose: "albumChoose", none: "albumNone" } as const;
       for (const a of music.albums) {
-        const key = a.status === "auto" && a.choice?.id.startsWith("discogs:") ? "albumAutoDiscogs" : tip[a.status];
+        const key = a.status === "auto" && a.choice?.discogs ? "albumAutoDiscogs" : tip[a.status];
         for (const p of a.files) out[p] = { status: a.status, tip: t(key) };
       }
       for (const i of preview.items) if (i.untagged) out[i.path] = { status: "none", tip: t("musicUntaggedTip") };
@@ -339,7 +331,7 @@
   });
 ;
 
-  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, alikeOnly, similarOnly, movies: movies.matches, episodes: tv.matches, songs: music.matches, books: books.matches, comics: comics.matches, dates: photos.dates, leftoverSuffix: t("leftoverSuffix"), lang: settings.lang, numberClashes: settings.numberClashes, sendTo, trashAds: steps.some((s) => s.enabled && (s.rule.type === "movie" || s.rule.type === "series") && !!s.rule.trashAds) });
+  const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, alikeOnly, similarOnly, movies: movies.matches, episodes: tv.matches, songs: music.matches, books: books.matches, comics: comics.matches, dates: photos.dates, leftoverSuffix: t("leftoverSuffix"), lang: settings.lang, numberClashes: settings.numberClashes, sendTo });
   /** Example name for rule cards: the first file in natural name order, so
    *  it does not jump around while the preview re-sorts. */
   const collator = new Intl.Collator(undefined, { numeric: true });
@@ -347,70 +339,42 @@
   /** The lookup rule in the stack (on or off): the others wait until it
    *  is removed. */
   const lookupType = $derived(steps.find((s) => isKindRule(s.rule.type))?.rule.type ?? null);
-  /** The optional columns that make sense with the rules in the stack. */
-  const availableColumns = $derived.by<DetailColumn[]>(() => {
-    const cols: DetailColumn[] = [];
-    if (lookupType === "music") cols.push("artist", "album", "title", "track", "year", "genre", "length", "quality");
-    if (lookupType === "movie" || lookupType === "series") cols.push("resolution", "codec");
-    if (steps.some((s) => s.rule.type === "insert" && s.rule.source === "taken")) cols.push("taken");
-    return cols;
+  /** The optional columns that make sense with the rules in the stack
+   *  (the Rust catalog says, as for the command line's `--csv`). */
+  let availableColumns = $state<DetailColumn[]>([]);
+  $effect(() => {
+    const rules = $state.snapshot(steps);
+    api.columnsFor(rules).then((c) => (availableColumns = c), () => {});
   });
   // Sorted by a column no longer shown: the order stays, as a hand-made one.
   $effect(() => {
-    if ((DETAIL_COLUMNS as readonly string[]).includes(sortKey) && !availableColumns.includes(sortKey as DetailColumn)) {
+    if ((TABLE.columns as readonly string[]).includes(sortKey) && !availableColumns.includes(sortKey as DetailColumn)) {
       sortKey = "manual";
     }
   });
-  const ruleTypes = $derived(
-    [...RULE_TYPES].sort((a, b) => t(`rule.${a}`).localeCompare(t(`rule.${b}`), LOCALES[settings.lang])),
-  );
-  /** The kinds of file a rule is made for, then those that edit text. */
-  const MEDIA_RULES: RuleType[] = ["movie", "series", "music", "book", "comic", "photo", "subtitle"];
+  /** The "+ Rule" menu: the groups the Rust catalog makes, each in
+   *  alphabetical order of the current language. */
+  const byName = (a: RuleType, b: RuleType) => t(`rule.${a}`).localeCompare(t(`rule.${b}`), LOCALES[settings.lang]);
   const ruleGroups = $derived([
-    { label: "ruleGroupMedia", types: ruleTypes.filter((r) => MEDIA_RULES.includes(r)) },
-    { label: "ruleGroupText", types: ruleTypes.filter((r) => !MEDIA_RULES.includes(r)) },
+    { label: "ruleGroupMedia", types: [...TABLE.media].sort(byName) },
+    { label: "ruleGroupText", types: [...TABLE.text].sort(byName) },
   ] as const);
   /** What the Rename button does: names and the files that only get data. */
   const applyCount = $derived(preview.changed + afterCounts.besides);
-  const sample = $derived(
-    preview.items.reduce<string>((min, i) => (!min || collator.compare(i.original, min) < 0 ? i.original : min), ""),
-  );
+  /** Example name for rule cards (the preview's: the first in natural order). */
+  const sample = $derived(preview.hints.sample);
   const canMove = $derived(selected.size > 0 && sortKey !== "newName");
-  /** The name the lookups read: what the rules above the lookup rule make of it. */
-  const readName = (i: PreviewItem) => i.lookupName ?? i.original;
 
-  /** The names in the table, without extensions, for the list rule. */
-  const currentNames = $derived(preview.items.map((i) => (i.isDir ? i.original : splitExt(i.original)[0])));
-  /** The same, files of one name with other extensions (a video and its
-   *  subtitles) once, as the list rule counts them with "pairs". */
-  const currentPairs = $derived.by(() => {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const i of preview.items) {
-      const base = i.pair;
-      if (seen.has(base.toLowerCase())) continue;
-      seen.add(base.toLowerCase());
-      out.push(base);
-    }
-    return out;
-  });
 
   function ruleError(i: number) {
     const e = preview.ruleErrors.find((e) => e.index === i);
     return e ? `${t(e.code)}: ${e.detail}` : null;
   }
 
-  // Empty numeric fields become 0 so Rust accepts them.
+  /** The rules as they are (Rust reads their numbers as the core takes
+   *  them: `catalog::normalize_steps`, the command line's too). */
   function payload(): Step[] {
-    return $state.snapshot(steps).map((s) => {
-      const rule: Record<string, unknown> = { ...s.rule };
-      for (const [k, v] of Object.entries(rule)) {
-        if (v === null || (typeof v === "number" && !Number.isFinite(v))) rule[k] = 0;
-        else if (typeof v === "number" && k === "shiftHours") rule[k] = Math.max(-48, Math.min(48, Math.trunc(v)));
-        else if (typeof v === "number" && k !== "start" && k !== "step") rule[k] = Math.max(0, Math.trunc(v));
-      }
-      return { ...s, rule } as Step;
-    });
+    return $state.snapshot(steps) as Step[];
   }
 
   /** The latest preview asked for: an older one that comes back later is
@@ -461,7 +425,7 @@
   let secretsTimer: ReturnType<typeof setTimeout> | undefined;
   $effect(() => {
     // Every secret field, so none is left out when one is added.
-    const deps = SECRET_FIELDS.map((k) => settings[k]);
+    const deps = secretFields().map((k) => settings[k]);
     if (!ready || !deps) return;
     clearTimeout(secretsTimer);
     secretsTimer = setTimeout(() => saveSecrets().catch(() => {}), 600);
@@ -511,7 +475,7 @@
       sortDesc = false;
     }
     // By what the files hold: each file is read (once), which takes a while.
-    const reads = (DETAIL_COLUMNS as readonly string[]).includes(key);
+    const reads = (TABLE.columns as readonly string[]).includes(key);
     if (reads) {
       busy = true;
       task = "sort";
@@ -610,6 +574,12 @@
       api.ruleTable(lang).then(setRuleTable, () => {});
     }
   });
+  // The catalogues' languages follow the interface's and TMDB's.
+  $effect(() => {
+    settings.lang;
+    settings.tmdbLang;
+    if (ready) refreshLangs().catch(() => {});
+  });
   /** Why each rule cannot join the rules there, when it cannot (the Rust catalog decides, as for the command line). */
   let blocks = $state<Record<string, Blocked | null>>({});
   $effect(() => {
@@ -630,14 +600,15 @@
   /** Loaded steps with one lookup rule at most; the notice says which
    *  were left out, else `done` (when given). */
   async function loadSteps(loaded: Step[], done = "", saved = false): Promise<Step[]> {
-    const [kept, dropped] = await api.oneLookup($state.snapshot(loaded) as Step[]);
+    // Made whole and up to date by the Rust catalog (`complete_steps`, the
+    // command line's too): one lookup rule, every option, all back on
+    // when a saved set had them all off.
+    const [kept, dropped] = await api.completeSteps($state.snapshot(loaded) as Step[], settings.lang, saved);
     if (dropped.length) notice = t("lookupsDropped", { rules: [...new Set(dropped)].map((r) => t(`rule.${r}`)).join(", ") });
     else if (done) notice = done;
-    // All off is how rules are left after renaming (an option), not a
-    // choice: a saved set opened like that comes back on.
-    const allOff = saved && kept.length > 0 && kept.every((s) => !s.enabled);
-    return kept.map((s) => newStep(s.rule, allOff || s.enabled, s.only));
+    return kept;
   }
+
 
   function moveStep(i: number, delta: -1 | 1) {
     const j = i + delta;
@@ -738,6 +709,7 @@
       }
       if (after) {
         if (after.remaining !== null) subs.remaining = after.remaining;
+        followMatches(after.followed);
         // Downloaded (or tried): searched again if wanted.
         if (counts.subtitles) {
           for (const op of r.done) delete subs.found[op.from];
@@ -761,7 +733,7 @@
         }
       }
       const a = after ?? { adsTrashed: 0, adsFailed: 0, sidecars: 0, keptLists: 0, tags: 0, audioTags: 0, inside: 0, drawn: 0, subFixed: 0, subExtracted: 0, subtitles: 0 };
-      followMatches(r);
+      followMatches(r.moved);
       if (settings.disableRulesAfterApply) for (const s of steps) s.enabled = false;
       // The list now holds what was sent: sending it again would send it
       // once more, so the files stay where they are until chosen again.
@@ -871,7 +843,7 @@
     try {
       const r = await api.undo(id);
       foundUndo = [];
-      followMatches(r);
+      followMatches(r.moved);
       const restored = r.done.filter((op) => !op.copy).length;
       notice = [
         restored || !r.copiesRemoved ? t("restoredN", { n: restored }) : "",
@@ -967,20 +939,15 @@
     }
   }
 
-  /** Movie, episode and book choices follow their files when renamed or restored. */
-  function followMatches(r: ApplyReport) {
-    if (!r.done.length) return;
-    // All the renames at once (two files may swap names), then the folders
-    // renamed along, which carry what is inside them.
-    const exact = new Map(r.done.map((op) => [op.from, op.to]));
-    const inside = (p: string, dir: string) => p.startsWith(`${dir}/`) || p.startsWith(`${dir}\\`);
-    const follow = (p: string) => {
-      let q = exact.get(p) ?? p;
-      for (const op of r.done) if (inside(q, op.from)) q = op.to + q.slice(op.from.length);
-      return q;
-    };
+  /** What was found per file follows the files renamed or restored
+   *  (where each went, Rust says: `apply::Follow`). */
+  function followMatches(moved: [string, string][] | undefined) {
+    if (!moved?.length) return;
+    const to = new Map(moved);
+    const follow = (p: string) => to.get(p) ?? p;
     for (const m of [movies, tv, subs, books, comics, music, photos]) m.follow(follow);
   }
+
 
   /** Writes .nfo files and images (undone with the rename); movies.progress
    *  must be set. Returns how many files were created. */
@@ -1075,7 +1042,11 @@
     }
   }
 
-  /** Saves the list as shown to a CSV file. */
+  /** A CSV cell from Rust (`flow::export`): text, or a key of the texts. */
+  const cellText = (c: string | { key: string }) => (typeof c === "string" ? c : t(c.key as Key));
+
+  /** Saves the list as shown to a CSV file (the rows Rust makes, as for
+   *  the command line's `--csv`). */
   async function exportCsv() {
     const path = await save({
       title: t("exportCsv"),
@@ -1084,57 +1055,26 @@
     });
     if (!path) return;
     // The optional columns shown go too.
-    const extra = DETAIL_COLUMNS.filter((c) => settings.columns.includes(c));
-    const details = extra.length ? await api.fileDetails(preview.items.map((i) => i.path)) : {};
-    await saveCsv(path, t("exportCsv"), t("csvSaved"), [
-      [t("csv.folder"), t("csv.original"), t("csv.new"), t("csv.dest"), t("csv.status"), t("csv.problem"), ...extra.map((c) => t(COL_LABEL[c]))],
-      ...preview.items.map((i) => [
-        i.dir,
-        i.original,
-        i.newName,
-        i.folder ?? "",
-        t(`csv.${i.status}`),
-        i.problem ? t(`problem.${i.problem}`) : "",
-        ...extra.map((c) => detailText(c, details[i.path])),
-      ]),
-    ]);
+    const extra = TABLE.columns.filter((c) => availableColumns.includes(c) && settings.columns.includes(c));
+    const rows = await api.exportRows(extra, settings.lang);
+    await saveCsv(path, t("exportCsv"), t("csvSaved"), rows.map((r) => r.map(cellText)));
   }
 
-  /** Saves the missing items to a CSV file, by show (or series, album,
-   *  collection), season (or disc) and number. */
+  /** Saves the missing items to a CSV file: where, under what name, which
+   *  rows, Rust says (`flow::export::missing`, the command line's
+   *  `--missing-csv` too). */
   async function exportMissing() {
-    // In the show's folder, named after the show when there is one.
-    const names = [...new Set(ghosts.map((g) => g.group))];
-    const kinds = [...new Set(ghosts.map((g) => g.kind))];
-    const base = t(kinds.length === 1 ? MISSING[kinds[0]].file : "defaultMissingItemsName");
-    const file = `${names.length === 1 ? names[0].replace(/[\\/:*?"<>|]/g, " ").trim() + " - " : ""}${base}.csv`;
-    const byPath = new Map(preview.items.map((i) => [i.path, i.dir]));
-    const dir = missingFolder(ghosts, (p) => byPath.get(p));
+    const csv = await api.exportMissing();
+    const file = `${csv.group ? `${csv.group} - ` : ""}${t(csv.nameKey as Key)}.csv`;
+    const dir = csv.dir;
+    const sep = dir && dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
     const path = await save({
       title: t("exportMissing"),
       filters: [{ name: t("csvFile"), extensions: ["csv"] }],
-      defaultPath: dir ? `${dir}${/[\\/]$/.test(dir) ? "" : dir.includes("/") ? "/" : "\\"}${file}` : file,
+      defaultPath: dir ? `${dir}${dir.endsWith(sep) ? "" : sep}${file}` : file,
     });
     if (!path) return;
-    const list = [...ghosts].sort(
-      (a, b) => a.group.localeCompare(b.group) || a.season - b.season || a.number - b.number,
-    );
-    // Each kind alone with its own columns; mixed, the columns all share.
-    const columns: Record<Ghost["kind"], [string[], (g: Ghost) => string[]]> = {
-      episode: [
-        [t("csv.show"), t("csv.season"), t("csv.episode"), t("csv.code"), t("csv.title"), t("csv.airDate")],
-        (g) => [g.group, String(g.season), String(g.number), g.code, g.title, g.date],
-      ],
-      issue: [[t("csv.series"), t("csv.number"), t("csv.title"), t("csv.coverDate")], (g) => [g.group, g.code.replace(/^#/, ""), g.title, g.date]],
-      track: [[t("csv.album"), t("csv.disc"), t("csv.track"), t("csv.title")], (g) => [g.group, String(g.season), String(g.position ?? ""), g.title]],
-      movie: [[t("csv.collection"), t("csv.title"), t("csv.releaseDate")], (g) => [g.group, g.title, g.date]],
-      book: [[t("csv.series"), t("csv.volume")], (g) => [g.group, g.code]],
-    };
-    const [head, row]: [string[], (g: Ghost) => string[]] =
-      kinds.length === 1
-        ? columns[kinds[0]]
-        : [[t("csv.group"), t("csv.code"), t("csv.title"), t("csv.date")], (g) => [g.group, g.code, g.title, g.date]];
-    await saveCsv(path, t("exportMissing"), t("missingSaved"), [head, ...list.map(row)]);
+    await saveCsv(path, t("exportMissing"), t("missingSaved"), csv.rows.map((r) => r.map(cellText)));
   }
 
   /** Writes rows as CSV (`;` between fields where a comma is the decimal
@@ -1152,7 +1092,9 @@
     const path = await open({ title: t("openRules"), filters: presetFilter() });
     if (typeof path !== "string") return;
     try {
-      steps = await loadSteps(await api.loadPreset(path), t("rulesLoaded"), true);
+      const [loaded, dropped] = await api.loadPreset(path, settings.lang);
+      steps = loaded;
+      notice = dropped.length ? t("lookupsDropped", { rules: [...new Set(dropped)].map((r) => t(`rule.${r}`)).join(", ") }) : t("rulesLoaded");
     } catch (e) {
       await notify({ title: t("openRules"), text: tError(e) });
     }
@@ -1288,9 +1230,8 @@
       similarProgress = e.payload.done < e.payload.total ? e.payload.done / e.payload.total : null;
     });
     (async () => {
-      await loadSettings();
-      // The rules' defaults, before any rule is made or read.
-      setRuleTable(await api.ruleTable(settings.lang));
+      // The settings and the rules' table came before the page
+      // (`+layout.ts`).
       tableLang = settings.lang;
       // The password store may wait to be unlocked: the program does not.
       loadSecrets();
@@ -1413,7 +1354,7 @@
                 {#each g.types as type (type)}
                   {@const block = blocks[type] ?? null}
                   {@const locked = !!block}
-                  {@const sub = block && "twice" in block ? t("ruleOnce") : block && "clash" in block ? t("ruleClash", { rule: t(`rule.${block.clash}`) }) : MEDIA_RULES.includes(type) ? t(`ruleSub.${type}` as Key) : ""}
+                  {@const sub = block && "twice" in block ? t("ruleOnce") : block && "clash" in block ? t("ruleClash", { rule: t(`rule.${block.clash}`) }) : TABLE.media.includes(type) ? t(`ruleSub.${type}` as Key) : ""}
                   <button role="menuitem" disabled={locked} onclick={() => addRule(type)}>
                     <span class="item-text">{t(`rule.${type}`)}{#if sub}<small>{sub}</small>{/if}</span>
                   </button>
@@ -1529,10 +1470,11 @@
                 ? t("photoUndatedN", { n: undatedCount })
                 : step.rule.type === "list" && step.rule.names.trim()
                   ? step.only?.trim()
-                    ? t("listOrderN", { n: listNames(step.rule.names).length })
-                    : t("listCountN", { names: listNames(step.rule.names).length, files: (step.rule.pairs ? currentPairs : currentNames).length })
+                    ? t("listOrderN", { n: preview.hints.steps[i]?.names ?? 0 })
+                    : t("listCountN", { names: preview.hints.steps[i]?.names ?? 0, files: step.rule.pairs ? preview.hints.pairs : preview.hints.files })
                   : null}
-            currentNames={step.rule.type === "list" && !step.only?.trim() ? (step.rule.pairs ? currentPairs : currentNames) : []}
+            currentNames={step.rule.type === "list" && !step.only?.trim() ? (step.rule.pairs ? preview.hints.pairNames : preview.hints.names) : []}
+            hint={preview.hints.steps[i] ?? null}
           />
         {:else}
           <p class="empty">{t("emptyRules")}</p>

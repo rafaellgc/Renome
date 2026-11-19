@@ -105,88 +105,34 @@ pub enum Device {
     Custom,
 }
 
+include!(concat!(env!("OUT_DIR"), "/screens.rs"));
+
 impl Device {
-    /// The screen pages are fit into, if any (a custom one: the options').
-    pub fn size(self) -> Option<(u32, u32)> {
-        use Device::*;
-        Some(match self {
-            Original | Custom => return None,
-            Kindle | Kobo | KoboClaraColor => (1072, 1448),
-            KindlePw => (1236, 1648),
-            KindlePw2024 | KindleColor => (1272, 1696),
-            KindleOasis | KoboLibra | KoboColor => (1264, 1680),
-            KindlePwOld | KoboNia => (758, 1024),
-            KindleBasic => (600, 800),
-            KindleDx => (824, 1000),
-            KindleScribe => (1860, 2480),
-            KindleScribe2025 | KindleScribeColor => (1986, 2648),
-            KoboH2o => (1080, 1430),
-            KoboSage => (1440, 1920),
-            KoboElipsa | Remarkable => (1404, 1872),
-            RemarkablePro => (1620, 2160),
-            RemarkableMove => (954, 1696),
-            Eink480 => (480, 800),
-            Eink528 => (528, 792),
-            Eink824 | Colour824 => (824, 1648),
-            Colour1404 => (1404, 1872),
-            Eink1650 => (1650, 2200),
-            Eink1860 | Colour1860 => (1860, 2480),
-            Eink1920 => (1920, 2560),
-            Eink2400 | Colour2400 => (2400, 3200),
-            Tablet => (1600, 2560),
-            Ipad => (1640, 2360),
-            Ipad13 => (2048, 2732),
-            Phone => (1080, 2400),
-        })
+    /// Its screen in the readers' list (`src/lib/readers.ts`): size and
+    /// ink (`grey`, `colour` or a lit `lcd` screen).
+    fn screen(self) -> Option<(u32, u32, &'static str)> {
+        let name = serde_json::to_value(self).ok()?;
+        let name = name.as_str()?;
+        SCREENS
+            .iter()
+            .find(|(n, ..)| *n == name)
+            .map(|&(_, w, h, ink)| (w, h, ink))
     }
 
-    /// A grey ink screen: pages saved in grey (smaller, the same on it).
+    /// The screen's size in pixels (`None`: the pages keep theirs, or the
+    /// options' width and height).
+    pub fn size(self) -> Option<(u32, u32)> {
+        self.screen().map(|(w, h, _)| (w, h))
+    }
+
+    /// A grey ink screen (pages saved in grey).
     pub fn grey(self) -> bool {
-        use Device::*;
-        matches!(
-            self,
-            Kindle
-                | KindlePw
-                | KindlePw2024
-                | KindleOasis
-                | KindlePwOld
-                | KindleBasic
-                | KindleDx
-                | KindleScribe
-                | KindleScribe2025
-                | Kobo
-                | KoboLibra
-                | KoboH2o
-                | KoboSage
-                | KoboElipsa
-                | KoboNia
-                | Remarkable
-                | Eink480
-                | Eink528
-                | Eink824
-                | Eink1650
-                | Eink1860
-                | Eink1920
-                | Eink2400
-        )
+        self.screen().is_some_and(|(_, _, ink)| ink == "grey")
     }
 
     /// A colour ink screen, where fine dot patterns shimmer in colour.
     pub fn colour_ink(self) -> bool {
-        use Device::*;
-        matches!(
-            self,
-            KindleColor
-                | KindleScribeColor
-                | KoboClaraColor
-                | KoboColor
-                | RemarkablePro
-                | RemarkableMove
-                | Colour824
-                | Colour1404
-                | Colour1860
-                | Colour2400
-        )
+        self.screen().is_some_and(|(_, _, ink)| ink == "colour")
     }
 
     /// An ink screen (grey or colour), which shows pages lighter than a
@@ -197,12 +143,12 @@ impl Device {
 
     /// A reader known to show pictures in PNG badly (blank pages): the
     /// Scribes and the colour Kindles get JPEG only.
-    fn png_ok(self) -> bool {
-        use Device::*;
-        !matches!(
-            self,
-            KindleScribe | KindleScribe2025 | KindleScribeColor | KindleColor
-        )
+    pub fn png_ok(self) -> bool {
+        let name = serde_json::to_value(self).ok();
+        !name
+            .as_ref()
+            .and_then(|n| n.as_str())
+            .is_some_and(|n| NO_PNG.contains(&n))
     }
 }
 

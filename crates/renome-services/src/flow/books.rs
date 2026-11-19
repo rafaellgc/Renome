@@ -40,6 +40,7 @@ pub struct Found {
     pub error: Option<String>,
     /// Doubts of one group share one answer (one book in several formats).
     pub group: String,
+    pub status: super::Status,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -132,6 +133,7 @@ pub async fn search(
         .into_iter()
         .map(|f| Found {
             group: format!("{}\u{1f}{}", f.guess.title, f.guess.author),
+            status: super::Status::of(f.auto && !f.candidates.is_empty(), !f.candidates.is_empty()),
             choice: if f.auto {
                 f.candidates.first().cloned()
             } else {

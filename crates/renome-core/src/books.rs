@@ -438,6 +438,9 @@ pub struct Candidate {
     /// A cover's address elsewhere (Google Books), for a book with no Open
     /// Library cover.
     pub cover_url: String,
+    /// The cover the reviews show (Open Library's, else the one elsewhere:
+    /// filled by `renome_services::openlibrary::thumbs`).
+    pub thumb: String,
     /// The book's description elsewhere (Google Books), for its
     /// `metadata.opf` when Open Library has none.
     pub description: String,
@@ -868,6 +871,7 @@ pub fn rank(g: &Guess, docs: Vec<Doc>, isbn: Option<&str>, lang: &str) -> (Vec<C
             cover: ed.cover_i.or(doc.cover_i),
             source: String::new(),
             cover_url: String::new(),
+            thumb: String::new(),
             description: String::new(),
             editions: doc.edition_count,
             exact: by_isbn,
