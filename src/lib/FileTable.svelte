@@ -518,6 +518,7 @@
                 >{MOVIE_MARK[m.status]}</button>
               {/if}
               {#if item.folder}<span class="into" title={t("intoFolder", { folder: item.folder })}><svg class="folder" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M1.5 3.5A1 1 0 0 1 2.5 2.5h3.6l1.5 1.5h5.9a1 1 0 0 1 1 1v7.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" /></svg>/</span>{/if}
+              {#if item.manual}<span class="outside manual-tag" title={t("manualRowTip")}>{t("manualRow")}</span>{/if}
               <span class="name" class:same={item.status === "unchanged"}>{#if d}{@render segs(d[1], "ins")}{:else}{item.newName}{/if}</span>
               {#if item.manual}
                 <button class="icon reset" title={t("resetManual")} onclick={(e) => { e.stopPropagation(); onoverride(item.path, null); }}><Icon name="undo" size={13} /></button>
@@ -660,6 +661,8 @@
     font-style: normal;
   }
   /* Left alone by the lookup rules: the row stays as it is. */
+  /* Before the name, so a long one never hides it. */
+  .manual-tag { flex: none; }
   .outside {
     margin-right: 6px;
     padding: 0 6px;
