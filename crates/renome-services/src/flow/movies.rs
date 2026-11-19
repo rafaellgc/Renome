@@ -34,6 +34,22 @@ pub fn targets(items: &[Item]) -> Vec<&Item> {
         .collect()
 }
 
+/// The name a file is looked up by: without its extension and, for a
+/// subtitle, without its language and flags (`Movie.pt-BR.forced.srt`
+/// is `Movie`, so it shares its video's answer).
+fn lookup_stem(i: &Item) -> String {
+    let stem = i.read_stem();
+    if i.is_dir {
+        return stem;
+    }
+    let ext = std::path::Path::new(i.read_name())
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    let suffix = renome_core::tmdb::subtitle_suffix(&stem, &ext).len();
+    stem[..stem.len() - suffix].to_string()
+}
+
 /// The doubts sharing an answer: same guessed title and year.
 fn group(guess: &Guess) -> String {
     format!(
@@ -55,7 +71,7 @@ pub async fn search(
         .into_iter()
         .map(|i| tmdb::LookupItem {
             path: i.path.clone(),
-            name: i.read_stem(),
+            name: lookup_stem(i),
         })
         .collect();
     if wanted.is_empty() {
@@ -124,6 +140,22 @@ mod tests {
             .map(|i| i.original.as_str())
             .collect();
         assert_eq!(names, ["A Film.mkv", "A Film.srt", "A Film (2001)"]);
+    }
+
+    #[test]
+    fn a_subtitle_without_year_is_looked_up_as_its_video() {
+        let video = renome_core::tmdb::guess(&lookup_stem(&item("A.Quiet.Isle.mkv")));
+        for name in [
+            "A.Quiet.Isle.pt-BR.srt",
+            "A.Quiet.Isle.en.forced.srt",
+            "A.Quiet.Isle.pt-BR.sdh.ass",
+        ] {
+            assert_eq!(
+                group(&renome_core::tmdb::guess(&lookup_stem(&item(name)))),
+                group(&video),
+                "{name}"
+            );
+        }
     }
 
     #[test]
