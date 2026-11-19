@@ -96,7 +96,7 @@ export const pt: Section[] = [
 <p>Troca um texto por outro.</p>
 ${ex("foto_de_ferias.jpg", "foto de ferias.jpg")}
 <ul>
-  <li><b>Localizar</b> e <b>Substituir por</b>: deixe "Substituir por" vazio para apagar o texto.</li>
+  <li><b>Localizar</b> e <b>Substituir por</b>: deixe "Substituir por" vazio para apagar o texto. Um sinal digitado (<code>?</code>, <code>:</code>, <code>/</code>, <code>*</code>…) também encontra as formas largas e parecidas que programas põem no lugar dos sinais que o Windows não aceita (<code>？</code>, <code>：</code>, <code>／</code>…).</li>
   <li><b>Diferenciar maiúsculas</b>: desmarcado, "Foto" também encontra "foto" e "FOTO".</li>
   <li><b>Só a 1ª ocorrência em cada nome</b>: troca só a primeira vez que o texto aparece <i>em cada nome</i>. Em <code>a_b_c</code>, trocar <code>_</code> por espaço dá <code>a b_c</code>. Se o texto só aparece uma vez, todos os nomes mudam do mesmo jeito.</li>
 </ul>`,
@@ -232,7 +232,7 @@ ${ex("praia.jpg", "Viagem 01.jpg")}
   <li><b>Acentos</b>: <code>Canção</code> → <code>Cancao</code>; também letras especiais, como <code>Ørsted</code> → <code>Orsted</code>, <code>Straße</code> → <code>Strasse</code>, <code>Łódź</code> → <code>Lodz</code></li>
   <li><b>Dígitos</b>: <code>foto123</code> → <code>foto</code></li>
   <li><b>Número no início</b>: o número de faixa no começo do nome e o separador depois dele: <code>01 - Música</code>, <code>01. Música</code> e <code>1-05 Música</code> viram <code>Música</code>. Números de até três dígitos: anos (<code>1999 Viagem</code>) e datas (<code>2024-07-15 Praia</code>) ficam, e um nome que é só o número também.</li>
-  <li><b>Caracteres</b>: cada caractere digitado é removido onde aparecer. <code>_#</code> remove todos os <code>_</code> e <code>#</code>.</li>
+  <li><b>Caracteres</b>: cada caractere digitado é removido onde aparecer. <code>_#</code> remove todos os <code>_</code> e <code>#</code>. Um sinal digitado também remove suas formas largas e parecidas (<code>?</code> remove <code>？</code>, <code>:</code> remove <code>：</code>), que programas põem no lugar dos sinais que o Windows não aceita.</li>
   <li><b>Limitar a</b> N caracteres: corta o nome (sem a extensão) depois de N caracteres, tirando espaços e traços que sobrarem no fim. Útil para som de carro, pen drives e programas antigos que não aceitam nomes longos. Com 0, não há limite. Cuidado: dois nomes longos que só mudam no fim podem ficar iguais, e o conflito aparece na lista.</li>
 </ul>`,
   },

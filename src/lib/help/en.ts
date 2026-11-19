@@ -96,7 +96,7 @@ export const en: Section[] = [
 <p>Replaces one text with another.</p>
 ${ex("holiday_photo_01.jpg", "holiday photo 01.jpg")}
 <ul>
-  <li><b>Find</b> and <b>Replace with</b>: leave "Replace with" empty to delete the text.</li>
+  <li><b>Find</b> and <b>Replace with</b>: leave "Replace with" empty to delete the text. A sign typed (<code>?</code>, <code>:</code>, <code>/</code>, <code>*</code>…) also finds the full-width and lookalike forms programs put in place of the signs Windows does not accept (<code>？</code>, <code>：</code>, <code>／</code>…).</li>
   <li><b>Match case</b>: unchecked, "Photo" also finds "photo" and "PHOTO".</li>
   <li><b>Only the first occurrence in each name</b>: replaces only the first time the text appears <i>in each name</i>. In <code>a_b_c</code>, replacing <code>_</code> with a space gives <code>a b_c</code>. If the text appears only once, every name changes the same way.</li>
 </ul>`,
@@ -232,7 +232,7 @@ ${ex("beach.jpg", "Trip 01.jpg")}
   <li><b>Accents</b>: <code>Café</code> → <code>Cafe</code>; also special letters, like <code>Ørsted</code> → <code>Orsted</code>, <code>Straße</code> → <code>Strasse</code>, <code>Łódź</code> → <code>Lodz</code></li>
   <li><b>Digits</b>: <code>photo123</code> → <code>photo</code></li>
   <li><b>Number at the start</b>: the track number at the start of the name and the separator after it: <code>01 - Song</code>, <code>01. Song</code> and <code>1-05 Song</code> become <code>Song</code>. Numbers of up to three digits: years (<code>1999 Trip</code>) and dates (<code>2024-07-15 Beach</code>) stay, and so does a name that is only the number.</li>
-  <li><b>Characters</b>: each character typed is removed wherever it appears. <code>_#</code> removes every <code>_</code> and <code>#</code>.</li>
+  <li><b>Characters</b>: each character typed is removed wherever it appears. <code>_#</code> removes every <code>_</code> and <code>#</code>. A sign typed also removes its full-width and lookalike forms (<code>?</code> removes <code>？</code>, <code>:</code> removes <code>：</code>), which programs put in place of the signs Windows does not accept.</li>
   <li><b>Limit to</b> N characters: cuts the name (without the extension) after N characters, removing spaces and dashes left at the end. Useful for car stereos, USB sticks and old programs that do not take long names. With 0 there is no limit. Careful: two long names that only differ at the end may become the same, and the conflict shows in the list.</li>
 </ul>`,
   },

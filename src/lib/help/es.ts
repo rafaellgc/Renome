@@ -96,7 +96,7 @@ export const es: Section[] = [
 <p>Cambia un texto por otro.</p>
 ${ex("foto_de_vacaciones.jpg", "foto de vacaciones.jpg")}
 <ul>
-  <li><b>Buscar</b> y <b>Reemplazar por</b>: deje "Reemplazar por" vacío para borrar el texto.</li>
+  <li><b>Buscar</b> y <b>Reemplazar por</b>: deje "Reemplazar por" vacío para borrar el texto. Un signo escrito (<code>?</code>, <code>:</code>, <code>/</code>, <code>*</code>…) también encuentra las formas anchas y parecidas que algunos programas ponen en lugar de los signos que Windows no acepta (<code>？</code>, <code>：</code>, <code>／</code>…).</li>
   <li><b>Distinguir mayúsculas</b>: sin marcar, "Foto" también encuentra "foto" y "FOTO".</li>
   <li><b>Solo la 1ª aparición en cada nombre</b>: cambia solo la primera vez que aparece el texto <i>en cada nombre</i>. En <code>a_b_c</code>, cambiar <code>_</code> por un espacio da <code>a b_c</code>. Si el texto aparece una sola vez, todos los nombres cambian igual.</li>
 </ul>`,
@@ -232,7 +232,7 @@ ${ex("playa.jpg", "Viaje 01.jpg")}
   <li><b>Acentos</b>: <code>Canción</code> → <code>Cancion</code>; también letras especiales, como <code>Ørsted</code> → <code>Orsted</code>, <code>Straße</code> → <code>Strasse</code>, <code>Łódź</code> → <code>Lodz</code></li>
   <li><b>Dígitos</b>: <code>foto123</code> → <code>foto</code></li>
   <li><b>Número al inicio</b>: el número de pista al comienzo del nombre y el separador que lo sigue: <code>01 - Canción</code>, <code>01. Canción</code> y <code>1-05 Canción</code> pasan a <code>Canción</code>. Números de hasta tres dígitos: los años (<code>1999 Viaje</code>) y las fechas (<code>2024-07-15 Playa</code>) quedan, y también un nombre que es solo el número.</li>
-  <li><b>Caracteres</b>: cada carácter escrito se quita donde aparezca. <code>_#</code> quita todos los <code>_</code> y <code>#</code>.</li>
+  <li><b>Caracteres</b>: cada carácter escrito se quita donde aparezca. <code>_#</code> quita todos los <code>_</code> y <code>#</code>. Un signo escrito también quita sus formas anchas y parecidas (<code>?</code> quita <code>？</code>, <code>:</code> quita <code>：</code>), que algunos programas ponen en lugar de los signos que Windows no acepta.</li>
   <li><b>Limitar a</b> N caracteres: corta el nombre (sin la extensión) después de N caracteres, quitando los espacios y guiones que sobren al final. Útil para radios de coche, memorias USB y programas antiguos que no aceptan nombres largos. Con 0 no hay límite. Cuidado: dos nombres largos que solo cambian al final pueden quedar iguales, y el conflicto aparece en la lista.</li>
 </ul>`,
   },

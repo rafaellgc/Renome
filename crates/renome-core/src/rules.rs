@@ -1090,8 +1090,22 @@ fn compile(rule: &Rule) -> Result<Option<Compiled>, (&'static str, String)> {
             if find.is_empty() {
                 return Ok(None);
             }
+            // `:` typed also finds `：` and the other characters put in
+            // names in its place.
+            let pattern: String = find
+                .chars()
+                .map(|c| match text::with_stand_ins(c) {
+                    v if v.len() > 1 => format!(
+                        "[{}]",
+                        v.iter()
+                            .map(|x| regex::escape(&x.to_string()))
+                            .collect::<String>()
+                    ),
+                    _ => regex::escape(&c.to_string()),
+                })
+                .collect();
             (
-                regex::escape(find),
+                pattern,
                 replace,
                 *case_sensitive,
                 *first_only,
@@ -1329,7 +1343,10 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
                     s.retain(|c| !c.is_ascii_digit());
                 }
                 if !chars.is_empty() {
-                    s.retain(|c| !chars.contains(c));
+                    // `?` also takes `？`, put in names in its place.
+                    s.retain(|c| {
+                        !chars.contains(c) && !text::stand_in(c).is_some_and(|a| chars.contains(a))
+                    });
                 }
                 if *all_spaces {
                     s.retain(|c| !c.is_whitespace());
@@ -2349,6 +2366,41 @@ mod tests {
             },
         }];
         assert_eq!(Pipeline::new(&steps).errors.len(), 1);
+    }
+
+    #[test]
+    fn typed_punctuation_takes_its_stand_ins() {
+        let remove = Rule::Remove {
+            all_spaces: false,
+            extra_spaces: true,
+            accents: false,
+            digits: false,
+            chars: "?".into(),
+            leading_number: false,
+            max_length: 0,
+            target: Target::Name,
+        };
+        assert_eq!(
+            run(vec![remove], "Como lutar o bom combate？ ?.mkv", 0),
+            "Como lutar o bom combate.mkv"
+        );
+        let replace = Rule::Replace {
+            find: "Cultural:".into(),
+            replace: "Cultural -".into(),
+            case_sensitive: false,
+            first_only: false,
+            target: Target::Name,
+        };
+        assert_eq!(
+            run(vec![replace.clone()], "Revolução Cultural： Visão.mkv", 0),
+            "Revolução Cultural - Visão.mkv"
+        );
+        assert_eq!(
+            run(vec![replace], "Revolução Cultural꞉ Visão.mkv", 0),
+            "Revolução Cultural - Visão.mkv"
+        );
+        // Letters typed stay letters: a full-width `Ａ` is not an `A`.
+        assert_eq!(crate::text::with_stand_ins('A'), ['A']);
     }
 
     #[test]

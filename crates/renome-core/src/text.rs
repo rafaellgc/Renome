@@ -38,6 +38,50 @@ pub fn nfc(s: &str) -> String {
     s.nfc().collect()
 }
 
+/// Characters put in names instead of punctuation that Windows does not
+/// accept (or that looks like it): full-width forms (`？`, `：`, `／`) and
+/// lookalikes (`꞉`, `∕`, `∗`). Each stands for the ASCII punctuation it
+/// returns; anything else returns `None`.
+pub fn stand_in(c: char) -> Option<char> {
+    let n = c as u32;
+    // The full-width forms of ASCII: U+FF01..=U+FF5E.
+    if (0xFF01..=0xFF5E).contains(&n) {
+        let ascii = char::from_u32(n - 0xFEE0)?;
+        return ascii.is_ascii_punctuation().then_some(ascii);
+    }
+    Some(match c {
+        '\u{2d0}' | '\u{a789}' | '\u{fe13}' | '\u{2236}' => ':',
+        '\u{2215}' | '\u{2044}' | '\u{29f8}' => '/',
+        '\u{29f5}' | '\u{fe68}' => '\\',
+        '\u{2217}' | '\u{fe61}' => '*',
+        '\u{fe56}' => '?',
+        '\u{2223}' | '\u{1c0}' => '|',
+        '\u{fe64}' | '\u{2039}' => '<',
+        '\u{fe65}' | '\u{203a}' => '>',
+        '\u{2033}' => '"',
+        _ => return None,
+    })
+}
+
+/// The characters that stand for `c` (see [`stand_in`]), `c` first: what
+/// a search for `c` typed by the person also finds.
+pub fn with_stand_ins(c: char) -> Vec<char> {
+    let mut out = vec![c];
+    if c.is_ascii_punctuation() {
+        out.extend(char::from_u32(c as u32 + 0xFEE0));
+        for x in [
+            '\u{2d0}', '\u{a789}', '\u{fe13}', '\u{2236}', '\u{2215}', '\u{2044}', '\u{29f8}',
+            '\u{29f5}', '\u{fe68}', '\u{2217}', '\u{fe61}', '\u{fe56}', '\u{2223}', '\u{1c0}',
+            '\u{fe64}', '\u{2039}', '\u{fe65}', '\u{203a}', '\u{2033}',
+        ] {
+            if stand_in(x) == Some(c) {
+                out.push(x);
+            }
+        }
+    }
+    out
+}
+
 pub fn strip_accents(s: &str) -> String {
     s.nfd().filter(|c| !is_combining_mark(*c)).nfc().collect()
 }
