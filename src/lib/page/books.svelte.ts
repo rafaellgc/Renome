@@ -52,11 +52,6 @@ export class Books {
     return isBook(name) || (this.audio && isAudio(name));
   }
 
-  /** The file an audiobook is looked up, named on its cover and written
-   *  about by (its first); any book is its own. */
-  leads(p: string) {
-    return (this.parts[p]?.leader ?? p) === p;
-  }
   /** Each chosen book's details as the rule names it (made by the shared
    *  flow: one spelling per author across the list, an audiobook's files
    *  with their part); rebuilt whenever the choices change. */
@@ -72,47 +67,9 @@ export class Books {
   counts = $derived.by(() => counts(this.state, this.#ctx.items));
   /** The books among the rows chosen in the list. */
   selected = $derived.by(() => this.#ctx.items.filter((i) => this.#ctx.selected.has(i.path) && !i.isDir && this.takes(i.original)));
-  /** Books whose names are already right but that still get a cover or a
-   *  metadata.opf (files that already exist are skipped when writing). */
-  metaOnly = $derived.by(() => {
-    const r = this.rule?.rule;
-    return r?.type === "book" && (r.cover || r.metadataOpf)
-      ? this.#ctx.items.filter((i) => i.status === "unchanged" && this.has(i.path) && (isBook(i.original) || (isAudio(i.original) && this.leads(i.path))))
-      : [];
-  });
-  /** Books whose names are already right but whose details get written
-   *  or that get polished (those that already have them are skipped). */
-  epubOnly = $derived.by(() =>
-    this.#ctx.items.filter((i) => i.status === "unchanged" && !i.isDir && !i.bookTo && this.writes(i.path, i.path)),
-  );
 
-  /** The EPUB polish the rule asks for, if any. */
-  get polish() {
-    const r = this.rule?.rule;
-    return r?.type === "book" && (r.epub3 || r.shrinkImages) ? { epub3: !!r.epub3, shrink: !!r.shrinkImages } : null;
-  }
 
-  /** Whether a book (`key` before renaming, `path` after) gets its details
-   *  written inside or gets polished. */
-  writes(key: string, path: string) {
-    const r = this.rule?.rule;
-    if (r?.type !== "book") return false;
-    return (!!r.writeEpub && this.has(key) && isWritableBook(path)) || (!!this.polish && isEpub(path));
-  }
 
-  /** What writing a book's details inside it and polishing it need. */
-  writeItem(key: string, path: string) {
-    const r = this.rule?.rule;
-    const details = r?.type === "book" && r.writeEpub && this.has(key) ? this.insideItem(key, path) : { path };
-    const polish = isEpub(path) ? this.polish : null;
-    return polish ? { ...details, polish } : details;
-  }
-  /** Books whose names are already right but that get converted (an
-   *  `.epub` that is really another format). */
-  convertOnly = $derived.by(() => {
-    const r = this.rule?.rule;
-    return r?.type === "book" && r.convertTo ? this.#ctx.items.filter((i) => i.status === "unchanged" && !!i.bookTo) : [];
-  });
   /** The details window's fields. */
   fields = $derived<EditField[]>([
     { key: "title", label: t("bookEditTitle"), wide: true },
@@ -125,11 +82,6 @@ export class Books {
     { key: "isbn", label: t("bookEditIsbn") },
   ]);
 
-  /** A book has details to name and write it with: chosen or typed in. */
-  has(p: string) {
-    const leader = this.parts[p]?.leader ?? p;
-    return !!(this.state[leader]?.choice || this.edits[p]);
-  }
 
   /** A book's details as the window shows them. */
   text(m: BookMatch): Record<string, string> {
@@ -145,63 +97,11 @@ export class Books {
     };
   }
 
-  /** What writing a book's details inside it needs; `key` is the path before renaming. */
-  insideItem(key: string, path: string) {
-    const typed = this.edits[key];
-    if (typed) return { path, book: typed, language: typed.extra?.language ?? "" };
-    const b = this.state[key];
-    const c = b.choice!;
-    return { path, book: this.matches[key], language: c.exact ? c.language : b.guess.language };
-  }
 
-  /** What converting a book needs: the format, the original's fate and,
-   *  when it has some, the details to write in it. */
-  convertItem(key: string, path: string, to: BookTarget) {
-    const r = this.rule?.rule;
-    const original = r?.type === "book" ? (r.original ?? "keep") : "keep";
-    const base = this.has(key) ? this.insideItem(key, path) : { path };
-    // A PDF the size of the chosen reader's screen.
-    const device = r?.type === "book" ? modelOf(r.model)?.device : undefined;
-    const pdfPage = to === "pdf" && device ? screenMm(device) : null;
-    return { ...base, bookTo: to, convert: original, ...(pdfPage ? { pdfPage } : {}) };
-  }
 
-  /** Whether the rule writes audiobooks' details inside their files. */
-  get audioTags() {
-    const r = this.rule?.rule;
-    return r?.type === "book" && this.audio && !!r.audioTags;
-  }
 
-  /** Audiobook files whose names are already right but that get their
-   *  book's details written (files that already have them are skipped). */
-  tagsOnly = $derived.by(() =>
-    this.audioTags ? this.#ctx.items.filter((i) => i.status === "unchanged" && !i.isDir && isAudio(i.original) && this.has(i.path)) : [],
-  );
 
-  /** What writing an audiobook file's details needs: its book, with this
-   *  file's part. */
-  audioTagItem(key: string, path: string) {
-    const g = this.parts[key];
-    // The catalogue's cover and synopsis are the book's, chosen for its
-    // first file.
-    const item = this.sidecarItem(g?.leader ?? key, path);
-    const m = this.matches[key] ?? item.book;
-    return g ? { ...item, book: { ...m, part: g.part, parts: g.parts, narrator: m.narrator || g.narrator } } : { ...item, book: m };
-  }
 
-  /** What the cover and metadata.opf of a book need; `key` is the path before renaming. */
-  sidecarItem(key: string, path: string) {
-    const typed = this.edits[key];
-    const b = this.state[key];
-    const c = b?.choice;
-    // Typed in: the catalogue's cover and description only while it is still that book.
-    if (typed) {
-      const same = !!(c && typed.work);
-      return { path, book: typed, cover: same ? c!.cover : null, coverUrl: same ? (c!.coverUrl ?? "") : "", description: same ? (c!.description ?? "") : "", language: typed.extra?.language ?? "" };
-    }
-    if (!c) throw new Error("no book");
-    return { path, book: this.matches[key], cover: c.cover, coverUrl: c.coverUrl ?? "", description: c.description ?? "", language: c.exact ? c.language : b.guess.language };
-  }
 
   /** Looks up the visible books without a choice yet on Open Library;
    *  books picked with confidence are done, the rest go to the review.

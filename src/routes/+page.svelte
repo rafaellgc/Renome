@@ -8,7 +8,7 @@
   import { api, type WorkGroup } from "$lib/api";
   import { Books } from "$lib/page/books.svelte";
   import { Music } from "$lib/page/music.svelte";
-  import { Comics, clearsInfo } from "$lib/page/comics.svelte";
+  import { Comics } from "$lib/page/comics.svelte";
   import { Movies } from "$lib/page/movies.svelte";
   import { Series } from "$lib/page/series.svelte";
   import { Subtitles } from "$lib/page/subtitles.svelte";
@@ -38,7 +38,7 @@
   import { RULE_TYPES, blockedBy, isKindRule, oneLookup, isAudio, isBook, isComic, isScreen, isTaggableVideo, isVideo, listNames, newRule, newStep, pairBase, splitExt } from "$lib/rules";
   import { SECRET_FIELDS, loadSecrets, loadSettings, saveSecrets, saveSettings, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
-    ApplyReport, Candidate, Copies, MovieStatus, HistoryEntry, OpError, Preview, PreviewItem, Rule, RuleType, Step, View, ViewSort,
+    AfterCounts, AfterReport, ApplyReport, Candidate, Copies, MovieStatus, HistoryEntry, OpError, Preview, PreviewItem, Rule, RuleType, Step, View, ViewSort,
   } from "$lib/types";
   import { DETAIL_COLUMNS, type DetailColumn, type UpdateFound } from "$lib/types";
   import { COL_LABEL, detailText } from "$lib/details";
@@ -129,48 +129,58 @@
   const subs = new Subtitles(ctx, movies, tv);
   /** Dates typed in for the photo rule. */
   const photos = new Photos(ctx);
-  /** Details being written inside comics and books. */
-  let insideProgress = $state<{ done: number; total: number } | null>(null);
-  /** Subtitles being fixed or taken out of videos (`part`: how far into
-   *  the video being read). */
-  let subToolsProgress = $state<{ done: number; total: number; part: number } | null>(null);
-  /** The movie or TV show rule writes details inside videos (TMDB only). */
-  const videoTagRule = $derived.by(() => {
-    const m = movies.rule?.rule;
-    if (m?.type === "movie" && m.videoTags) return "movie" as const;
-    const s = tv.rule?.rule;
-    if (s?.type === "series" && s.videoTags && s.source !== "anilist") return "series" as const;
-    return null;
-  });
-  /** What goes inside a video once renamed: `key` is its path before. */
-  function videoTagItem(key: string, path: string) {
-    if (videoTagRule === "movie") {
-      const c = movies.state[key]?.choice;
-      return c && isTaggableVideo(path) ? { path, movie: c.id } : null;
-    }
-    if (videoTagRule === "series") {
-      const m = tv.matches[key];
-      return m && m.id > 0 && isTaggableVideo(path) ? { path, show: m.id, season: m.season, episodes: m.episodes } : null;
-    }
-    return null;
+  /** The work after the renames under way: its stage (see
+   *  `flow::after`), how far it got and, for a video being read, how far
+   *  into it (`part`). */
+  let afterProgress = $state<{ stage: string; done: number; total: number; part?: number } | null>(null);
+  /** The rules that are on, as saved: what is written after the renames reads its options from them. */
+  const onRules = () => steps.filter((s) => s.enabled).map((s) => $state.snapshot(s.rule));
+  /** What the lookups chose, by each file's path before renaming: what is
+   *  written after the renames is decided from it (by the shared flow). */
+  function chosen() {
+    const pick = <T, U>(o: Record<string, T>, f: (v: T) => U | null | undefined) =>
+      Object.fromEntries(Object.entries(o).flatMap(([k, v]) => {
+        const u = f(v);
+        return u === null || u === undefined ? [] : [[k, u]];
+      }));
+    return $state.snapshot({
+      movies: pick(movies.state, (m) => m.choice?.id),
+      episodes: tv.matches,
+      songs: music.matches,
+      albums: music.albums.filter((a) => a.choice).map((a): [string, string[]] => [a.choice!.id, a.files]),
+      books: books.matches,
+      bookFound: pick(books.state, (b) => (b.choice ? { guess: b.guess, choice: b.choice } : null)),
+      bookTyped: Object.keys(books.edits),
+      bookParts: books.parts,
+      comics: { ...comics.built, ...pick(comics.edits, (c) => ({ comic: c, web: "", manga: false })) },
+      subtitles: subs.found,
+      subLangs: subs.langs,
+    });
   }
-  /** Matched videos that keep their names but get their details inside. */
-  const videoTagOnly = $derived(
-    videoTagRule ? preview.items.filter((i) => i.status === "unchanged" && !i.isDir && videoTagItem(i.path, i.path)) : [],
-  );
-  /** Subtitles and videos the subtitle rule works on that keep their names. */
-  const subToolsOnly = $derived(
-    preview.items.filter((i) => i.status === "unchanged" && ((i.subFix && !i.subFix.noFps) || i.subExtract)),
-  );
+  const NO_COUNTS: AfterCounts = { sidecars: 0, bookMeta: 0, covers: 0, playlists: 0, tags: 0, inside: 0, videoTags: 0, subTools: 0, subtitles: 0, besides: 0 };
+  /** What renaming would write besides the renames (asked of the shared flow whenever the list or the choices change). */
+  let afterCounts = $state<AfterCounts>(NO_COUNTS);
+  $effect(() => {
+    const p = preview;
+    const rules = onRules();
+    const c = chosen();
+    if (!p.total || !rules.length) {
+      afterCounts = NO_COUNTS;
+      return;
+    }
+    api.afterCounts(rules, c).then((n) => {
+      if (p === preview) afterCounts = n;
+    }, () => {});
+  });
   /** A long operation under way: the list waits for it, with what it is
    *  doing and how far it got (no count: still finding out). Searches can
    *  be stopped (`stop`). */
   const working = $derived.by((): { label: string; done?: number; total?: number; stop?: boolean } | null => {
     const counted = (label: string, p: { done: number; total: number }, stop: boolean) => ({ label, done: p.done, total: p.total, stop });
-    if (insideProgress) return counted(t("insideWriting", insideProgress), insideProgress, false);
-    if (subToolsProgress) {
-      const p = subToolsProgress;
-      return { label: t("subToolsWorking", { done: p.done, total: p.total }), done: p.done + Math.min(p.part, 0.99), total: p.total, stop: true };
+    if (afterProgress) {
+      const p = afterProgress;
+      const label = ({ covers: "coversWriting", tags: "tagsWriting", audioTags: "tagsWriting", inside: "insideWriting", subTools: "subToolsWorking", subtitles: "subsWriting" } as Record<string, string>)[p.stage] ?? "sidecarsWriting";
+      return { label: t(label as "insideWriting", { done: p.done, total: p.total }), done: p.done + Math.min(p.part ?? 0, 0.99), total: p.total, stop: p.stage === "subTools" || p.stage === "subtitles" };
     }
     if (subs.progress)
       return counted(t(subs.progress.kind === "search" ? "subsSearching" : "subsWriting", subs.progress), subs.progress, true);
@@ -362,7 +372,7 @@
     { label: "ruleGroupText", types: ruleTypes.filter((r) => !MEDIA_RULES.includes(r)) },
   ] as const);
   /** What the Rename button does: names and the files that only get data. */
-  const applyCount = $derived(preview.changed + movies.metaOnly.length + tv.metaOnly.length + books.metaOnly.length + music.coverOnly + music.playlistOnly.length + music.tagsOnly.length + comics.infoOnly.length + books.epubOnly.length + books.convertOnly.length + subs.only.length + subToolsOnly.length + videoTagOnly.length);
+  const applyCount = $derived(preview.changed + afterCounts.besides);
   const sample = $derived(
     preview.items.reduce<string>((min, i) => (!min || collator.compare(i.original, min) < 0 ? i.original : min), ""),
   );
@@ -653,43 +663,15 @@
     // A shortcut may come before the debounced preview update.
     clearTimeout(timer);
     await refresh();
-    const meta = movies.metaOnly.map((i) => ({ path: i.path, id: movies.state[i.path].choice!.id }));
-    const tvMeta = tv.metaOnly.map((i) => tv.sidecarItem(i.path, i.path));
-    const listOnly = music.playlistOnly;
-    const retagOnly = music.tagsOnly.map((i) => i.path);
-    const audioTagOnly = books.tagsOnly.map((i) => books.audioTagItem(i.path, i.path));
-    const subsUnchanged = subs.only.map((i) => i.path);
-    const subsPlanned = subs.wanted === null ? 0 : preview.items.reduce((n, i) => n + (i.status !== "conflict" ? subs.chosen(subs.found[i.path]) : 0), 0);
-    const bookMeta = books.metaOnly.map((i) => books.sidecarItem(i.path, i.path));
-    /** Books renamed with the format they are converted to. */
-    const bookTo = new Map(preview.items.filter((i) => i.bookTo).map((i) => [i.path, i.bookTo!]));
-    /** Comics renamed `.cbz` to be converted. */
-    const converting = new Set(preview.items.filter((i) => i.convert).map((i) => i.path));
-    /** Comics renamed with the e-book format they are made into. */
-    const comicTo = new Map(preview.items.filter((i) => i.comicTo).map((i) => [i.path, i.comicTo!]));
-    const cleared = new Set(preview.items.filter((i) => i.junk).map((i) => i.path));
-    /** What the subtitle rule does to each file: fix a subtitle, take out a video's tracks. */
-    const strule = steps.find((s) => s.enabled && s.rule.type === "subtitle")?.rule;
-    // Taken now: the preview changes once files are renamed.
-    const toolsOnly = subToolsOnly;
-    const tagOnly = videoTagOnly;
-    const subJobs = new Map(
-      preview.items
-        .filter((i) => i.status !== "conflict" && ((i.subFix && !i.subFix.noFps) || i.subExtract))
-        .map((i) => [i.path, { fix: !!i.subFix && !i.subFix.noFps, extract: !!i.subExtract }]),
-    );
-    const insideOnly = [
-      ...comics.infoOnly.map((i) => comics.insideItem(i.path, i.path, i.convert)),
-      ...books.epubOnly.map((i) => books.writeItem(i.path, i.path)),
-      ...books.convertOnly.map((i) => books.convertItem(i.path, i.path, i.bookTo!)),
-    ];
-    if (!preview.changed && !meta.length && !tvMeta.length && !bookMeta.length && !music.coverOnly && !listOnly.length && !retagOnly.length && !audioTagOnly.length && !insideOnly.length && !subsUnchanged.length && !toolsOnly.length && !tagOnly.length) return;
+    // Taken now: the list changes once files are renamed.
+    const rules = onRules();
+    const picked = chosen();
+    const counts = await api.afterCounts(rules, picked).catch(() => afterCounts);
+    if (!preview.changed && !counts.besides) return;
     // Files left behind in an old folder are always told, listed.
     const left = preview.leftFolders.map((f) => t("confirmLeftoverItem", { n: f.files, from: basename(f.from), to: basename(f.to) }));
     // The release's advertisements going to the trash: always told.
     const ads = preview.changed ? preview.items.filter((i) => i.toTrash).length : 0;
-    const adFiles = [...preview.trash];
-    const adFolders = [...preview.trashFolders];
     if (settings.confirmApply || left.length || ads) {
       const lines = [
         preview.changed
@@ -697,18 +679,17 @@
             ? t(sendTo.copy ? "confirmCopy" : "confirmMove", { n: preview.changed, dir: sendTo.dir })
             : t("confirmText", { n: preview.changed })
           : "",
-        meta.length + tvMeta.length ? t("confirmMeta", { n: meta.length + tvMeta.length }) : "",
-        bookMeta.length ? t("confirmBookMeta", { n: bookMeta.length }) : "",
-        music.coverOnly ? t("confirmCovers", { n: music.coverOnly }) : "",
-        listOnly.length ? t("confirmPlaylists", { n: listOnly.length }) : "",
-        retagOnly.length + audioTagOnly.length ? t("confirmTags", { n: retagOnly.length + audioTagOnly.length }) : "",
-        insideOnly.length ? t("confirmInside", { n: insideOnly.length }) : "",
-        toolsOnly.length ? t("confirmSubTools", { n: toolsOnly.length }) : "",
-        tagOnly.length ? t("confirmInside", { n: tagOnly.length }) : "",
-        subsPlanned ? t("confirmSubs", { n: subsPlanned }) : "",
+        counts.sidecars ? t("confirmMeta", { n: counts.sidecars }) : "",
+        counts.bookMeta ? t("confirmBookMeta", { n: counts.bookMeta }) : "",
+        counts.covers ? t("confirmCovers", { n: counts.covers }) : "",
+        counts.playlists ? t("confirmPlaylists", { n: counts.playlists }) : "",
+        counts.tags ? t("confirmTags", { n: counts.tags }) : "",
+        counts.inside + counts.videoTags ? t("confirmInside", { n: counts.inside + counts.videoTags }) : "",
+        counts.subTools ? t("confirmSubTools", { n: counts.subTools }) : "",
+        counts.subtitles ? t("confirmSubs", { n: counts.subtitles }) : "",
         preview.conflicts - sameThere ? t("confirmConflicts", { n: preview.conflicts - sameThere }) : "",
         sameThere ? t("confirmSameThere", { n: sameThere }) : "",
-        ads ? t("confirmTrashAds", { n: ads, folders: adFolders.length }) : "",
+        ads ? t("confirmTrashAds", { n: ads, folders: preview.trashFolders.length }) : "",
       ].filter(Boolean);
       const ok = await confirm({
         title: t(sendTo ? (sendTo.copy ? "confirmCopyTitle" : "confirmMoveTitle") : "confirmTitle"),
@@ -726,275 +707,48 @@
     // Where the files went, for the notice (the choice is reset below).
     const sent = sendTo;
     try {
-      const rule = movies.rule?.rule;
       // Old folders renamed for their leftovers: not files.
       const leftFrom = new Set(preview.leftFolders.map((f) => f.from));
       const r: ApplyReport = preview.changed
         ? await api.apply(payload(), $state.snapshot(overrides), $state.snapshot(view))
         : { done: [], errors: [], historyId: null, lists: 0, listsRemoved: 0 };
-      let saved = 0;
-      // Albums whose playlist was there already (and follows the renames).
-      let keptLists = 0;
-      // Renamed without a history entry (it could not be written): nothing
-      // more is written, or undo could not take it back.
       // The list's undo starts over (as the core's, when it renamed).
       if (preview.changed) foundUndo = [];
-      // The advertisements, once the files are where they go.
-      let adsTrashed = 0;
-      let adsFailed = 0;
-      if (ads && r.done.length) {
-        try {
-          const res = await api.trashLeftovers(adFiles, adFolders);
-          // Counted in files; a folder sent whole holds several.
-          adsFailed = res.failed.length;
-          adsTrashed = adsFailed ? res.trashed.length : ads;
-        } catch {
-          adsFailed = adFiles.length + adFolders.length;
-        }
+      // Everything written after the renames: decided and done by the
+      // shared flow (the command line runs the same).
+      let after: AfterReport | null = null;
+      try {
+        after = await api.afterRename(rules, picked, r.done.map((op): [string, string] => [op.from, op.to]), r.historyId, settings.tmdbKey, tmdbLang(), subs.auth());
+      } catch (e) {
+        await notify({ title: t("resultTitle"), text: tError(e) });
+      } finally {
+        afterProgress = null;
       }
-      const recorded = !r.done.length || !!r.historyId;
-      if (recorded && rule?.type === "movie" && rule.nfo) {
-        const items = r.done
-          .filter((op) => movies.state[op.from]?.choice && isVideo(op.to))
-          .map((op) => ({ path: op.to, id: movies.state[op.from].choice!.id }))
-          .concat(meta);
-        if (items.length) {
-          movies.progress = { done: 0, total: items.length, kind: "save" };
-          saved += await writeMeta(() => api.writeSidecars(settings.tmdbKey, tmdbLang(), r.historyId, items, rule.backdrop, rule.folder));
+      if (after) {
+        if (after.remaining !== null) subs.remaining = after.remaining;
+        // Downloaded (or tried): searched again if wanted.
+        if (counts.subtitles) {
+          for (const op of r.done) delete subs.found[op.from];
+          for (const i of preview.items) if (i.status === "unchanged") delete subs.found[i.path];
         }
-      }
-      const mrule = music.rule?.rule;
-      if (recorded && mrule?.type === "music" && mrule.cover) {
-        const items = await music.coverItems(r);
-        if (items.length) {
-          music.progress = { done: 0, total: items.length, kind: "save" };
-          try {
-            saved += await writeMeta(() => api.writeCovers(r.historyId, items));
-          } finally {
-            music.progress = null;
-          }
-        }
-      }
-      if (recorded && mrule?.type === "music" && mrule.playlist) {
-        const parent = (p: string) => p.slice(0, Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\")));
-        const dirs = [...new Set(r.done.filter((op) => isAudio(op.to)).map((op) => parent(op.to)).concat(listOnly))];
-        if (dirs.length)
-          saved += await writeMeta(async () => {
-            const res = await api.writePlaylists(r.historyId, dirs);
-            keptLists = res.kept;
-            return res;
+        const told: Record<string, [string, (n: number) => string]> = {
+          sidecars: ["sidecarsTitle", (n) => t("sidecarsN", { n })],
+          tags: ["tagsTitle", (n) => t("tagsN", { n })],
+          audioTags: ["tagsTitle", (n) => t("audioTagsN", { n })],
+          inside: ["insideTitle", (n) => t("insideN", { n })],
+          subTools: ["subToolsTitle", () => subToolsText(after!.subFixed, after!.subExtracted)],
+          subtitles: ["subsTitle", (n) => t("subsSavedN", { n })],
+        };
+        for (const x of after.troubles) {
+          const [title, text] = told[x.stage] ?? ["resultTitle", () => ""];
+          await notify({
+            title: t(title as "resultTitle"),
+            text: text(x.done),
+            items: x.errors.map(([file, why]) => (file ? `${file} — ${tError(why)}` : tError(why))),
           });
-      }
-      let tagged = 0;
-      if (recorded && mrule?.type === "music" && mrule.writeTags) {
-        // Every matched song that moved, and those that keep their names.
-        const items = r.done
-          .filter((op) => music.matches[op.from] && isAudio(op.to))
-          .map((op) => ({ path: op.to, song: music.matches[op.from] }))
-          .concat(retagOnly.map((p) => ({ path: p, song: music.matches[p] })));
-        if (items.length) {
-          music.progress = { done: 0, total: items.length, kind: "tags" };
-          try {
-            const res = await api.writeTags(r.historyId, $state.snapshot(items), mrule.embedCover, mrule.cleanTags, mrule.coverSize);
-            tagged = res.written;
-            if (res.errors.length) {
-              await notify({
-                title: t("tagsTitle"),
-                text: t("tagsN", { n: res.written }),
-                items: res.errors.map(([file, why]) => (file ? `${file} — ${tError(why)}` : tError(why))),
-              });
-            }
-          } catch (e) {
-            await notify({ title: t("tagsTitle"), text: tError(e) });
-          } finally {
-            music.progress = null;
-          }
         }
       }
-      const brule = books.rule?.rule;
-      if (recorded && brule?.type === "book" && (brule.cover || brule.metadataOpf)) {
-        const items = r.done
-          .filter((op) => books.has(op.from) && (isBook(op.to) || (isAudio(op.to) && books.leads(op.from))))
-          .map((op) => books.sidecarItem(op.from, op.to))
-          .concat(bookMeta);
-        if (items.length) {
-          books.progress = { done: 0, total: items.length, kind: "save" };
-          try {
-            saved += await writeMeta(() => api.writeBookSidecars(r.historyId, $state.snapshot(items), brule.cover, brule.metadataOpf, brule.folders));
-          } finally {
-            books.progress = null;
-          }
-        }
-      }
-      // After the covers: a book without one in the catalogue takes the
-      // one just saved in its folder.
-      let audioTagged = 0;
-      if (recorded && brule?.type === "book" && books.audioTags) {
-        const items = r.done
-          .filter((op) => books.has(op.from) && isAudio(op.to))
-          .map((op) => books.audioTagItem(op.from, op.to))
-          .concat(audioTagOnly);
-        if (items.length) {
-          books.progress = { done: 0, total: items.length, kind: "save" };
-          try {
-            const res = await api.writeAudiobookTags(r.historyId, $state.snapshot(items), true, !!brule.audioClean);
-            audioTagged = res.written;
-            if (res.errors.length) {
-              await notify({
-                title: t("tagsTitle"),
-                text: t("audioTagsN", { n: res.written }),
-                items: res.errors.map(([file, why]) => (file ? `${file} — ${tError(why)}` : tError(why))),
-              });
-            }
-          } catch (e) {
-            await notify({ title: t("tagsTitle"), text: tError(e) });
-          } finally {
-            books.progress = null;
-          }
-        }
-      }
-      let inside = 0;
-      let drawnPages = 0;
-      {
-        const crule = comics.rule?.rule;
-        const items = [
-          ...(crule?.type === "comic" && (crule.writeInfo || crule.convert || crule.cleanInfo)
-            ? r.done
-                .filter(
-                  (op) =>
-                    extOf(op.to) === "cbz" &&
-                    ((crule.convert && converting.has(op.from)) ||
-                      (crule.writeInfo && comics.matches[op.from]) ||
-                      clearsInfo(crule, cleared.has(op.from))),
-                )
-                .map((op) => comics.insideItem(op.from, op.to, converting.has(op.from)))
-            : []),
-          ...(crule?.type === "comic" && crule.ebook
-            ? r.done.filter((op) => comicTo.has(op.from)).map((op) => comics.ebookItem(op.from, op.to, comicTo.get(op.from)!))
-            : []),
-          ...(brule?.type === "book"
-            ? r.done.filter((op) => !bookTo.has(op.from) && books.writes(op.from, op.to)).map((op) => books.writeItem(op.from, op.to))
-            : []),
-          ...(brule?.type === "book" && brule.convertTo
-            ? r.done.filter((op) => bookTo.has(op.from)).map((op) => books.convertItem(op.from, op.to, bookTo.get(op.from)!))
-            : []),
-          ...insideOnly,
-        ];
-        if (recorded && items.length) {
-          insideProgress = { done: 0, total: items.length };
-          try {
-            const res = await api.writeInside(r.historyId, $state.snapshot(items));
-            inside = res.written;
-            drawnPages = res.drawn;
-            if (res.errors.length) {
-              await notify({
-                title: t("insideTitle"),
-                text: t("insideN", { n: res.written }),
-                items: res.errors.map(([file, why]) => (file ? `${file} — ${tError(why)}` : tError(why))),
-              });
-            }
-          } catch (e) {
-            await notify({ title: t("insideTitle"), text: tError(e) });
-          } finally {
-            insideProgress = null;
-          }
-        }
-      }
-      const srule = tv.rule?.rule;
-      if (recorded && srule?.type === "series" && srule.nfo && srule.source !== "anilist") {
-        const items = r.done
-          .filter((op) => tv.matches[op.from] && isVideo(op.to))
-          .map((op) => tv.sidecarItem(op.from, op.to))
-          .concat(tvMeta);
-        if (items.length) {
-          movies.progress = { done: 0, total: items.length, kind: "saveTv" };
-          saved += await writeMeta(() =>
-            api.writeTvSidecars(settings.tmdbKey, tmdbLang(), r.historyId, items, srule.backdrop, srule.folders),
-          );
-        }
-      }
-      if (recorded && videoTagRule) {
-        const items = [
-          ...r.done.map((op) => videoTagItem(op.from, op.to)),
-          ...tagOnly.map((i) => videoTagItem(i.path, i.path)),
-        ].filter((i) => i !== null);
-        if (items.length) {
-          insideProgress = { done: 0, total: items.length };
-          try {
-            const vr = videoTagRule === "movie" ? movies.rule?.rule : tv.rule?.rule;
-            const clean = (vr?.type === "movie" || vr?.type === "series") && !!vr.videoClean;
-            const tracks = (vr?.type === "movie" || vr?.type === "series") && !!vr.videoTracks;
-            const res = await api.writeVideoTags(settings.tmdbKey, tmdbLang(), r.historyId, items, { cover: true, clean, tracks });
-            inside += res.written;
-            if (res.errors.length) {
-              await notify({
-                title: t("insideTitle"),
-                text: t("insideN", { n: res.written }),
-                items: res.errors.map(([file, why]) => (file ? `${file} — ${tError(why)}` : tError(why))),
-              });
-            }
-          } catch (e) {
-            await notify({ title: t("insideTitle"), text: tError(e) });
-          } finally {
-            insideProgress = null;
-          }
-        }
-      }
-      let subTools = { written: 0, created: 0 };
-      if (recorded && strule?.type === "subtitle" && subJobs.size) {
-        const items = [
-          ...r.done.filter((op) => subJobs.has(op.from)).map((op) => ({ path: op.to, ...subJobs.get(op.from)! })),
-          ...toolsOnly.map((i) => ({ path: i.path, ...subJobs.get(i.path)! })),
-        ];
-        if (items.length) {
-          subToolsProgress = { done: 0, total: items.length, part: 0 };
-          try {
-            const tools = { toSrt: strule.toSrt, utf8: strule.utf8, ads: strule.ads, hearing: strule.hearing, shiftMs: strule.shiftMs, fpsFrom: strule.fpsFrom, fpsTo: strule.fpsTo };
-            const res = await api.subtitleTools(r.historyId, items, tools, strule.original ?? "keep", strule.extract ? strule.extractLangs : "");
-            subTools = res;
-            if (res.errors.length) {
-              await notify({
-                title: t("subToolsTitle"),
-                text: subToolsText(res.written, res.created),
-                items: res.errors.map(([file, why]) => (file ? `${file} — ${tError(why)}` : tError(why))),
-              });
-            }
-          } catch (e) {
-            await notify({ title: t("subToolsTitle"), text: tError(e) });
-          } finally {
-            subToolsProgress = null;
-          }
-        }
-      }
-      let subsSaved = 0;
-      if (recorded && subs.wanted !== null) {
-        const pairs: [string, string][] = [
-          ...r.done.filter((op) => isVideo(op.to) && subs.found[op.from]).map((op): [string, string] => [op.from, op.to]),
-          ...subsUnchanged.map((p): [string, string] => [p, p]),
-        ];
-        const items = await subs.writes(pairs);
-        if (items.length) {
-          subs.progress = { done: 0, total: items.reduce((n, i) => n + i.langs.length, 0), kind: "save" };
-          try {
-            const res = await api.writeSubtitles(subs.auth(), r.historyId, $state.snapshot(items));
-            subsSaved = res.created.length;
-            if (res.remaining !== null) subs.remaining = res.remaining;
-            // Downloaded (or tried): searched again if wanted.
-            for (const [from] of pairs) delete subs.found[from];
-            if (res.errors.length) {
-              await notify({
-                title: t("subsTitle"),
-                text: t("subsSavedN", { n: subsSaved }),
-                items: res.errors.map(([file, why]) => (file ? `${file} — ${tError(why)}` : tError(why))),
-              });
-            }
-          } catch (e) {
-            await notify({ title: t("subsTitle"), text: tError(e) });
-          } finally {
-            subs.progress = null;
-          }
-        }
-      }
+      const a = after ?? { adsTrashed: 0, adsFailed: 0, sidecars: 0, keptLists: 0, tags: 0, audioTags: 0, inside: 0, drawn: 0, subFixed: 0, subExtracted: 0, subtitles: 0 };
       followMatches(r);
       if (settings.disableRulesAfterApply) for (const s of steps) s.enabled = false;
       // The list now holds what was sent: sending it again would send it
@@ -1005,18 +759,18 @@
         preview.changed ? t(sent ? (sent.copy ? "copiedN" : "movedN") : "renamedN", { n: r.done.filter((op) => !leftFrom.has(op.from)).length }) : "",
         r.stopped ? t("applyStopped") : "",
         r.done.some((op) => leftFrom.has(op.from)) ? t("leftFoldersN", { n: r.done.filter((op) => leftFrom.has(op.from)).length }) : "",
-        adsTrashed ? t("adsTrashedN", { n: adsTrashed }) : "",
-        adsFailed ? t("adsFailedN", { n: adsFailed }) : "",
+        a.adsTrashed ? t("adsTrashedN", { n: a.adsTrashed }) : "",
+        a.adsFailed ? t("adsFailedN", { n: a.adsFailed }) : "",
         r.lists ? t("listsN", { n: r.lists }) : "",
         r.listsRemoved ? t("listsRemovedN", { n: r.listsRemoved }) : "",
-        saved ? t("sidecarsN", { n: saved }) : "",
-        subsSaved ? t("subsSavedN", { n: subsSaved }) : "",
-        subToolsText(subTools.written, subTools.created),
-        keptLists ? t("playlistsKeptN", { n: keptLists }) : "",
-        tagged ? t("tagsN", { n: tagged }) : "",
-        audioTagged ? t("audioTagsN", { n: audioTagged }) : "",
-        inside ? t("insideN", { n: inside }) : "",
-        drawnPages ? t("insideDrawnN", { n: drawnPages }) : "",
+        a.sidecars ? t("sidecarsN", { n: a.sidecars }) : "",
+        a.subtitles ? t("subsSavedN", { n: a.subtitles }) : "",
+        subToolsText(a.subFixed, a.subExtracted),
+        a.keptLists ? t("playlistsKeptN", { n: a.keptLists }) : "",
+        a.tags ? t("tagsN", { n: a.tags }) : "",
+        a.audioTags ? t("audioTagsN", { n: a.audioTags }) : "",
+        a.inside ? t("insideN", { n: a.inside }) : "",
+        a.drawn ? t("insideDrawnN", { n: a.drawn }) : "",
         r.errors.length ? t("errorsN", { n: r.errors.length }) : "",
       ].filter(Boolean).join(" · ");
       await refresh();
@@ -1232,25 +986,6 @@
 
   /** Writes .nfo files and images (undone with the rename); movies.progress
    *  must be set. Returns how many files were created. */
-  async function writeMeta(write: () => Promise<{ created: string[]; errors: [string, string][] }>): Promise<number> {
-    try {
-      const res = await write();
-      if (res.errors.length) {
-        await notify({
-          title: t("sidecarsTitle"),
-          text: t("sidecarsN", { n: res.created.length }),
-          items: res.errors.map(([file, why]) => (file ? `${file} — ${tError(why)}` : tError(why))),
-        });
-      }
-      return res.created.length;
-    } catch (e) {
-      await notify({ title: t("sidecarsTitle"), text: tError(e) });
-      return 0;
-    } finally {
-      movies.progress = null;
-    }
-  }
-
   /** Saves the list and the hand-edited names before an edit, for Ctrl+Z. */
   /** What the lookups found per file, kept along each list checkpoint
    *  that takes files out (null: the edit left them as they were). */
@@ -1505,7 +1240,8 @@
       if (e.payload.type === "drop") addPaths(e.payload.paths);
     });
     const unlistenTmdb = listen<{ done: number; total: number }>("tmdb-progress", (e) => {
-      if (movies.progress) movies.progress = { ...movies.progress, ...e.payload };
+      if (afterProgress) afterProgress = { ...afterProgress, done: e.payload.done, total: e.payload.total };
+      else if (movies.progress) movies.progress = { ...movies.progress, ...e.payload };
     });
     const unlistenComic = listen<{ stage: string; series?: string; n?: string }>("comic-progress", (e) => comics.onProgress(e.payload));
     const unlistenTv = listen<{ stage: "finding" | "loading"; show?: string }>("tv-progress", (e) => tv.onProgress(e.payload));
@@ -1520,20 +1256,26 @@
     );
     const unlistenMb = listen<{ done: number; total: number; kind?: "listen" | "tags" }>("mb-progress", (e) => {
       // After listening, the albums heard are looked up.
-      if (music.progress)
+      if (afterProgress) afterProgress = { ...afterProgress, done: e.payload.done, total: e.payload.total };
+      else if (music.progress)
         music.progress = { ...e.payload, kind: e.payload.kind ?? (music.progress.kind === "listen" ? "search" : music.progress.kind) };
     });
     const unlistenSubs = listen<{ done: number; total: number }>("subs-progress", (e) => {
-      if (subs.progress) subs.progress = { ...subs.progress, ...e.payload };
+      if (afterProgress) afterProgress = { ...afterProgress, done: e.payload.done, total: e.payload.total };
+      else if (subs.progress) subs.progress = { ...subs.progress, ...e.payload };
     });
     const unlistenBooks = listen<{ done: number; total: number }>("book-progress", (e) => {
-      if (books.progress) books.progress = { ...books.progress, ...e.payload };
+      if (afterProgress) afterProgress = { ...afterProgress, done: e.payload.done, total: e.payload.total };
+      else if (books.progress) books.progress = { ...books.progress, ...e.payload };
     });
     const unlistenInside = listen<{ done: number; total: number }>("inside-progress", (e) => {
-      if (insideProgress) insideProgress = e.payload;
+      if (afterProgress) afterProgress = { ...afterProgress, done: e.payload.done, total: e.payload.total };
+    });
+    const unlistenAfter = listen<{ stage: string | null; total?: number }>("after-stage", (e) => {
+      afterProgress = e.payload.stage ? { stage: e.payload.stage, done: 0, total: e.payload.total ?? 0 } : null;
     });
     const unlistenSubTools = listen<{ done: number; total: number; part: number }>("subtools-progress", (e) => {
-      if (subToolsProgress) subToolsProgress = e.payload;
+      if (afterProgress) afterProgress = { ...afterProgress, ...e.payload };
     });
     const unlistenApply = listen<{ done: number; total: number }>("apply-progress", (e) => {
       if (task === "rename") applyProgress = e.payload;
@@ -1596,6 +1338,7 @@
       unlistenBooks.then((f) => f());
       unlistenSubs.then((f) => f());
       unlistenInside.then((f) => f());
+      unlistenAfter.then((f) => f());
       unlistenSubTools.then((f) => f());
     };
   });
@@ -1646,7 +1389,7 @@
           <button role="menuitemradio" aria-checked={!!sendTo?.copy} onclick={() => pickSendTo(true)}><span class="tick">{#if sendTo?.copy}<Icon name="check" size={14} />{/if}</span>{t("sendCopyTo")}</button>
         </div>
       {/if}
-      <button class="primary" title="{MOD}+Enter" disabled={(!preview.changed && !movies.metaOnly.length && !tv.metaOnly.length && !books.metaOnly.length && !music.coverOnly && !music.playlistOnly.length && !music.tagsOnly.length && !comics.infoOnly.length && !books.epubOnly.length && !books.convertOnly.length && !subs.only.length && !subToolsOnly.length && !videoTagOnly.length) || busy || !!working} onclick={applyAll}>
+      <button class="primary" title="{MOD}+Enter" disabled={!applyCount || busy || !!working} onclick={applyAll}>
         {t(sendTo ? (sendTo.copy ? "copyAction" : "moveAction") : "rename")}<span class="count" class:none={!applyCount} aria-hidden={!applyCount}>{applyCount.toLocaleString(LOCALES[settings.lang])}</span>
       </button>
     </div>

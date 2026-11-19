@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AlbumLookup, BookTarget, ComicFormat, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, MbCandidate, SongMatch, HistoryEntry, ListedTrack, EpisodeMatch, EpKey, BookFound, BookPart, MovieFound, PreviewItem, SeriesOutcome, AudioBook, ServerCall, ServerLibrary, UpdateFound, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
+import type { AfterCounts, AfterReport, Rule, AlbumLookup, BookTarget, ComicFormat, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, MbCandidate, SongMatch, HistoryEntry, ListedTrack, EpisodeMatch, EpKey, BookFound, BookPart, MovieFound, PreviewItem, SeriesOutcome, AudioBook, ServerCall, ServerLibrary, UpdateFound, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
 
 type Overrides = Record<string, string>;
 
@@ -38,6 +38,11 @@ export interface WorkGroup {
 }
 
 export const api = {
+  /** What renaming would write besides the renames (the shared flow decides). */
+  afterCounts: (rules: Rule[], chosen: unknown) => invoke<AfterCounts>("after_counts", { rules, chosen }),
+  /** Everything written once the list is renamed: `done`, each renamed file's old and new path. */
+  afterRename: (rules: Rule[], chosen: unknown, done: [string, string][], historyId: string | null, tmdbKey: string, tmdbLang: string, subs: SubsAuth) =>
+    invoke<AfterReport>("after_rename", { rules, chosen, done, historyId, tmdbKey, tmdbLang, subs }),
   pdfPrintAvailable: () => invoke<boolean>("pdf_print_available"),
   checkpoint: (overrides: Overrides) => invoke<void>("checkpoint", { overrides }),
   dropCheckpoint: () => invoke<void>("drop_checkpoint"),
@@ -63,7 +68,6 @@ export const api = {
    *  catalogues that give no covers to programs. */
   seriesCovers: (source: ComicSource, key: string, id: string, comic: ComicMatch) => invoke<string[]>("series_covers", { source, key, id, comic }),
   pictureCards: (paths: string[], max: number) => invoke<PictureCard[]>("picture_cards", { paths, max }),
-  trashLeftovers: (files: string[], folders: string[]) => invoke<{ trashed: string[]; failed: [string, string][] }>("trash_leftovers", { files, folders }),
   trashFiles: (paths: string[]) => invoke<{ trashed: string[]; failed: [string, string][] }>("trash_files", { paths }),
   preview: (steps: Step[], overrides: Overrides, view: View) =>
     invoke<Preview>("preview", { steps, overrides, view }),
@@ -119,13 +123,6 @@ export const api = {
       errors: string[];
       remaining: number | null;
     }>("subs_search", { auth, langs, items }),
-  /** What to download for the renamed videos, from what is picked. */
-  subsWrites: (
-    chosen: { path: string; season: number | null; episode: number | null; have: string[]; candidates: SubCandidate[]; pick: Record<string, number> }[],
-    langs: string[],
-  ) => invoke<{ path: string; season?: number | null; episode?: number | null; langs: SubCandidate[][] }[]>("subs_writes", { chosen, langs }),
-  writeSubtitles: (auth: SubsAuth, historyId: string | null, items: { path: string; season?: number | null; episode?: number | null; langs: SubCandidate[][] }[]) =>
-    invoke<{ created: string[]; errors: [string, string][]; remaining: number | null }>("write_subtitles", { auth, historyId, items }),
   osCheck: (auth: SubsAuth) => invoke<number | null>("os_check", { auth }),
   subdlCheck: (key: string) => invoke<void>("subdl_check", { key }),
   updateCheck: () => invoke<UpdateFound | null>("update_check"),
@@ -185,73 +182,6 @@ export const api = {
   bookGuesses: (paths: string[], names: string[]) => invoke<BookGuess[]>("book_guesses", { paths, names }),
   bookSearch: (lang: string, title: string, author: string) =>
     invoke<BookCandidate[]>("book_search", { lang, title, author }),
-  writeBookSidecars: (
-    historyId: string | null,
-    items: { path: string; book: BookMatch; cover: number | null; language: string }[],
-    cover: boolean,
-    opf: boolean,
-    inFolder: boolean,
-  ) => invoke<{ created: string[]; errors: [string, string][] }>("write_book_sidecars", { historyId, items, cover, opf, inFolder }),
-  playlistDirs: (dirs: string[]) => invoke<string[]>("playlist_dirs", { dirs }),
-  coverDirs: (dirs: string[]) => invoke<string[]>("cover_dirs", { dirs }),
-  writeAudiobookTags: (historyId: string | null, items: unknown[], cover: boolean, clean: boolean) =>
-    invoke<{ written: number; errors: [string, string][] }>("write_audiobook_tags", { historyId, items, cover, clean }),
-  writeTags: (historyId: string | null, items: { path: string; song: SongMatch }[], cover: boolean, clean: boolean, coverSize: number) =>
-    invoke<{ written: number; errors: [string, string][] }>("write_tags", { historyId, items, cover, clean, coverSize }),
-  writeInside: (
-    historyId: string | null,
-    items: (
-      | {
-          path: string;
-          comic?: ComicMatch;
-          web?: string;
-          manga?: boolean;
-          convert?: "keep" | "delete";
-          pdf?: { draw: boolean; size: number; info: boolean };
-          comicTo?: ComicFormat;
-          ebook?: { device: string; crop: boolean; split: boolean };
-        }
-      | { path: string; book?: BookMatch; language?: string; polish?: { epub3: boolean; shrink: boolean } }
-    )[],
-  ) => invoke<{ written: number; drawn: number; errors: [string, string][] }>("write_inside", { historyId, items }),
-  writeVideoTags: (
-    key: string,
-    lang: string,
-    historyId: string | null,
-    items: { path: string; movie?: number; show?: number; season?: number; episodes?: number[] }[],
-    options: { cover: boolean; clean: boolean; tracks: boolean },
-  ) => invoke<{ written: number; drawn: number; errors: [string, string][] }>("write_video_tags", { key, lang, historyId, items, options }),
-  subtitleTools: (
-    historyId: string | null,
-    items: { path: string; fix: boolean; extract: boolean }[],
-    tools: { toSrt: boolean; utf8: boolean; ads: boolean; hearing: boolean; shiftMs: number; fpsFrom: number; fpsTo: number },
-    original: "keep" | "delete",
-    extractLangs: string,
-  ) =>
-    invoke<{ written: number; created: number; errors: [string, string][] }>("subtitle_tools", { historyId, items, tools, original, extractLangs }),
-  writePlaylists: (historyId: string | null, dirs: string[]) =>
-    invoke<{ created: string[]; errors: [string, string][]; kept: number }>("write_playlists", { historyId, dirs }),
-  /** Where each album's cover goes once renamed: the folder most of its renamed songs went to. */
-  coverItems: (albums: [string, string[]][], done: [string, string][]) =>
-    invoke<{ dir: string; release: string }[]>("cover_items", { albums, done }),
-  writeCovers: (historyId: string | null, items: { dir: string; release: string }[]) =>
-    invoke<{ created: string[]; errors: [string, string][] }>("write_covers", { historyId, items }),
-  writeSidecars: (
-    key: string,
-    lang: string,
-    historyId: string | null,
-    items: { path: string; id: number }[],
-    fanart: boolean,
-    inFolder: boolean,
-  ) => invoke<{ created: string[]; errors: [string, string][] }>("write_sidecars", { key, lang, historyId, items, fanart, inFolder }),
-  writeTvSidecars: (
-    key: string,
-    lang: string,
-    historyId: string | null,
-    items: { path: string; id: number; season: number; episodes: number[]; titles: string[] }[],
-    fanart: boolean,
-    folders: boolean,
-  ) => invoke<{ created: string[]; errors: [string, string][] }>("write_tv_sidecars", { key, lang, historyId, items, fanart, folders }),
   undo: (id: string) => invoke<ApplyReport>("undo", { id }),
   /** Puts back renames a stopped program left halfway. */
   recover: () => invoke<{ restored: number; renamed: number; undone: number; tagged: number; stuck: { from: string; to: string }[] }>("recover"),

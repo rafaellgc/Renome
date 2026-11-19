@@ -261,14 +261,24 @@ pub fn preview_or_apply(
     if !out::json() {
         show(&preview, m.get_flag("all"), &missing);
     }
-    // Nothing to rename: what runs after the renames may still have work
-    // (subtitles fixed, details written, .nfo made for files already named
-    // right), as in the window.
-    let extra_work = lookup_rule.is_some()
-        || steps_json.iter().any(|s| {
-            rulespec::kind_of(s) == "subtitle" && s.get("enabled") != Some(&Value::Bool(false))
-        });
-    if preview.changed == 0 && !extra_work {
+    // What is written besides the renames is decided by the shared flow,
+    // as in the window: from the rules that are on and what was chosen
+    // (the subtitles searched now, before the videos move).
+    let rules_on: Vec<Value> = steps_json
+        .iter()
+        .filter(|s| s.get("enabled") != Some(&Value::Bool(false)))
+        .map(|s| s["rule"].clone())
+        .collect();
+    let typed: std::collections::HashSet<PathBuf> = edits.keys().cloned().collect();
+    let mut chosen = crate::lookup::chosen(found.as_ref(), &typed);
+    let auth = crate::lookup::subs_auth(settings);
+    if let (Some(rule), Some(crate::lookup::Found::Movies(_) | crate::lookup::Found::Series(_))) =
+        (&lookup_rule, &found)
+    {
+        runtime()?.block_on(crate::lookup::subtitles(rule, &preview, &auth, &mut chosen));
+    }
+    let counts = renome_services::flow::after::counts(&rules_on, &preview, &chosen);
+    if preview.changed == 0 && counts.besides == 0 {
         if out::json() {
             println!(
                 "{}",
@@ -288,6 +298,9 @@ pub fn preview_or_apply(
     if !m.get_flag("yes") {
         if !std::io::stdin().is_terminal() {
             return Err(t("needYes", &[]));
+        }
+        for line in crate::lookup::planned(&counts) {
+            out::note(&line);
         }
         if !ask(&t("askRename", &[])) {
             out::note(&t("cancelled", &[]));
@@ -315,52 +328,18 @@ pub fn preview_or_apply(
         out::note(&t("stoppedRenaming", &[]));
         return Ok(Exit::Stopped);
     }
-    if let Some(rule) = steps_json
-        .iter()
-        .find(|s| {
-            rulespec::kind_of(s) == "subtitle" && s.get("enabled") != Some(&Value::Bool(false))
-        })
-        .map(|s| &s["rule"])
-    {
-        let history = renome_core::History::new(renome_services::history_dir());
-        for note in runtime()?.block_on(crate::lookup::after_subtitles(
-            rule, &preview, &report, &history,
-        )) {
-            out::note(&note);
-        }
-    }
-    if let (Some(rule), Some(found)) = (&lookup_rule, &found) {
-        let history = renome_core::History::new(renome_services::history_dir());
-        let notes = match found {
-            crate::lookup::Found::Movies(f) => runtime()?.block_on(crate::lookup::after_movies(
-                rule, f, &preview, &report, &history,
-            )),
-            crate::lookup::Found::Series(f) => runtime()?.block_on(crate::lookup::after_series(
-                rule, f, &preview, &report, &history,
-            )),
-            crate::lookup::Found::Music(f) => runtime()?.block_on(crate::lookup::after_music(
-                rule, f, &preview, &report, &history,
-            )),
-            crate::lookup::Found::Books(f) => runtime()?.block_on(crate::lookup::after_books(
-                rule, f, &preview, &report, &history,
-            )),
-            crate::lookup::Found::Comics(f) => runtime()?.block_on(crate::lookup::after_comics(
-                rule, f, &preview, &report, &history,
-            )),
-        };
-        for note in notes {
-            out::note(&note);
-        }
-        if matches!(
-            found,
-            crate::lookup::Found::Movies(_) | crate::lookup::Found::Series(_)
-        ) {
-            for note in runtime()?.block_on(crate::lookup::download_subtitles(
-                rule, found, &preview, &report, &history, settings,
-            )) {
-                out::note(&note);
-            }
-        }
+    let history = renome_core::History::new(renome_services::history_dir());
+    for note in runtime()?.block_on(crate::lookup::after(
+        &rules_on,
+        found.as_ref(),
+        &preview,
+        &chosen,
+        &report,
+        &history,
+        settings,
+        auth,
+    )) {
+        out::note(&note);
     }
     // Renamed what was certain; conflicts or doubts left say so.
     if matches!(exit, Exit::Done) && (real_conflicts(&preview) > 0 || doubtful > 0) {

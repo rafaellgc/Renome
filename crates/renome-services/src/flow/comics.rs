@@ -541,7 +541,7 @@ pub struct Settled {
 
 /// A comic as the rule names it, with its page in the catalogue and
 /// whether that is a manga catalogue's (for `ComicInfo.xml`).
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Named {
     pub comic: ComicMatch,

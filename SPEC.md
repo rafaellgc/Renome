@@ -1323,9 +1323,10 @@ The book rule's option `audiobooks` (TS only, default on) takes audio files
   INDX with TAGX and CNCX, FLIS/FCIS/EOF, EXTH 100/101/103–106/503/524/
   501 PDOC/113/201/129); `print.rs` (EPUB→PDF: one HTML page in a temp folder,
   ids prefixed per chapter, print CSS for A5 (margins 16/18/14 mm) or,
-  when the rule names a reader (`model`, window only; the job's
-  `pdfPage` [w, h] mm from its screen's pixels and the model's usual
-  density, 20–1000 mm), that page with 4% margins (3–8 mm) and pictures
+  when the rule names a reader (`model`; the job's `pdfPage` [w, h]
+  mm from its screen's pixels and the model's usual density, 20–1000 mm,
+  by `flow::after::pdf_page` from `src/lib/readers.ts`'s list, read by
+  renome-services' build script), that page with 4% margins (3–8 mm) and pictures
   as tall as fit (`print::Page`), the GTK page setup following;
   pictures over 1400 px shrunk; the app loads it in a hidden web view and prints with WebKitGTK's print
   operation to the file printer, named by GTK's own translation of "Print
@@ -2649,7 +2650,16 @@ invisible characters), what is picked by itself, the doubts and which
 files share an answer,
 the questions asked mid-search through `Host::ask`, and each file's match
 as the rule names it — the window shows them in its review and pickers,
-the command line in the terminal, neither decides on its own),
+the command line in the terminal, neither decides on its own; and
+`flow::after`, everything written once the files are renamed: which
+files get `.nfo` and images, covers, playlists, tags, details inside,
+conversions, the subtitle rule's fixes and the subtitles downloaded —
+from the rules that are on, the list as it was renamed and what the
+lookups chose — done in one order by `after::run`, which records it for
+undo; the window's question before renaming and its Rename button count
+the same plan, `after::counts`, as the command line's question does; the
+command line searches the subtitles before renaming, as the window's
+review does),
 `renome_core::catalog` the rules' options, and
 `crates/renome-cli` the program: every command below, the lookup rules
 with their choices, `--edit`, `--missing`, Ctrl+C, the manual, man pages

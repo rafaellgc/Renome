@@ -646,6 +646,39 @@ export interface ApplyReport {
   stopped?: boolean;
 }
 
+/** What renaming would write besides the renames (see `flow::after`). */
+export interface AfterCounts {
+  sidecars: number;
+  bookMeta: number;
+  covers: number;
+  playlists: number;
+  tags: number;
+  inside: number;
+  videoTags: number;
+  subTools: number;
+  /** Subtitle files to download, for every file. */
+  subtitles: number;
+  /** Files named right already that get work: counted on the Rename button. */
+  besides: number;
+}
+
+/** What was written after the renames; `troubles`: per stage, how much it did and each file's reason. */
+export interface AfterReport {
+  adsTrashed: number;
+  adsFailed: number;
+  sidecars: number;
+  keptLists: number;
+  tags: number;
+  audioTags: number;
+  inside: number;
+  drawn: number;
+  subFixed: number;
+  subExtracted: number;
+  subtitles: number;
+  remaining: number | null;
+  troubles: { stage: string; done: number; errors: [string, string][] }[];
+}
+
 export interface HistoryEntry {
   id: string;
   created: string;

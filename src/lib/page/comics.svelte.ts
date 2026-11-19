@@ -10,12 +10,6 @@ import { comicKey, settings } from "$lib/settings.svelte";
 import type { ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, EditField, Rule, ComicFormat } from "$lib/types";
 import { counts, extOf, moved, ruleOf, without, type PageCtx } from "./common";
 
-/** A CBZ whose ComicInfo.xml the comic rule takes out: with "clear", the
- *  ones it does not write (without "write", every one; with it, none:
- *  an unmatched comic's details are what name it). */
-export function clearsInfo(r: Rule, junk: boolean) {
-  return r.type === "comic" && !!r.cleanInfo && junk && !r.writeInfo;
-}
 
 const EMPTY: ComicMatch = { series: "", seriesYear: null, number: "", volume: null, chapter: "", title: "", year: null, count: null, publisher: "", writer: "", artist: "", id: "" };
 
@@ -66,18 +60,6 @@ export class Comics {
   /** The comics among the rows chosen in the list. */
   selected = $derived.by(() => this.#ctx.items.filter((i) => this.#ctx.selected.has(i.path) && (i.isDir ? i.convert : isComic(i.original))));
   counts = $derived.by(() => counts(this.state, this.#ctx.items));
-  /** Comics whose names are already right but that get converted to CBZ
-   *  (a RAR named `.cbz`), or whose ComicInfo.xml says something else. */
-  infoOnly = $derived.by(() => {
-    const r = this.rule?.rule;
-    if (r?.type !== "comic") return [];
-    return this.#ctx.items.filter(
-      (i) =>
-        i.status === "unchanged" &&
-        ((r.convert && i.convert) ||
-          (extOf(i.original) === "cbz" && ((r.writeInfo && (i.retag || (r.cleanInfo && i.junk)) && this.matches[i.path]) || clearsInfo(r, i.junk)))),
-    );
-  });
   /** The details window's fields. */
   fields = $derived<EditField[]>([
     { key: "series", label: t("comicEditSeries"), wide: true },
@@ -91,49 +73,6 @@ export class Comics {
     { key: "artist", label: t("comicEditArtist") },
   ]);
 
-  /** What converting a comic to CBZ and writing its ComicInfo.xml need: the
-   *  original's fate, its match and its page in the catalogue. */
-  insideItem(key: string, path: string, convert: boolean, details?: boolean) {
-    const r = this.rule?.rule;
-    /** The issue's details go along (to write them, or for an e-book). */
-    const want = details ?? (r?.type === "comic" && !!r.writeInfo);
-    const original = r?.type === "comic" && r.convert && convert ? (r.original ?? "keep") : undefined;
-    const pdf = r?.type === "comic" ? { draw: r.drawPdfPages !== false, size: r.pageSize ?? 2400, info: !!r.writeInfo } : undefined;
-    const fresh = r?.type === "comic" && !!r.cleanInfo;
-    // Typed in: no page in a catalogue.
-    if (r?.type === "comic" && want && this.edits[key]) return { path, comic: this.edits[key], web: "", manga: false, convert: original, pdf, fresh };
-    const named = this.built[key];
-    if (!(r?.type === "comic" && want && named)) return { path, convert: original, pdf, fresh };
-    return { path, comic: named.comic, web: named.web, manga: named.manga, convert: original, pdf, fresh };
-  }
-  /** What making a comic an e-book needs: the format, the reader, the
-   *  original's fate and, when it has some, its details. */
-  ebookItem(key: string, path: string, to: ComicFormat) {
-    const r = this.rule?.rule;
-    if (r?.type !== "comic") return { path };
-    const base = this.insideItem(key, path, false, true);
-    return {
-      ...base,
-      fresh: false,
-      comicTo: to,
-      ebook: {
-        device: r.device ?? "kindle-pw",
-        width: r.width ?? 0,
-        height: r.height ?? 0,
-        crop: r.crop ?? true,
-        numbers: r.cropPageNumbers ?? false,
-        spread: r.spread ?? (r.split === false ? "keep" : "split"),
-        contrast: r.contrast ?? true,
-        upscale: r.upscale ?? false,
-        greys16: r.sixteenGreys ?? false,
-        soften: r.reduceRainbow ?? false,
-        webtoon: r.webtoon ?? false,
-        join: r.join ?? false,
-        maxMb: r.maxMb ?? 0,
-      },
-      convert: r.original ?? "keep",
-    };
-  }
 
 
   /** The chosen catalogue (GCD, Metron, Comic Vine, a manga one) for the

@@ -336,112 +336,6 @@ async fn choose_movie(
     }
 }
 
-/// After the renames: the adverts to the Trash, the `.nfo` and images,
-/// the details inside the videos. What was done, as notices.
-pub async fn after_movies(
-    rule: &Value,
-    movies: &Movies,
-    preview: &Preview,
-    report: &renome_core::ApplyReport,
-    history: &renome_core::History,
-) -> Vec<String> {
-    let mut notes = Vec::new();
-    let on = |k: &str| rule.get(k).and_then(Value::as_bool).unwrap_or(false);
-    let recorded = report.done.is_empty() || report.history_id.is_some();
-    if on("trashAds") {
-        trash_ads(preview, report, &mut notes);
-    }
-    let video = |p: &Path| {
-        p.extension()
-            .map(|e| e.to_string_lossy().to_lowercase())
-            .is_some_and(|e| renome_core::tmdb::is_video(&e))
-    };
-    // Renamed movies, and those whose names were already right.
-    let mut pairs: Vec<(PathBuf, PathBuf)> = report
-        .done
-        .iter()
-        .map(|op| (op.from.clone(), op.to.clone()))
-        .collect();
-    pairs.extend(
-        preview
-            .items
-            .iter()
-            .filter(|i| i.status == renome_core::Status::Unchanged)
-            .map(|i| (i.path.clone(), i.path.clone())),
-    );
-    let ids: Vec<(PathBuf, u64)> = pairs
-        .iter()
-        .filter(|(from, to)| video(to) && movies.chosen.contains_key(from))
-        .map(|(from, to)| (to.clone(), movies.chosen[from].id))
-        .collect();
-    if recorded && on("nfo") && !ids.is_empty() {
-        let items = ids
-            .iter()
-            .map(|(path, id)| tmdb::SidecarItem {
-                path: path.clone(),
-                id: *id,
-            })
-            .collect();
-        let r = renome_services::after::movie_sidecars(
-            &Cli,
-            history,
-            &movies.key,
-            &movies.lang,
-            report.history_id.clone(),
-            items,
-            on("backdrop"),
-            on("folder"),
-        )
-        .await;
-        if !r.created.is_empty() {
-            notes.push(t("sidecarsN", &[("n", &r.created.len())]));
-        }
-        for (file, why) in r.errors {
-            out::error(&format!("{file}: {}", crate::text::error_text(&why)));
-        }
-    }
-    if recorded && on("videoTags") && !ids.is_empty() {
-        let items = ids
-            .iter()
-            .filter(|(p, _)| renome_core::videotags::writable(p))
-            .map(|(path, id)| tmdb::VideoTagItem {
-                path: path.clone(),
-                movie: Some(*id),
-                show: None,
-                season: 0,
-                episodes: vec![],
-            })
-            .collect();
-        let options = renome_services::after::VideoTagOptions {
-            cover: true,
-            clean: on("videoClean"),
-            tracks: on("videoTracks"),
-        };
-        match renome_services::after::video_tags(
-            &Cli,
-            history,
-            &movies.key,
-            &movies.lang,
-            report.history_id.clone(),
-            items,
-            options,
-        )
-        .await
-        {
-            Ok(r) => {
-                if r.written > 0 {
-                    notes.push(t("insideN", &[("n", &r.written)]));
-                }
-                for (file, why) in r.errors {
-                    out::error(&format!("{file}: {}", crate::text::error_text(&why)));
-                }
-            }
-            Err(e) => out::error(&crate::text::error_text(&e)),
-        }
-    }
-    notes
-}
-
 /// What the person answered to a list of choices.
 enum Pick {
     Number(usize),
@@ -510,7 +404,6 @@ fn candidate_line(c: &Candidate) -> String {
 pub struct Series {
     pub key: String,
     pub lang: String,
-    pub anime: bool,
     pub chosen: HashMap<PathBuf, renome_core::tv::EpisodeMatch>,
     /// The shows fetched, with their episodes.
     pub shows: Vec<renome_core::tv::Show>,
@@ -671,7 +564,6 @@ pub async fn series(
     let mut out_series = Series {
         key,
         lang: tmdb_lang,
-        anime,
         chosen: HashMap::new(),
         shows: found.shows,
         loose: found.loose,
@@ -772,125 +664,6 @@ fn choose_episode(
             },
         }
     }
-}
-
-/// After the renames: each episode's `.nfo` and images (TMDB shows), and
-/// the details inside the videos.
-/// The release's advertisements to the trash, once the videos moved.
-fn trash_ads(preview: &Preview, report: &renome_core::ApplyReport, notes: &mut Vec<String>) {
-    if report.done.is_empty() || (preview.trash.is_empty() && preview.trash_folders.is_empty()) {
-        return;
-    }
-    let (trashed, failed) =
-        renome_core::plan::trash_leftovers(&preview.trash, &preview.trash_folders);
-    let ads = preview.items.iter().filter(|i| i.to_trash).count();
-    if failed.is_empty() {
-        notes.push(t("adsTrashedN", &[("n", &ads)]));
-    } else {
-        notes.push(t("adsTrashedN", &[("n", &trashed.len())]));
-        notes.push(t("adsFailedN", &[("n", &failed.len())]));
-    }
-}
-
-pub async fn after_series(
-    rule: &Value,
-    series: &Series,
-    preview: &Preview,
-    report: &renome_core::ApplyReport,
-    history: &renome_core::History,
-) -> Vec<String> {
-    let mut notes = Vec::new();
-    let on = |k: &str| rule.get(k).and_then(Value::as_bool).unwrap_or(false);
-    let recorded = report.done.is_empty() || report.history_id.is_some();
-    if on("trashAds") {
-        trash_ads(preview, report, &mut notes);
-    }
-    if series.anime || !recorded {
-        return notes;
-    }
-    let video = |p: &Path| {
-        p.extension()
-            .map(|e| e.to_string_lossy().to_lowercase())
-            .is_some_and(|e| renome_core::tmdb::is_video(&e))
-    };
-    let mut pairs: Vec<(PathBuf, PathBuf)> = report
-        .done
-        .iter()
-        .map(|op| (op.from.clone(), op.to.clone()))
-        .collect();
-    pairs.extend(
-        preview
-            .items
-            .iter()
-            .filter(|i| i.status == renome_core::Status::Unchanged)
-            .map(|i| (i.path.clone(), i.path.clone())),
-    );
-    let found: Vec<(PathBuf, &renome_core::tv::EpisodeMatch)> = pairs
-        .iter()
-        .filter(|(from, to)| video(to) && series.chosen.contains_key(from))
-        .map(|(from, to)| (to.clone(), &series.chosen[from]))
-        .collect();
-    if on("nfo") && !found.is_empty() {
-        let items = found
-            .iter()
-            .map(|(path, m)| tmdb::TvSidecarItem {
-                path: path.clone(),
-                id: m.id,
-                season: m.season,
-                episodes: m.episodes.clone(),
-                titles: m.titles.clone(),
-            })
-            .collect();
-        let client = tmdb::Client::new(&series.key, &series.lang);
-        let mut r = tmdb::tv_sidecars(&Cli, &client, items, on("backdrop"), on("folders")).await;
-        renome_services::after::record_created(history, report.history_id.clone(), &mut r);
-        if !r.created.is_empty() {
-            notes.push(t("sidecarsN", &[("n", &r.created.len())]));
-        }
-        for (file, why) in r.errors {
-            out::error(&format!("{file}: {}", crate::text::error_text(&why)));
-        }
-    }
-    if on("videoTags") && !found.is_empty() {
-        let items = found
-            .iter()
-            .filter(|(p, _)| renome_core::videotags::writable(p))
-            .map(|(path, m)| tmdb::VideoTagItem {
-                path: path.clone(),
-                movie: None,
-                show: Some(m.id),
-                season: m.season,
-                episodes: m.episodes.clone(),
-            })
-            .collect();
-        let options = renome_services::after::VideoTagOptions {
-            cover: true,
-            clean: on("videoClean"),
-            tracks: on("videoTracks"),
-        };
-        match renome_services::after::video_tags(
-            &Cli,
-            history,
-            &series.key,
-            &series.lang,
-            report.history_id.clone(),
-            items,
-            options,
-        )
-        .await
-        {
-            Ok(r) => {
-                if r.written > 0 {
-                    notes.push(t("insideN", &[("n", &r.written)]));
-                }
-                for (file, why) in r.errors {
-                    out::error(&format!("{file}: {}", crate::text::error_text(&why)));
-                }
-            }
-            Err(e) => out::error(&crate::text::error_text(&e)),
-        }
-    }
-    notes
 }
 
 /// What a lookup rule found and chose.
@@ -1110,125 +883,6 @@ async fn choose_album(
     }
 }
 
-/// After the renames: the album covers, the playlists and the tags.
-pub async fn after_music(
-    rule: &Value,
-    music: &Music,
-    preview: &Preview,
-    report: &renome_core::ApplyReport,
-    history: &renome_core::History,
-) -> Vec<String> {
-    let mut notes = Vec::new();
-    let on = |k: &str| rule.get(k).and_then(Value::as_bool).unwrap_or(false);
-    let recorded = report.done.is_empty() || report.history_id.is_some();
-    if !recorded {
-        return notes;
-    }
-    let to: HashMap<&PathBuf, &PathBuf> = report.done.iter().map(|op| (&op.from, &op.to)).collect();
-    let now = |p: &PathBuf| to.get(p).map_or(p.clone(), |t| (*t).clone());
-    if on("cover") {
-        let albums: Vec<(String, Vec<PathBuf>)> = music
-            .albums
-            .iter()
-            .map(|(folder, release)| {
-                let mut songs: Vec<PathBuf> = music
-                    .chosen
-                    .iter()
-                    .filter(|(p, m)| &m.release == release && p.starts_with(folder))
-                    .map(|(p, _)| p.clone())
-                    .collect();
-                songs.sort();
-                (release.clone(), songs)
-            })
-            .collect();
-        let moved: HashMap<PathBuf, PathBuf> = report
-            .done
-            .iter()
-            .map(|op| (op.from.clone(), op.to.clone()))
-            .collect();
-        let items = renome_services::flow::music::cover_items(&albums, &moved);
-        if !items.is_empty() {
-            let mut r =
-                renome_services::musicbrainz::covers(&Cli, &music.mb, &music.dg, items).await;
-            renome_services::after::record_created(history, report.history_id.clone(), &mut r);
-            if !r.created.is_empty() {
-                notes.push(t("sidecarsN", &[("n", &r.created.len())]));
-            }
-        }
-    }
-    if on("playlist") {
-        let mut dirs: Vec<PathBuf> = music
-            .chosen
-            .keys()
-            .filter_map(|p| now(p).parent().map(Path::to_path_buf))
-            .collect();
-        dirs.sort();
-        dirs.dedup();
-        let r = renome_services::after::playlists(history, report.history_id.clone(), dirs);
-        if !r.created.is_empty() {
-            notes.push(t("sidecarsN", &[("n", &r.created.len())]));
-        }
-        if r.kept > 0 {
-            notes.push(t("playlistsKeptN", &[("n", &r.kept)]));
-        }
-    }
-    if on("writeTags") {
-        let clean = rule
-            .get("cleanTags")
-            .and_then(Value::as_bool)
-            .unwrap_or(true);
-        let unchanged: std::collections::HashSet<&PathBuf> = preview
-            .items
-            .iter()
-            .filter(|i| {
-                i.status == renome_core::Status::Unchanged && (i.retag || (clean && i.junk))
-            })
-            .map(|i| &i.path)
-            .collect();
-        let items: Vec<renome_services::after::TagJob> = music
-            .chosen
-            .iter()
-            .filter(|(p, _)| to.contains_key(p) || unchanged.contains(p))
-            .map(|(p, m)| renome_services::after::TagJob {
-                path: now(p),
-                song: m.clone(),
-            })
-            .collect();
-        if !items.is_empty() {
-            let embed = rule
-                .get("embedCover")
-                .and_then(Value::as_bool)
-                .unwrap_or(true);
-            let size = rule
-                .get("coverSize")
-                .and_then(Value::as_u64)
-                .map(|n| n as u32);
-            match renome_services::after::song_tags(
-                &Cli,
-                history,
-                &music.mb,
-                &music.dg,
-                report.history_id.clone(),
-                items,
-                embed,
-                clean,
-                size,
-            )
-            .await
-            {
-                Ok((r, _)) => {
-                    notes.push(t("tagsN", &[("n", &r.written)]));
-                    for (file, why) in r.errors {
-                        out::error(&format!("{file}: {}", crate::text::error_text(&why)));
-                    }
-                }
-                Err(e) => out::error(&crate::text::error_text(&e)),
-            }
-        }
-    }
-    notes
-}
-
 /// What the book rule found and chose.
 pub struct Books {
     pub ol: renome_services::openlibrary::Client,
@@ -1398,269 +1052,6 @@ async fn choose_book(
             },
         }
     }
-}
-
-/// After the renames: cover and `metadata.opf`, the details and cover
-/// inside audiobooks, the details inside EPUB/AZW3/FB2 (and polishing),
-/// the conversions.
-pub async fn after_books(
-    rule: &Value,
-    books: &Books,
-    preview: &Preview,
-    report: &renome_core::ApplyReport,
-    history: &renome_core::History,
-) -> Vec<String> {
-    use renome_services::openlibrary as ol;
-    let mut notes = Vec::new();
-    let on = |k: &str| rule.get(k).and_then(Value::as_bool).unwrap_or(false);
-    let recorded = report.done.is_empty() || report.history_id.is_some();
-    if !recorded {
-        return notes;
-    }
-    let ext_of = |p: &Path| {
-        p.extension()
-            .map(|e| e.to_string_lossy().to_lowercase())
-            .unwrap_or_default()
-    };
-    let is_book = |p: &Path| renome_core::ebook::is_book(&ext_of(p));
-    let is_audio = |p: &Path| renome_core::music::is_audio(&ext_of(p));
-    let leads = |p: &PathBuf| books.parts.get(p).is_none_or(|g| &g.leader == p);
-    // Renamed files, and those whose names were already right.
-    let mut pairs: Vec<(PathBuf, PathBuf)> = report
-        .done
-        .iter()
-        .map(|op| (op.from.clone(), op.to.clone()))
-        .collect();
-    pairs.extend(
-        preview
-            .items
-            .iter()
-            .filter(|i| i.status == renome_core::Status::Unchanged && !i.is_dir)
-            .map(|i| (i.path.clone(), i.path.clone())),
-    );
-    let book_to: HashMap<&PathBuf, renome_core::bookconv::Target> = preview
-        .items
-        .iter()
-        .filter_map(|i| Some((&i.path, i.book_to?)))
-        .collect();
-    // What a file's book is, with what came from the catalogue alongside.
-    let detail = |from: &PathBuf| -> Option<(
-        renome_core::books::BookMatch,
-        &renome_core::books::Candidate,
-        String,
-    )> {
-        let m = books.chosen.get(from)?.clone();
-        let leader = books.parts.get(from).map_or(from, |g| &g.leader);
-        let (g, c) = books.found.get(leader)?;
-        let language = if c.exact {
-            c.language.clone()
-        } else {
-            g.language.clone()
-        };
-        Some((m, c, language))
-    };
-    if on("cover") || on("metadataOpf") {
-        let items: Vec<ol::SidecarItem> = pairs
-            .iter()
-            .filter(|(from, to)| is_book(to) || (is_audio(to) && leads(from)))
-            .filter_map(|(from, to)| {
-                let (book, c, language) = detail(from)?;
-                Some(ol::SidecarItem {
-                    path: to.clone(),
-                    book,
-                    cover: c.cover,
-                    cover_url: c.cover_url.clone(),
-                    description: c.description.clone(),
-                    language,
-                })
-            })
-            .collect();
-        if !items.is_empty() {
-            let mut r = ol::sidecars(
-                &Cli,
-                &books.ol,
-                items,
-                on("cover"),
-                on("metadataOpf"),
-                on("folders"),
-            )
-            .await;
-            renome_services::after::record_created(history, report.history_id.clone(), &mut r);
-            if !r.created.is_empty() {
-                notes.push(t("sidecarsN", &[("n", &r.created.len())]));
-            }
-            for (file, why) in r.errors {
-                out::error(&format!("{file}: {}", crate::text::error_text(&why)));
-            }
-        }
-    }
-    if on("audioTags")
-        && rule
-            .get("audiobooks")
-            .and_then(Value::as_bool)
-            .unwrap_or(true)
-    {
-        let items: Vec<renome_services::after::AudiobookTagJob> = pairs
-            .iter()
-            .filter(|(_, to)| is_audio(to))
-            .filter_map(|(from, to)| {
-                let (book, c, language) = detail(from)?;
-                Some(renome_services::after::AudiobookTagJob {
-                    path: to.clone(),
-                    book,
-                    cover: c.cover,
-                    cover_url: c.cover_url.clone(),
-                    description: c.description.clone(),
-                    language,
-                })
-            })
-            .collect();
-        if !items.is_empty() {
-            match renome_services::after::audiobook_tags(
-                &Cli,
-                history,
-                &books.ol,
-                report.history_id.clone(),
-                items,
-                true,
-                on("audioClean"),
-            )
-            .await
-            {
-                Ok((r, _)) => {
-                    notes.push(t("audioTagsN", &[("n", &r.written)]));
-                    for (file, why) in r.errors {
-                        out::error(&format!("{file}: {}", crate::text::error_text(&why)));
-                    }
-                }
-                Err(e) => out::error(&crate::text::error_text(&e)),
-            }
-        }
-    }
-    // Inside the books: details, polishing, conversions.
-    let polish = (on("epub3") || on("shrinkImages"))
-        .then(|| serde_json::json!({ "epub3": on("epub3"), "shrink": on("shrinkImages") }));
-    let original = rule
-        .get("original")
-        .and_then(Value::as_str)
-        .unwrap_or("keep");
-    let mut jobs: Vec<renome_services::after::InsideJob> = Vec::new();
-    for (from, to) in &pairs {
-        let mut job = serde_json::json!({ "path": to });
-        let details = detail(from);
-        if let Some((book, _, language)) = &details {
-            job["book"] = serde_json::to_value(book).unwrap_or_default();
-            job["language"] = Value::from(language.clone());
-        }
-        if let Some(target) = book_to.get(from) {
-            job["bookTo"] = serde_json::to_value(target).unwrap_or_default();
-            job["convert"] = Value::from(original);
-        } else {
-            let writable =
-                renome_core::inside::book_writable(to) || renome_core::bookmeta::writable(to);
-            let epub = matches!(ext_of(to).as_str(), "epub" | "kepub");
-            let writes = on("writeEpub") && details.is_some() && writable;
-            if epub && let Some(p) = &polish {
-                job["polish"] = p.clone();
-            } else if !writes {
-                continue;
-            }
-            if !writes {
-                job.as_object_mut().map(|o| o.remove("book"));
-            }
-        }
-        if let Ok(j) = serde_json::from_value(job) {
-            jobs.push(j);
-        }
-    }
-    if !jobs.is_empty() {
-        match renome_services::after::inside(&Cli, history, report.history_id.clone(), jobs).await {
-            Ok(o) => {
-                notes.push(t("insideN", &[("n", &o.report.written)]));
-                for (file, why) in o.report.errors {
-                    out::error(&format!("{file}: {}", crate::text::error_text(&why)));
-                }
-            }
-            Err(e) => out::error(&crate::text::error_text(&e)),
-        }
-    }
-    notes
-}
-
-/// After the renames, the subtitle rule's work: subtitles fixed where
-/// they are (or made SubRip), text tracks taken out of videos.
-pub async fn after_subtitles(
-    rule: &Value,
-    preview: &Preview,
-    report: &renome_core::ApplyReport,
-    history: &renome_core::History,
-) -> Vec<String> {
-    let mut notes = Vec::new();
-    if !(report.done.is_empty() || report.history_id.is_some()) {
-        return notes;
-    }
-    let to: HashMap<&PathBuf, &PathBuf> = report.done.iter().map(|op| (&op.from, &op.to)).collect();
-    let jobs: Vec<renome_services::after::SubJob> = preview
-        .items
-        .iter()
-        .filter(|i| i.status != renome_core::Status::Conflict)
-        .filter(|i| to.contains_key(&i.path) || i.status == renome_core::Status::Unchanged)
-        .filter_map(|i| {
-            let fix = i.sub_fix.as_ref().is_some_and(|f| !f.no_fps);
-            let extract = i.sub_extract > 0;
-            (fix || extract).then(|| renome_services::after::SubJob {
-                path: to.get(&i.path).map_or(i.path.clone(), |p| (*p).clone()),
-                fix,
-                extract,
-            })
-        })
-        .collect();
-    if jobs.is_empty() {
-        return notes;
-    }
-    let tools: renome_core::subtext::Tools =
-        serde_json::from_value(rule.clone()).unwrap_or_default();
-    let original = match rule.get("original").and_then(Value::as_str) {
-        Some("delete") => renome_core::convert::Original::Delete,
-        _ => renome_core::convert::Original::Keep,
-    };
-    let langs = if rule
-        .get("extract")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
-        rule.get("extractLangs")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string()
-    } else {
-        String::new()
-    };
-    match renome_services::after::subtitle_tools(
-        &Cli,
-        history,
-        report.history_id.clone(),
-        jobs,
-        tools,
-        original,
-        langs,
-    )
-    .await
-    {
-        Ok((r, _)) => {
-            if r.written > 0 {
-                notes.push(t("subToolsN", &[("n", &r.written)]));
-            }
-            if r.created > 0 {
-                notes.push(t("subToolsM", &[("n", &r.created)]));
-            }
-            for (file, why) in r.errors {
-                out::error(&format!("{file}: {}", crate::text::error_text(&why)));
-            }
-        }
-        Err(e) => out::error(&crate::text::error_text(&e)),
-    }
-    notes
 }
 
 /// A comic series looked up: its details, its issues (none for a manga
@@ -1969,241 +1360,6 @@ fn choose_issue(
     }
 }
 
-/// After the renames: `ComicInfo.xml` written (or cleared), conversions
-/// to CBZ, comic e-books for a reader.
-pub async fn after_comics(
-    rule: &Value,
-    comics: &Comics,
-    preview: &Preview,
-    report: &renome_core::ApplyReport,
-    history: &renome_core::History,
-) -> Vec<String> {
-    let mut notes = Vec::new();
-    if !(report.done.is_empty() || report.history_id.is_some()) {
-        return notes;
-    }
-    let on = |k: &str| rule.get(k).and_then(Value::as_bool).unwrap_or(false);
-    let original = rule
-        .get("original")
-        .and_then(Value::as_str)
-        .unwrap_or("keep");
-    let pdf = serde_json::json!({
-        "draw": rule.get("drawPdfPages").and_then(Value::as_bool).unwrap_or(true),
-        "size": rule.get("pageSize").and_then(Value::as_u64).unwrap_or(2400),
-        "info": on("writeInfo"),
-    });
-    let to: HashMap<&PathBuf, &PathBuf> = report.done.iter().map(|op| (&op.from, &op.to)).collect();
-    let mut jobs: Vec<renome_services::after::InsideJob> = Vec::new();
-    for i in &preview.items {
-        let renamed = to.get(&i.path).map(|p| (*p).clone());
-        if renamed.is_none() && i.status != renome_core::Status::Unchanged {
-            continue;
-        }
-        let path = renamed.clone().unwrap_or_else(|| i.path.clone());
-        let ext = path
-            .extension()
-            .map(|e| e.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        let matched = comics.chosen.get(&i.path);
-        let clears = on("cleanInfo") && i.junk && !on("writeInfo");
-        let mut job = serde_json::json!({ "path": path, "pdf": pdf, "fresh": on("cleanInfo") });
-        let details = |job: &mut Value| {
-            if let Some(m) = matched {
-                let (web, manga) = comics.web.get(&i.path).cloned().unwrap_or_default();
-                job["comic"] = serde_json::to_value(m).unwrap_or_default();
-                job["web"] = Value::from(web);
-                job["manga"] = Value::from(manga);
-            }
-        };
-        if let Some(format) = i.comic_to {
-            if renamed.is_none() && i.status != renome_core::Status::Unchanged {
-                continue;
-            }
-            details(&mut job);
-            job["fresh"] = Value::from(false);
-            job["comicTo"] = serde_json::to_value(format).unwrap_or_default();
-            job["convert"] = Value::from(original);
-            job["ebook"] = serde_json::json!({
-                "device": rule.get("device").cloned().unwrap_or(Value::from("kindle-pw")),
-                "width": rule.get("width").cloned().unwrap_or(Value::from(0)),
-                "height": rule.get("height").cloned().unwrap_or(Value::from(0)),
-                "crop": rule.get("crop").and_then(Value::as_bool).unwrap_or(true),
-                "numbers": on("cropPageNumbers"),
-                "spread": rule.get("spread").cloned().unwrap_or(Value::from("split")),
-                "contrast": rule.get("contrast").and_then(Value::as_bool).unwrap_or(true),
-                "upscale": on("upscale"),
-                "greys16": on("sixteenGreys"),
-                "soften": on("reduceRainbow"),
-                "webtoon": on("webtoon"),
-                "join": on("join"),
-                "maxMb": rule.get("maxMb").cloned().unwrap_or(Value::from(0)),
-            });
-        } else if ext == "cbz"
-            && ((on("convert") && i.convert)
-                || (on("writeInfo")
-                    && matched.is_some()
-                    && (renamed.is_some() || i.retag || (on("cleanInfo") && i.junk)))
-                || clears)
-        {
-            if on("writeInfo") {
-                details(&mut job);
-            }
-            if on("convert") && i.convert {
-                job["convert"] = Value::from(original);
-            }
-        } else {
-            continue;
-        }
-        if let Ok(j) = serde_json::from_value(job) {
-            jobs.push(j);
-        }
-    }
-    if jobs.is_empty() {
-        return notes;
-    }
-    match renome_services::after::inside(&Cli, history, report.history_id.clone(), jobs).await {
-        Ok(o) => {
-            notes.push(t("insideN", &[("n", &o.report.written)]));
-            if o.report.drawn > 0 {
-                notes.push(t("insideDrawnN", &[("n", &o.report.drawn)]));
-            }
-            for (file, why) in o.report.errors {
-                out::error(&format!("{file}: {}", crate::text::error_text(&why)));
-            }
-        }
-        Err(e) => out::error(&crate::text::error_text(&e)),
-    }
-    notes
-}
-
-/// After the renames, with the movie or series rule's `subtitles`: each
-/// matched video's subtitles in the rule's languages searched and the
-/// best one per language downloaded beside it (as the window's review
-/// picks them), unless it already has one beside or inside.
-pub async fn download_subtitles(
-    rule: &Value,
-    found: &Found,
-    preview: &Preview,
-    report: &renome_core::ApplyReport,
-    history: &renome_core::History,
-    settings: Option<&Value>,
-) -> Vec<String> {
-    use renome_services::subtitles as subs;
-    let mut notes = Vec::new();
-    if !rule
-        .get("subtitles")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-        || !(report.done.is_empty() || report.history_id.is_some())
-    {
-        return notes;
-    }
-    let langs = rule
-        .get("subLangs")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    let secrets = renome_services::load_secrets();
-    let secret = |k: &str| {
-        secrets
-            .get("secrets")
-            .and_then(|s| s.get(k))
-            .or_else(|| settings.and_then(|s| s.get(k)))
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .trim()
-            .to_string()
-    };
-    let auth = subs::Auth {
-        os_key: secret("osKey"),
-        os_user: secret("osUser"),
-        os_password: secret("osPassword"),
-        subdl_key: secret("subdlKey"),
-        subsource_key: secret("subsourceKey"),
-        tmdb_key: secret("tmdbKey"),
-    };
-    if auth.os_key.is_empty()
-        && auth.subdl_key.is_empty()
-        && (auth.subsource_key.is_empty() || auth.tmdb_key.is_empty())
-    {
-        out::error(&t("subsNeedKey", &[]));
-        return notes;
-    }
-    let to: HashMap<&PathBuf, &PathBuf> = report.done.iter().map(|op| (&op.from, &op.to)).collect();
-    // The videos renamed (or already right) that were identified.
-    let files: Vec<flow::subtitles::Identified> = preview
-        .items
-        .iter()
-        .filter(|i| to.contains_key(&i.path) || i.status == renome_core::Status::Unchanged)
-        .map(|i| flow::subtitles::Identified {
-            path: i.path.clone(),
-            original: i.original.clone(),
-            is_dir: i.is_dir,
-            movie: match found {
-                Found::Movies(m) => m.chosen.get(&i.path).map(|c| c.id),
-                _ => None,
-            },
-            episode: match found {
-                Found::Series(s) => s.chosen.get(&i.path).cloned(),
-                _ => None,
-            },
-        })
-        .collect();
-    let items = flow::subtitles::targets(&files);
-    if items.is_empty() {
-        return notes;
-    }
-    let episode_of: HashMap<PathBuf, (Option<u32>, Option<u32>)> = items
-        .iter()
-        .map(|i| (i.path.clone(), (i.season, i.episode)))
-        .collect();
-    let searched =
-        flow::subtitles::search(&Cli, auth.clone(), &langs, items, crate::stop::requested).await;
-    for e in &searched.errors {
-        out::error(&crate::text::error_text(e));
-    }
-    // Each video gets the subtitles the flow picked.
-    let chosen: Vec<flow::subtitles::Chosen> = searched
-        .found
-        .into_iter()
-        .map(|f| {
-            let (season, episode) = episode_of.get(&f.found.path).copied().unwrap_or_default();
-            flow::subtitles::Chosen {
-                path: to
-                    .get(&f.found.path)
-                    .map_or(f.found.path.clone(), |p| (*p).clone()),
-                season,
-                episode,
-                have: f.found.have,
-                candidates: f.found.candidates,
-                pick: f.pick,
-            }
-        })
-        .collect();
-    let writes = flow::subtitles::writes(chosen, &searched.langs);
-    if writes.is_empty() {
-        return notes;
-    }
-    let mut written = subs::write(&Cli, auth, writes, crate::stop::requested).await;
-    let mut r = tmdb::SidecarReport {
-        created: std::mem::take(&mut written.created),
-        errors: std::mem::take(&mut written.errors),
-        kept: 0,
-    };
-    renome_services::after::record_created(history, report.history_id.clone(), &mut r);
-    notes.push(t("subsSavedN", &[("n", &r.created.len())]));
-    for (file, why) in r.errors {
-        let text = format!("{file}: {}", crate::text::error_text(&why));
-        // Saved all the same, maybe out of time: a warning, not an error.
-        if why == "subsLengthKept" {
-            out::note(&out::yellow(&text));
-        } else {
-            out::error(&text);
-        }
-    }
-    notes
-}
-
 impl Books {
     /// Each book's (and audiobook's first file's) guess and choice.
     pub fn guesses(
@@ -2216,4 +1372,277 @@ impl Books {
     > {
         self.found.iter()
     }
+}
+
+/// What the lookups chose, for what is written after the renames (the
+/// shared flow decides it, as for the window). `typed`: the files whose
+/// details were typed in (`--edit`).
+pub fn chosen(
+    found: Option<&Found>,
+    typed: &std::collections::HashSet<PathBuf>,
+) -> flow::after::Chosen {
+    let mut c = flow::after::Chosen::default();
+    match found {
+        Some(Found::Movies(m)) => {
+            c.movies = m.chosen.iter().map(|(p, x)| (p.clone(), x.id)).collect();
+        }
+        Some(Found::Series(s)) => c.episodes = s.chosen.clone(),
+        Some(Found::Music(m)) => {
+            c.songs = m.chosen.clone();
+            c.albums = m
+                .albums
+                .iter()
+                .map(|(folder, release)| {
+                    let mut songs: Vec<PathBuf> = m
+                        .chosen
+                        .iter()
+                        .filter(|(p, s)| &s.release == release && p.starts_with(folder))
+                        .map(|(p, _)| p.clone())
+                        .collect();
+                    songs.sort();
+                    (release.clone(), songs)
+                })
+                .collect();
+        }
+        Some(Found::Books(b)) => {
+            c.books = b.chosen.clone();
+            c.book_found = b
+                .found
+                .iter()
+                .map(|(p, (guess, choice))| {
+                    (
+                        p.clone(),
+                        flow::after::BookFound {
+                            guess: guess.clone(),
+                            choice: choice.clone(),
+                        },
+                    )
+                })
+                .collect();
+            c.book_parts = b.parts.clone();
+            c.book_typed = typed.clone();
+        }
+        Some(Found::Comics(k)) => {
+            c.comics = k
+                .chosen
+                .iter()
+                .map(|(p, comic)| {
+                    let (web, manga) = if typed.contains(p) {
+                        Default::default()
+                    } else {
+                        k.web.get(p).cloned().unwrap_or_default()
+                    };
+                    (
+                        p.clone(),
+                        flow::comics::Named {
+                            comic: comic.clone(),
+                            web,
+                            manga,
+                        },
+                    )
+                })
+                .collect();
+        }
+        None => {}
+    }
+    c
+}
+
+/// The subtitle services' keys, from the system's password store (or the
+/// options file).
+pub fn subs_auth(settings: Option<&Value>) -> renome_services::subtitles::Auth {
+    let secrets = renome_services::load_secrets();
+    let secret = |k: &str| {
+        secrets
+            .get("secrets")
+            .and_then(|s| s.get(k))
+            .or_else(|| settings.and_then(|s| s.get(k)))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    };
+    renome_services::subtitles::Auth {
+        os_key: secret("osKey"),
+        os_user: secret("osUser"),
+        os_password: secret("osPassword"),
+        subdl_key: secret("subdlKey"),
+        subsource_key: secret("subsourceKey"),
+        tmdb_key: secret("tmdbKey"),
+    }
+}
+
+/// With the movie or series rule's `subtitles`: each identified video's
+/// subtitles in the rule's languages searched before renaming, the best
+/// one per language picked (as the window's review picks them) for
+/// downloading once it is renamed.
+pub async fn subtitles(
+    rule: &Value,
+    preview: &Preview,
+    auth: &renome_services::subtitles::Auth,
+    chosen: &mut flow::after::Chosen,
+) {
+    if !rule
+        .get("subtitles")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return;
+    }
+    if auth.os_key.is_empty()
+        && auth.subdl_key.is_empty()
+        && (auth.subsource_key.is_empty() || auth.tmdb_key.is_empty())
+    {
+        out::error(&t("subsNeedKey", &[]));
+        return;
+    }
+    let langs = rule
+        .get("subLangs")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let files: Vec<flow::subtitles::Identified> = preview
+        .items
+        .iter()
+        .filter(|i| i.status != renome_core::Status::Conflict)
+        .map(|i| flow::subtitles::Identified {
+            path: i.path.clone(),
+            original: i.original.clone(),
+            is_dir: i.is_dir,
+            movie: chosen.movies.get(&i.path).copied(),
+            episode: chosen.episodes.get(&i.path).cloned(),
+        })
+        .collect();
+    let items = flow::subtitles::targets(&files);
+    if items.is_empty() {
+        return;
+    }
+    let searched =
+        flow::subtitles::search(&Cli, auth.clone(), &langs, items, crate::stop::requested).await;
+    for e in &searched.errors {
+        out::error(&crate::text::error_text(e));
+    }
+    chosen.sub_langs = searched.langs;
+    for f in searched.found {
+        chosen.subtitles.insert(
+            f.found.path,
+            flow::after::SubsFound {
+                have: f.found.have,
+                candidates: f.found.candidates,
+                pick: f.pick,
+            },
+        );
+    }
+}
+
+/// The lines asked about before renaming, for what is written besides
+/// the renames (as the window's question says them).
+pub fn planned(c: &flow::after::Counts) -> Vec<String> {
+    let line = |key: &str, n: usize| (n > 0).then(|| t(key, &[("n", &n)]));
+    [
+        line("confirmMeta", c.sidecars),
+        line("confirmBookMeta", c.book_meta),
+        line("confirmCovers", c.covers),
+        line("confirmPlaylists", c.playlists),
+        line("confirmTags", c.tags),
+        line("confirmInside", c.inside + c.video_tags),
+        line("confirmSubTools", c.sub_tools),
+        line("confirmSubs", c.subtitles),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+/// Everything written once the files are renamed, by the shared flow (as
+/// in the window); what it did, as notices, and what failed, as errors.
+#[allow(clippy::too_many_arguments)]
+pub async fn after(
+    rules: &[Value],
+    found: Option<&Found>,
+    preview: &Preview,
+    chosen: &flow::after::Chosen,
+    report: &renome_core::ApplyReport,
+    history: &renome_core::History,
+    settings: Option<&Value>,
+    auth: renome_services::subtitles::Auth,
+) -> Vec<String> {
+    let moved: HashMap<PathBuf, PathBuf> = report
+        .done
+        .iter()
+        .map(|op| (op.from.clone(), op.to.clone()))
+        .collect();
+    let jobs = flow::after::plan(rules, preview, chosen, &moved);
+    let (tmdb_key, tmdb_lang) = match found {
+        Some(Found::Movies(m)) => (m.key.clone(), m.lang.clone()),
+        Some(Found::Series(s)) => (s.key.clone(), s.lang.clone()),
+        _ => tmdb_access(settings).unwrap_or_default(),
+    };
+    let (own_mb, own_dg);
+    let (mb, dg) = match found {
+        Some(Found::Music(m)) => (&m.mb, &m.dg),
+        _ => {
+            own_mb = renome_services::musicbrainz::Client::default();
+            own_dg = renome_services::discogs::Client::default();
+            (&own_mb, &own_dg)
+        }
+    };
+    let own_ol;
+    let ol = match found {
+        Some(Found::Books(b)) => &b.ol,
+        _ => {
+            own_ol = renome_services::openlibrary::Client::default();
+            &own_ol
+        }
+    };
+    let services = flow::after::Services {
+        tmdb_key,
+        tmdb_lang,
+        mb,
+        dg,
+        ol,
+        subs: auth,
+    };
+    let r = flow::after::run(
+        &Cli,
+        history,
+        report.history_id.clone(),
+        !report.done.is_empty(),
+        rules,
+        jobs,
+        &services,
+    )
+    .await;
+    for trouble in &r.troubles {
+        for (file, why) in &trouble.errors {
+            let text = if file.is_empty() {
+                crate::text::error_text(why)
+            } else {
+                format!("{file}: {}", crate::text::error_text(why))
+            };
+            // Saved all the same, maybe out of time: a warning, not an error.
+            if why == "subsLengthKept" {
+                out::note(&out::yellow(&text));
+            } else {
+                out::error(&text);
+            }
+        }
+    }
+    let line = |key: &str, n: usize| (n > 0).then(|| t(key, &[("n", &n)]));
+    [
+        line("adsTrashedN", r.ads_trashed),
+        line("adsFailedN", r.ads_failed),
+        line("sidecarsN", r.sidecars),
+        line("subsSavedN", r.subtitles),
+        line("subToolsN", r.sub_fixed),
+        line("subToolsM", r.sub_extracted),
+        line("playlistsKeptN", r.kept_lists),
+        line("tagsN", r.tags),
+        line("audioTagsN", r.audio_tags),
+        line("insideN", r.inside),
+        line("insideDrawnN", r.drawn),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
 }

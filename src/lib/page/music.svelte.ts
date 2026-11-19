@@ -22,48 +22,9 @@ export class Music {
   /** Albums in the review window (indexes); null when closed. */
   review = $state<number[] | null>(null);
   progress = $state<{ done: number; total: number; kind: "search" | "listen" | "save" | "tags" } | null>(null);
-  /** Albums whose songs keep their names but still get a cover: those
-   *  whose folder has none yet (asked of the disk; an existing cover is
-   *  kept when writing). */
-  coverOnly = $state(0);
-  /** Album folders whose songs keep their names but still get a playlist
-   *  (asked of the disk: those without one and with two songs or more). */
-  playlistOnly = $state<string[]>([]);
 
   constructor(ctx: PageCtx) {
     this.#ctx = ctx;
-    $effect(() => {
-      const r = this.rule?.rule;
-      const on = r?.type === "music" && r.cover;
-      const items = this.#ctx.items;
-      const status = new Map(items.map((i) => [i.path, i.status]));
-      const dirs = on
-        ? [...new Set(this.albums.filter((a) => a.choice && a.files.every((p) => status.get(p) === "unchanged")).map((a) => a.dir))]
-        : [];
-      if (!dirs.length) {
-        this.coverOnly = 0;
-        return;
-      }
-      api.coverDirs(dirs).then((d) => {
-        if (items === this.#ctx.items) this.coverOnly = d.length;
-      }, () => {});
-    });
-    $effect(() => {
-      const r = this.rule?.rule;
-      const on = r?.type === "music" && r.playlist;
-      const items = this.#ctx.items;
-      const changed = new Set(items.filter((i) => i.status !== "unchanged").map((i) => i.dir));
-      const dirs = on
-        ? [...new Set(items.filter((i) => !i.isDir && i.status === "unchanged" && isAudio(i.original) && !changed.has(i.dir)).map((i) => i.dir))]
-        : [];
-      if (!dirs.length) {
-        this.playlistOnly = [];
-        return;
-      }
-      api.playlistDirs(dirs).then((d) => {
-        if (items === this.#ctx.items) this.playlistOnly = d;
-      }, () => {});
-    });
   }
 
   rule = $derived.by(() => ruleOf(this.#ctx.steps, "music"));
@@ -78,13 +39,6 @@ export class Music {
   albumOf = $derived.by(() => new Map(this.albums.flatMap((a, i) => a.files.map((p): [string, number] => [p, i]))));
   /** The songs among the rows chosen in the list. */
   selected = $derived.by(() => this.#ctx.items.filter((i) => this.#ctx.selected.has(i.path) && !i.isDir && isAudio(i.original)));
-  /** Songs whose names are already right but whose tags get written. */
-  tagsOnly = $derived.by(() => {
-    const r = this.rule?.rule;
-    return r?.type === "music" && r.writeTags
-      ? this.#ctx.items.filter((i) => i.status === "unchanged" && (i.retag || (r.cleanTags && i.junk)) && this.matches[i.path])
-      : [];
-  });
   counts = $derived.by(() => {
     let found = 0, choose = 0, none = 0;
     for (const a of this.albums) {
@@ -174,14 +128,6 @@ export class Music {
     };
   }
 
-  /** Where each album with a release ends up after renaming, for its cover. */
-  coverItems(r: ApplyReport): Promise<{ dir: string; release: string }[]> {
-    const to = new Set(r.done.map((op) => op.from));
-    const albums: [string, string[]][] = this.albums
-      .filter((a) => a.choice && a.files.some((p) => this.#ctx.items.some((i) => i.path === p) || to.has(p)))
-      .map((a) => [a.choice!.id, a.files]);
-    return api.coverItems(albums, r.done.map((op) => [op.from, op.to]));
-  }
 
   /** Opens the details window on the songs chosen in the list. */
   async openEdit() {

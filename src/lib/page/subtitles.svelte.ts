@@ -65,10 +65,6 @@ export class Subtitles {
     }
     return { subs, videos, missing };
   });
-  /** Videos whose names are already right but that still get subtitles. */
-  only = $derived.by(() =>
-    this.wanted === null ? [] : this.#ctx.items.filter((i) => i.status === "unchanged" && chosen(this.found[i.path]) > 0),
-  );
 
   /** Subtitles chosen for a video, not there yet. */
   chosen(s: SubsState | undefined) {
@@ -137,17 +133,6 @@ export class Subtitles {
     }
   }
 
-  /** What to download for renamed videos (`from` → `to`), from what is
-   *  picked (the order, the shared flow says). */
-  writes(pairs: [string, string][]) {
-    const chosen = pairs.flatMap(([from, to]) => {
-      const s = this.found[from];
-      if (!s) return [];
-      const e = this.#series.matches[from];
-      return [{ path: to, season: e?.season ?? null, episode: e?.episodes[0] ?? null, have: s.have, candidates: s.candidates, pick: s.pick }];
-    });
-    return api.subsWrites($state.snapshot(chosen), $state.snapshot(this.langs));
-  }
 
   /** Forgets the files taken out of the list (all, with null). */
   forget(paths: Set<string> | null) {

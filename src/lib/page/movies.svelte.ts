@@ -63,14 +63,6 @@ export class Movies {
         }),
     ),
   );
-  /** Movies whose names are already right but that still get .nfo and
-   *  images (files that already exist are skipped when writing). */
-  metaOnly = $derived.by(() => {
-    const r = this.rule?.rule;
-    return r?.type === "movie" && r.nfo
-      ? this.#ctx.items.filter((i) => i.status === "unchanged" && this.state[i.path]?.choice && isVideo(i.original))
-      : [];
-  });
   counts = $derived.by(() => counts(this.state, this.#ctx.items));
 
   /** Looks up the visible videos (and folders) without a choice yet; those

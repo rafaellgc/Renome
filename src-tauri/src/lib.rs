@@ -17,10 +17,6 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 mod update;
 
-use renome_services::after::{
-    AudiobookTagJob, InsideJob, SubJob, SubToolsReport, TagJob, TagReport, VideoTagOptions,
-};
-
 use renome_services::{
     ANSWERS, acoustid, anilist, cache_days, cache_root, comicvine, discogs, drop_old_cache, gcd,
     mangadex, mangaupdates, mediaserver, metron, musicbrainz, openlibrary, read_settings_file,
@@ -90,6 +86,10 @@ struct AppState {
     mt: metron::Client,
     /// Discogs, with the user's token.
     dg: discogs::Client,
+    /// The list as last shown, and as last renamed: what is written after
+    /// the renames is planned on them (see `flow::after`).
+    shown: Mutex<Option<renome_core::Preview>>,
+    renamed: Mutex<Option<renome_core::Preview>>,
 }
 
 type Overrides = HashMap<PathBuf, String>;
@@ -327,6 +327,7 @@ async fn preview(
             });
         }
         let preview = renome_core::preview(&files, &steps, &overrides, &view);
+        *state.shown.lock().unwrap() = Some(preview.clone());
         // What was read stays known.
         let read: HashMap<&PathBuf, &FileEntry> = files.iter().map(|f| (&f.path, f)).collect();
         for f in state.session.lock().unwrap().files.iter_mut() {
@@ -801,25 +802,6 @@ async fn trash_files(app: AppHandle, paths: Vec<PathBuf>) -> Result<Trashed, Str
     .await
 }
 
-/// Sends a release's advertisements left after the moves to the system's
-/// trash, with their old folders when nothing else is in them.
-#[tauri::command]
-async fn trash_leftovers(
-    app: AppHandle,
-    files: Vec<PathBuf>,
-    folders: Vec<PathBuf>,
-) -> Result<Trashed, String> {
-    in_background(app, move |state| {
-        let (trashed, failed) = renome_core::plan::trash_leftovers(&files, &folders);
-        let mut s = state.session.lock().unwrap();
-        s.files
-            .retain(|f| !trashed.iter().any(|t| f.path.starts_with(t)));
-        drop(s);
-        Trashed { trashed, failed }
-    })
-    .await
-}
-
 /// Renames as they happened, in order: plain renames are looked up at
 /// once; a renamed folder also moves whatever was under it.
 enum Renamed<'a> {
@@ -929,6 +911,7 @@ async fn apply(
         refresh_renamed(&mut s.files, &report);
         // Earlier states point to the old names.
         s.undo.clear();
+        *state.renamed.lock().unwrap() = Some(plan);
         report
     })
     .await
@@ -1062,54 +1045,82 @@ fn series_named(
     renome_services::flow::series::named(&files, &shows)
 }
 
-/// Records created metadata files in the rename's history entry, so undo
-/// deletes them; without a rename (names already right), in an entry of
-/// their own.
-fn record_created(app: &AppHandle, history_id: Option<String>, report: &mut tmdb::SidecarReport) {
-    renome_services::after::record_created(&app.state::<AppState>().history, history_id, report);
+/// What renaming the list as shown would write besides the renames (the
+/// files already named right only; subtitles for every file), for the
+/// question before renaming and the Rename button.
+#[tauri::command]
+fn after_counts(
+    app: AppHandle,
+    rules: Vec<Value>,
+    chosen: renome_services::flow::after::Chosen,
+) -> renome_services::flow::after::Counts {
+    let state = app.state::<AppState>();
+    let shown = state.shown.lock().unwrap();
+    match shown.as_ref() {
+        Some(p) => renome_services::flow::after::counts(&rules, p, &chosen),
+        None => Default::default(),
+    }
 }
 
-/// Writes `.nfo` and images next to renamed movies and records them in the
-/// rename's history entry, so undo deletes them.
+/// Everything written once the list is renamed (see `flow::after`): on
+/// the list as it was renamed, with what the lookups chose; the list
+/// follows what it moved, trashed or retagged.
 #[tauri::command]
-async fn write_sidecars(
+#[allow(clippy::too_many_arguments)]
+async fn after_rename(
     app: AppHandle,
-    key: String,
-    lang: String,
+    rules: Vec<Value>,
+    chosen: renome_services::flow::after::Chosen,
+    done: Vec<(PathBuf, PathBuf)>,
     history_id: Option<String>,
-    items: Vec<tmdb::SidecarItem>,
-    fanart: bool,
-    in_folder: bool,
-) -> Result<tmdb::SidecarReport, String> {
-    let history = &app.state::<AppState>().history;
-    Ok(renome_services::after::movie_sidecars(
+    tmdb_key: String,
+    tmdb_lang: String,
+    subs: subtitles::Auth,
+) -> Result<renome_services::flow::after::Report, String> {
+    use renome_services::flow::after;
+    let state = app.state::<AppState>();
+    // The list as renamed (as shown, when nothing was).
+    let renamed = !done.is_empty();
+    let preview = renamed
+        .then(|| state.renamed.lock().unwrap().take())
+        .flatten()
+        .or_else(|| state.shown.lock().unwrap().clone())
+        .unwrap_or_default();
+    let moved: HashMap<PathBuf, PathBuf> = done.into_iter().collect();
+    let jobs = after::plan(&rules, &preview, &chosen, &moved);
+    let services = after::Services {
+        tmdb_key,
+        tmdb_lang,
+        mb: &state.mb,
+        dg: &state.dg,
+        ol: &state.ol,
+        subs,
+    };
+    let report = after::run(
         &Gui(app.clone()),
-        history,
-        &key,
-        &lang,
+        &state.history,
         history_id,
-        items,
-        fanart,
-        in_folder,
+        renamed,
+        &rules,
+        jobs,
+        &services,
     )
-    .await)
-}
-
-/// Writes `.nfo` files and images for renamed episodes and their show, and
-/// records them like `write_sidecars`.
-#[tauri::command]
-async fn write_tv_sidecars(
-    app: AppHandle,
-    key: String,
-    lang: String,
-    history_id: Option<String>,
-    items: Vec<tmdb::TvSidecarItem>,
-    fanart: bool,
-    folders: bool,
-) -> Result<tmdb::SidecarReport, String> {
-    let client = tmdb::Client::new(&key, &lang);
-    let mut report = tmdb::tv_sidecars(&Gui(app.clone()), &client, items, fanart, folders).await;
-    record_created(&app, history_id, &mut report);
+    .await;
+    {
+        let s = &mut *state.session.lock().unwrap();
+        if !report.trashed.is_empty() {
+            s.files
+                .retain(|f| !report.trashed.iter().any(|t| f.path.starts_with(t)));
+        }
+        if !report.moved.is_empty() {
+            let moved = ApplyReport {
+                done: report.moved.clone(),
+                ..Default::default()
+            };
+            refresh_renamed(&mut s.files, &moved);
+        }
+    }
+    forget_tags_of(&state, report.retagged.clone());
     Ok(report)
 }
 
@@ -1131,37 +1142,6 @@ async fn subs_search(
 ) -> renome_services::flow::subtitles::Outcome {
     let stop = stop_signal(&app);
     renome_services::flow::subtitles::search(&Gui(app.clone()), auth, &langs, items, stop).await
-}
-
-/// What to download for the renamed videos, from what is picked.
-#[tauri::command]
-fn subs_writes(
-    chosen: Vec<renome_services::flow::subtitles::Chosen>,
-    langs: Vec<String>,
-) -> Vec<subtitles::Write> {
-    renome_services::flow::subtitles::writes(chosen, &langs)
-}
-
-/// Downloads the subtitles chosen beside the renamed videos and records
-/// them like `write_sidecars`.
-#[tauri::command]
-async fn write_subtitles(
-    app: AppHandle,
-    auth: subtitles::Auth,
-    history_id: Option<String>,
-    items: Vec<subtitles::Write>,
-) -> subtitles::Written {
-    let stop = stop_signal(&app);
-    let mut out = subtitles::write(&Gui(app.clone()), auth, items, stop).await;
-    let mut report = tmdb::SidecarReport {
-        created: std::mem::take(&mut out.created),
-        errors: std::mem::take(&mut out.errors),
-        kept: 0,
-    };
-    record_created(&app, history_id, &mut report);
-    out.created = report.created;
-    out.errors = report.errors;
-    out
 }
 
 #[tauri::command]
@@ -1354,94 +1334,6 @@ async fn mb_choose(
     .await
 }
 
-/// Where each album's cover goes once renamed (see
-/// [`flow::music::cover_items`]): `albums`, each release with its songs;
-/// `done`, each renamed file's old and new path.
-#[tauri::command]
-fn cover_items(
-    albums: Vec<(String, Vec<PathBuf>)>,
-    done: Vec<(PathBuf, PathBuf)>,
-) -> Vec<musicbrainz::CoverItem> {
-    renome_services::flow::music::cover_items(&albums, &done.into_iter().collect())
-}
-
-/// Saves the albums' covers and records them like `write_sidecars`.
-#[tauri::command]
-async fn write_covers(
-    app: AppHandle,
-    history_id: Option<String>,
-    items: Vec<musicbrainz::CoverItem>,
-) -> Result<tmdb::SidecarReport, String> {
-    let state = app.state::<AppState>();
-    let mut report = musicbrainz::covers(&Gui(app.clone()), &state.mb, &state.dg, items).await;
-    record_created(&app, history_id, &mut report);
-    Ok(report)
-}
-
-/// Writes each song's release details into its tags (and, with `cover`,
-/// the release's front cover in place of its pictures; with `clean`, the
-/// other tags go), keeping what they held in the rename's history entry (or
-/// one of its own) for undo. Each release is looked up in full once, for
-/// what its songs' tags take beyond the match (labels, genres, credits).
-#[tauri::command]
-async fn write_tags(
-    app: AppHandle,
-    history_id: Option<String>,
-    items: Vec<TagJob>,
-    cover: bool,
-    clean: bool,
-    cover_size: Option<u32>,
-) -> Result<TagReport, String> {
-    let state = app.state::<AppState>();
-    let (report, written) = renome_services::after::song_tags(
-        &Gui(app.clone()),
-        &state.history,
-        &state.mb,
-        &state.dg,
-        history_id,
-        items,
-        cover,
-        clean,
-        cover_size,
-    )
-    .await?;
-    // The list reads the new tags.
-    let written: HashSet<PathBuf> = written.into_iter().collect();
-    for f in state.session.lock().unwrap().files.iter_mut() {
-        if written.contains(&f.path) {
-            f.forget_tags();
-        }
-    }
-    Ok(report)
-}
-
-/// Writes each audiobook file's details (book, author, narrator, part,
-/// series, synopsis) into its tags and, with `cover`, the book's cover in
-/// place of its pictures; with `clean`, the other tags go. Kept for undo
-/// like `write_tags`. Each cover and synopsis is fetched once per book.
-#[tauri::command]
-async fn write_audiobook_tags(
-    app: AppHandle,
-    history_id: Option<String>,
-    items: Vec<AudiobookTagJob>,
-    cover: bool,
-    clean: bool,
-) -> Result<TagReport, String> {
-    let state = app.state::<AppState>();
-    let (report, written) = renome_services::after::audiobook_tags(
-        &Gui(app.clone()),
-        &state.history,
-        &state.ol,
-        history_id,
-        items,
-        cover,
-        clean,
-    )
-    .await?;
-    forget_tags_of(&state, written);
-    Ok(report)
-}
-
 /// Whether this system's web view can print books to PDF.
 #[tauri::command]
 fn pdf_print_available() -> bool {
@@ -1573,94 +1465,6 @@ fn print_webview(
     _: PrintDone,
 ) -> Result<(), String> {
     Err("pdfPrint".into())
-}
-
-/// Writes each comic's details into its `ComicInfo.xml` (CBZ) and each
-/// book's into its OPF (EPUB), keeping what they held in the rename's
-/// history entry (or one of its own) for undo, like `write_tags`. Comics
-/// to convert (CBR, CB7, CBT renamed `.cbz`) are converted, the details
-/// written in the same pass.
-#[tauri::command]
-async fn write_inside(
-    app: AppHandle,
-    history_id: Option<String>,
-    items: Vec<InsideJob>,
-) -> Result<TagReport, String> {
-    let state = app.state::<AppState>();
-    let out = renome_services::after::inside(&Gui(app.clone()), &state.history, history_id, items)
-        .await?;
-    let s = &mut *state.session.lock().unwrap();
-    if !out.moved.is_empty() {
-        let moved = ApplyReport {
-            done: out.moved,
-            ..Default::default()
-        };
-        refresh_renamed(&mut s.files, &moved);
-    }
-    let written: HashSet<PathBuf> = out.written.into_iter().collect();
-    for f in s.files.iter_mut() {
-        if written.contains(&f.path) {
-            f.forget_tags();
-        }
-    }
-    Ok(out.report)
-}
-
-/// Writes each renamed movie's or episode's details (title, date,
-/// description, genres, cast and crew, show, season, episode and, with
-/// `options.cover`, the poster and the background) inside its video, MKV or MP4,
-/// keeping what changed in the rename's history entry (or one of its
-/// own) for undo. `clean` takes out what came in the video first;
-/// `tracks` names its audio and subtitle tracks.
-#[tauri::command]
-async fn write_video_tags(
-    app: AppHandle,
-    key: String,
-    lang: String,
-    history_id: Option<String>,
-    items: Vec<tmdb::VideoTagItem>,
-    options: VideoTagOptions,
-) -> Result<TagReport, String> {
-    let history = &app.state::<AppState>().history;
-    renome_services::after::video_tags(
-        &Gui(app.clone()),
-        history,
-        &key,
-        &lang,
-        history_id,
-        items,
-        options,
-    )
-    .await
-}
-
-/// The subtitle rule's work after the rename: subtitles changed where they
-/// are (their old content kept in the history entry for undo) or made
-/// into SubRip (their original kept beside or sent to the trash), and the
-/// text tracks of videos written beside them (deleted by undo). `stop`
-/// ends it between files (and while a video is read).
-#[tauri::command]
-async fn subtitle_tools(
-    app: AppHandle,
-    history_id: Option<String>,
-    items: Vec<SubJob>,
-    tools: renome_core::subtext::Tools,
-    original: renome_core::convert::Original,
-    extract_langs: String,
-) -> Result<SubToolsReport, String> {
-    let state = app.state::<AppState>();
-    let (report, changed) = renome_services::after::subtitle_tools(
-        &Gui(app.clone()),
-        &state.history,
-        history_id,
-        items,
-        tools,
-        original,
-        extract_langs,
-    )
-    .await?;
-    forget_tags_of(&state, changed);
-    Ok(report)
 }
 
 /// The book rule's search (the flow the command line runs too): books
@@ -1857,72 +1661,6 @@ fn comic_named(
 #[tauri::command]
 async fn metron_check(app: AppHandle, token: String) -> Result<(), String> {
     app.state::<AppState>().mt.check(&token).await
-}
-
-/// Saves the books' covers and `metadata.opf` files and records them like
-/// `write_sidecars`.
-#[tauri::command]
-async fn write_book_sidecars(
-    app: AppHandle,
-    history_id: Option<String>,
-    items: Vec<openlibrary::SidecarItem>,
-    cover: bool,
-    opf: bool,
-    in_folder: bool,
-) -> Result<tmdb::SidecarReport, String> {
-    let ol = &app.state::<AppState>().ol;
-    let mut report =
-        openlibrary::sidecars(&Gui(app.clone()), ol, items, cover, opf, in_folder).await;
-    record_created(&app, history_id, &mut report);
-    Ok(report)
-}
-
-/// The album folders among (or above) `dirs` that would get a playlist.
-/// The album folders among `dirs` without a cover image yet: those the
-/// album cover would be saved in.
-#[tauri::command]
-async fn cover_dirs(dirs: Vec<PathBuf>) -> Vec<PathBuf> {
-    tauri::async_runtime::spawn_blocking(move || {
-        dirs.into_iter()
-            .filter(|d| !musicbrainz::has_cover(d))
-            .collect()
-    })
-    .await
-    .unwrap_or_default()
-}
-
-#[tauri::command]
-async fn playlist_dirs(dirs: Vec<PathBuf>) -> Vec<PathBuf> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut out: Vec<PathBuf> = Vec::new();
-        for d in dirs
-            .iter()
-            .filter_map(|d| renome_core::playlists::playlist_dir(d))
-        {
-            if !out.contains(&d) {
-                out.push(d);
-            }
-        }
-        out
-    })
-    .await
-    .unwrap_or_default()
-}
-
-/// Writes a playlist for each album in `dirs` (see
-/// `playlists::album_playlist`) and records them like `write_sidecars`.
-#[tauri::command]
-async fn write_playlists(
-    app: AppHandle,
-    history_id: Option<String>,
-    dirs: Vec<PathBuf>,
-) -> Result<tmdb::SidecarReport, String> {
-    let app2 = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        renome_services::after::playlists(&app2.state::<AppState>().history, history_id, dirs)
-    })
-    .await
-    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -2167,6 +1905,8 @@ pub fn run() {
             mu: mangaupdates::Client::default(),
             mt: metron::Client::default(),
             dg: discogs::Client::default(),
+            shown: Mutex::default(),
+            renamed: Mutex::default(),
         })
         .invoke_handler(tauri::generate_handler![
             pdf_print_available,
@@ -2183,7 +1923,6 @@ pub fn run() {
             series_covers,
             remote_image,
             trash_files,
-            trash_leftovers,
             tmdb_collections,
             clear_files,
             move_files,
@@ -2202,14 +1941,8 @@ pub fn run() {
             flow_answer,
             tmdb_search,
             tv_search,
-            write_sidecars,
-            write_tv_sidecars,
             subs_search,
             subs_targets,
-            subs_writes,
-            write_subtitles,
-            subtitle_tools,
-            write_video_tags,
             os_check,
             subdl_check,
             subsource_check,
@@ -2222,13 +1955,8 @@ pub fn run() {
             music_search,
             mb_search,
             mb_choose,
-            write_covers,
-            cover_items,
-            write_playlists,
-            write_tags,
-            write_audiobook_tags,
-            playlist_dirs,
-            cover_dirs,
+            after_counts,
+            after_rename,
             books_search,
             book_matches,
             book_search,
@@ -2246,8 +1974,6 @@ pub fn run() {
             save_text,
             tmdb_images,
             recover,
-            write_book_sidecars,
-            write_inside,
             apply,
             history,
             undo,

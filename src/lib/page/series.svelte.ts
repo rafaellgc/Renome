@@ -47,19 +47,7 @@ export class Series {
     this.matches = files.length ? await api.seriesNamed($state.snapshot(files), $state.snapshot(keys.map((k) => this.shows[k]))) : {};
   }
   counts = $derived.by(() => counts(this.state, this.#ctx.items));
-  /** Episodes whose names are already right but that still get metadata. */
-  metaOnly = $derived.by(() => {
-    const r = this.rule?.rule;
-    return r?.type === "series" && r.nfo && r.source !== "anilist"
-      ? this.#ctx.items.filter((i) => i.status === "unchanged" && this.matches[i.path] && isVideo(i.original))
-      : [];
-  });
 
-  /** What the metadata of an episode needs; `key` is the path before renaming. */
-  sidecarItem(key: string, path: string) {
-    const m = this.matches[key];
-    return { path, id: m.id, season: m.season, episodes: m.episodes, titles: m.titles };
-  }
 
   /** Finds the show (asking when unsure), then each visible file's episode;
    *  doubtful files go to the review window. With no show typed, each show

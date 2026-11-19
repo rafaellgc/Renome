@@ -300,7 +300,7 @@ fn is_zero(n: &usize) -> bool {
     *n == 0
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Preview {
     pub items: Vec<PreviewItem>,
