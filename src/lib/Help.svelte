@@ -283,7 +283,8 @@
     white-space: normal;
   }
   nav button.sub { padding-left: 22px; color: var(--muted); }
-  .nav-group { margin: 8px 8px 2px 22px; font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+  /* A group of the rules' sections: a band, as in the + Rule menu. */
+  .nav-group { margin: 10px 4px 4px 14px; padding: 5px 8px; border-radius: var(--r-sm); background: var(--accent-soft); font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
   nav button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
   .content {
     flex: 1;
