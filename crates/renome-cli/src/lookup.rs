@@ -1127,20 +1127,26 @@ pub async fn after_music(
     let to: HashMap<&PathBuf, &PathBuf> = report.done.iter().map(|op| (&op.from, &op.to)).collect();
     let now = |p: &PathBuf| to.get(p).map_or(p.clone(), |t| (*t).clone());
     if on("cover") {
-        let mut seen = std::collections::HashSet::new();
-        let items: Vec<renome_services::musicbrainz::CoverItem> = music
+        let albums: Vec<(String, Vec<PathBuf>)> = music
             .albums
             .iter()
-            .filter_map(|(_, release)| {
-                let first = music.chosen.iter().find(|(_, m)| &m.release == release)?.0;
-                let dir = now(first).parent()?.to_path_buf();
-                seen.insert(dir.clone())
-                    .then(|| renome_services::musicbrainz::CoverItem {
-                        dir,
-                        release: release.clone(),
-                    })
+            .map(|(folder, release)| {
+                let mut songs: Vec<PathBuf> = music
+                    .chosen
+                    .iter()
+                    .filter(|(p, m)| &m.release == release && p.starts_with(folder))
+                    .map(|(p, _)| p.clone())
+                    .collect();
+                songs.sort();
+                (release.clone(), songs)
             })
             .collect();
+        let moved: HashMap<PathBuf, PathBuf> = report
+            .done
+            .iter()
+            .map(|op| (op.from.clone(), op.to.clone()))
+            .collect();
+        let items = renome_services::flow::music::cover_items(&albums, &moved);
         if !items.is_empty() {
             let mut r =
                 renome_services::musicbrainz::covers(&Cli, &music.mb, &music.dg, items).await;

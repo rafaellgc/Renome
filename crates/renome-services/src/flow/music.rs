@@ -80,3 +80,68 @@ pub async fn choose(
     songs.extend(unnamed);
     mbs::choose(services.mb, services.dg, id, &songs).await
 }
+
+/// Where each album's cover is saved once its songs are renamed: the
+/// folder most of its renamed songs went to (a song left where it was, by
+/// a conflict, does not keep the cover behind); none renamed, its first
+/// song's folder. `albums`: each release with its songs; `moved`: where
+/// the renamed ones went. One cover per folder.
+pub fn cover_items(
+    albums: &[(String, Vec<PathBuf>)],
+    moved: &HashMap<PathBuf, PathBuf>,
+) -> Vec<mbs::CoverItem> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for (release, songs) in albums {
+        let mut count: Vec<(PathBuf, usize)> = Vec::new();
+        for to in songs.iter().filter_map(|p| moved.get(p)) {
+            let Some(dir) = to.parent() else { continue };
+            match count.iter_mut().find(|(d, _)| d == dir) {
+                Some((_, n)) => *n += 1,
+                None => count.push((dir.to_path_buf(), 1)),
+            }
+        }
+        // The first folder among the most counted.
+        let best = count.iter().map(|(_, n)| *n).max();
+        let dir = match count.into_iter().find(|(_, n)| Some(*n) == best) {
+            Some((d, _)) => d,
+            None => match songs.first().and_then(|p| p.parent()) {
+                Some(d) => d.to_path_buf(),
+                None => continue,
+            },
+        };
+        if seen.insert(dir.clone()) {
+            out.push(mbs::CoverItem {
+                dir,
+                release: release.clone(),
+            });
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cover_goes_where_the_album_went() {
+        let p = PathBuf::from;
+        let albums = vec![(
+            "r1".to_string(),
+            vec![p("/in/01.mp3"), p("/in/02.mp3"), p("/in/03.mp3")],
+        )];
+        // The first song stayed behind by a conflict.
+        let moved: HashMap<PathBuf, PathBuf> = [
+            (p("/in/02.mp3"), p("/lib/A/Album/02.mp3")),
+            (p("/in/03.mp3"), p("/lib/A/Album/03.mp3")),
+        ]
+        .into();
+        let c = cover_items(&albums, &moved);
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0].dir, p("/lib/A/Album"));
+        // Nothing renamed (the names were right): the songs' folder.
+        let c = cover_items(&albums, &HashMap::new());
+        assert_eq!(c[0].dir, p("/in"));
+    }
+}

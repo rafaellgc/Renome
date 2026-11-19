@@ -8,8 +8,9 @@ use std::sync::LazyLock;
 
 use chrono::format::{Item, StrftimeItems};
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
-use regex::{NoExpand, Regex, RegexBuilder};
+use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::books::{self, BookMatch};
 use crate::comics;
@@ -691,10 +692,18 @@ impl Places {
 }
 
 enum Compiled {
+    /// Replace text: what was typed, in any of its forms (see
+    /// [`text::find_typed`]).
+    Typed {
+        find: String,
+        replace: String,
+        case_sensitive: bool,
+        first_only: bool,
+        target: Target,
+    },
     Replace {
         re: Regex,
         replace: String,
-        literal: bool,
         first_only: bool,
         target: Target,
     },
@@ -944,20 +953,35 @@ impl Pipeline {
                 None => all,
             };
             match step {
-                Compiled::Replace {
-                    re,
+                Compiled::Typed {
+                    find,
                     replace,
-                    literal,
+                    case_sensitive,
                     first_only,
                     target,
                 } => {
-                    let limit = if *first_only { 1 } else { 0 };
+                    let limit = usize::from(*first_only);
                     on_target(&mut stem, &mut ext, *target, |s| {
-                        if *literal {
-                            re.replacen(s, limit, NoExpand(replace)).into_owned()
-                        } else {
-                            re.replacen(s, limit, replace.as_str()).into_owned()
+                        let mut out = String::with_capacity(s.len());
+                        let mut from = 0;
+                        for r in text::find_typed(s, find, *case_sensitive, limit) {
+                            out.push_str(&s[from..r.start]);
+                            out.push_str(replace);
+                            from = r.end;
                         }
+                        out.push_str(&s[from..]);
+                        out
+                    });
+                }
+                Compiled::Replace {
+                    re,
+                    replace,
+                    first_only,
+                    target,
+                } => {
+                    let limit = usize::from(*first_only);
+                    on_target(&mut stem, &mut ext, *target, |s| {
+                        re.replacen(s, limit, replace.as_str()).into_owned()
                     });
                 }
                 Compiled::List(names, pairs) => {
@@ -1079,7 +1103,7 @@ impl Pipeline {
 }
 
 fn compile(rule: &Rule) -> Result<Option<Compiled>, (&'static str, String)> {
-    let (pattern, replace, case_sensitive, first_only, target, literal) = match rule {
+    let (pattern, replace, case_sensitive, first_only, target) = match rule {
         Rule::Replace {
             find,
             replace,
@@ -1090,28 +1114,13 @@ fn compile(rule: &Rule) -> Result<Option<Compiled>, (&'static str, String)> {
             if find.is_empty() {
                 return Ok(None);
             }
-            // `:` typed also finds `：` and the other characters put in
-            // names in its place.
-            let pattern: String = find
-                .chars()
-                .map(|c| match text::with_stand_ins(c) {
-                    v if v.len() > 1 => format!(
-                        "[{}]",
-                        v.iter()
-                            .map(|x| regex::escape(&x.to_string()))
-                            .collect::<String>()
-                    ),
-                    _ => regex::escape(&c.to_string()),
-                })
-                .collect();
-            (
-                pattern,
-                replace,
-                *case_sensitive,
-                *first_only,
-                *target,
-                true,
-            )
+            return Ok(Some(Compiled::Typed {
+                find: find.clone(),
+                replace: replace.clone(),
+                case_sensitive: *case_sensitive,
+                first_only: *first_only,
+                target: *target,
+            }));
         }
         Rule::Regex {
             pattern,
@@ -1129,7 +1138,6 @@ fn compile(rule: &Rule) -> Result<Option<Compiled>, (&'static str, String)> {
                 *case_sensitive,
                 *first_only,
                 *target,
-                false,
             )
         }
         Rule::Insert {
@@ -1158,7 +1166,6 @@ fn compile(rule: &Rule) -> Result<Option<Compiled>, (&'static str, String)> {
     Ok(Some(Compiled::Replace {
         re,
         replace: replace.clone(),
-        literal,
         first_only,
         target,
     }))
@@ -1344,12 +1351,14 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
                 }
                 if !chars.is_empty() {
                     // `?` also takes `？`, put in names in its place.
-                    s.retain(|c| {
-                        !chars.contains(c) && !text::stand_in(c).is_some_and(|a| chars.contains(a))
-                    });
+                    let typed: Vec<&str> = chars.graphemes(true).collect();
+                    s = s
+                        .graphemes(true)
+                        .filter(|g| !typed.iter().any(|t| text::same_char(t, g, true)))
+                        .collect();
                 }
                 if *all_spaces {
-                    s.retain(|c| !c.is_whitespace());
+                    s.retain(|c| !c.is_whitespace() && !text::is_invisible(c));
                 } else if *extra_spaces {
                     s = text::collapse_spaces(&s);
                 }
@@ -2399,8 +2408,89 @@ mod tests {
             run(vec![replace], "Revolução Cultural꞉ Visão.mkv", 0),
             "Revolução Cultural - Visão.mkv"
         );
-        // Letters typed stay letters: a full-width `Ａ` is not an `A`.
-        assert_eq!(crate::text::with_stand_ins('A'), ['A']);
+    }
+
+    #[test]
+    fn typed_text_finds_every_form_of_it() {
+        let replace = |find: &str, by: &str, case_sensitive| Rule::Replace {
+            find: find.into(),
+            replace: by.into(),
+            case_sensitive,
+            first_only: false,
+            target: Target::Name,
+        };
+        // Accents written apart from the letter (as macOS keeps names).
+        assert_eq!(
+            run(
+                vec![replace("ção", "cao", true)],
+                "Revolu\u{63}\u{327}a\u{303}o.txt",
+                0
+            ),
+            "Revolucao.txt"
+        );
+        // Full-width letters and ligatures, in any case.
+        assert_eq!(
+            run(
+                vec![replace("file", "x", false)],
+                "ＦＩＬＥ \u{fb01}le.txt",
+                0
+            ),
+            "x x.txt"
+        );
+        // An invisible character in the middle does not hide the word.
+        assert_eq!(
+            run(
+                vec![replace("Marxismo Cultural", "MC", true)],
+                "Marxismo \u{200b}Cultural.txt",
+                0
+            ),
+            "MC.txt"
+        );
+        // Typographic quotes and dashes.
+        assert_eq!(
+            run(
+                vec![replace("don't - x", "ok", true)],
+                "Don\u{2019}t \u{2013} x.txt",
+                0
+            ),
+            "Don\u{2019}t \u{2013} x.txt"
+        );
+        assert_eq!(
+            run(
+                vec![replace("don't - x", "ok", false)],
+                "Don\u{2019}t \u{2013} x.txt",
+                0
+            ),
+            "ok.txt"
+        );
+        // A special form typed finds only itself.
+        assert_eq!(
+            run(
+                vec![replace("\u{2013}", "-", true)],
+                "a - b \u{2013} c.txt",
+                0
+            ),
+            "a - b - c.txt"
+        );
+        let remove = |chars: &str| Rule::Remove {
+            all_spaces: false,
+            extra_spaces: true,
+            accents: false,
+            digits: false,
+            chars: chars.into(),
+            leading_number: false,
+            max_length: 0,
+            target: Target::Name,
+        };
+        assert_eq!(
+            run(vec![remove("ç")], "Ac\u{327}a\u{303}o.txt", 0),
+            "Aa\u{303}o.txt"
+        );
+        // Invisible characters go with the extra spaces.
+        assert_eq!(
+            run(vec![remove("")], "\u{feff}Nome\u{200b} .txt", 0),
+            "Nome.txt"
+        );
     }
 
     #[test]

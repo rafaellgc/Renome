@@ -57,17 +57,18 @@ impl From<&PreviewItem> for Item {
 }
 
 impl Item {
-    /// The name the lookups read, with extension.
-    pub fn read_name(&self) -> &str {
-        self.lookup_name.as_deref().unwrap_or(&self.original)
+    /// The name the lookups read, with extension, as it reads (`？` as
+    /// `?`, no invisible characters: see [`renome_core::text::plain`]).
+    pub fn read_name(&self) -> String {
+        renome_core::text::plain(self.lookup_name.as_deref().unwrap_or(&self.original))
     }
     /// The same, without extension (a folder's whole name).
     pub fn read_stem(&self) -> String {
         let name = self.read_name();
         if self.is_dir {
-            return name.to_string();
+            return name;
         }
-        Path::new(name)
+        Path::new(&name)
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| name.to_string())

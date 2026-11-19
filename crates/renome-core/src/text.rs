@@ -63,20 +63,127 @@ pub fn stand_in(c: char) -> Option<char> {
     })
 }
 
-/// The characters that stand for `c` (see [`stand_in`]), `c` first: what
-/// a search for `c` typed by the person also finds.
-pub fn with_stand_ins(c: char) -> Vec<char> {
-    let mut out = vec![c];
-    if c.is_ascii_punctuation() {
-        out.extend(char::from_u32(c as u32 + 0xFEE0));
-        for x in [
-            '\u{2d0}', '\u{a789}', '\u{fe13}', '\u{2236}', '\u{2215}', '\u{2044}', '\u{29f8}',
-            '\u{29f5}', '\u{fe68}', '\u{2217}', '\u{fe61}', '\u{fe56}', '\u{2223}', '\u{1c0}',
-            '\u{fe64}', '\u{2039}', '\u{fe65}', '\u{203a}', '\u{2033}',
-        ] {
-            if stand_in(x) == Some(c) {
-                out.push(x);
+/// Characters that take no room in a name: zero-width spaces and joiners,
+/// the soft hyphen, the byte order mark, writing direction marks.
+pub fn is_invisible(c: char) -> bool {
+    matches!(c,
+        '\u{ad}' | '\u{34f}' | '\u{61c}' | '\u{115f}' | '\u{1160}' | '\u{17b4}' | '\u{17b5}'
+        | '\u{180b}'..='\u{180f}' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}'
+        | '\u{2060}'..='\u{206f}' | '\u{3164}' | '\u{fe00}'..='\u{fe0f}' | '\u{feff}'
+        | '\u{ffa0}' | '\u{1bca0}'..='\u{1bca3}' | '\u{e0000}'..='\u{e0fff}')
+}
+
+/// Text as it reads, whatever way each character was written: the
+/// compatibility forms as their plain character (`？` → `?`, `Ａ` → `A`,
+/// `ﬁ` → `fi`, `²` → `2`), the lookalikes put in names instead of
+/// punctuation as that punctuation (see [`stand_in`]), typographic quotes
+/// and dashes as `'`, `"` and `-`, accents joined to their letter, and no
+/// invisible characters (see [`is_invisible`]).
+pub fn plain(s: &str) -> String {
+    let mapped: String = s
+        .chars()
+        .filter(|c| !is_invisible(*c))
+        .map(|c| match c {
+            '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}' | '\u{2032}' | '\u{b4}'
+            | '\u{60}' => '\'',
+            '\u{201c}' | '\u{201d}' | '\u{201e}' | '\u{201f}' | '\u{ab}' | '\u{bb}' => '"',
+            '\u{2010}'..='\u{2015}' | '\u{2212}' | '\u{fe58}' | '\u{fe63}' => '-',
+            _ => stand_in(c).unwrap_or(c),
+        })
+        .collect();
+    mapped.nfkc().collect()
+}
+
+/// Whether `found`, a character of a name, is `typed`, a character the
+/// person typed: the same character in any of its forms (see [`plain`])
+/// when `typed` is the plain one (`?` finds `？`), only itself when
+/// `typed` is one of the other forms (`？` finds just `？`). Both are
+/// graphemes (a letter with its accents).
+pub fn same_char(typed: &str, found: &str, case_sensitive: bool) -> bool {
+    let fold = |s: String| if case_sensitive { s } else { s.to_lowercase() };
+    let (t, f) = (fold(nfc(typed)), fold(nfc(found)));
+    if t == f {
+        return true;
+    }
+    let pt = fold(plain(typed));
+    pt == t && !pt.is_empty() && fold(plain(found)) == pt
+}
+
+/// How many of the `typed` characters (plain ones) one character of a
+/// name stands for (`ﬁ` for `f` and `i`); 0: none.
+fn spelled_out(typed: &[&str], found: &str, case_sensitive: bool) -> usize {
+    let fold = |s: String| if case_sensitive { s } else { s.to_lowercase() };
+    let want = fold(plain(found));
+    let mut got = String::new();
+    for (n, t) in typed.iter().enumerate() {
+        let pt = fold(plain(t));
+        if pt != fold(nfc(t)) {
+            return 0;
+        }
+        got.push_str(&pt);
+        if got == want {
+            return if n > 0 { n + 1 } else { 0 };
+        }
+        if !want.starts_with(&got) {
+            return 0;
+        }
+    }
+    0
+}
+
+/// Where `typed` occurs in `s` (see [`same_char`]), as byte ranges of
+/// `s`, left to right, not overlapping, at most `limit` (0: all).
+/// Invisible characters inside the name do not break an occurrence.
+pub fn find_typed(
+    s: &str,
+    typed: &str,
+    case_sensitive: bool,
+    limit: usize,
+) -> Vec<std::ops::Range<usize>> {
+    let needle: Vec<&str> = typed
+        .graphemes(true)
+        .filter(|g| !g.chars().all(is_invisible))
+        .collect();
+    let hay: Vec<(usize, &str)> = s.grapheme_indices(true).collect();
+    let invisible = |g: &str| g.chars().all(is_invisible);
+    let mut out = Vec::new();
+    if needle.is_empty() {
+        return out;
+    }
+    let mut i = 0;
+    while i < hay.len() {
+        if invisible(hay[i].1) {
+            i += 1;
+            continue;
+        }
+        let (mut k, mut n, mut last) = (i, 0, None);
+        while n < needle.len() && k < hay.len() {
+            let g = hay[k].1;
+            if k > i && invisible(g) {
+                k += 1;
+                continue;
             }
+            let took = if same_char(needle[n], g, case_sensitive) {
+                1
+            } else {
+                spelled_out(&needle[n..], g, case_sensitive)
+            };
+            if took == 0 {
+                break;
+            }
+            last = Some(k);
+            n += took;
+            k += 1;
+        }
+        match last {
+            Some(l) if n == needle.len() => {
+                out.push(hay[i].0..hay[l].0 + hay[l].1.len());
+                if limit > 0 && out.len() == limit {
+                    break;
+                }
+                i = l + 1;
+            }
+            _ => i += 1,
         }
     }
     out
@@ -327,7 +434,19 @@ pub fn fix_mojibake(s: &str) -> String {
 }
 
 /// Trims spaces at both ends and collapses runs of spaces into one.
+/// Invisible characters on their own (see [`is_invisible`]; not a joiner
+/// inside an emoji) are taken out too.
 pub fn collapse_spaces(s: &str) -> String {
+    let seen: String;
+    let s = if s.chars().any(is_invisible) {
+        seen = s
+            .graphemes(true)
+            .filter(|g| !g.chars().all(is_invisible))
+            .collect();
+        seen.as_str()
+    } else {
+        s
+    };
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 

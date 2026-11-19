@@ -639,7 +639,7 @@ pub async fn choose(
     })
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct CoverItem {
     /// The album's folder after renaming.
     pub dir: PathBuf,

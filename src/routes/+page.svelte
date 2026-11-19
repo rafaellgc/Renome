@@ -765,7 +765,7 @@
       }
       const mrule = music.rule?.rule;
       if (recorded && mrule?.type === "music" && mrule.cover) {
-        const items = music.coverItems(r);
+        const items = await music.coverItems(r);
         if (items.length) {
           music.progress = { done: 0, total: items.length, kind: "save" };
           try {
@@ -2151,7 +2151,7 @@
   .empty { color: var(--muted); font-size: var(--fs-md); margin: 4px 2px; }
   .rules-menu { min-width: 260px; max-height: calc(100vh - 140px); overflow-y: auto; }
   .rules-menu button { flex: none; height: auto; min-height: 30px; padding: 4px 10px; }
-  .menu-note { margin: 0 10px 4px; font-size: var(--fs-xs); color: var(--warn-text); max-width: 260px; }
+  .menu-note { margin: 2px 12px 6px; padding-bottom: 8px; border-bottom: 1px solid var(--border); font-size: var(--fs-sm); color: var(--muted); max-width: 260px; }
   .item-text { display: flex; flex-direction: column; }
   .item-text small { font-size: var(--fs-xs); color: var(--muted); white-space: normal; }
   .send-label { overflow: hidden; text-overflow: ellipsis; }

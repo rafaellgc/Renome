@@ -175,15 +175,12 @@ export class Music {
   }
 
   /** Where each album with a release ends up after renaming, for its cover. */
-  coverItems(r: ApplyReport): { dir: string; release: string }[] {
-    const to = new Map(r.done.map((op) => [op.from, op.to]));
-    const parent = (p: string) => p.slice(0, Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\")));
-    const items = new Map<string, string>();
-    for (const a of this.albums) {
-      if (!a.choice || !a.files.some((p) => this.#ctx.items.some((i) => i.path === p) || to.has(p))) continue;
-      items.set(parent(to.get(a.files[0]) ?? a.files[0]), a.choice.id);
-    }
-    return [...items].map(([dir, release]) => ({ dir, release }));
+  coverItems(r: ApplyReport): Promise<{ dir: string; release: string }[]> {
+    const to = new Set(r.done.map((op) => op.from));
+    const albums: [string, string[]][] = this.albums
+      .filter((a) => a.choice && a.files.some((p) => this.#ctx.items.some((i) => i.path === p) || to.has(p)))
+      .map((a) => [a.choice!.id, a.files]);
+    return api.coverItems(albums, r.done.map((op) => [op.from, op.to]));
   }
 
   /** Opens the details window on the songs chosen in the list. */

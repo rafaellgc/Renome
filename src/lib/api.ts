@@ -231,6 +231,9 @@ export const api = {
     invoke<{ written: number; created: number; errors: [string, string][] }>("subtitle_tools", { historyId, items, tools, original, extractLangs }),
   writePlaylists: (historyId: string | null, dirs: string[]) =>
     invoke<{ created: string[]; errors: [string, string][]; kept: number }>("write_playlists", { historyId, dirs }),
+  /** Where each album's cover goes once renamed: the folder most of its renamed songs went to. */
+  coverItems: (albums: [string, string[]][], done: [string, string][]) =>
+    invoke<{ dir: string; release: string }[]>("cover_items", { albums, done }),
   writeCovers: (historyId: string | null, items: { dir: string; release: string }[]) =>
     invoke<{ created: string[]; errors: [string, string][] }>("write_covers", { historyId, items }),
   writeSidecars: (

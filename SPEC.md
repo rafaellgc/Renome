@@ -125,14 +125,14 @@ before it is read. The preview sends that name to the app
 
 | Rule | Parameters |
 |---|---|
-| Replace text | find, replace with, case-sensitive, first occurrence only; a punctuation sign typed also finds the full-width and lookalike forms put in names instead of signs Windows refuses (`:` finds `：`, `꞉`, `∶`; `?` finds `？`; `text::stand_in`) |
+| Replace text | find, replace with, case-sensitive, first occurrence only; what is typed is found in any form it is written in (`text::find_typed`, grapheme by grapheme): a plain character typed finds its compatibility forms (NFKC: `？`, `Ａ`, `ﬁ` for `fi`), the lookalikes put in names instead of signs Windows refuses (`꞉`, `∶`; `text::stand_in`), typographic quotes and dashes, and accents stored apart (NFD); invisible characters (`text::is_invisible`) inside the name do not break a match; a special form typed finds only itself. Regex matches exactly |
 | Regular expression | pattern, replacement (`$1`, `${name}`), case-sensitive, first occurrence only |
 | Rearrange parts | separator; new order using part numbers and text (`1 - 3 - 2`); the parts of a sample file are shown and can be clicked to build the order. Parts are trimmed; parts left out are removed; names with fewer parts are unchanged |
 | Names from a list | the names typed or pasted, one per line, given in the table's order to the files shown (blank lines skipped; more files than names: the rest unchanged); a button, while the box is empty, fills it with the names in the table (without extensions) to edit. The extension stays; a line ending with the file's own extension does not repeat it. Below the card: names for files; with `pairs` (as in Number) a video and its subtitles take one line, the fill-in button lists them once, and the count is of such groups |
 | Case | lowercase; UPPERCASE; Sentence case; Title Case; Title Case except connectives (of, the, de, da…; a part after ` - `, `:`, `(`, `.` starts capitalized). Title Case keeps Roman numerals II–XXXIX in capitals (lowercase `vi`/`xi` are words) and leaves words with inner capitals (`iPhone`, `McDonald`) as they are; words to keep as written (comma-separated, typed in any case, empty by default): whole words matching one keep the case they had in the name, in every mode |
 | Insert | text, current date, file modification date, date the photo was taken (EXIF; optionally the modification date when missing, otherwise the name is unchanged) or the name of the folder the file is in; configurable date format; at the start, at the end or at a position (from the start or the end) |
 | Number | template with `{n}` (number), `{name}` (current name) and `{folder}` (folder name); start, step, minimum digits (zero padding); optionally restart in each folder; "same name with another extension counts as one" (`pairs`, on in rules added from now, off in saved ones): files of a folder with one name before the extension count once (`Ctx::pair_index`/`pair_folder_index`), a subtitle without its language, an edit without its photo's extension and a media server's picture without its kind (`-thumb`, `-poster`, `-fanart`, `-landscape`, `-banner`, `-clearlogo`, `-logo`, `-clearart`, `-disc`, `-backdrop` on JPEG/PNG/WebP/TBN) (`rules::pair_split`); those keep that part after the new name (`Ep 1.pt-BR.srt`, `Ep 1.CR2.xmp`, `Ep 1-thumb.jpg`) |
-| Remove | spaces; repeated/leading/trailing spaces; accents (also letters written apart from their base: `ø` → `o`, `ß` → `ss`, `æ` → `ae`, `ł` → `l`, `đ`/`ð` → `d`, `þ` → `th`, `œ` → `oe`, `ı` → `i`, `ħ` → `h`); digits; custom characters (a punctuation sign also takes its full-width and lookalike forms: `?` removes `？`); the number at the start (up to three digits, an optional `1-` disc before it, and the separator after it: `01 - `, `01. `, `1-05 `; years, dates and a name that is only the number stay); a maximum length in characters (cut at the end, without spaces, dashes, dots or commas left there; 0: no limit) |
+| Remove | spaces; repeated/leading/trailing spaces; accents (also letters written apart from their base: `ø` → `o`, `ß` → `ss`, `æ` → `ae`, `ł` → `l`, `đ`/`ð` → `d`, `þ` → `th`, `œ` → `oe`, `ı` → `i`, `ħ` → `h`); digits; custom characters (each also takes its other forms, as in Replace: `?` removes `？`, `ç` removes a decomposed `ç`); repeated spaces also drop invisible characters standing alone; the number at the start (up to three digits, an optional `1-` disc before it, and the separator after it: `01 - `, `01. `, `1-05 `; years, dates and a name that is only the number stay); a maximum length in characters (cut at the end, without spaces, dashes, dots or commas left there; 0: no limit) |
 | Convert characters | fix broken accents: each run of non-ASCII characters is turned back into the Windows-1252/Latin-1 bytes it was read as and, when those are UTF-8, decoded (up to 3 times, for text broken more than once; `SÃ£o` → `São`, `â€™` → `’`); text that does not decode stays; other alphabets in Latin letters: Cyrillic (Russian, Ukrainian, Belarusian, Serbian, Macedonian letters; `щ` → `shch`, `ъ`/`ь` dropped) and Greek (accents dropped, `ου` → `ou`), a capital as `Sh`, or `SH` inside a word in capitals; a web-safe name: the name in plain Latin letters (as above and with the accents rule's letters), then only ASCII letters, digits and dots, every other run of characters becoming one `-` or `_` (the user's choice), none at the ends; split words run together: a space before a capital after a lowercase letter, or before the last capital of a run followed by a lowercase letter (`HTMLParser` → `HTML Parser`), digits stay with their word; applied before the web-safe name |
 | Remove range | from: position N or first occurrence of a text; to: end, position N or occurrence of a text; include the delimiters or not |
 | Character at position | position N; optionally only if the current character is X (case-insensitive unless asked); replace with Y or delete |
@@ -919,7 +919,10 @@ the language of the key (`{month name}` May, `{nome do mês}` maio,
   punctuation is made plain (U+2010/2011 hyphens, curly quotes, `…`);
   dashes stay.
 - "Save the album's cover": after renaming, `cover.jpg` (front, 1200 px)
-  in the folder each album with a release ends up in, unless it has a
+  in the folder each album with a release ends up in (the one most of
+  its renamed songs went to, so a song left behind by a conflict does not
+  keep the cover in the old folder; `flow::music::cover_items`, shared by
+  the window and renome-cli), unless it has a
   `cover.*`, `folder.*` or `front.*` file (an HTTP 5xx from the archive
   is retried once after 3 s); a release without artwork (a cassette
   edition, say) takes its release group's front; albums whose songs keep their
@@ -2641,7 +2644,9 @@ Status: built. `crates/renome-services` holds what the window and the
 command line share (catalogues, keys, cache, data folders, the rename
 lock, what runs after the renames; the window's work reports through a
 `Host`; and `flow`, each lookup rule's decisions: which files are looked
-up, what is picked by itself, the doubts and which files share an answer,
+up (by their names as they read, `text::plain`: `？` as `?`, no
+invisible characters), what is picked by itself, the doubts and which
+files share an answer,
 the questions asked mid-search through `Host::ask`, and each file's match
 as the rule names it — the window shows them in its review and pickers,
 the command line in the terminal, neither decides on its own),

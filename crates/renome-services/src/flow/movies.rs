@@ -42,7 +42,7 @@ fn lookup_stem(i: &Item) -> String {
     if i.is_dir {
         return stem;
     }
-    let ext = std::path::Path::new(i.read_name())
+    let ext = std::path::Path::new(&i.read_name())
         .extension()
         .map(|e| e.to_string_lossy().to_lowercase())
         .unwrap_or_default();

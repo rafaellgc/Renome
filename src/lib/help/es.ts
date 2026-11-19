@@ -96,7 +96,7 @@ export const es: Section[] = [
 <p>Cambia un texto por otro.</p>
 ${ex("foto_de_vacaciones.jpg", "foto de vacaciones.jpg")}
 <ul>
-  <li><b>Buscar</b> y <b>Reemplazar por</b>: deje "Reemplazar por" vacío para borrar el texto. Un signo escrito (<code>?</code>, <code>:</code>, <code>/</code>, <code>*</code>…) también encuentra las formas anchas y parecidas que algunos programas ponen en lugar de los signos que Windows no acepta (<code>？</code>, <code>：</code>, <code>／</code>…).</li>
+  <li><b>Buscar</b> y <b>Reemplazar por</b>: deje "Reemplazar por" vacío para borrar el texto. Lo que escribe se encuentra en cualquier forma en que esté escrito en el nombre: <code>?</code> encuentra <code>？</code> y las otras formas anchas y parecidas que algunos programas ponen en lugar de los signos que Windows no acepta; <code>ción</code> encuentra también las letras guardadas con el acento aparte (como las guarda macOS); <code>fi</code> encuentra la ligadura <code>ﬁ</code>; <code>'</code> y <code>-</code> encuentran <code>’</code> y <code>–</code>; los caracteres invisibles en medio no estorban. Una forma especial escrita (<code>？</code>, <code>–</code>) encuentra solo a sí misma. Expresión regular busca exactamente lo que está escrito.</li>
   <li><b>Distinguir mayúsculas</b>: sin marcar, "Foto" también encuentra "foto" y "FOTO".</li>
   <li><b>Solo la 1ª aparición en cada nombre</b>: cambia solo la primera vez que aparece el texto <i>en cada nombre</i>. En <code>a_b_c</code>, cambiar <code>_</code> por un espacio da <code>a b_c</code>. Si el texto aparece una sola vez, todos los nombres cambian igual.</li>
 </ul>`,
@@ -227,12 +227,12 @@ ${ex("playa.jpg", "Viaje 01.jpg")}
     sub: true,
     html: `
 <ul>
-  <li><b>Espacios repetidos y en los extremos</b>: <code>  foto   de  la playa </code> → <code>foto de la playa</code></li>
+  <li><b>Espacios repetidos y en los extremos</b>: <code>  foto   de  la playa </code> → <code>foto de la playa</code>. Quita también los caracteres invisibles (espacio de ancho cero, guion invisible, marcas de dirección del texto).</li>
   <li><b>Todos los espacios</b>: → <code>fotodelaplaya</code></li>
   <li><b>Acentos</b>: <code>Canción</code> → <code>Cancion</code>; también letras especiales, como <code>Ørsted</code> → <code>Orsted</code>, <code>Straße</code> → <code>Strasse</code>, <code>Łódź</code> → <code>Lodz</code></li>
   <li><b>Dígitos</b>: <code>foto123</code> → <code>foto</code></li>
   <li><b>Número al inicio</b>: el número de pista al comienzo del nombre y el separador que lo sigue: <code>01 - Canción</code>, <code>01. Canción</code> y <code>1-05 Canción</code> pasan a <code>Canción</code>. Números de hasta tres dígitos: los años (<code>1999 Viaje</code>) y las fechas (<code>2024-07-15 Playa</code>) quedan, y también un nombre que es solo el número.</li>
-  <li><b>Caracteres</b>: cada carácter escrito se quita donde aparezca. <code>_#</code> quita todos los <code>_</code> y <code>#</code>. Un signo escrito también quita sus formas anchas y parecidas (<code>?</code> quita <code>？</code>, <code>:</code> quita <code>：</code>), que algunos programas ponen en lugar de los signos que Windows no acepta.</li>
+  <li><b>Caracteres</b>: cada carácter escrito se quita donde aparezca. <code>_#</code> quita todos los <code>_</code> y <code>#</code>. Cada uno quita también sus otras formas, como en Reemplazar texto (<code>?</code> quita <code>？</code>, <code>ç</code> quita una ç guardada con el acento aparte).</li>
   <li><b>Limitar a</b> N caracteres: corta el nombre (sin la extensión) después de N caracteres, quitando los espacios y guiones que sobren al final. Útil para radios de coche, memorias USB y programas antiguos que no aceptan nombres largos. Con 0 no hay límite. Cuidado: dos nombres largos que solo cambian al final pueden quedar iguales, y el conflicto aparece en la lista.</li>
 </ul>`,
   },

@@ -1354,6 +1354,17 @@ async fn mb_choose(
     .await
 }
 
+/// Where each album's cover goes once renamed (see
+/// [`flow::music::cover_items`]): `albums`, each release with its songs;
+/// `done`, each renamed file's old and new path.
+#[tauri::command]
+fn cover_items(
+    albums: Vec<(String, Vec<PathBuf>)>,
+    done: Vec<(PathBuf, PathBuf)>,
+) -> Vec<musicbrainz::CoverItem> {
+    renome_services::flow::music::cover_items(&albums, &done.into_iter().collect())
+}
+
 /// Saves the albums' covers and records them like `write_sidecars`.
 #[tauri::command]
 async fn write_covers(
@@ -2212,6 +2223,7 @@ pub fn run() {
             mb_search,
             mb_choose,
             write_covers,
+            cover_items,
             write_playlists,
             write_tags,
             write_audiobook_tags,
