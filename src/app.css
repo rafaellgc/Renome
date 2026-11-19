@@ -181,8 +181,9 @@ input[type="search"]::-webkit-search-cancel-button { cursor: pointer; }
 .menu button { display: flex; align-items: center; gap: 8px; border: none; background: none; text-align: left; border-radius: var(--r-sm); }
 .menu button .icon-svg { color: var(--muted); }
 .menu .tick { width: 14px; display: inline-flex; color: var(--accent); }
-.menu-group { margin: 6px 10px 2px; font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
-.menu-group:first-child { margin-top: 4px; }
+/* A section of a menu: a band that stands apart from the items. */
+.menu-group { margin: 6px 0 4px; padding: 6px 12px; border-top: 1px solid var(--border); background: var(--accent-soft); font-size: var(--fs-sm); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
+.menu-group:first-child { margin-top: 0; border-top: 0; }
 .menu.right { left: auto; right: 0; }
 .menu button:hover, .menu button:focus-visible { background: var(--hover); outline: none; }
 .menu button:focus-visible { box-shadow: inset 2px 0 var(--accent); }
