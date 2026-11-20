@@ -29,6 +29,24 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo test -p renome-core -p renome-services -p renome-cli
 
+  # Lints that hold the code to its standard: any clippy warning or type
+  # error in the window's code fails the run.
+  lint:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy -p renome-archive -p renome-core -p renome-services -p renome-cli --all-targets -- -D warnings
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+
   # The same tests on Windows and macOS (renaming works differently there);
   # they do not hold the builds back.
   test-other:
@@ -44,7 +62,7 @@ jobs:
       - run: cargo test -p renome-core -p renome-services -p renome-cli
 
   build:
-    needs: test
+    needs: [test, lint]
     strategy:
       fail-fast: false
       matrix:
