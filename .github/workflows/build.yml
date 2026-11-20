@@ -47,6 +47,13 @@ jobs:
       - run: npm ci
       - run: npm run check
 
+  # Licences, sources and known advisories of every dependency.
+  deny:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
   # The same tests on Windows and macOS (renaming works differently there);
   # they do not hold the builds back.
   test-other:
