@@ -1266,6 +1266,51 @@ fn format_date(ts: NaiveDateTime, fmt: &str) -> String {
     ts.format(fmt).to_string().replace('/', "-")
 }
 
+/// Puts the rule's text, date or folder name into the name, at its place.
+fn insert(rule: &Rule, stem: &mut String, ctx: &Ctx) {
+    let Rule::Insert {
+        source,
+        text: literal,
+        date_format,
+        fallback,
+        at,
+        position,
+    } = rule
+    else {
+        return;
+    };
+    let modified = || {
+        let t = Local.timestamp_opt(ctx.file.modified?, 0).single()?;
+        Some(t.naive_local())
+    };
+    let date = match source {
+        InsertSource::Now => Some(ctx.now.naive_local()),
+        InsertSource::Modified => modified(),
+        InsertSource::Taken => ctx
+            .file
+            .taken()
+            .or_else(|| if *fallback { modified() } else { None }),
+        InsertSource::Text | InsertSource::Folder => None,
+    };
+    let piece = match source {
+        InsertSource::Text => literal.clone(),
+        InsertSource::Folder => folder_name(ctx.file),
+        _ => match date {
+            Some(t) => format_date(t, date_format),
+            // No date for this file: leave the name as it is.
+            None => return,
+        },
+    };
+    let g = text::graphemes(stem);
+    let idx = match at {
+        Anchor::Start => 0,
+        Anchor::End => g.len(),
+        Anchor::Index => position.saturating_sub(1).min(g.len()),
+        Anchor::FromEnd => g.len().saturating_sub(*position),
+    };
+    *stem = format!("{}{}{}", g[..idx].concat(), piece, g[idx..].concat());
+}
+
 fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
     match rule {
         Rule::Case { mode, target, keep } => on_target(stem, ext, *target, |s| {
@@ -1279,45 +1324,7 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             text::keep_words(s, &changed, keep)
         }),
 
-        Rule::Insert {
-            source,
-            text: literal,
-            date_format,
-            fallback,
-            at,
-            position,
-        } => {
-            let modified = || {
-                let t = Local.timestamp_opt(ctx.file.modified?, 0).single()?;
-                Some(t.naive_local())
-            };
-            let date = match source {
-                InsertSource::Now => Some(ctx.now.naive_local()),
-                InsertSource::Modified => modified(),
-                InsertSource::Taken => ctx
-                    .file
-                    .taken()
-                    .or_else(|| if *fallback { modified() } else { None }),
-                InsertSource::Text | InsertSource::Folder => None,
-            };
-            let piece = match source {
-                InsertSource::Text => literal.clone(),
-                InsertSource::Folder => folder_name(ctx.file),
-                _ => match date {
-                    Some(t) => format_date(t, date_format),
-                    // No date for this file: leave the name as it is.
-                    None => return,
-                },
-            };
-            let g = text::graphemes(stem);
-            let idx = match at {
-                Anchor::Start => 0,
-                Anchor::End => g.len(),
-                Anchor::Index => position.saturating_sub(1).min(g.len()),
-                Anchor::FromEnd => g.len().saturating_sub(*position),
-            };
-            *stem = format!("{}{}{}", g[..idx].concat(), piece, g[idx..].concat());
-        }
+        Rule::Insert { .. } => insert(rule, stem, ctx),
 
         Rule::Number {
             template,
