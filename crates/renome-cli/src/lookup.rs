@@ -187,22 +187,7 @@ pub async fn movies(
     let mut sets = tmdb::collections(&client, ids, ask.missing).await;
     let extras: HashMap<u64, renome_core::fields::Extra> =
         std::mem::take(&mut sets.extras).into_iter().collect();
-    let chosen = chosen
-        .into_iter()
-        .map(|(p, c)| {
-            let extra = extras.get(&c.id).cloned().unwrap_or_default();
-            (
-                p,
-                MovieMatch {
-                    id: c.id,
-                    title: c.title,
-                    original_title: c.original_title,
-                    year: c.year,
-                    extra,
-                },
-            )
-        })
-        .collect();
+    let chosen = flow::movies::named(chosen, &extras);
     Ok(Movies {
         key,
         lang: tmdb_lang,
@@ -1092,6 +1077,11 @@ pub async fn comics(
         mangaupdates::Client::default(),
     );
     gcd_c.set_account(&secret("gcdEmail"), &secret("gcdPassword"));
+    // Without an account the GCD takes few searches (the window says so
+    // once a session).
+    if renome_services::options::gcd_few(&source, &secret("gcdEmail"), &secret("gcdPassword")) {
+        out::note(&out::yellow(&t("gcdNoAccount", &[])));
+    }
     let sources = shared::Sources {
         cv: &cv,
         mt: &mt,
@@ -1492,6 +1482,26 @@ pub async fn subtitles(
     for e in &searched.errors {
         out::error(&crate::text::error_text(e));
     }
+    // More picked on OpenSubtitles than today's quota: the rest come from
+    // SubDL, if any (the window's review says the same).
+    let standing: Vec<flow::subtitles::Standing> = searched
+        .found
+        .iter()
+        .map(|f| flow::subtitles::Standing {
+            have: f.found.have.clone(),
+            inside: f.found.inside.clone(),
+            candidates: f.found.candidates.clone(),
+            pick: f.pick.clone(),
+        })
+        .collect();
+    let tally = flow::subtitles::tally(&standing, &searched.langs, searched.remaining);
+    if let (true, Some(n)) = (tally.over_quota, searched.remaining) {
+        out::note(&out::yellow(&format!(
+            "{} · {}",
+            t("subsRemaining", &[("n", &n)]),
+            t("subsOverQuota", &[])
+        )));
+    }
     chosen.sub_langs = searched.langs;
     for f in searched.found {
         chosen.subtitles.insert(
@@ -1508,20 +1518,12 @@ pub async fn subtitles(
 /// The lines asked about before renaming, for what is written besides
 /// the renames (as the window's question says them).
 pub fn planned(c: &flow::after::Counts) -> Vec<String> {
-    let line = |key: &str, n: usize| (n > 0).then(|| t(key, &[("n", &n)]));
-    [
-        line("confirmMeta", c.sidecars),
-        line("confirmBookMeta", c.book_meta),
-        line("confirmCovers", c.covers),
-        line("confirmPlaylists", c.playlists),
-        line("confirmTags", c.tags),
-        line("confirmInside", c.inside + c.video_tags),
-        line("confirmSubTools", c.sub_tools),
-        line("confirmSubs", c.subtitles),
-    ]
-    .into_iter()
-    .flatten()
-    .collect()
+    said(&c.lines)
+}
+
+/// Lines said of the work (see `flow::after::{Counts, Report}::lines`).
+fn said(lines: &[flow::after::Line]) -> Vec<String> {
+    lines.iter().map(|l| t(l.key, &[("n", &l.n)])).collect()
 }
 
 /// Everything written once the files are renamed, by the shared flow (as
@@ -1598,21 +1600,5 @@ pub async fn after(
             }
         }
     }
-    let line = |key: &str, n: usize| (n > 0).then(|| t(key, &[("n", &n)]));
-    [
-        line("adsTrashedN", r.ads_trashed),
-        line("adsFailedN", r.ads_failed),
-        line("sidecarsN", r.sidecars),
-        line("subsSavedN", r.subtitles),
-        line("subToolsN", r.sub_fixed),
-        line("subToolsM", r.sub_extracted),
-        line("playlistsKeptN", r.kept_lists),
-        line("tagsN", r.tags),
-        line("audioTagsN", r.audio_tags),
-        line("insideN", r.inside),
-        line("insideDrawnN", r.drawn),
-    ]
-    .into_iter()
-    .flatten()
-    .collect()
+    said(&r.lines)
 }

@@ -23,7 +23,7 @@ pub const EXTRAS: &str = "extras";
 
 /// Lower case, without accents, every run of separators one space.
 fn plain(s: &str) -> String {
-    let s = crate::text::strip_accents(s).to_lowercase();
+    let s = crate::text::fold(s);
     s.split(|c: char| !c.is_alphanumeric())
         .filter(|w| !w.is_empty())
         .collect::<Vec<_>>()

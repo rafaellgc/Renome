@@ -2,6 +2,7 @@
   import Icon from "./Icon.svelte";
   import { tick } from "svelte";
   import { api, type WorkGroup } from "./api";
+  import { baseName } from "./page/common";
   import { diff, type Seg } from "./diff";
   import { LOCALES, t, type Key } from "./i18n";
   import { interleave, type Ghost, type Row } from "./missing";
@@ -207,15 +208,6 @@
     if (e.key === "Escape") editing = null;
   }
 
-  function size(n: number) {
-    if (n < 1024) return `${n} B`;
-    const units = ["KB", "MB", "GB", "TB"];
-    let v = n / 1024;
-    let u = 0;
-    while (v >= 1024 && u < units.length - 1) { v /= 1024; u++; }
-    return `${v.toFixed(v < 10 ? 1 : 0)} ${units[u]}`;
-  }
-
   const fmt = $derived(new Intl.DateTimeFormat(LOCALES[settings.lang], { dateStyle: "short", timeStyle: "short" }));
   const date = (s: number | null) => (s === null ? "" : fmt.format(new Date(s * 1000)));
   const dayFmt = $derived(new Intl.DateTimeFormat(LOCALES[settings.lang], { dateStyle: "short", timeZone: "UTC" }));
@@ -224,17 +216,17 @@
     const d = new Date(`${s}T00:00:00Z`);
     return Number.isNaN(d.getTime()) ? s : dayFmt.format(d);
   };
-  const home = /^\/(var\/)?home\/[^/]+/;
   // The column is right-to-left so long paths are cut at the start; the
-  // left-to-right marks keep "~" and the slashes where they belong.
-  const dir = (d: string) => `\u200e${d.replace(home, "~")}\u200e`;
+  // left-to-right marks keep "~" and the slashes where they belong (the
+  // paths as Rust shows them: `dirShown`, `destShown`).
+  const dir = (d: string) => `\u200e${d}\u200e`;
 
   const byPath = $derived(new Map(items.map((i) => [i.path, i])));
   /** Copies of the selected files, highlighted so you can find them. */
   const twins = $derived(
     new Set([...selected].flatMap((p) => [...(copies[p]?.others ?? []), ...(alike[p]?.others ?? []), ...(similar[p]?.others ?? [])]).filter((p) => !selected.has(p))),
   );
-  const base = (p: string) => p.split(/[\\/]/).pop() ?? p;
+  const base = baseName;
 
   function note(item: PreviewItem) {
     if (item.problem) return t(`problem.${item.problem}`);
@@ -492,7 +484,7 @@
             {:else if item.status === "ok"}<span class="dot good">●</span>{/if}
           </span>
           <span class="c-orig" title={item.path}>
-            {#if copies[item.path]}{@const c = copies[item.path]}{@const same = t("identicalTo", { names: c.others.map(base).join(", ") })}<!-- svelte-ignore a11y_no_static_element_interactions --><span class="copy g{c.group % 6}" title={`${same}\n${t("compareDbl")}`} role="img" aria-label={same} ondblclick={() => oncompare?.("identical", item.path)}><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M5 1.5h7A1.5 1.5 0 0 1 13.5 3v8.5H12V3H5zM2.5 4.5A1.5 1.5 0 0 1 4 3h6a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 10 15H4a1.5 1.5 0 0 1-1.5-1.5zM4 4.5v9h6v-9z" /></svg>{c.group + 1}</span>{/if}{#if alike[item.path]}{@const s = alike[item.path]}{#if works[item.path]}{@const w = works[item.path]}{@const same = t(`sameWork_${w.kind}`, { names: s.others.map(base).join(", ") })}{@const lines = w.items.map((i) => `${i.path === w.best ? "★ " : "• "}${base(i.path)} — ${[i.picture, i.codec, size(i.size)].filter(Boolean).join(" · ")}`)}{@const tip = [same, ...lines, w.best ? t(`workBest_${w.kind}`, { name: base(w.best) }) : t("workNoBest")].join("\n")}<span class="copy song g{s.group % 6}" title={tip} role="img" aria-label={same}>{w.best === item.path ? "★" : "≡"}{s.group + 1}</span>{:else}{@const same = t("sameSongAs", { names: s.others.map(base).join(", ") })}<span class="copy song g{s.group % 6}" title={same} role="img" aria-label={same}>♪{s.group + 1}</span>{/if}{/if}{#if similar[item.path]}{@const s = similar[item.path]}{@const same = t("looksLike", { names: s.others.map(base).join(", ") })}<!-- svelte-ignore a11y_no_static_element_interactions --><span class="copy song g{s.group % 6}" title={`${same}\n${t("compareDbl")}`} role="img" aria-label={same} ondblclick={() => oncompare?.("similar", item.path)}><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M2.5 2h11A1.5 1.5 0 0 1 15 3.5v9a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 12.5v-9A1.5 1.5 0 0 1 2.5 2zm0 1.5v7.3l3.2-3.2 2.6 2.6 1.9-1.9 3.3 3.3V3.5zM10.8 4.6a1.4 1.4 0 1 1 0 2.8 1.4 1.4 0 0 1 0-2.8z" /></svg>{s.group + 1}</span>{/if}{#if outside[item.path]}<span class="outside" title={outside[item.path]}>{t("outsideRow")}</span>{/if}{#if item.drawn}<span class="outside" title={t("drawnRowTip", { n: item.drawn })}>{t("drawnRow", { n: item.drawn })}</span>{/if}{#if item.drm}<span class="outside" title={t("drmRowTip")}>{t("drmRow")}</span>{/if}{#if item.extra}<span class="outside" title={t("extraRowTip", { folder: item.extra })}>{t("extraRow")}</span>{/if}{#if item.releaseJunk}<span class="outside" title={t(item.toTrash ? "junkRowTrashTip" : "junkRowTip")}>{t(item.toTrash ? "junkRowTrash" : "junkRow")}</span>{/if}{#if item.subFix}{@const f = item.subFix}{#if f.noFps}<span class="outside" title={t("subNoFpsTip")}>{t("subNoFpsRow")}</span>{:else}<span class="outside" title={[f.convert ? t("subTipConvert") : "", f.encoding ? t("subTipEncoding", { enc: f.encoding }) : "", f.ads ? t("subTipAds", { n: f.ads }) : "", f.hearing ? t("subTipHearing", { n: f.hearing }) : "", f.retime ? t("subTipRetime") : ""].filter(Boolean).join("\n")}>{[f.convert ? t("subRowSrt") : "", f.encoding ? "UTF-8" : "", f.ads ? t("subRowAds", { n: f.ads }) : "", f.hearing ? t("subRowHearing", { n: f.hearing }) : "", f.retime ? t("subRowRetime") : ""].filter(Boolean).join(" · ")}</span>{/if}{/if}{#if item.subExtract}<span class="outside" title={t("subExtractTip", { n: item.subExtract })}>{t("subExtractRow", { n: item.subExtract })}</span>{/if}{#if item.subPictures}<span class="outside" title={t("subPicturesTip", { n: item.subPictures })}>{t("subPicturesRow", { n: item.subPictures })}</span>{/if}{#if item.isDir}<svg class="folder" viewBox="0 0 16 16" aria-label={t("isFolder")}><path fill="currentColor" d="M1.5 3.5A1 1 0 0 1 2.5 2.5h3.6l1.5 1.5h5.9a1 1 0 0 1 1 1v7.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" /></svg>{/if}{#if d}{@render segs(d[0], "del")}{:else}{item.original}{/if}
+            {#if copies[item.path]}{@const c = copies[item.path]}{@const same = t("identicalTo", { names: c.others.map(base).join(", ") })}<!-- svelte-ignore a11y_no_static_element_interactions --><span class="copy g{c.group % 6}" title={`${same}\n${t("compareDbl")}`} role="img" aria-label={same} ondblclick={() => oncompare?.("identical", item.path)}><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M5 1.5h7A1.5 1.5 0 0 1 13.5 3v8.5H12V3H5zM2.5 4.5A1.5 1.5 0 0 1 4 3h6a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 10 15H4a1.5 1.5 0 0 1-1.5-1.5zM4 4.5v9h6v-9z" /></svg>{c.group + 1}</span>{/if}{#if alike[item.path]}{@const s = alike[item.path]}{#if works[item.path]}{@const w = works[item.path]}{@const same = t(`sameWork_${w.kind}`, { names: s.others.map(base).join(", ") })}{@const lines = w.items.map((i) => `${i.path === w.best ? "★ " : "• "}${base(i.path)} — ${[i.picture, i.codec, i.sizeText].filter(Boolean).join(" · ")}`)}{@const tip = [same, ...lines, w.best ? t(`workBest_${w.kind}`, { name: base(w.best) }) : t("workNoBest")].join("\n")}<span class="copy song g{s.group % 6}" title={tip} role="img" aria-label={same}>{w.best === item.path ? "★" : "≡"}{s.group + 1}</span>{:else}{@const same = t("sameSongAs", { names: s.others.map(base).join(", ") })}<span class="copy song g{s.group % 6}" title={same} role="img" aria-label={same}>♪{s.group + 1}</span>{/if}{/if}{#if similar[item.path]}{@const s = similar[item.path]}{@const same = t("looksLike", { names: s.others.map(base).join(", ") })}<!-- svelte-ignore a11y_no_static_element_interactions --><span class="copy song g{s.group % 6}" title={`${same}\n${t("compareDbl")}`} role="img" aria-label={same} ondblclick={() => oncompare?.("similar", item.path)}><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M2.5 2h11A1.5 1.5 0 0 1 15 3.5v9a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 12.5v-9A1.5 1.5 0 0 1 2.5 2zm0 1.5v7.3l3.2-3.2 2.6 2.6 1.9-1.9 3.3 3.3V3.5zM10.8 4.6a1.4 1.4 0 1 1 0 2.8 1.4 1.4 0 0 1 0-2.8z" /></svg>{s.group + 1}</span>{/if}{#if outside[item.path]}<span class="outside" title={outside[item.path]}>{t("outsideRow")}</span>{/if}{#if item.drawn}<span class="outside" title={t("drawnRowTip", { n: item.drawn })}>{t("drawnRow", { n: item.drawn })}</span>{/if}{#if item.drm}<span class="outside" title={t("drmRowTip")}>{t("drmRow")}</span>{/if}{#if item.extra}<span class="outside" title={t("extraRowTip", { folder: item.extra })}>{t("extraRow")}</span>{/if}{#if item.releaseJunk}<span class="outside" title={t(item.toTrash ? "junkRowTrashTip" : "junkRowTip")}>{t(item.toTrash ? "junkRowTrash" : "junkRow")}</span>{/if}{#if item.subFix}{@const f = item.subFix}{#if f.noFps}<span class="outside" title={t("subNoFpsTip")}>{t("subNoFpsRow")}</span>{:else}<span class="outside" title={[f.convert ? t("subTipConvert") : "", f.encoding ? t("subTipEncoding", { enc: f.encoding }) : "", f.ads ? t("subTipAds", { n: f.ads }) : "", f.hearing ? t("subTipHearing", { n: f.hearing }) : "", f.retime ? t("subTipRetime") : ""].filter(Boolean).join("\n")}>{[f.convert ? t("subRowSrt") : "", f.encoding ? "UTF-8" : "", f.ads ? t("subRowAds", { n: f.ads }) : "", f.hearing ? t("subRowHearing", { n: f.hearing }) : "", f.retime ? t("subRowRetime") : ""].filter(Boolean).join(" · ")}</span>{/if}{/if}{#if item.subExtract}<span class="outside" title={t("subExtractTip", { n: item.subExtract })}>{t("subExtractRow", { n: item.subExtract })}</span>{/if}{#if item.subPictures}<span class="outside" title={t("subPicturesTip", { n: item.subPictures })}>{t("subPicturesRow", { n: item.subPictures })}</span>{/if}{#if item.isDir}<svg class="folder" viewBox="0 0 16 16" aria-label={t("isFolder")}><path fill="currentColor" d="M1.5 3.5A1 1 0 0 1 2.5 2.5h3.6l1.5 1.5h5.9a1 1 0 0 1 1 1v7.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" /></svg>{/if}{#if d}{@render segs(d[0], "del")}{:else}{item.original}{/if}
           </span>
           <span class="c-new" role="gridcell" tabindex="-1" ondblclick={() => startEdit(item)} title={note(item) || t("editHint")}>
             {#if editing === item.path}
@@ -523,15 +515,15 @@
           </span>
           <!-- Moving: where to, without hovering over the folder icon. -->
           {#if item.folder}
-            <span class="c-dir into-dir" title={item.dest ?? item.folder}><span class="arrow">→</span><span class="path">{item.dest ? dir(item.dest) : item.folder}</span></span>
+            <span class="c-dir into-dir" title={item.dest ?? item.folder}><span class="arrow">→</span><span class="path">{item.destShown ? dir(item.destShown) : item.folder}</span></span>
           {:else}
-            <span class="c-dir" title={item.dir}>{dir(item.dir)}</span>
+            <span class="c-dir" title={item.dir}>{dir(item.dirShown)}</span>
           {/if}
           {#each extra as c (c)}
             {@const v = details[item.path]?.[c] ?? ""}
             <span class="c-x" class:num={NARROW.includes(c)} title={v}>{v}</span>
           {/each}
-          <span class="c-size">{item.isDir ? "" : size(item.size)}</span>
+          <span class="c-size">{item.isDir ? "" : item.sizeText}</span>
           <span class="c-date">{date(item.modified)}</span>
         </div>
         {/if}

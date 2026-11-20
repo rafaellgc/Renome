@@ -7,7 +7,7 @@ import { notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
 import { tmdbLang } from "$lib/settings.svelte";
 import type { BookCandidate, BookMatch, BookPart, BookState, EditField } from "$lib/types";
-import { counts, editFields, moved, ruleOf, takers, without, type PageCtx } from "./common";
+import { counts, editFields, moved, reviewQueue, ruleOf, takers, without, type PageCtx } from "./common";
 
 export class Books {
   #ctx: PageCtx;
@@ -88,13 +88,7 @@ export class Books {
 
   /** Opens the review on the books still without a choice (or on one). */
   openReview(start?: string) {
-    const paths = this.#ctx.items.map((i) => i.path);
-    const pending = [
-      ...paths.filter((p) => this.state[p]?.status === "choose"),
-      ...paths.filter((p) => this.state[p]?.status === "none"),
-    ];
-    const queue = start ? [start, ...pending.filter((p) => p !== start)] : pending;
-    this.review = queue.length ? queue : null;
+    this.review = reviewQueue(this.#ctx.items.map((i) => i.path), (p) => this.state[p]?.status, start);
   }
 
   /** The user's pick for a book; undecided files of its group (the same

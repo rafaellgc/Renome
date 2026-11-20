@@ -487,10 +487,10 @@ pub fn library_root(base: &Path, levels: usize) -> PathBuf {
 /// A folder named by a date: digits, separators and month names alone
 /// (`2019`, `2019-05`, `05 - maio`, `2019-05-12`).
 fn dated(name: &str) -> bool {
-    let lower = text::strip_accents(&name.to_lowercase());
+    let lower = text::fold(name);
     let mut rest = lower.clone();
     for month in crate::fields::MONTHS.iter().flatten() {
-        rest = rest.replace(&text::strip_accents(&month.to_lowercase()), "");
+        rest = rest.replace(&text::fold(month), "");
     }
     lower.chars().any(|c| c.is_ascii_digit())
         && rest

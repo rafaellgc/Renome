@@ -184,17 +184,13 @@
     }
   }
 
-  let cacheBytes = $state<number | null>(null);
-  api.cacheSize().then((n) => (cacheBytes = n)).catch(() => {});
+  /** The kept answers' size: bytes, and as shown (Rust's). */
+  let cache = $state<[number, string] | null>(null);
+  api.cacheSize().then((n) => (cache = n)).catch(() => {});
 
   async function clearCache() {
     await api.clearCache().catch(() => 0);
-    cacheBytes = await api.cacheSize().catch(() => 0);
-  }
-
-  function size(bytes: number): string {
-    if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
-    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+    cache = await api.cacheSize().catch((): [number, string] => [0, ""]);
   }
 
   const shortcuts: [string, Key][] = $derived([
@@ -297,8 +293,8 @@
       </div>
       <small>{t("cacheHint")}</small>
       <div class="cache">
-        <small>{cacheBytes === null ? "…" : t("cacheSize").replace("{size}", size(cacheBytes))}</small>
-        <button onclick={clearCache} disabled={!cacheBytes}>{t("cacheClear")}</button>
+        <small>{cache === null ? "…" : t("cacheSize", { size: cache[1] })}</small>
+        <button onclick={clearCache} disabled={!cache?.[0]}>{t("cacheClear")}</button>
       </div>
     </section>
       {/if}

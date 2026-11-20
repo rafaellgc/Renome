@@ -122,7 +122,7 @@ pub fn year_of(date: &Option<String>) -> Option<u16> {
 }
 
 fn words(s: &str) -> Vec<String> {
-    text::strip_accents(&s.to_lowercase())
+    text::fold(s)
         .replace('&', " and ")
         .split(|c: char| !c.is_alphanumeric())
         .filter(|w| !w.is_empty())

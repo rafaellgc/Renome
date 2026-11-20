@@ -3,8 +3,10 @@
 
 use super::Item;
 use crate::{Host, tmdb};
-use renome_core::tmdb::{Candidate, Guess};
+use renome_core::fields::Extra;
+use renome_core::tmdb::{Candidate, Guess, MovieMatch};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// What was found for a file.
@@ -20,6 +22,31 @@ pub struct Found {
     /// Doubts of one group share one answer (a movie and its subtitles).
     pub group: String,
     pub status: super::Status,
+}
+
+/// Each chosen movie as the rule names it: its choice, with its template
+/// fields (genre, director…) when they came (the window and the command
+/// line build them here).
+pub fn named(
+    chosen: impl IntoIterator<Item = (PathBuf, Candidate)>,
+    extras: &HashMap<u64, Extra>,
+) -> HashMap<PathBuf, MovieMatch> {
+    chosen
+        .into_iter()
+        .map(|(p, c)| {
+            let extra = extras.get(&c.id).cloned().unwrap_or_default();
+            (
+                p,
+                MovieMatch {
+                    id: c.id,
+                    title: c.title,
+                    original_title: c.original_title,
+                    year: c.year,
+                    extra,
+                },
+            )
+        })
+        .collect()
 }
 
 /// The files the movie rule looks up: videos, subtitles and folders, not

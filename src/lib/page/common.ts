@@ -32,6 +32,17 @@ export function counts(state: Record<string, { status: MovieStatus }>, items: Pr
   return { found, choose, none };
 }
 
+/** A path's last part: the file's or folder's name. */
+export const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
+
+/** The review's queue: those to choose first, then those without a
+ *  result, in the list's order; `start` (a row clicked) at its head. */
+export function reviewQueue<K>(keys: K[], status: (k: K) => MovieStatus | undefined, start?: K): K[] | null {
+  const pending = [...keys.filter((k) => status(k) === "choose"), ...keys.filter((k) => status(k) === "none")];
+  const queue = start === undefined ? pending : [start, ...pending.filter((k) => k !== start)];
+  return queue.length ? queue : null;
+}
+
 /** The first enabled rule of a type. */
 export const ruleOf = (steps: Step[], type: string) => steps.find((s) => s.enabled && s.rule.type === type);
 

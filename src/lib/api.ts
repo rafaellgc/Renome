@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Ghost } from "./missing";
 import type { Blocked, RuleTable } from "./rules";
-import type { RuleType, AfterCounts, AfterReport, Rule, AlbumLookup, BookTarget, ComicFormat, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, MbCandidate, SongMatch, HistoryEntry, ListedTrack, EpisodeMatch, EpKey, BookFound, BookPart, MovieFound, PreviewItem, SeriesOutcome, AudioBook, ServerCall, ServerLibrary, UpdateFound, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
+import type { RuleType, AfterCounts, AfterReport, Rule, AlbumLookup, BookTarget, ComicFormat, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, MbCandidate, SongMatch, HistoryEntry, ListedTrack, EpisodeMatch, EpKey, BookFound, BookPart, MovieFound, MovieMatch, PreviewItem, SeriesOutcome, AudioBook, ServerCall, ServerLibrary, UpdateFound, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
 
 type Overrides = Record<string, string>;
 
@@ -15,6 +15,8 @@ export interface OwnCover {
 export interface PictureCard {
   path: string;
   size: number;
+  /** The size as shown (`12 MB`, Rust's). */
+  sizeText: string;
   /** Unix seconds. */
   modified: number | null;
   /** When the photo was taken, `YYYY-MM-DDTHH:MM:SS`. */
@@ -34,7 +36,7 @@ export type Cell = string | { key: string };
 /** The same movie, episode, comic or book in several files. */
 export interface WorkGroup {
   kind: "movie" | "episode" | "comic" | "book";
-  items: { path: string; size: number; picture?: string; codec?: string }[];
+  items: { path: string; size: number; sizeText: string; picture?: string; codec?: string }[];
   /** The one worth keeping, when one stands out. */
   best?: string;
 }
@@ -108,6 +110,12 @@ export const api = {
   issueCovers: (issues: ComicIssue[], volumeKey: string) => invoke<[string[], boolean, string | null]>("issue_covers", { issues, volumeKey }),
   /** The episodes what was typed names: a code exactly, and those whose name or code holds it. */
   episodesTyped: (show: Show, text: string) => invoke<{ exact: EpKey[] | null; matches: EpKey[] }>("episodes_typed", { show, text }),
+  /** Whether the GCD would be searched without an account. */
+  gcdFew: (source: string, email: string, password: string) => invoke<boolean>("gcd_few", { source, email, password }),
+  /** The options that do nothing as the rule is set (hidden on its card). */
+  ruleInert: (rule: Rule) => invoke<string[]>("rule_inert", { rule }),
+  /** Each list of episodes as file names write it (`S01E02-E03`). */
+  episodeCodes: (lists: EpKey[][]) => invoke<string[]>("episode_codes", { lists }),
   /** A larger copy of a catalogue's cover, where there is one. */
   biggerCover: (url: string) => invoke<string>("bigger_cover", { url }),
   /** A catalogue's picture the page could not show by its address. */
@@ -115,6 +123,8 @@ export const api = {
   /** Which pictures of a group of similar ones stand out (the shared choice). */
   picturePicks: (cards: { path: string; width: number | null; height: number | null; size: number; taken: string | null; modified: number | null }[]) =>
     invoke<{ best: string | null; largest: string | null; oldest: string | null }>("picture_picks", { cards }),
+  /** Where each picture of a group is, as the window says it. */
+  picturePlaces: (group: string[]) => invoke<string[]>("picture_places", { group }),
   pictureCards: (paths: string[], max: number) => invoke<PictureCard[]>("picture_cards", { paths, max }),
   trashFiles: (paths: string[]) => invoke<{ trashed: string[]; failed: [string, string][] }>("trash_files", { paths }),
   preview: (steps: Step[], overrides: Overrides, view: View) =>
@@ -127,6 +137,9 @@ export const api = {
    *  and doubts. An error when nothing could be searched. */
   movieSearch: (key: string, lang: string, items: PreviewItem[]) =>
     invoke<MovieFound[]>("movie_search", { key, lang, items }),
+  /** Each chosen movie as the rule names it, with its template fields. */
+  movieNamed: (files: [string, Candidate][], extras: Record<number, Record<string, string>>) =>
+    invoke<Record<string, MovieMatch>>("movie_named", { files, extras }),
   /** Each movie's template fields and collection (null: none), and,
    *  with `sets`, the collections. */
   tmdbCollections: (key: string, lang: string, ids: number[], sets: boolean) =>
@@ -177,6 +190,9 @@ export const api = {
       errors: string[];
       remaining: number | null;
     }>("subs_search", { auth, langs, items }),
+  /** What is chosen across the videos' subtitles (the shared count). */
+  subsTally: (videos: { have: string[]; inside: string[]; candidates: SubCandidate[]; pick: Record<string, number> }[], langs: string[], remaining: number | null) =>
+    invoke<{ subs: number; videos: number; missing: number; overQuota: boolean }>("subs_tally", { videos, langs, remaining }),
   osCheck: (auth: SubsAuth) => invoke<number | null>("os_check", { auth }),
   subdlCheck: (key: string) => invoke<void>("subdl_check", { key }),
   updateCheck: () => invoke<UpdateFound | null>("update_check"),
@@ -248,7 +264,7 @@ export const api = {
   deleteHistory: (id: string) => invoke<void>("delete_history", { id }),
   clearHistory: () => invoke<number>("clear_history"),
   /** Bytes the kept answers of the catalogues take. */
-  cacheSize: () => invoke<number>("cache_size"),
+  cacheSize: () => invoke<[number, string]>("cache_size"),
   /** Forgets the kept answers; the bytes freed. */
   clearCache: () => invoke<number>("clear_cache"),
   savePreset: (path: string, steps: Step[]) => invoke<void>("save_preset", { path, steps }),

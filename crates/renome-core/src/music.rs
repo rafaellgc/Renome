@@ -689,13 +689,7 @@ pub fn folders(template: &str, t: &AudioTags, colon: &str) -> Vec<String> {
         .collect()
 }
 
-fn words(s: &str) -> Vec<String> {
-    text::strip_accents(&s.to_lowercase())
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .map(str::to_string)
-        .collect()
-}
+use crate::text::words;
 
 /// A bracketed part, or a year or date.
 static ASIDE: LazyLock<Regex> = LazyLock::new(|| {

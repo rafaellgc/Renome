@@ -40,8 +40,11 @@
     marked = [];
   });
 
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const code = (keys: EpKey[]) => (keys.length ? `S${pad(keys[0][0])}E${keys.map((k) => pad(k[1])).join("-E")}` : "");
+  /** Episodes as file names write them (`S01E02-E03`): the shared
+   *  flow's, asked for those shown. */
+  let codes = $state<Record<string, string>>({});
+  const listKey = (keys: EpKey[]) => keys.map((k) => `${k[0]}x${k[1]}`).join(",");
+  const code = (keys: EpKey[]) => codes[listKey(keys)] ?? "";
   const episode = (k: EpKey) => show?.episodes.find((e) => e.season === k[0] && e.number === k[1]);
   const same = (a: EpKey[] | null | undefined, b: EpKey[]) =>
     !!a && a.length === b.length && a.every((k, i) => k[0] === b[i][0] && k[1] === b[i][1]);
@@ -71,6 +74,21 @@
         groups.get(season)!.push(e);
       }
       seasons = [...groups.entries()];
+    }, () => {});
+  });
+
+  $effect(() => {
+    const wanted = [
+      ...(st?.alternatives ?? []),
+      marked,
+      ...seasons.flatMap(([, eps]) => eps.map((e): EpKey[] => [[e.season, e.number]])),
+    ].filter((l) => l.length && !(listKey(l) in codes));
+    if (!wanted.length) return;
+    const lists = $state.snapshot(wanted) as EpKey[][];
+    api.episodeCodes(lists).then((got) => {
+      const next = { ...codes };
+      lists.forEach((l, i) => (next[listKey(l)] = got[i]));
+      codes = next;
     }, () => {});
   });
 
@@ -140,7 +158,7 @@
       {#if st?.alternatives.length}
         <p class="muted hint">{t("epSuggestions")}</p>
         <div class="grid">
-          {#each st.alternatives.slice(0, 9) as keys, i (code(keys))}
+          {#each st.alternatives.slice(0, 9) as keys, i (listKey(keys))}
             {@const e = episode(keys[0])}
             <button class="cand" class:current={same(st.choice, keys)} onclick={() => choose(keys)}>
               {#if still(e?.stillPath ?? null)}

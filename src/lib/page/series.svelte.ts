@@ -6,7 +6,8 @@ import { confirm, notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
 import { settings, tmdbLang } from "$lib/settings.svelte";
 import type { Candidate, EpKey, EpisodeMatch, EpisodeState, Rule, Show } from "$lib/types";
-import { counts, moved, ruleOf, takers, without, type PageCtx } from "./common";
+import { needsKey } from "$lib/rules";
+import { counts, moved, reviewQueue, ruleOf, takers, without, type PageCtx } from "./common";
 
 /** What the show picker asks, while open. */
 export type ShowPick = { source: "tmdb" | "anilist"; query: string; candidates: Candidate[]; resolve: (c: Candidate | null) => void };
@@ -90,7 +91,7 @@ export class Series {
       if (res.files.some((f) => !f.choice.length)) this.openReview();
     } catch (e) {
       // No key: it is typed in the options.
-      if (String(e).startsWith("tmdbNeedsKey")) {
+      if (needsKey(e)) {
         if (await confirm({ title: t("rule.series"), text: tError(e), ok: t("options"), cancel: t("cancel") })) this.#ctx.openOptions();
       } else await notify({ title: t("rule.series"), text: tError(e) });
     } finally {
@@ -118,13 +119,7 @@ export class Series {
 
   /** Opens the review on the files still without an episode (or on one). */
   openReview(start?: string) {
-    const paths = this.#ctx.items.map((i) => i.path);
-    const pending = [
-      ...paths.filter((p) => this.state[p]?.status === "choose"),
-      ...paths.filter((p) => this.state[p]?.status === "none"),
-    ];
-    const queue = start ? [start, ...pending.filter((p) => p !== start)] : pending;
-    this.review = queue.length ? queue : null;
+    this.review = reviewQueue(this.#ctx.items.map((i) => i.path), (p) => this.state[p]?.status, start);
   }
 
   /** The user's pick for a file; undecided files of its group (its

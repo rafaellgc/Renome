@@ -258,7 +258,25 @@ pub fn table() -> Value {
         "menus": menus,
         "serverKinds": crate::mediaserver::KINDS,
         "comicKeys": { "comicvine": comic_key_name("comicvine"), "metron": comic_key_name("metron") },
+        "keyErrors": KEY_ERRORS,
     })
+}
+
+/// The errors a key or an account set in the options fixes: the window
+/// offers its Options, the command line's texts name `renome-cli keys`.
+pub const KEY_ERRORS: &[&str] = &[
+    "tmdbNeedsKey",
+    "cvNeedsKey",
+    "mtNeedsKey",
+    "mtBadKey",
+    "gcdBadLogin",
+];
+
+/// Whether to say, before a search, that the Grand Comics Database takes
+/// few searches without an account (the window once a session, the
+/// command line each run).
+pub fn gcd_few(source: &str, email: &str, password: &str) -> bool {
+    source == "gcd" && (email.trim().is_empty() || password.is_empty())
 }
 
 #[cfg(test)]

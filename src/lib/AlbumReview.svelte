@@ -2,6 +2,7 @@
   import { dialog } from "./modal";
   import Icon from "./Icon.svelte";
   import { api } from "./api";
+  import { baseName } from "./page/common";
   import { t, tError } from "./i18n";
   import { settings } from "./settings.svelte";
   import type { AlbumState, MbCandidate } from "./types";
@@ -93,7 +94,7 @@
     if (n >= 1 && n <= Math.min(9, candidates.length)) choose(candidates[n - 1]);
   }
 
-  const folder = (dir: string) => dir.split(/[\\/]/).pop() ?? dir;
+  const folder = baseName;
   /** The small cover Rust picked (the source's, else the Cover Art Archive's). */
   const cover = (c: MbCandidate) => c.thumb || c.image;
   const fromDiscogs = (c: MbCandidate) => !!c.discogs;

@@ -53,14 +53,8 @@ fn net_error(e: reqwest::Error) -> String {
     }
 }
 
-/// Words without accents or case, to compare titles.
-pub fn fold(s: &str) -> String {
-    renome_core::text::strip_accents(&s.to_lowercase())
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ")
-}
+/// Words without accents or case, to compare titles (the core's).
+pub use renome_core::text::fold_words as fold;
 
 /// The title to name by: the one the file already has, when it is one of
 /// the series' titles (a translation the reader knows), else the English

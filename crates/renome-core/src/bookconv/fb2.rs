@@ -29,7 +29,7 @@ pub fn read(bytes: &[u8]) -> Result<Book, String> {
     xhtml::find_all(&root.kids, "binary", &mut bins);
     for b in bins {
         let Some(id) = b.attr("id") else { continue };
-        let data = base64(&b.plain());
+        let data = crate::b64::decode(&b.plain());
         if let Some(name) = book.add_file(data, &id.to_ascii_lowercase()) {
             pics.insert(id.to_string(), name);
         }
@@ -140,54 +140,6 @@ const FB2_CSS: &str = "
 .notes h3 { font-size: 1em; text-align: left; margin: 1em 0 0.3em; }
 .back { text-decoration: none; }
 ";
-
-fn base64(s: &str) -> Vec<u8> {
-    let mut out = Vec::with_capacity(s.len() * 3 / 4);
-    let mut acc = 0u32;
-    let mut bits = 0;
-    for c in s.bytes() {
-        let v = match c {
-            b'A'..=b'Z' => c - b'A',
-            b'a'..=b'z' => c - b'a' + 26,
-            b'0'..=b'9' => c - b'0' + 52,
-            b'+' | b'-' => 62,
-            b'/' | b'_' => 63,
-            _ => continue,
-        };
-        acc = (acc << 6) | v as u32;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push((acc >> bits) as u8);
-        }
-    }
-    out
-}
-
-pub fn base64_encode(data: &[u8]) -> String {
-    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut s = String::with_capacity(data.len() * 4 / 3 + data.len() / 57 + 4);
-    for (i, ch) in data.chunks(3).enumerate() {
-        if i > 0 && i % 19 == 0 {
-            s.push('\n');
-        }
-        let b = [ch[0], *ch.get(1).unwrap_or(&0), *ch.get(2).unwrap_or(&0)];
-        let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | b[2] as u32;
-        s.push(T[(n >> 18) as usize & 63] as char);
-        s.push(T[(n >> 12) as usize & 63] as char);
-        s.push(if ch.len() > 1 {
-            T[(n >> 6) as usize & 63] as char
-        } else {
-            '='
-        });
-        s.push(if ch.len() > 2 {
-            T[n as usize & 63] as char
-        } else {
-            '='
-        });
-    }
-    s
-}
 
 fn clean_line(s: &str) -> String {
     crate::text::collapse_spaces(s.trim())
@@ -874,7 +826,7 @@ pub fn to_fb2(book: &Book) -> String {
                 "<binary id=\"{}\" content-type=\"{}\">{}</binary>\n",
                 esc_attr(&r.name),
                 esc_attr(&r.media),
-                base64_encode(&r.data)
+                crate::b64::encode_lines(&r.data, 76)
             ));
         }
     }
@@ -1045,7 +997,7 @@ fn genre_of(subject: &str) -> Option<&'static str> {
         ("prose_classic", &["classico", "classic", "clasico"]),
         ("science", &["ciencia", "science"]),
     ];
-    let s = crate::text::strip_accents(subject).to_lowercase();
+    let s = crate::text::fold(subject);
     if s.chars().all(|c| c.is_ascii_lowercase() || c == '_') && GENRES.iter().any(|(g, _)| *g == s)
     {
         return GENRES.iter().find(|(g, _)| *g == s).map(|(g, _)| *g);
@@ -1783,11 +1735,5 @@ mod tests {
                 .any(|c| c.body.contains("Texto da nota."))
         );
         assert!(again.cover.is_some());
-    }
-
-    #[test]
-    fn base64_both_ways() {
-        let d = b"any bytes \x00\xff here";
-        assert_eq!(base64(&base64_encode(d)), d);
     }
 }

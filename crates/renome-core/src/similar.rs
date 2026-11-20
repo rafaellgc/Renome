@@ -677,6 +677,45 @@ pub fn picks(group: &[Worth]) -> Picks {
     }
 }
 
+/// Where each picture of a group is, as the comparison window says it:
+/// in a group spread over folders, only what tells them apart
+/// (`…/Phone`, `…/WhatsApp`); the whole folder (`~/…`) otherwise.
+pub fn places(group: &[std::path::PathBuf]) -> Vec<String> {
+    let parts = |p: &std::path::Path| -> Vec<String> {
+        p.parent()
+            .map(|d| {
+                d.components()
+                    .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let dirs: Vec<Vec<String>> = group.iter().map(|p| parts(p)).collect();
+    let common = dirs.first().map_or(0, |first| {
+        (0..first.len())
+            .take_while(|&k| dirs.iter().all(|d| d.len() > k && d[k] == first[k]))
+            .count()
+    });
+    let sep = std::path::MAIN_SEPARATOR.to_string();
+    group
+        .iter()
+        .zip(&dirs)
+        .map(|(p, own)| {
+            let whole = || p.parent().map(crate::text::home_short).unwrap_or_default();
+            if common == 0 || dirs.iter().all(|d| d.len() == common) {
+                return whole();
+            }
+            // A folder holding the others: all start from its name.
+            let from = if dirs.iter().any(|d| d.len() == common) {
+                common - 1
+            } else {
+                common
+            };
+            format!("…{sep}{}", own[from..].join(&sep))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -884,5 +923,37 @@ mod tests {
         let mut stale = PictureCache::in_file(file);
         stale.load();
         assert!(stale.entries.is_empty());
+    }
+
+    #[test]
+    fn places_tell_folders_apart() {
+        use std::path::PathBuf;
+        let g = [
+            PathBuf::from("/x/Fotos/Phone/a.jpg"),
+            PathBuf::from("/x/Fotos/WhatsApp/b.jpg"),
+        ];
+        let sep = std::path::MAIN_SEPARATOR;
+        assert_eq!(
+            places(&g),
+            [format!("…{sep}Phone"), format!("…{sep}WhatsApp")]
+        );
+        // One folder holding the other: both from its name.
+        let g = [
+            PathBuf::from("/x/Fotos/a.jpg"),
+            PathBuf::from("/x/Fotos/Old/b.jpg"),
+        ];
+        assert_eq!(
+            places(&g),
+            [format!("…{sep}Fotos"), format!("…{sep}Fotos{sep}Old")]
+        );
+        // All in one folder: the folder itself.
+        let g = [
+            PathBuf::from("/x/Fotos/a.jpg"),
+            PathBuf::from("/x/Fotos/b.jpg"),
+        ];
+        assert_eq!(
+            places(&g)[0],
+            crate::text::home_short(std::path::Path::new("/x/Fotos"))
+        );
     }
 }

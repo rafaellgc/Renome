@@ -9,7 +9,7 @@
 //! number. Video tracks lose their names (a name there is almost always
 //! a group's or a site's); other tracks keep theirs.
 
-use crate::text::strip_accents;
+use crate::text::fold;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TrackKind {
@@ -830,10 +830,6 @@ struct Said {
     regions: Vec<(&'static str, &'static str)>,
     details: Vec<Word>,
     rest: String,
-}
-
-fn fold(s: &str) -> String {
-    strip_accents(s).to_lowercase()
 }
 
 fn read_name(name: &str) -> Said {

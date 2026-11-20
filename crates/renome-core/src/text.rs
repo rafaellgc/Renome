@@ -189,6 +189,73 @@ pub fn find_typed(
     out
 }
 
+/// Bytes as the program shows them: `999 B`, `1.5 KB`, `12 MB` (one
+/// decimal under ten; the window's list, its Options and the command line).
+pub fn size(bytes: u64) -> String {
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+    let units = ["KB", "MB", "GB", "TB"];
+    let mut v = bytes as f64 / 1024.0;
+    let mut u = 0;
+    while v >= 1024.0 && u < units.len() - 1 {
+        v /= 1024.0;
+        u += 1;
+    }
+    if v < 10.0 {
+        format!("{v:.1} {}", units[u])
+    } else {
+        format!("{v:.0} {}", units[u])
+    }
+}
+
+/// A path as people read it: the home folder as `~` (also when it is
+/// written the other way, `/home/…` for `/var/home/…`); the window's list
+/// and the command line.
+pub fn home_short(p: &std::path::Path) -> String {
+    let Some(home) = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+        .map(std::path::PathBuf::from)
+    else {
+        return p.display().to_string();
+    };
+    let mut homes = vec![home.clone()];
+    if let Ok(rest) = home.strip_prefix("/var/home") {
+        homes.push(std::path::Path::new("/home").join(rest));
+    } else if let Ok(rest) = home.strip_prefix("/home") {
+        homes.push(std::path::Path::new("/var/home").join(rest));
+    }
+    for h in &homes {
+        if let Ok(rest) = p.strip_prefix(h) {
+            return if rest.as_os_str().is_empty() {
+                "~".into()
+            } else {
+                format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display())
+            };
+        }
+    }
+    p.display().to_string()
+}
+
+/// Text compared without accents or case (`Ação` and `acao` meet).
+pub fn fold(s: &str) -> String {
+    strip_accents(&s.to_lowercase())
+}
+
+/// The words of a text, without accents or case: letters and digits in a
+/// row (`O.Céu-Azul` → `o`, `ceu`, `azul`).
+pub fn words(s: &str) -> Vec<String> {
+    fold(s)
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Those words joined by spaces, to compare names (`o ceu azul`).
+pub fn fold_words(s: &str) -> String {
+    words(s).join(" ")
+}
+
 pub fn strip_accents(s: &str) -> String {
     s.nfd().filter(|c| !is_combining_mark(*c)).nfc().collect()
 }
@@ -763,5 +830,20 @@ mod tests {
         );
         assert_eq!(split_glued("Já está certo"), "Já está certo");
         assert_eq!(split_glued("ÁguaViva"), "Água Viva");
+    }
+
+    #[test]
+    fn sizes_as_shown() {
+        assert_eq!(size(999), "999 B");
+        assert_eq!(size(1536), "1.5 KB");
+        assert_eq!(size(12 << 20), "12 MB");
+        assert_eq!(size(3 << 30), "3.0 GB");
+    }
+
+    #[test]
+    fn folded_words() {
+        assert_eq!(fold("AÇÃO"), "acao");
+        assert_eq!(words("O.Céu-Azul"), ["o", "ceu", "azul"]);
+        assert_eq!(fold_words("  O.Céu-Azul! "), "o ceu azul");
     }
 }

@@ -463,7 +463,7 @@ fn name_words(s: &str) -> Vec<String> {
         "de", "da", "do", "das", "dos", "e", "y", "and", "von", "van", "der", "den", "del", "la",
         "le", "di", "du", "jr", "junior", "filho", "neto", "the",
     ];
-    text::strip_accents(&s.to_lowercase())
+    text::fold(s)
         .split(|c: char| !c.is_alphanumeric())
         .filter(|w| w.len() > 1 && !PARTICLES.contains(w))
         .map(str::to_string)
@@ -472,7 +472,7 @@ fn name_words(s: &str) -> Vec<String> {
 
 /// The initials of a name (`C. S. Moraes` → `c`, `s`).
 fn initials(s: &str) -> Vec<char> {
-    text::strip_accents(&s.to_lowercase())
+    text::fold(s)
         .split(|c: char| !c.is_alphanumeric())
         .filter(|w| w.chars().count() == 1)
         .filter_map(|w| w.chars().next())
@@ -510,7 +510,7 @@ pub fn author_fit(guess: &str, authors: &[String]) -> Option<f64> {
             true => fit,
             false => fit.min(0.4),
         };
-        let starts: Vec<char> = text::strip_accents(&author.to_lowercase())
+        let starts: Vec<char> = text::fold(author)
             .split(|c: char| !c.is_alphanumeric())
             .filter_map(|w| w.chars().next())
             .collect();
@@ -534,13 +534,7 @@ fn title_fit(guess: &str, title: &str) -> f64 {
 
 /// Whether all the words of `short` are in `long`.
 fn short_form(short: &str, long: &str) -> bool {
-    let words = |s: &str| -> Vec<String> {
-        text::strip_accents(&s.to_lowercase())
-            .split(|c: char| !c.is_alphanumeric())
-            .filter(|w| !w.is_empty())
-            .map(str::to_string)
-            .collect()
-    };
+    let words = text::words;
     let long = words(long);
     let short = words(short);
     !short.is_empty() && short.iter().all(|w| long.contains(w))
@@ -583,7 +577,7 @@ fn own_title(g: &Guess) -> Option<String> {
     if !g.from_file || g.title.trim().is_empty() || shouting(&g.title) || g.title.contains('|') {
         return None;
     }
-    let fold = |s: &str| words_only(&text::strip_accents(&s.to_lowercase()));
+    let fold = |s: &str| words_only(&text::fold(s));
     let series = fold(&g.series);
     // The file's author; without one, the readings of its name (which
     // may take a title for the author, so only then).
@@ -667,7 +661,7 @@ fn choose_title(g: &Guess, catalog: &str, authors: &[String], edition: bool) -> 
     if !same {
         return name_capitals(g, &catalog);
     }
-    let fold = |s: &str| words_only(&text::strip_accents(&s.to_lowercase()));
+    let fold = |s: &str| words_only(&text::fold(s));
     if own.contains(':')
         && !catalog.contains(':')
         && fold(main_title(&own)) == fold(main_title(&catalog))
@@ -705,7 +699,7 @@ fn name_capitals(g: &Guess, title: &str) -> String {
     if acronyms.is_empty() {
         return title.to_string();
     }
-    let fold = |s: &str| text::strip_accents(&s.to_lowercase());
+    let fold = text::fold;
     let mut out = String::new();
     let mut word = String::new();
     let flush = |word: &mut String, out: &mut String| {
@@ -999,7 +993,7 @@ fn brasil_title(title: &str, g: &Guess) -> String {
         }
     }
     let t = text::collapse_spaces(FORMAT_NOTE.replace(t, "").trim());
-    let fold = |s: &str| words_only(&text::strip_accents(&s.to_lowercase()));
+    let fold = |s: &str| words_only(&text::fold(s));
     // The file's title without subtitle or what follows a dash
     // (`As 12 Regras do Êxito – Otto Lindqvist - Jonas Prado`).
     let first = main_title(&g.title)

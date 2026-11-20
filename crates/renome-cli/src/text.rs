@@ -1268,6 +1268,14 @@ const CLI: &[(&str, [&str; 3])] = &[
         ],
     ),
     (
+        "gcdNoAccount",
+        [
+            "Sem conta, o Grand Comics Database aceita só umas 30 consultas por hora. Com uma conta gratuita são cerca de 25 por minuto (renome-cli keys set gcdEmail e gcdPassword).",
+            "Without an account, the Grand Comics Database takes only about 30 requests an hour. With a free account it takes about 25 a minute (renome-cli keys set gcdEmail and gcdPassword).",
+            "Sin cuenta, Grand Comics Database acepta solo unas 30 consultas por hora. Con una cuenta gratuita son unas 25 por minuto (renome-cli keys set gcdEmail y gcdPassword).",
+        ],
+    ),
+    (
         "cvNeedsKey",
         [
             "A busca no Comic Vine precisa de uma chave da API gratuita (renome-cli keys set comicVineKey).",

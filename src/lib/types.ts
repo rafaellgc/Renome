@@ -146,6 +146,11 @@ export interface PreviewItem {
   path: string;
   dir: string;
   size: number;
+  /** The size as shown (`12 MB`, Rust's). */
+  sizeText: string;
+  /** Its folder and where it goes as people read them (`~/…`, Rust's). */
+  dirShown: string;
+  destShown?: string | null;
   modified: number | null;
   isDir: boolean;
   original: string;
@@ -693,6 +698,14 @@ export interface AfterCounts {
   subtitles: number;
   /** Files named right already that get work: counted on the Rename button. */
   besides: number;
+  /** What the question before renaming says of this work (Rust's lines: a text's key and its count). */
+  lines: SaidLine[];
+}
+
+/** A line said of the work after the renames: a text's key and its count. */
+export interface SaidLine {
+  key: string;
+  n: number;
 }
 
 /** What was written after the renames; `troubles`: per stage, how much it did and each file's reason. */
@@ -712,6 +725,8 @@ export interface AfterReport {
   troubles: { stage: string; done: number; errors: [string, string][] }[];
   /** Where each file of the list went with conversions. */
   followed?: [string, string][];
+  /** What was done, as the notice says it (Rust's lines). */
+  lines: SaidLine[];
 }
 
 export interface HistoryEntry {

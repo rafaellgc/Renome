@@ -1258,6 +1258,59 @@ pub fn default_value(opt: &Opt, lang: &str) -> Value {
     }
 }
 
+/// An option of a rule as it is set: its own value, else its default.
+fn set_value(rule: &Value, key: &str) -> Value {
+    if let Some(v) = rule.get(key).filter(|v| !v.is_null()) {
+        return v.clone();
+    }
+    rule.get("type")
+        .and_then(Value::as_str)
+        .and_then(self::rule)
+        .and_then(|r| r.option(key))
+        .map(|o| default_value(o, "en"))
+        .unwrap_or(Value::Null)
+}
+
+/// The options of a rule that do nothing as it is set: AniList shows get
+/// no `.nfo`, video tags or subtitles (TMDB's), a barcode is read only on
+/// Metron, 16 greys only on grey ink readers that take PNG, dot patterns
+/// softened only on colour ink and small pages enlarged only for a
+/// reader's screen. The window hides them; the flows take them as off
+/// (the command line's too).
+pub fn inert(rule: &Value) -> Vec<&'static str> {
+    let text = |k: &str| set_value(rule, k).as_str().unwrap_or("").to_string();
+    match rule.get("type").and_then(Value::as_str) {
+        Some("series") if text("source") == "anilist" => vec![
+            "nfo",
+            "backdrop",
+            "videoTags",
+            "videoClean",
+            "videoTracks",
+            "subtitles",
+            "subLangs",
+        ],
+        Some("comic") => {
+            let device: Option<crate::comicbook::Device> =
+                serde_json::from_value(set_value(rule, "device")).ok();
+            let mut off = Vec::new();
+            if text("source") != "metron" {
+                off.push("barcode");
+            }
+            if !device.is_some_and(|d| d.grey() && d.png_ok()) {
+                off.push("sixteenGreys");
+            }
+            if !device.is_some_and(|d| d.colour_ink()) {
+                off.push("reduceRainbow");
+            }
+            if device.is_none_or(|d| d == crate::comicbook::Device::Original) {
+                off.push("upscale");
+            }
+            off
+        }
+        _ => Vec::new(),
+    }
+}
+
 /// A new rule of this type with every option at its default.
 pub fn new_rule(spec: &RuleSpec, lang: &str) -> Map<String, Value> {
     let mut rule = Map::new();
@@ -2077,5 +2130,23 @@ mod tests {
         assert_eq!(devices.first(), Some(&"original"));
         assert_eq!(devices.last(), Some(&"custom"));
         assert_eq!(devices.len(), crate::comicbook::SCREENS.len() + 2);
+    }
+
+    #[test]
+    fn options_that_do_nothing() {
+        use serde_json::json;
+        let anime = inert(&json!({"type": "series", "source": "anilist"}));
+        assert!(anime.contains(&"nfo") && anime.contains(&"subtitles"));
+        assert!(inert(&json!({"type": "series", "source": "tmdb"})).is_empty());
+        // Grey ink that takes PNG: 16 greys, no softening.
+        let grey = inert(&json!({"type": "comic", "source": "metron", "device": "kobo"}));
+        assert!(!grey.contains(&"sixteenGreys") && grey.contains(&"reduceRainbow"));
+        assert!(!grey.contains(&"barcode") && !grey.contains(&"upscale"));
+        // A colour Kindle: no PNG, so no 16 greys; softened.
+        let colour = inert(&json!({"type": "comic", "source": "gcd", "device": "kindle-color"}));
+        assert!(colour.contains(&"sixteenGreys") && !colour.contains(&"reduceRainbow"));
+        assert!(colour.contains(&"barcode"));
+        // The pages as they are: nothing enlarged.
+        assert!(inert(&json!({"type": "comic", "device": "original"})).contains(&"upscale"));
     }
 }

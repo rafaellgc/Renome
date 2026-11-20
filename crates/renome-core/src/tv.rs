@@ -617,13 +617,7 @@ pub fn check_length(show: &Show, mut found: EpisodeLookup, secs: Option<f64>) ->
     found
 }
 
-fn words(s: &str) -> Vec<String> {
-    text::strip_accents(&s.to_lowercase())
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .map(str::to_string)
-        .collect()
-}
+use crate::text::words;
 
 /// The title without the show's name in front ("Estação Norte Pilot").
 fn without_show(title: &str, show: &Show) -> String {

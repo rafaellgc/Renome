@@ -230,34 +230,8 @@ pub fn folder_pages(dir: &Path) -> Result<Vec<(PathBuf, String)>, String> {
     Ok(out)
 }
 
-/// Names in the order a person reads them: `2` before `10`.
-fn natural(a: &str, b: &str) -> std::cmp::Ordering {
-    let parts = |s: &str| -> Vec<(bool, String)> {
-        let mut v: Vec<(bool, String)> = Vec::new();
-        for c in s.to_lowercase().chars() {
-            let digit = c.is_ascii_digit();
-            match v.last_mut() {
-                Some((d, part)) if *d == digit => part.push(c),
-                _ => v.push((digit, c.to_string())),
-            }
-        }
-        v
-    };
-    let (pa, pb) = (parts(a), parts(b));
-    for (x, y) in pa.iter().zip(&pb) {
-        let o = match (x.0, y.0) {
-            (true, true) => {
-                let (tx, ty) = (x.1.trim_start_matches('0'), y.1.trim_start_matches('0'));
-                tx.len().cmp(&ty.len()).then_with(|| tx.cmp(ty))
-            }
-            _ => x.1.cmp(&y.1),
-        };
-        if o != std::cmp::Ordering::Equal {
-            return o;
-        }
-    }
-    pa.len().cmp(&pb.len()).then_with(|| a.cmp(b))
-}
+/// Names in the order a person reads them: `2` before `10` (the list's).
+use crate::files::natural_cmp as natural;
 
 /// The largest picture read for [`end_pages`].
 const END_PAGE_MAX: u64 = 40 << 20;

@@ -106,6 +106,11 @@ impl<'a> Opts<'a> {
         let Some(rule) = self.rule else {
             return Value::Null;
         };
+        // An option that does nothing as the rule is set is off (see
+        // `catalog::inert`: the window hides it).
+        if renome_core::catalog::inert(rule).contains(&key) {
+            return Value::Bool(false);
+        }
         if let Some(v) = rule.get(key).filter(|v| !v.is_null()) {
             return v.clone();
         }
@@ -212,11 +217,47 @@ pub struct Counts {
     /// Files with work besides the renames (named right already): what
     /// the Rename button counts beside the renames.
     pub besides: usize,
+    /// What the question before renaming says of this work (see
+    /// [`Counts::lines`]).
+    pub lines: Vec<Line>,
+}
+
+/// A line said of the work: a text's key and its count.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Line {
+    pub key: &'static str,
+    pub n: usize,
+}
+
+/// The lines with a count, in order.
+fn lines(all: &[(&'static str, usize)]) -> Vec<Line> {
+    all.iter()
+        .filter(|(_, n)| *n > 0)
+        .map(|&(key, n)| Line { key, n })
+        .collect()
+}
+
+impl Counts {
+    /// What the question before renaming says of the work besides the
+    /// renames, in its order (the window's question and the command
+    /// line's list are these).
+    pub fn lines(&self) -> Vec<Line> {
+        lines(&[
+            ("confirmMeta", self.sidecars),
+            ("confirmBookMeta", self.book_meta),
+            ("confirmCovers", self.covers),
+            ("confirmPlaylists", self.playlists),
+            ("confirmTags", self.tags),
+            ("confirmInside", self.inside + self.video_tags),
+            ("confirmSubTools", self.sub_tools),
+            ("confirmSubs", self.subtitles),
+        ])
+    }
 }
 
 impl Jobs {
     pub fn counts(&self) -> Counts {
-        Counts {
+        let mut c = Counts {
             sidecars: self.movie_sidecars.len() + self.tv_sidecars.len(),
             book_meta: self.book_sidecars.len(),
             covers: self.covers.len(),
@@ -237,7 +278,10 @@ impl Jobs {
                 + self.video_tags.len()
                 + self.sub_tools.len()
                 + self.subtitles.len(),
-        }
+            lines: Vec::new(),
+        };
+        c.lines = c.lines();
+        c
     }
 }
 
@@ -299,7 +343,6 @@ pub fn plan(
     let book = Opts::of(rules, "book");
     let comic = Opts::of(rules, "comic");
     let subtitle = Opts::of(rules, "subtitle");
-    let tmdb_series = series.on() && series.text("source") != "anilist";
     let pairs = pairs(preview, moved);
     let mut jobs = Jobs::default();
 
@@ -329,7 +372,8 @@ pub fn plan(
                 });
             }
         }
-        if let Some(m) = chosen.episodes.get(p.from).filter(|_| video && tmdb_series) {
+        // AniList's shows get neither (`catalog::inert`: off).
+        if let Some(m) = chosen.episodes.get(p.from).filter(|_| video) {
             if series.bool("nfo") {
                 jobs.tv_sidecars.push(tmdb::TvSidecarItem {
                     path: p.to.clone(),
@@ -717,9 +761,29 @@ pub struct Report {
     /// window, see `apply::Follow`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub followed: Vec<(std::path::PathBuf, std::path::PathBuf)>,
+    /// What was done, as said once it is (see [`Report::lines`]).
+    pub lines: Vec<Line>,
 }
 
 impl Report {
+    /// What was done besides the renames, as the notice after renaming
+    /// says it, in its order (the window's and the command line's).
+    pub fn lines(&self) -> Vec<Line> {
+        lines(&[
+            ("adsTrashedN", self.ads_trashed),
+            ("adsFailedN", self.ads_failed),
+            ("sidecarsN", self.sidecars),
+            ("subsSavedN", self.subtitles),
+            ("subToolsN", self.sub_fixed),
+            ("subToolsM", self.sub_extracted),
+            ("playlistsKeptN", self.kept_lists),
+            ("tagsN", self.tags),
+            ("audioTagsN", self.audio_tags),
+            ("insideN", self.inside),
+            ("insideDrawnN", self.drawn),
+        ])
+    }
+
     fn trouble(&mut self, stage: &'static str, done: usize, errors: Vec<(String, String)>) {
         if !errors.is_empty() {
             self.troubles.push(Trouble {
@@ -766,6 +830,7 @@ pub async fn run(
         out.trashed = trashed;
     }
     if renamed && history_id.is_none() {
+        out.lines = out.lines();
         return out;
     }
     let id = || history_id.clone();
@@ -962,6 +1027,7 @@ pub async fn run(
         out.trouble("subtitles", r.created.len(), r.errors);
     }
     host.report("after-stage", json!({ "stage": Value::Null }));
+    out.lines = out.lines();
     out
 }
 

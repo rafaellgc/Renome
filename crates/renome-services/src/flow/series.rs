@@ -320,7 +320,7 @@ pub struct Typed {
 }
 
 pub fn typed(show: &Show, text: &str) -> Typed {
-    let fold = |s: &str| renome_core::text::strip_accents(s).to_lowercase();
+    let fold = renome_core::text::fold;
     let q = fold(text.trim());
     let compact: String = q.chars().filter(|c| !c.is_whitespace()).collect();
     let matches = show

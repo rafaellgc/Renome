@@ -254,10 +254,20 @@ pub fn preview_or_apply(
     if let Some(e) = &preview.filter_error {
         return Err(format!("{}: {e}", t("invalidFilter", &[])));
     }
+    // As the window's rule card says it: the rule, what is wrong, why.
     if let Some(e) = preview.rule_errors.first() {
-        return Err(serde_json::to_value(e)
-            .map(|v| v.to_string())
-            .unwrap_or_default());
+        let rule = steps_json
+            .get(e.index)
+            .and_then(|s| s["rule"].get("type"))
+            .and_then(Value::as_str)
+            .map(|ty| t(&format!("rule.{ty}"), &[]))
+            .unwrap_or_default();
+        let what = t(e.code, &[]);
+        return Err(if e.detail.is_empty() {
+            format!("{rule}: {what}")
+        } else {
+            format!("{rule}: {what}: {}", e.detail)
+        });
     }
     if let Some(path) = m.get_one::<PathBuf>("csv") {
         // The optional columns chosen in the options that make sense with

@@ -18,9 +18,6 @@ import type { Series } from "./series.svelte";
  *  episode, languages), to search again on a change. */
 export type SubsState = { key: string; have: string[]; inside: string[]; candidates: SubCandidate[]; pick: Record<string, number> };
 
-/** Subtitles chosen for a video, not there yet. */
-const chosen = (s: SubsState | undefined) => (s ? Object.entries(s.pick).filter(([l, i]) => i >= 0 && !s.have.includes(l)).length : 0);
-
 export class Subtitles {
   #ctx: PageCtx;
   #movies: Movies;
@@ -43,31 +40,23 @@ export class Subtitles {
       const rules = this.#ctx.steps.filter((s) => s.enabled).map((s) => $state.snapshot(s.rule));
       api.subsWanted(rules).then((w) => (this.wanted = w), () => {});
     });
+    // What is chosen for the visible videos: the shared count.
+    $effect(() => {
+      const visible = new Set(this.#ctx.items.map((i) => i.path));
+      const videos = Object.entries(this.found).filter(([p]) => visible.has(p)).map(([, s]) => $state.snapshot(s));
+      const langs = $state.snapshot(this.langs);
+      api.subsTally(videos, langs, this.remaining).then((c) => (this.counts = c), () => {});
+    });
   }
 
   /** The languages asked for by the movie or TV show rule, when it
    *  downloads subtitles (the shared flow says: `subtitles::wanted`). */
   wanted = $state<string | null>(null);
 
-  counts = $derived.by(() => {
-    const visible = new Set(this.#ctx.items.map((i) => i.path));
-    let subs = 0;
-    let videos = 0;
-    let missing = 0;
-    for (const [p, s] of Object.entries(this.found)) {
-      if (!visible.has(p)) continue;
-      const n = chosen(s);
-      subs += n;
-      if (n) videos++;
-      if (this.langs.some((l) => !s.have.includes(l) && !s.inside.includes(l) && !(s.pick[l] >= 0))) missing++;
-    }
-    return { subs, videos, missing };
-  });
-
-  /** Subtitles chosen for a video, not there yet. */
-  chosen(s: SubsState | undefined) {
-    return chosen(s);
-  }
+  /** Subtitles to come, the videos getting some, those still lacking a
+   *  language, and whether OpenSubtitles' quota is passed (the shared
+   *  count: `subtitles::tally`). */
+  counts = $state({ subs: 0, videos: 0, missing: 0, overQuota: false });
 
   /** The keys and account from the options. */
   auth(): SubsAuth {

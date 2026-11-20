@@ -19,12 +19,18 @@
   let {
     rows,
     remaining,
+    chosen,
+    overQuota,
     onpick,
     onclose,
   }: {
     rows: Row[];
     /** OpenSubtitles downloads left today, when known. */
     remaining: number | null;
+    /** Subtitles chosen still to come, and whether those from
+     *  OpenSubtitles pass today's quota (the shared count). */
+    chosen: number;
+    overQuota: boolean;
     onpick: (path: string, lang: string, index: number) => void;
     onclose: () => void;
   } = $props();
@@ -61,10 +67,6 @@
       .join(" · ");
   }
 
-  const chosen = $derived(rows.reduce((n, r) => n + r.langs.filter((l) => !l.have && l.pick >= 0).length, 0));
-  const fromOs = $derived(
-    rows.reduce((n, r) => n + r.langs.filter((l) => !l.have && l.pick >= 0 && r.candidates[l.pick]?.source === "openSubtitles").length, 0),
-  );
 </script>
 
 <div class="overlay">
@@ -105,7 +107,7 @@
       <span class="muted">
         {t("subsChosenN", { n: chosen })}
         {#if remaining !== null}· {t("subsRemaining", { n: remaining })}{/if}
-        {#if remaining !== null && fromOs > remaining}· <b class="bad">{t("subsOverQuota")}</b>{/if}
+        {#if overQuota}· <b class="bad">{t("subsOverQuota")}</b>{/if}
       </span>
       <span class="spacer"></span>
       <button class="primary" onclick={onclose}>{t("close")}</button>

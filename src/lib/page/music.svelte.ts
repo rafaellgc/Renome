@@ -6,7 +6,7 @@ import { api } from "$lib/api";
 import { notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
 import type { AlbumState, EditField, MbCandidate, Rule, SongMatch } from "$lib/types";
-import { editFields, moved, ruleOf, without, type PageCtx } from "./common";
+import { editFields, moved, reviewQueue, ruleOf, without, type PageCtx } from "./common";
 
 export class Music {
   #ctx: PageCtx;
@@ -86,12 +86,7 @@ export class Music {
 
   /** Opens the review on the albums without a release (or on one). */
   openReview(start?: number) {
-    const pending = [
-      ...this.albums.flatMap((a, i) => (a.status === "choose" ? [i] : [])),
-      ...this.albums.flatMap((a, i) => (a.status === "none" ? [i] : [])),
-    ];
-    const queue = start === undefined ? pending : [start, ...pending.filter((i) => i !== start)];
-    this.review = queue.length ? queue : null;
+    this.review = reviewQueue(this.albums.map((_, i) => i), (i) => this.albums[i].status, start);
   }
 
   /** The release the user chose for an album: its songs are matched to

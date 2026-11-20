@@ -2717,7 +2717,23 @@ the manual's order (each rule's chapter is `r-<type>`; `renome-cli
 manual` lists them as the window does). The readers' screens, the
 readers that get no PNG and the comic rule's reader choices
 (`catalog::DEVICES`) are read from `src/lib/readers.ts` by the core's
-build too. Plurals
+build too. Since the 2026-11-19 re-audit, also: each chosen movie as the
+rule names it (`flow::movies::named`), episode codes for the review
+(`flow::series::code`), the lines said of the work besides the renames
+before and after renaming (`flow::after::{Counts, Report}::lines`), the
+options that do nothing as a rule is set (`catalog::inert`: AniList gets
+no `.nfo`, video tags or subtitles, a barcode only on Metron, 16 greys
+only on grey ink readers that take PNG, softening only on colour ink,
+enlarging only for a screen; the window hides them, the flows take them
+as off), what is chosen across subtitles and whether OpenSubtitles'
+quota is passed (`flow::subtitles::tally`; the command line warns too),
+the errors a key fixes and the GCD without an account
+(`options::{KEY_ERRORS, gcd_few}`; the command line says so too), sizes
+and home-relative paths as shown (`text::{size, home_short}`,
+`similar::places`), and one `text::{fold, words, fold_words}`, base64
+(`b64`, on the `base64` crate) and natural order for the whole core. A
+character rule's "only if" is one character (`onlyIfOne` otherwise), and
+the command line says a rule's error as the window's card does. Plurals
 in texts are written twice (TypeScript for the window, Rust for the
 command line); both run the cases of `src/lib/plurals.json`. And
 `crates/renome-cli` the program: every command below, the lookup rules

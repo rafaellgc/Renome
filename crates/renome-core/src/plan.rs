@@ -199,6 +199,8 @@ pub struct PreviewItem {
     pub path: PathBuf,
     pub dir: PathBuf,
     pub size: u64,
+    /// The size as shown (`12 MB`: [`crate::text::size`]).
+    pub size_text: String,
     pub modified: Option<i64>,
     pub is_dir: bool,
     pub original: String,
@@ -208,6 +210,10 @@ pub struct PreviewItem {
     pub folder: Option<String>,
     /// The folder the file ends up in, when it moves.
     pub dest: Option<PathBuf>,
+    /// Its folder and `dest` as people read them (`~/…`:
+    /// [`crate::text::home_short`]).
+    pub dir_shown: String,
+    pub dest_shown: Option<String>,
     pub status: Status,
     pub problem: Option<Problem>,
     /// Non-blocking warning: contains characters Windows does not accept.
@@ -2002,11 +2008,14 @@ pub fn preview(
                 path: file.path.clone(),
                 dir: file.dir.clone(),
                 size: file.size,
+                size_text: crate::text::size(file.size),
                 modified: file.modified,
                 is_dir: file.is_dir,
                 original,
                 new_name,
                 folder,
+                dir_shown: crate::text::home_short(&file.dir),
+                dest_shown: dest.as_deref().map(crate::text::home_short),
                 dest,
                 status,
                 problem,

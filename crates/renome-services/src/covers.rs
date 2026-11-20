@@ -2,6 +2,7 @@
 //! pickers, the command line's choosers): which series or issue has the
 //! file's cover, to show it first.
 
+use renome_core::text::fold;
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
@@ -316,10 +317,6 @@ fn unpadded(s: &str) -> &str {
         t = &t[1..];
     }
     t
-}
-
-fn fold(s: &str) -> String {
-    renome_core::text::strip_accents(s).to_lowercase()
 }
 
 #[cfg(test)]

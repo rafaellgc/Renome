@@ -28,7 +28,7 @@
     return t("readerNotOpens", { reader: m ? modelName(m) : "", format: f.toUpperCase(), best: (best ?? "").toUpperCase() });
   };
   import { api } from "./api";
-  import { NO_PNG, OTHER_DEVICES, POPULAR, READERS, SCREENS, chooseReader, formatsOf, isColourInk, isGreyInk, modelOf, opens, readerOf, type Format, type Reader } from "./readers";
+  import { OTHER_DEVICES, POPULAR, READERS, SCREENS, chooseReader, formatsOf, isColourInk, modelOf, opens, readerOf, type Format, type Reader } from "./readers";
 
   /** Whether this system can print books to PDF (asked once). */
   let canPrint = $state(false);
@@ -105,6 +105,14 @@
 
   let open = $state(true);
   const r = $derived(step.rule);
+  /** The options that do nothing as the rule is set (the Rust catalog
+   *  says: `catalog::inert`, the flows take them as off): hidden. */
+  let inert = $state<string[]>([]);
+  $effect(() => {
+    const rule = $state.snapshot(step.rule);
+    api.ruleInert(rule).then((v) => (inert = v), () => {});
+  });
+  const applies = (name: string) => !inert.includes(name);
   /** A whole-number option's bounds in this rule (the Rust catalog's). */
   const lim = (name: string) => limitsOf(r.type, name);
   /** Bounds in milliseconds as a field in seconds. */
@@ -359,7 +367,7 @@
           <label class="check"><input type="checkbox" bind:checked={r.fromEnd} /> {t("countFromEnd")}</label>
         </div>
         <div class="row">
-          <label>{t("onlyIf")} <input bind:value={r.onlyIf} maxlength="4" placeholder={t("any")} /></label>
+          <label>{t("onlyIf")} <input bind:value={r.onlyIf} placeholder={t("any")} /></label>
           <label>{t("replaceBy")} <input bind:value={r.replace} placeholder={t("deleteIt")} /></label>
         </div>
         {#if r.onlyIf}
@@ -422,7 +430,7 @@
         <label>{t("seriesShow")} <input bind:value={r.show} placeholder={t(r.source === "anilist" ? "seriesShowPlaceholderAnilist" : "seriesShowPlaceholder")} spellcheck="false" /></label>
         {#if lookup?.show}<p class="hint">{t("seriesCurrent", { show: lookup.show })}</p>{/if}
         {@render actions(t("tvSearch"), "seriesSummary")}
-        {#if r.source !== "anilist"}
+        {#if applies("nfo")}
           <h4 class="sect">{t("sectBeside")}</h4>
           <label class="check"><input type="checkbox" bind:checked={r.nfo} /> <span>{t("seriesSidecarLabel")}<small>{t("seriesSidecarHint")}</small></span></label>
           {#if r.nfo}
@@ -434,7 +442,7 @@
         {/if}
         <h4 class="sect">{t("sectList")}</h4>
         <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("seriesMissingLabel")}<small>{t("seriesMissingHint")}</small></span></label>
-        {#if r.source !== "anilist"}
+        {#if applies("subtitles")}
           <h4 class="sect">{t("sectSubs")}</h4>
           {@render subtitles()}
         {/if}
@@ -647,7 +655,7 @@
           </select>
         </label>
         <p class="hint">{t(SOURCE_HINT[r.source] ?? "gcdHint")}</p>
-        {#if r.source === "metron"}
+        {#if applies("barcode")}
           <label class="check"><input type="checkbox" bind:checked={r.barcode} /> <span>{t("comicBarcodeLabel")}<small>{t("comicBarcodeHint")}</small></span></label>
         {/if}
         <label>{t("comicSeries")} <input bind:value={r.series} placeholder={t("comicSeriesPlaceholder")} spellcheck="false" /></label>
@@ -714,7 +722,6 @@
               <label>{t("comicHeight")} <input type="number" {...lim("height")} bind:value={r.height} /></label>
             </div>
           {/if}
-          {@const dev = r.device}
           <label class="check sub"><input type="checkbox" bind:checked={r.crop} /> <span>{t("comicCrop")}<small>{t("comicCropHint")}</small></span></label>
           {#if r.crop}
             <label class="check sub2"><input type="checkbox" bind:checked={r.cropPageNumbers} /> <span>{t("comicNumbers")}<small>{t("comicNumbersHint")}</small></span></label>
@@ -726,13 +733,13 @@
           </label>
           <p class="hint sub">{t("comicSpreadHint")}</p>
           <label class="check sub"><input type="checkbox" bind:checked={r.contrast} /> <span>{t("comicContrast")}<small>{t("comicContrastHint")}</small></span></label>
-          {#if dev !== "original"}
+          {#if applies("upscale")}
             <label class="check sub"><input type="checkbox" bind:checked={r.upscale} /> <span>{t("comicUpscale")}<small>{t("comicUpscaleHint")}</small></span></label>
           {/if}
-          {#if isGreyInk(dev) && !NO_PNG.includes(dev)}
+          {#if applies("sixteenGreys")}
             <label class="check sub"><input type="checkbox" bind:checked={r.sixteenGreys} /> <span>{t("comicGreys16")}<small>{t("comicGreys16Hint")}</small></span></label>
           {/if}
-          {#if isColourInk(dev)}
+          {#if applies("reduceRainbow")}
             <label class="check sub"><input type="checkbox" bind:checked={r.reduceRainbow} /> <span>{t("comicSoften")}<small>{t("comicSoftenHint")}</small></span></label>
           {/if}
           <label class="check sub"><input type="checkbox" bind:checked={r.webtoon} /> <span>{t("comicWebtoon")}<small>{t("comicWebtoonHint")}</small></span></label>

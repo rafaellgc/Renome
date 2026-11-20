@@ -1001,7 +1001,7 @@ pub fn in_folder(m: &mut ComicMatch, folder: &str) {
     if f.series.is_empty() {
         return;
     }
-    let fold = |s: &str| text::strip_accents(&s.to_lowercase());
+    let fold = text::fold;
     let part_of = |a: &str, b: &str| {
         let a = simple(a);
         !a.is_empty() && format!(" {} ", simple(b)).contains(&format!(" {a} "))
@@ -1277,7 +1277,7 @@ pub fn folders(template: &str, m: &ComicMatch, colon: &str) -> Vec<String> {
 
 /// A name for comparing series: no accents, case or punctuation.
 fn simple(s: &str) -> String {
-    let s = text::strip_accents(&s.to_lowercase());
+    let s = text::fold(s);
     let s: String = s
         .chars()
         .map(|c| if c.is_alphanumeric() { c } else { ' ' })
@@ -1510,13 +1510,7 @@ pub struct Issue {
 /// Masters"), and among close ones those in the reader's language (`pt`);
 /// the service's order counts among equals.
 pub fn rank_volumes(query: &str, found: Vec<Volume>, lang: &str) -> Vec<Volume> {
-    let fold = |s: &str| {
-        text::strip_accents(&s.to_lowercase())
-            .split(|c: char| !c.is_alphanumeric())
-            .filter(|w| !w.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ")
-    };
+    let fold = text::fold_words;
     let q = fold(query);
     let lang = lang.split('-').next().unwrap_or("").to_lowercase();
     let mut scored: Vec<(f64, usize, Volume)> = found
@@ -1596,13 +1590,7 @@ pub fn skip_publishers(found: Vec<Volume>, skip: &str) -> Vec<Volume> {
         .collect()
 }
 
-fn fold_words(s: &str) -> String {
-    text::strip_accents(&s.to_lowercase())
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ")
-}
+use crate::text::fold_words;
 
 /// Publishers typed, separated by `;`, `/` or `,`.
 fn publishers(typed: &str) -> Vec<String> {
@@ -1705,7 +1693,7 @@ pub fn find_issue<'a>(m: &ComicMatch, issues: &'a [Issue]) -> Option<&'a Issue> 
 /// What a file's series has after the catalogue's: the story
 /// (`Series: Story`, `Series - Story` for `Series`); empty otherwise.
 pub fn story(own: &str, series: &str) -> String {
-    let fold = |s: &str| text::strip_accents(&s.to_lowercase());
+    let fold = text::fold;
     let (o, s) = (fold(own), fold(series.trim()));
     if s.is_empty() || !o.starts_with(&s) || o.len() == s.len() {
         return String::new();

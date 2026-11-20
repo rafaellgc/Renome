@@ -96,10 +96,11 @@ type Overrides = HashMap<PathBuf, String>;
 
 /// The bytes the kept answers take.
 #[tauri::command]
-async fn cache_size() -> u64 {
-    tauri::async_runtime::spawn_blocking(|| ANSWERS.size())
+async fn cache_size() -> (u64, String) {
+    let n = tauri::async_runtime::spawn_blocking(|| ANSWERS.size())
         .await
-        .unwrap_or(0)
+        .unwrap_or(0);
+    (n, renome_core::text::size(n))
 }
 
 /// Forgets the kept answers; returns the bytes freed.
@@ -591,6 +592,8 @@ async fn find_similar(app: AppHandle) -> Result<Option<Vec<Vec<PathBuf>>>, Strin
 struct PictureCard {
     path: PathBuf,
     size: u64,
+    /// The size as shown (`12 MB`).
+    size_text: String,
     /// Unix seconds.
     modified: Option<i64>,
     /// When the photo was taken (EXIF), `YYYY-MM-DDTHH:MM:SS`.
@@ -601,25 +604,6 @@ struct PictureCard {
     /// A smaller copy, as a `data:` URL; `None` for what is not a picture
     /// or cannot be read.
     image: Option<String>,
-}
-
-fn base64(bytes: &[u8]) -> String {
-    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let n = chunk
-            .iter()
-            .enumerate()
-            .fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
-        for i in 0..4 {
-            if i <= chunk.len() {
-                out.push(ABC[(n >> (18 - 6 * i) & 63) as usize] as char);
-            } else {
-                out.push('=');
-            }
-        }
-    }
-    out
 }
 
 /// A picture of a group as the comparison window knows it.
@@ -677,6 +661,7 @@ async fn picture_cards(paths: Vec<PathBuf>, max: u32) -> Vec<PictureCard> {
             PictureCard {
                 path: path.clone(),
                 size: entry.as_ref().map_or(0, |e| e.size),
+                size_text: renome_core::text::size(entry.as_ref().map_or(0, |e| e.size)),
                 modified: entry.as_ref().and_then(|e| e.modified),
                 taken: entry
                     .as_ref()
@@ -685,7 +670,9 @@ async fn picture_cards(paths: Vec<PathBuf>, max: u32) -> Vec<PictureCard> {
                     .map(|t| t.format("%Y-%m-%dT%H:%M:%S").to_string()),
                 width: dims.map(|d| d.0),
                 height: dims.map(|d| d.1),
-                image: shown.map(|(jpeg, _)| format!("data:image/jpeg;base64,{}", base64(&jpeg))),
+                image: shown.map(|(jpeg, _)| {
+                    format!("data:image/jpeg;base64,{}", renome_core::b64::encode(&jpeg))
+                }),
             }
         };
         std::thread::scope(|scope| {
@@ -717,7 +704,7 @@ async fn own_cover(path: PathBuf) -> Option<OwnCover> {
         let (bytes, hash) = renome_services::covers::own_cover(&path)?;
         let (jpeg, _) = renome_core::similar::shown_copy(&bytes, "img", 600)?;
         Some(OwnCover {
-            image: format!("data:image/jpeg;base64,{}", base64(&jpeg)),
+            image: format!("data:image/jpeg;base64,{}", renome_core::b64::encode(&jpeg)),
             hash: format!("{hash:016x}"),
         })
     })
@@ -759,7 +746,8 @@ async fn remote_image(url: String) -> Option<String> {
         .filter(|v| v.starts_with("image/"))?
         .to_string();
     let bytes = res.bytes().await.ok()?;
-    (bytes.len() <= 4 << 20).then(|| format!("data:{kind};base64,{}", base64(&bytes)))
+    (bytes.len() <= 4 << 20)
+        .then(|| format!("data:{kind};base64,{}", renome_core::b64::encode(&bytes)))
 }
 
 /// How far each cover (by address) is from the fingerprint `hash`, in
@@ -988,6 +976,16 @@ async fn movie_search(
     renome_services::flow::movies::search(&Gui(app.clone()), &client, &items).await
 }
 
+/// Each chosen movie as the rule names it, with its template fields (the
+/// shared flow's: `flow::movies::named`).
+#[tauri::command]
+fn movie_named(
+    files: Vec<(PathBuf, renome_core::tmdb::Candidate)>,
+    extras: HashMap<u64, renome_core::fields::Extra>,
+) -> HashMap<PathBuf, renome_core::tmdb::MovieMatch> {
+    renome_services::flow::movies::named(files, &extras)
+}
+
 /// The collections the chosen movies belong to, for those missing.
 #[tauri::command]
 async fn tmdb_collections(key: String, lang: String, ids: Vec<u64>, sets: bool) -> tmdb::MovieSets {
@@ -1111,6 +1109,36 @@ fn episodes_typed(
     text: String,
 ) -> renome_services::flow::series::Typed {
     renome_services::flow::series::typed(&show, &text)
+}
+
+/// Where each picture of a group is, as the comparison window says it
+/// (see `similar::places`).
+#[tauri::command]
+fn picture_places(group: Vec<PathBuf>) -> Vec<String> {
+    renome_core::similar::places(&group)
+}
+
+/// Whether the GCD is searched without an account (see `options::gcd_few`).
+#[tauri::command]
+fn gcd_few(source: String, email: String, password: String) -> bool {
+    renome_services::options::gcd_few(&source, &email, &password)
+}
+
+/// The options that do nothing as a rule is set (see `catalog::inert`):
+/// its card hides them.
+#[tauri::command]
+fn rule_inert(rule: Value) -> Vec<&'static str> {
+    renome_core::catalog::inert(&rule)
+}
+
+/// Episodes as file names write them (`S01E02-E03`: `flow::series::code`,
+/// the command line's too), for each list.
+#[tauri::command]
+fn episode_codes(lists: Vec<Vec<(u16, u16)>>) -> Vec<String> {
+    lists
+        .iter()
+        .map(|keys| renome_services::flow::series::code(keys))
+        .collect()
 }
 
 /// A larger copy of a catalogue's cover, where there is one.
@@ -1449,6 +1477,17 @@ async fn subs_search(
 ) -> renome_services::flow::subtitles::Outcome {
     let stop = stop_signal(&app);
     renome_services::flow::subtitles::search(&Gui(app.clone()), auth, &langs, items, stop).await
+}
+
+/// What is chosen across the videos' subtitles, and whether those from
+/// OpenSubtitles pass the day's quota (see `flow::subtitles::tally`).
+#[tauri::command]
+fn subs_tally(
+    videos: Vec<renome_services::flow::subtitles::Standing>,
+    langs: Vec<String>,
+    remaining: Option<i64>,
+) -> renome_services::flow::subtitles::Tally {
+    renome_services::flow::subtitles::tally(&videos, &langs, remaining)
 }
 
 #[tauri::command]
@@ -2254,6 +2293,12 @@ pub fn run() {
             movie_search,
             series_search,
             series_named,
+            movie_named,
+            episode_codes,
+            rule_inert,
+            subs_tally,
+            gcd_few,
+            picture_places,
             flow_answer,
             tmdb_search,
             tv_search,

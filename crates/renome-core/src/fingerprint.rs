@@ -25,29 +25,13 @@ pub struct Print {
     pub duration: u32,
 }
 
-/// Base64 with the URL alphabet and no padding, as Chromaprint writes it.
-fn base64url(bytes: &[u8]) -> String {
-    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut out = String::with_capacity(bytes.len() * 4 / 3 + 3);
-    for chunk in bytes.chunks(3) {
-        let n = chunk
-            .iter()
-            .enumerate()
-            .fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
-        for i in 0..=chunk.len() {
-            out.push(ABC[(n >> (18 - 6 * i) & 63) as usize] as char);
-        }
-    }
-    out
-}
-
 /// The fingerprint of the song at `path`; `None` when its audio cannot be
 /// decoded (a format not supported, a damaged file) or is too short.
 pub fn of(path: &Path) -> Option<Print> {
     let (print, duration) = raw(path)?;
     let config = Configuration::preset_test2();
     Some(Print {
-        fingerprint: base64url(&FingerprintCompressor::from(&config).compress(&print)),
+        fingerprint: crate::b64::encode_url(&FingerprintCompressor::from(&config).compress(&print)),
         duration,
     })
 }
@@ -127,11 +111,11 @@ mod tests {
 
     #[test]
     fn encodes_like_chromaprint() {
-        assert_eq!(base64url(b""), "");
-        assert_eq!(base64url(b"f"), "Zg");
-        assert_eq!(base64url(b"fo"), "Zm8");
-        assert_eq!(base64url(b"foo"), "Zm9v");
-        assert_eq!(base64url(&[0xfb, 0xff]), "-_8");
+        assert_eq!(crate::b64::encode_url(b""), "");
+        assert_eq!(crate::b64::encode_url(b"f"), "Zg");
+        assert_eq!(crate::b64::encode_url(b"fo"), "Zm8");
+        assert_eq!(crate::b64::encode_url(b"foo"), "Zm9v");
+        assert_eq!(crate::b64::encode_url(&[0xfb, 0xff]), "-_8");
     }
 
     /// A WAV of a few tones, long enough to be fingerprinted.

@@ -58,9 +58,7 @@ fn ordered() -> Vec<(&'static Page, Option<String>)> {
         .collect()
 }
 
-fn plain(s: &str) -> String {
-    renome_core::text::strip_accents(s).to_lowercase()
-}
+use renome_core::text::fold as plain;
 
 /// The page a topic names: its id (`r-movie` or `movie`), or the start of
 /// its title, accents and case aside.

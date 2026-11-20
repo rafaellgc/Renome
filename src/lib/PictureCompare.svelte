@@ -2,6 +2,7 @@
   import { dialog as dialogBox } from "./modal";
   import Icon from "./Icon.svelte";
   import { api, type PictureCard } from "./api";
+  import { baseName } from "./page/common";
   import { confirm, dialog, notify } from "./dialogs.svelte";
   import { LOCALES, t, tError } from "./i18n";
   import { settings } from "./settings.svelte";
@@ -145,31 +146,19 @@
     } else go(step);
   }
 
-  const base = (p: string) => p.split(/[\\/]/).pop() ?? p;
+  const base = baseName;
   const folder = (p: string) => p.replace(/[\\/][^\\/]*$/, "");
-  const home = /^\/(var\/)?home\/[^/]+/;
-  // Where each picture is: in a group spread over folders, only what tells
-  // them apart ("…/Phone", "…/WhatsApp"); the whole folder otherwise.
-  function where(p: string) {
-    const dirs = group.map((g) => folder(g).split(/[\\/]/));
-    const own = folder(p).split(/[\\/]/);
-    let k = 0;
-    while (k < own.length && dirs.every((d) => d.length > k && d[k] === own[k])) k++;
-    if (dirs.every((d) => d.length === k) || k === 0) return folder(p).replace(home, "~");
-    const sep = p.includes("\\") && !p.includes("/") ? "\\" : "/";
-    // A folder holding the others: all start from its name.
-    const from = dirs.some((d) => d.length === k) ? k - 1 : k;
-    return `…${sep}${own.slice(from).join(sep)}`;
-  }
+  /** Where each picture of the group is (Rust says: only what tells them
+   *  apart, or the whole folder). */
+  let places = $state<Record<string, string>>({});
+  $effect(() => {
+    const g = group;
+    api.picturePlaces(g).then((w) => {
+      if (g === group) places = Object.fromEntries(g.map((p, i) => [p, w[i]]));
+    }, () => {});
+  });
+  const where = (p: string) => places[p] ?? "";
   const ext = (p: string) => (base(p).includes(".") ? base(p).split(".").pop()!.toUpperCase() : "");
-  function size(n: number) {
-    if (n < 1024) return `${n} B`;
-    const units = ["KB", "MB", "GB", "TB"];
-    let v = n / 1024;
-    let u = 0;
-    while (v >= 1024 && u < units.length - 1) { v /= 1024; u++; }
-    return `${v.toFixed(v < 10 ? 1 : 0)} ${units[u]}`;
-  }
   const fmt = $derived(new Intl.DateTimeFormat(LOCALES[settings.lang], { dateStyle: "short", timeStyle: "short" }));
   const takenAt = (c: PictureCard) => (c.taken ? fmt.format(new Date(c.taken)) : null);
   const changedAt = (c: PictureCard) => (c.modified === null ? "" : fmt.format(new Date(c.modified * 1000)));
@@ -215,7 +204,7 @@
               <b class="name" title={p}>{base(p)}</b>
               <span class="muted path" title={folder(p)}><bdi>{where(p)}</bdi></span>
               {#if c}
-                <span>{[c.width ? `${c.width}×${c.height}` : "", size(c.size)].filter(Boolean).join(" · ")}</span>
+                <span>{[c.width ? `${c.width}×${c.height}` : "", c.sizeText].filter(Boolean).join(" · ")}</span>
                 <span class="muted">{takenAt(c) ? t("compareTaken", { d: takenAt(c) ?? "" }) : t("compareChanged", { d: changedAt(c) })}</span>
               {/if}
               <span class="badges">

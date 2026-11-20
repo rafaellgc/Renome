@@ -1164,6 +1164,11 @@ fn compile(rule: &Rule) -> Result<Option<Compiled>, (&'static str, String)> {
             validate_date_format(date_format)?;
             return Ok(Some(Compiled::Plain(rule.clone())));
         }
+        // The character compared is one letter (or sign, or emoji): a
+        // longer text would never be it.
+        Rule::CharAt { only_if, .. } if text::graphemes(only_if).len() > 1 => {
+            return Err(("onlyIfOne", only_if.clone()));
+        }
         Rule::List { names, pairs } => {
             let names: Vec<String> = names
                 .lines()
@@ -2802,5 +2807,24 @@ mod tests {
         let steps: Vec<Step> = serde_json::from_str(json).unwrap();
         assert_eq!(steps.len(), 2);
         assert!(steps[1].enabled);
+    }
+
+    #[test]
+    fn only_if_is_one_character() {
+        let step = |only_if: &str| Step {
+            enabled: true,
+            only: String::new(),
+            rule: Rule::CharAt {
+                position: 1,
+                from_end: false,
+                only_if: only_if.into(),
+                case_sensitive: false,
+                replace: String::new(),
+            },
+        };
+        assert!(Pipeline::new(&[step("é")]).errors.is_empty());
+        assert!(Pipeline::new(&[step("👍🏽")]).errors.is_empty());
+        let e = Pipeline::new(&[step("ab")]).errors;
+        assert_eq!(e[0].code, "onlyIfOne");
     }
 }

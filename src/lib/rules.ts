@@ -43,6 +43,8 @@ export type RuleTable = {
     serverKinds: [string, string][];
     /** The setting holding each comic catalogue's key. */
     comicKeys: Record<string, string>;
+    /** The errors a key or account in the options fixes. */
+    keyErrors: string[];
   };
 };
 
@@ -62,7 +64,7 @@ export let TABLE: RuleTable = {
   menus: {},
   seriesOnly: [],
   editFields: { music: [], book: [], comic: [], photo: [] },
-  options: { defaults: {}, secrets: [], menus: {}, serverKinds: [], comicKeys: {} },
+  options: { defaults: {}, secrets: [], menus: {}, serverKinds: [], comicKeys: {}, keyErrors: [] },
 };
 export function setRuleTable(table: RuleTable) {
   TABLE = table;
@@ -110,6 +112,10 @@ export const menuOf = (type: RuleType, name: string) => TABLE.menus[type]?.[name
 
 /** The rules that name a whole kind of file (one at a time). */
 export const isKindRule = (type: RuleType) => TABLE.kinds.includes(type);
+
+/** Whether an error is fixed by a key or account in the options (the
+ *  Rust table's list). */
+export const needsKey = (e: unknown) => TABLE.options.keyErrors.some((k) => String(e).startsWith(k));
 
 /** Why a rule cannot join the rules there (the Rust catalog decides). */
 export type Blocked = { kind: RuleType } | { twice: true } | { clash: RuleType };

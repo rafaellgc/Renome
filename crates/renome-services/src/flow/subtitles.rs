@@ -38,7 +38,8 @@ pub struct Identified {
 pub fn wanted(rules: &[serde_json::Value]) -> Option<String> {
     let rule = rules.iter().find(|r| {
         r["subtitles"] == true
-            && (r["type"] == "movie" || (r["type"] == "series" && r["source"] != "anilist"))
+            && (r["type"] == "movie" || r["type"] == "series")
+            && !renome_core::catalog::inert(r).contains(&"subtitles")
     })?;
     Some(match rule["subLangs"].as_str() {
         Some(l) => l.to_string(),
@@ -131,6 +132,64 @@ pub fn picks(found: &subs::Found) -> BTreeMap<String, i64> {
         }
     }
     pick
+}
+
+/// A video's subtitles as they stand: the languages beside it and only
+/// inside it, the candidates and the one picked per language.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Standing {
+    pub have: Vec<String>,
+    pub inside: Vec<String>,
+    pub candidates: Vec<Candidate>,
+    pub pick: BTreeMap<String, i64>,
+}
+
+/// What is chosen across the videos: subtitles to come (not beside their
+/// video yet), the videos getting some, the videos still lacking a
+/// language asked for, and whether those from OpenSubtitles pass the
+/// day's quota (when known).
+#[derive(Clone, Debug, Default, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Tally {
+    pub subs: usize,
+    pub videos: usize,
+    pub missing: usize,
+    pub over_quota: bool,
+}
+
+/// Counts what is chosen (the window's summary and review, the command
+/// line's warning).
+pub fn tally<'a>(
+    videos: impl IntoIterator<Item = &'a Standing>,
+    langs: &[String],
+    remaining: Option<i64>,
+) -> Tally {
+    let mut t = Tally::default();
+    let mut from_os = 0i64;
+    for v in videos {
+        let coming: Vec<&Candidate> = v
+            .pick
+            .iter()
+            .filter(|(l, i)| **i >= 0 && !v.have.contains(l))
+            .filter_map(|(_, i)| v.candidates.get(usize::try_from(*i).ok()?))
+            .collect();
+        t.subs += coming.len();
+        if !coming.is_empty() {
+            t.videos += 1;
+        }
+        from_os += coming
+            .iter()
+            .filter(|c| c.source == renome_core::subtitles::Source::OpenSubtitles)
+            .count() as i64;
+        if langs.iter().any(|l| {
+            !v.have.contains(l) && !v.inside.contains(l) && v.pick.get(l).is_none_or(|i| *i < 0)
+        }) {
+            t.missing += 1;
+        }
+    }
+    t.over_quota = remaining.is_some_and(|r| from_os > r);
+    t
 }
 
 /// Searches the videos (see [`targets`]).
@@ -267,5 +326,40 @@ mod tests {
             .map(|l| l.iter().map(|c| c.id.as_str()).collect())
             .collect();
         assert_eq!(ids, [vec!["p2", "p1"], vec!["e1"]]);
+    }
+
+    #[test]
+    fn tally_counts_what_comes_and_the_quota() {
+        use renome_core::subtitles::Source;
+        let c = |lang: &str, source| Candidate {
+            lang: lang.into(),
+            source,
+            ..Default::default()
+        };
+        let v = Standing {
+            have: vec!["en".into()],
+            inside: vec![],
+            candidates: vec![
+                c("pt-BR", Source::OpenSubtitles),
+                c("en", Source::OpenSubtitles),
+                c("es", Source::Subdl),
+            ],
+            pick: [
+                ("pt-BR".to_string(), 0),
+                ("en".to_string(), 1),
+                ("es".to_string(), 2),
+            ]
+            .into(),
+        };
+        let none = Standing {
+            pick: [("pt-BR".to_string(), -1)].into(),
+            ..Default::default()
+        };
+        let langs = vec!["pt-BR".to_string(), "en".to_string(), "es".to_string()];
+        let t = tally([&v, &none], &langs, Some(0));
+        // en is beside the video already: two to come, one from OpenSubtitles.
+        assert_eq!((t.subs, t.videos, t.missing, t.over_quota), (2, 1, 1, true));
+        assert!(!tally([&v], &langs, Some(1)).over_quota);
+        assert!(!tally([&v], &langs, None).over_quota);
     }
 }

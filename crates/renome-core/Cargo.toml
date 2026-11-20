@@ -6,6 +6,7 @@ license = "MIT"
 description = "Renome core: renaming rules, preview and safe apply"
 
 [dependencies]
+base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 chardetng = "1"
 encoding_rs = "0.8"

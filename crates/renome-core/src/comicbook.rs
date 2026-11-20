@@ -587,7 +587,7 @@ fn prepare(data: &[u8], o: &EbookOptions, first: bool, rtl: bool) -> Result<Vec<
             let same = whole
                 && (w, h) == (w0, h0)
                 && !o.contrast
-                && !o.greys16
+                && !(o.greys16 && grey && o.device.png_ok())
                 && !(o.soften && o.device.colour_ink());
             if same && data.starts_with(&[0xff, 0xd8]) && (source_grey || !grey) {
                 return Ok(Out {

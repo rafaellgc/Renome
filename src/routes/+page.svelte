@@ -13,7 +13,7 @@
   import { Series } from "$lib/page/series.svelte";
   import { Subtitles } from "$lib/page/subtitles.svelte";
   import { Photos } from "$lib/page/photos.svelte";
-  import type { PageCtx } from "$lib/page/common";
+  import { baseName, type PageCtx } from "$lib/page/common";
   import Dialog from "$lib/Dialog.svelte";
   import Icon from "$lib/Icon.svelte";
   import RuleSets from "$lib/RuleSets.svelte";
@@ -38,7 +38,7 @@
   import { TABLE, isKindRule, setRuleTable, type Blocked, newRule, newStep } from "$lib/rules";
   import { loadSecrets, refreshLangs, saveSecrets, saveSettings, secretFields, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
-    AfterCounts, AfterReport, ApplyReport, Candidate, Copies, MovieStatus, HistoryEntry, OpError, Preview, PreviewItem, Rule, RuleType, Step, View, ViewSort,
+    AfterCounts, AfterReport, ApplyReport, SaidLine, Candidate, Copies, MovieStatus, HistoryEntry, OpError, Preview, PreviewItem, Rule, RuleType, Step, View, ViewSort,
   } from "$lib/types";
   import type { DetailColumn, UpdateFound } from "$lib/types";
 
@@ -155,7 +155,9 @@
       subLangs: subs.langs,
     });
   }
-  const NO_COUNTS: AfterCounts = { sidecars: 0, bookMeta: 0, covers: 0, playlists: 0, tags: 0, inside: 0, videoTags: 0, subTools: 0, subtitles: 0, besides: 0 };
+  const NO_COUNTS: AfterCounts = { sidecars: 0, bookMeta: 0, covers: 0, playlists: 0, tags: 0, inside: 0, videoTags: 0, subTools: 0, subtitles: 0, besides: 0, lines: [] };
+  /** Lines Rust says of the work besides the renames, in the texts. */
+  const said = (lines: SaidLine[]) => lines.map((l) => t(l.key as Key, { n: l.n }));
   /** What renaming would write besides the renames (asked of the shared flow whenever the list or the choices change). */
   let afterCounts = $state<AfterCounts>(NO_COUNTS);
   $effect(() => {
@@ -586,10 +588,6 @@
     ruleMenu = false;
   }
 
-  /** "2 subtitles fixed, 1 extracted from videos", leaving out what is none. */
-  const subToolsText = (fixed: number, extracted: number) =>
-    [fixed ? t("subToolsN", { n: fixed }) : "", extracted ? t("subToolsM", { n: extracted }) : ""].filter(Boolean).join(", ");
-
   /** Loaded steps with one lookup rule at most; the notice says which
    *  were left out, else `done` (when given). */
   async function loadSteps(loaded: Step[], done = "", saved = false): Promise<Step[]> {
@@ -613,7 +611,7 @@
     else overrides[path] = name;
   }
 
-  const basename = (p: string) => p.split(/[\\/]/).pop() ?? p;
+  const basename = baseName;
   const errText = (e: OpError) => {
     if (e.kind === "history") return `${t("err.history")} (${e.detail})`;
     const why =
@@ -654,14 +652,7 @@
             ? t(sendTo.copy ? "confirmCopy" : "confirmMove", { n: preview.changed, dir: sendTo.dir })
             : t("confirmText", { n: preview.changed })
           : "",
-        counts.sidecars ? t("confirmMeta", { n: counts.sidecars }) : "",
-        counts.bookMeta ? t("confirmBookMeta", { n: counts.bookMeta }) : "",
-        counts.covers ? t("confirmCovers", { n: counts.covers }) : "",
-        counts.playlists ? t("confirmPlaylists", { n: counts.playlists }) : "",
-        counts.tags ? t("confirmTags", { n: counts.tags }) : "",
-        counts.inside + counts.videoTags ? t("confirmInside", { n: counts.inside + counts.videoTags }) : "",
-        counts.subTools ? t("confirmSubTools", { n: counts.subTools }) : "",
-        counts.subtitles ? t("confirmSubs", { n: counts.subtitles }) : "",
+        ...said(counts.lines),
         preview.conflicts - sameThere ? t("confirmConflicts", { n: preview.conflicts - sameThere }) : "",
         sameThere ? t("confirmSameThere", { n: sameThere }) : "",
         ads ? t("confirmTrashAds", { n: ads, folders: preview.trashFolders.length }) : "",
@@ -712,7 +703,7 @@
           tags: ["tagsTitle", (n) => t("tagsN", { n })],
           audioTags: ["tagsTitle", (n) => t("audioTagsN", { n })],
           inside: ["insideTitle", (n) => t("insideN", { n })],
-          subTools: ["subToolsTitle", () => subToolsText(after!.subFixed, after!.subExtracted)],
+          subTools: ["subToolsTitle", () => said(after!.lines.filter((l) => l.key.startsWith("subTools"))).join(", ")],
           subtitles: ["subsTitle", (n) => t("subsSavedN", { n })],
         };
         for (const x of after.troubles) {
@@ -724,7 +715,6 @@
           });
         }
       }
-      const a = after ?? { adsTrashed: 0, adsFailed: 0, sidecars: 0, keptLists: 0, tags: 0, audioTags: 0, inside: 0, drawn: 0, subFixed: 0, subExtracted: 0, subtitles: 0 };
       followMatches(r.moved);
       if (settings.disableRulesAfterApply) for (const s of steps) s.enabled = false;
       // The list now holds what was sent: sending it again would send it
@@ -735,18 +725,9 @@
         preview.changed ? t(sent ? (sent.copy ? "copiedN" : "movedN") : "renamedN", { n: r.done.filter((op) => !leftFrom.has(op.from)).length }) : "",
         r.stopped ? t("applyStopped") : "",
         r.done.some((op) => leftFrom.has(op.from)) ? t("leftFoldersN", { n: r.done.filter((op) => leftFrom.has(op.from)).length }) : "",
-        a.adsTrashed ? t("adsTrashedN", { n: a.adsTrashed }) : "",
-        a.adsFailed ? t("adsFailedN", { n: a.adsFailed }) : "",
         r.lists ? t("listsN", { n: r.lists }) : "",
         r.listsRemoved ? t("listsRemovedN", { n: r.listsRemoved }) : "",
-        a.sidecars ? t("sidecarsN", { n: a.sidecars }) : "",
-        a.subtitles ? t("subsSavedN", { n: a.subtitles }) : "",
-        subToolsText(a.subFixed, a.subExtracted),
-        a.keptLists ? t("playlistsKeptN", { n: a.keptLists }) : "",
-        a.tags ? t("tagsN", { n: a.tags }) : "",
-        a.audioTags ? t("audioTagsN", { n: a.audioTags }) : "",
-        a.inside ? t("insideN", { n: a.inside }) : "",
-        a.drawn ? t("insideDrawnN", { n: a.drawn }) : "",
+        ...said(after?.lines ?? []),
         r.errors.length ? t("errorsN", { n: r.errors.length }) : "",
       ].filter(Boolean).join(" · ");
       await refresh();
@@ -1671,6 +1652,8 @@
         return { path: i.path, name: i.original, candidates: s.candidates, langs: subs.langs.map((l) => ({ lang: l, have: s.have.includes(l), inside: s.inside.includes(l), pick: s.pick[l] ?? -1 })) };
       })}
     remaining={subs.remaining}
+    chosen={subs.counts.subs}
+    overQuota={subs.counts.overQuota}
     onpick={(path, lang, index) => (subs.found[path].pick[lang] = index)}
     onclose={() => (subs.review = false)}
   />

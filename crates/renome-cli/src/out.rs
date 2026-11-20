@@ -78,36 +78,12 @@ pub fn note(message: &str) {
     }
 }
 
-/// A path as people read it: the home folder as `~`.
+/// A path as people read it: the home folder as `~` (the core's).
 pub fn path(p: &Path) -> String {
-    if let Some(home) = dirs_home()
-        && let Ok(rest) = p.strip_prefix(&home)
-    {
-        return if rest.as_os_str().is_empty() {
-            "~".into()
-        } else {
-            format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display())
-        };
-    }
-    p.display().to_string()
+    renome_core::text::home_short(p)
 }
 
-fn dirs_home() -> Option<std::path::PathBuf> {
-    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(Into::into)
-}
-
-/// Bytes as the list shows them.
+/// Bytes as the list shows them (the core's).
 pub fn size(bytes: u64) -> String {
-    let units = ["B", "KB", "MB", "GB", "TB"];
-    let mut v = bytes as f64;
-    let mut u = 0;
-    while v >= 1024.0 && u < units.len() - 1 {
-        v /= 1024.0;
-        u += 1;
-    }
-    if u == 0 {
-        format!("{bytes} B")
-    } else {
-        format!("{v:.1} {}", units[u])
-    }
+    renome_core::text::size(bytes)
 }

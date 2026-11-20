@@ -7,7 +7,8 @@ import { confirm, notify } from "$lib/dialogs.svelte";
 import { t, tError } from "$lib/i18n";
 import { comicKey, langs, settings } from "$lib/settings.svelte";
 import type { ComicIssue, ComicMatch, ComicSource, ComicState, ComicVolume, EditField, Rule, ComicFormat } from "$lib/types";
-import { counts, editFields, moved, ruleOf, without, type PageCtx } from "./common";
+import { needsKey } from "$lib/rules";
+import { counts, editFields, moved, reviewQueue, ruleOf, without, type PageCtx } from "./common";
 
 /** What the series picker asks, while open. */
 export type ComicPick = { source: ComicSource; skip: string; query: string; files: number; highest: number; candidates: ComicVolume[]; path?: string; comic?: ComicMatch; resolve: (v: ComicVolume | null) => void };
@@ -70,7 +71,7 @@ export class Comics {
     const skip = rule.skipPublishers.trim();
     const key = comicKey(source);
     // Without an account the GCD takes few searches: said once per session.
-    if (source === "gcd" && !this.#gcdWarned && !(settings.gcdEmail.trim() && settings.gcdPassword)) {
+    if (!this.#gcdWarned && (await api.gcdFew(source, settings.gcdEmail, settings.gcdPassword))) {
       this.#gcdWarned = true;
       const ok = await confirm({ title: t("rule.comic"), text: t("gcdNoAccount"), ok: t("options"), cancel: t("gcdAnonymous") });
       if (ok) {
@@ -104,10 +105,9 @@ export class Comics {
       await this.rebuild();
       if (Object.values(this.state).some((c) => c.status === "choose")) this.openReview();
     } catch (e) {
-      const err = String(e);
       // A key missing or refused is fixed in the options (which, the
-      // shared flow says).
-      if (["gcdBadLogin", "mtBadKey", "cvNeedsKey", "mtNeedsKey"].some((k) => err.startsWith(k))) {
+      // Rust table says).
+      if (needsKey(e)) {
         if (await confirm({ title: t("rule.comic"), text: tError(e), ok: t("options"), cancel: t("close") })) this.#ctx.openOptions();
       } else {
         await notify({ title: t("rule.comic"), text: tError(e) });
@@ -120,13 +120,7 @@ export class Comics {
 
   /** Opens the review on the comics still without an issue (or on one). */
   openReview(start?: string) {
-    const paths = this.#ctx.items.map((i) => i.path);
-    const pending = [
-      ...paths.filter((p) => this.state[p]?.status === "choose"),
-      ...paths.filter((p) => this.state[p]?.status === "none"),
-    ];
-    const queue = start ? [start, ...pending.filter((p) => p !== start)] : pending;
-    this.review = queue.length ? queue : null;
+    this.review = reviewQueue(this.#ctx.items.map((i) => i.path), (p) => this.state[p]?.status, start);
   }
 
   async choose(path: string, issue: string | null) {

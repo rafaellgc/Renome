@@ -100,15 +100,8 @@ pub fn series_only(source: &str) -> bool {
     matches!(source, "mangadex" | "anilist" | "mangaupdates")
 }
 
-/// A name compared: no accents, no case, words only.
-fn fold(s: &str) -> String {
-    renome_core::text::strip_accents(s)
-        .to_lowercase()
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ")
-}
+/// A name compared: no accents, no case, words only (the core's).
+use renome_core::text::fold_words as fold;
 
 /// The key a group of comics' series is picked under (see
 /// [`Outcome::picked`]).

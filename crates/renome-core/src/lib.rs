@@ -32,6 +32,7 @@ pub mod alike;
 pub mod answers;
 pub mod apply;
 pub mod audiobook;
+pub mod b64;
 pub mod barcode;
 pub mod bookconv;
 pub mod bookmeta;

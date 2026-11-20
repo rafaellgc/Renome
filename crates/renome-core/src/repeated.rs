@@ -32,6 +32,8 @@ pub enum Kind {
 pub struct Item {
     pub path: PathBuf,
     pub size: u64,
+    /// The size as shown (`12 MB`).
+    pub size_text: String,
     /// A video's picture (`1920×1080`) and codec, when read.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub picture: String,
@@ -431,6 +433,7 @@ pub fn same_works(
                 Item {
                     path: f.path.clone(),
                     size: f.size,
+                    size_text: crate::text::size(f.size),
                     picture: v
                         .map(|v| format!("{}×{}", v.width, v.height))
                         .unwrap_or_default(),

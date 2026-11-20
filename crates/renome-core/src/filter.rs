@@ -21,9 +21,8 @@
 //! the folders the file is in, from the one added down: `pasta:"Temporada
 //! 2"`, `-pasta:extras`, `pasta:S0?`. One of them must match.
 
+use crate::text::fold;
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
-
-use crate::text::strip_accents;
 
 /// Terms of one kind: patterns and plain text.
 #[derive(Default)]
@@ -326,10 +325,6 @@ pub struct Filter {
     /// Folders: one of these, and none of those.
     folders: Vec<FolderTerm>,
     no_folders: Vec<FolderTerm>,
-}
-
-fn fold(s: &str) -> String {
-    strip_accents(&s.to_lowercase())
 }
 
 /// For plain text: `O.Reino.das.Mares` has the words `reino das`.
