@@ -1311,171 +1311,318 @@ fn insert(rule: &Rule, stem: &mut String, ctx: &Ctx) {
     *stem = format!("{}{}{}", g[..idx].concat(), piece, g[idx..].concat());
 }
 
+/// Changes the case of the name (lower, upper, sentence or title), keeping the words asked.
+fn case_rule(rule: &Rule, stem: &mut String, ext: &mut String) {
+    let Rule::Case { mode, target, keep } = rule else {
+        return;
+    };
+    on_target(stem, ext, *target, |s| {
+        let changed = match mode {
+            CaseMode::Lower => s.to_lowercase(),
+            CaseMode::Upper => s.to_uppercase(),
+            CaseMode::Sentence => text::sentence_case(s),
+            CaseMode::Title => text::title_case(s, false),
+            CaseMode::TitleSmart => text::title_case(s, true),
+        };
+        text::keep_words(s, &changed, keep)
+    })
+}
+
+/// Numbers the files from the template, from `start` by `step`.
+fn number_rule(rule: &Rule, stem: &mut String, ctx: &Ctx) {
+    let Rule::Number {
+        template,
+        start,
+        step,
+        digits,
+        per_folder,
+        pairs,
+    } = rule
+    else {
+        return;
+    };
+    let index = match (*per_folder, *pairs) {
+        (false, false) => ctx.index,
+        (true, false) => ctx.folder_index,
+        (false, true) => ctx.pair_index,
+        (true, true) => ctx.pair_folder_index,
+    };
+    let n = start.saturating_add(step.saturating_mul(index as i64));
+    let num = format!("{n:0digits$}");
+    let folder = folder_name(ctx.file);
+    let kept = if *pairs { pair_split(ctx.file).1 } else { "" };
+    let name = stem.strip_suffix(kept).unwrap_or(stem).to_string();
+    *stem = expand(template, |key| match key {
+        "n" => Some(num.as_str()),
+        "name" | "nome" | "nombre" => Some(name.as_str()),
+        "folder" | "pasta" | "carpeta" => Some(folder.as_str()),
+        _ => None,
+    }) + kept;
+}
+
+/// Takes out the spaces, accents, digits, leading number or characters asked.
+fn remove_rule(rule: &Rule, stem: &mut String, ext: &mut String) {
+    let Rule::Remove {
+        all_spaces,
+        extra_spaces,
+        accents,
+        digits,
+        chars,
+        leading_number,
+        max_length,
+        target,
+    } = rule
+    else {
+        return;
+    };
+    on_target(stem, ext, *target, |s| {
+        let mut s = s.to_string();
+        if *leading_number
+            && let Some(m) = LEADING_NUMBER.find(&s)
+            && m.end() < s.len()
+        {
+            s = s[m.end()..].to_string();
+        }
+        if *accents {
+            s = text::plain_letters(&s);
+        }
+        if *digits {
+            s.retain(|c| !c.is_ascii_digit());
+        }
+        if !chars.is_empty() {
+            // `?` also takes `？`, put in names in its place.
+            let typed: Vec<&str> = chars.graphemes(true).collect();
+            s = s
+                .graphemes(true)
+                .filter(|g| !typed.iter().any(|t| text::same_char(t, g, true)))
+                .collect();
+        }
+        if *all_spaces {
+            s.retain(|c| !c.is_whitespace() && !text::is_invisible(c));
+        } else if *extra_spaces {
+            s = text::collapse_spaces(&s);
+        }
+        if *max_length > 0 {
+            s = text::cut(&s, *max_length);
+        }
+        s
+    });
+}
+
+/// Repairs the name: wrong encoding, non-Latin letters, glued words, web-unsafe characters.
+fn convert_rule(rule: &Rule, stem: &mut String, ext: &mut String) {
+    let Rule::Convert {
+        mojibake,
+        latin,
+        web,
+        split_words,
+        target,
+    } = rule
+    else {
+        return;
+    };
+    on_target(stem, ext, *target, |s| {
+        let mut s = s.to_string();
+        if *mojibake {
+            s = text::fix_mojibake(&s);
+        }
+        if *latin {
+            s = text::to_latin(&s);
+        }
+        if *split_words {
+            s = text::split_glued(&s);
+        }
+        if !web.is_empty() {
+            s = text::web_safe(&s, web);
+        }
+        s
+    });
+}
+
+/// Takes out a stretch of the name, by position or between two marks.
+fn remove_range_rule(rule: &Rule, stem: &mut String) {
+    let Rule::RemoveRange {
+        from,
+        from_position,
+        from_text,
+        to,
+        to_position,
+        to_text,
+        inclusive,
+    } = rule
+    else {
+        return;
+    };
+    if let Some(s) = remove_range(
+        stem,
+        *from,
+        *from_position,
+        from_text,
+        *to,
+        *to_position,
+        to_text,
+        *inclusive,
+    ) {
+        *stem = s;
+    }
+}
+
+/// Changes the character at a position of the name when it passes the condition.
+fn char_at_rule(rule: &Rule, stem: &mut String) {
+    let Rule::CharAt {
+        position,
+        from_end,
+        only_if,
+        case_sensitive,
+        replace,
+    } = rule
+    else {
+        return;
+    };
+    let mut g = text::graphemes(stem);
+    if *position == 0 || *position > g.len() {
+        return;
+    }
+    let i = if *from_end {
+        g.len() - position
+    } else {
+        position - 1
+    };
+    let same = if *case_sensitive {
+        g[i] == only_if
+    } else {
+        g[i].to_lowercase() == only_if.to_lowercase()
+    };
+    if !only_if.is_empty() && !same {
+        return;
+    }
+    if replace.is_empty() {
+        g.remove(i);
+    } else {
+        g[i] = replace;
+    }
+    *stem = g.concat();
+}
+
+/// Puts the parts of the name, split at a separator, in another order.
+fn rearrange_rule(rule: &Rule, stem: &mut String, ext: &mut String) {
+    let Rule::Rearrange {
+        separator,
+        order,
+        target,
+    } = rule
+    else {
+        return;
+    };
+    on_target(stem, ext, *target, |s| {
+        rearrange(s, separator, order).unwrap_or_else(|| s.to_string())
+    })
+}
+
+/// Names a song from its tags with the music template.
+fn music_rule(rule: &Rule, stem: &mut String, ctx: &Ctx) {
+    let Rule::Music {
+        template,
+        colon,
+        disc_prefix,
+        from_name,
+        ..
+    } = rule
+    else {
+        return;
+    };
+    if let Some(t) = song_of(ctx, *from_name) {
+        let name = music::expand(template, &t, colon, *disc_prefix);
+        if !name.is_empty() {
+            *stem = name;
+        }
+    }
+}
+
+/// Names a book from its data with the book template.
+fn book_rule(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
+    let Rule::Book {
+        template,
+        colon,
+        convert_to,
+        ..
+    } = rule
+    else {
+        return;
+    };
+    if let Some(m) = ctx.book {
+        let name = books::book_name(template, m, colon);
+        if !name.is_empty() {
+            *stem = name;
+        }
+    }
+    if let Some(t) = crate::bookconv::Target::from_ext(convert_to)
+        && converts_book(ctx.file, t)
+    {
+        *ext = t.ext().into();
+    }
+}
+
+/// Names a comic from its data with the comic template.
+fn comic_rule(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
+    let Rule::Comic {
+        template,
+        colon,
+        by_folder,
+        convert,
+        draw_pages,
+        ebook,
+        ..
+    } = rule
+    else {
+        return;
+    };
+    // A folder only when it becomes a CBZ.
+    let folder_ok = !ctx.file.is_dir || (*convert && converts(ctx.file, *draw_pages));
+    if folder_ok && let Some(m) = comic_of(ctx, *by_folder, stem) {
+        let name = comics::comic_name(template, &m, colon);
+        if !name.is_empty() {
+            *stem = name;
+        }
+    }
+    if *convert && converts(ctx.file, *draw_pages) {
+        *ext = "cbz".into();
+    }
+    if let Some(t) = ebook_target(ebook)
+        && to_ebook(ctx.file, *draw_pages)
+    {
+        *ext = t.ext().into();
+    }
+}
+
+/// Names a photo from its date with the photo template.
+fn photo_rule(rule: &Rule, stem: &mut String, ctx: &Ctx) {
+    let Rule::Photo { template, .. } = rule else {
+        return;
+    };
+    if let Some(p) = ctx.photo {
+        let name = crate::photos::expand(template, &p.shot, &ctx.file.stem, false);
+        if !name.is_empty() {
+            *stem = name + &p.kept;
+        }
+    }
+}
+
 fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
     match rule {
-        Rule::Case { mode, target, keep } => on_target(stem, ext, *target, |s| {
-            let changed = match mode {
-                CaseMode::Lower => s.to_lowercase(),
-                CaseMode::Upper => s.to_uppercase(),
-                CaseMode::Sentence => text::sentence_case(s),
-                CaseMode::Title => text::title_case(s, false),
-                CaseMode::TitleSmart => text::title_case(s, true),
-            };
-            text::keep_words(s, &changed, keep)
-        }),
+        Rule::Case { .. } => case_rule(rule, stem, ext),
 
         Rule::Insert { .. } => insert(rule, stem, ctx),
 
-        Rule::Number {
-            template,
-            start,
-            step,
-            digits,
-            per_folder,
-            pairs,
-        } => {
-            let index = match (*per_folder, *pairs) {
-                (false, false) => ctx.index,
-                (true, false) => ctx.folder_index,
-                (false, true) => ctx.pair_index,
-                (true, true) => ctx.pair_folder_index,
-            };
-            let n = start.saturating_add(step.saturating_mul(index as i64));
-            let num = format!("{n:0digits$}");
-            let folder = folder_name(ctx.file);
-            let kept = if *pairs { pair_split(ctx.file).1 } else { "" };
-            let name = stem.strip_suffix(kept).unwrap_or(stem).to_string();
-            *stem = expand(template, |key| match key {
-                "n" => Some(num.as_str()),
-                "name" | "nome" | "nombre" => Some(name.as_str()),
-                "folder" | "pasta" | "carpeta" => Some(folder.as_str()),
-                _ => None,
-            }) + kept;
-        }
+        Rule::Number { .. } => number_rule(rule, stem, ctx),
 
-        Rule::Remove {
-            all_spaces,
-            extra_spaces,
-            accents,
-            digits,
-            chars,
-            leading_number,
-            max_length,
-            target,
-        } => {
-            on_target(stem, ext, *target, |s| {
-                let mut s = s.to_string();
-                if *leading_number
-                    && let Some(m) = LEADING_NUMBER.find(&s)
-                    && m.end() < s.len()
-                {
-                    s = s[m.end()..].to_string();
-                }
-                if *accents {
-                    s = text::plain_letters(&s);
-                }
-                if *digits {
-                    s.retain(|c| !c.is_ascii_digit());
-                }
-                if !chars.is_empty() {
-                    // `?` also takes `？`, put in names in its place.
-                    let typed: Vec<&str> = chars.graphemes(true).collect();
-                    s = s
-                        .graphemes(true)
-                        .filter(|g| !typed.iter().any(|t| text::same_char(t, g, true)))
-                        .collect();
-                }
-                if *all_spaces {
-                    s.retain(|c| !c.is_whitespace() && !text::is_invisible(c));
-                } else if *extra_spaces {
-                    s = text::collapse_spaces(&s);
-                }
-                if *max_length > 0 {
-                    s = text::cut(&s, *max_length);
-                }
-                s
-            });
-        }
+        Rule::Remove { .. } => remove_rule(rule, stem, ext),
 
-        Rule::Convert {
-            mojibake,
-            latin,
-            web,
-            split_words,
-            target,
-        } => {
-            on_target(stem, ext, *target, |s| {
-                let mut s = s.to_string();
-                if *mojibake {
-                    s = text::fix_mojibake(&s);
-                }
-                if *latin {
-                    s = text::to_latin(&s);
-                }
-                if *split_words {
-                    s = text::split_glued(&s);
-                }
-                if !web.is_empty() {
-                    s = text::web_safe(&s, web);
-                }
-                s
-            });
-        }
+        Rule::Convert { .. } => convert_rule(rule, stem, ext),
 
-        Rule::RemoveRange {
-            from,
-            from_position,
-            from_text,
-            to,
-            to_position,
-            to_text,
-            inclusive,
-        } => {
-            if let Some(s) = remove_range(
-                stem,
-                *from,
-                *from_position,
-                from_text,
-                *to,
-                *to_position,
-                to_text,
-                *inclusive,
-            ) {
-                *stem = s;
-            }
-        }
+        Rule::RemoveRange { .. } => remove_range_rule(rule, stem),
 
-        Rule::CharAt {
-            position,
-            from_end,
-            only_if,
-            case_sensitive,
-            replace,
-        } => {
-            let mut g = text::graphemes(stem);
-            if *position == 0 || *position > g.len() {
-                return;
-            }
-            let i = if *from_end {
-                g.len() - position
-            } else {
-                position - 1
-            };
-            let same = if *case_sensitive {
-                g[i] == only_if
-            } else {
-                g[i].to_lowercase() == only_if.to_lowercase()
-            };
-            if !only_if.is_empty() && !same {
-                return;
-            }
-            if replace.is_empty() {
-                g.remove(i);
-            } else {
-                g[i] = replace;
-            }
-            *stem = g.concat();
-        }
+        Rule::CharAt { .. } => char_at_rule(rule, stem),
 
         Rule::Extension { .. } if ctx.file.is_dir => {}
         Rule::Extension { mode, value } => match mode {
@@ -1491,15 +1638,8 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             }
         },
 
-        Rule::Rearrange {
-            separator,
-            order,
-            target,
-        } => on_target(stem, ext, *target, |s| {
-            rearrange(s, separator, order).unwrap_or_else(|| s.to_string())
-        }),
+        Rule::Rearrange { .. } => rearrange_rule(rule, stem, ext),
 
-        // Compiled apart (see `compile_list`).
         Rule::List { .. } => {}
 
         Rule::Movie {
@@ -1531,75 +1671,13 @@ fn apply_plain(rule: &Rule, stem: &mut String, ext: &mut String, ctx: &Ctx) {
             }
         }
 
-        Rule::Music {
-            template,
-            colon,
-            disc_prefix,
-            from_name,
-            ..
-        } => {
-            if let Some(t) = song_of(ctx, *from_name) {
-                let name = music::expand(template, &t, colon, *disc_prefix);
-                if !name.is_empty() {
-                    *stem = name;
-                }
-            }
-        }
+        Rule::Music { .. } => music_rule(rule, stem, ctx),
 
-        Rule::Book {
-            template,
-            colon,
-            convert_to,
-            ..
-        } => {
-            if let Some(m) = ctx.book {
-                let name = books::book_name(template, m, colon);
-                if !name.is_empty() {
-                    *stem = name;
-                }
-            }
-            if let Some(t) = crate::bookconv::Target::from_ext(convert_to)
-                && converts_book(ctx.file, t)
-            {
-                *ext = t.ext().into();
-            }
-        }
+        Rule::Book { .. } => book_rule(rule, stem, ext, ctx),
 
-        Rule::Comic {
-            template,
-            colon,
-            by_folder,
-            convert,
-            draw_pages,
-            ebook,
-            ..
-        } => {
-            // A folder only when it becomes a CBZ.
-            let folder_ok = !ctx.file.is_dir || (*convert && converts(ctx.file, *draw_pages));
-            if folder_ok && let Some(m) = comic_of(ctx, *by_folder, stem) {
-                let name = comics::comic_name(template, &m, colon);
-                if !name.is_empty() {
-                    *stem = name;
-                }
-            }
-            if *convert && converts(ctx.file, *draw_pages) {
-                *ext = "cbz".into();
-            }
-            if let Some(t) = ebook_target(ebook)
-                && to_ebook(ctx.file, *draw_pages)
-            {
-                *ext = t.ext().into();
-            }
-        }
+        Rule::Comic { .. } => comic_rule(rule, stem, ext, ctx),
 
-        Rule::Photo { template, .. } => {
-            if let Some(p) = ctx.photo {
-                let name = crate::photos::expand(template, &p.shot, &ctx.file.stem, false);
-                if !name.is_empty() {
-                    *stem = name + &p.kept;
-                }
-            }
-        }
+        Rule::Photo { .. } => photo_rule(rule, stem, ctx),
 
         Rule::Subtitle { to_srt: true, .. } => {
             if !ctx.file.is_dir && crate::subtext::converts(ext, ctx.file.subtitle()) {
