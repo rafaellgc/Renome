@@ -1061,7 +1061,7 @@ pub fn read(path: &Path) -> Result<Book, String> {
     book.meta.isbn = own.isbns.first().cloned().unwrap_or_default();
     book.meta.date = own.year.map(|y| y.to_string()).unwrap_or_default();
     book.meta.series = own.series.clone();
-    book.meta.series_index = own.series_index.clone();
+    book.meta.series_index = own.series_index;
 
     let pages = collect(&data, &mut book)?;
     if pages.is_empty() {

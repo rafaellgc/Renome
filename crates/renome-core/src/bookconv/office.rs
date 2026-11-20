@@ -545,7 +545,7 @@ impl Docx<'_> {
             .and_then(|p| kid(p, "jc"))
             .and_then(|j| j.attr("w:val"))
             .map(String::from)
-            .or(style.center.clone());
+            .or(style.center);
         let mut classes = Vec::new();
         match jc.as_deref() {
             Some("center") if level.is_none() => classes.push("center"),

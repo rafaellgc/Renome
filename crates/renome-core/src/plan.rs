@@ -1908,11 +1908,9 @@ pub fn preview(
                 let (root, names) = match (&view.send_to, moved) {
                     // The rules' folders go into the destination (the
                     // other files get theirs at the end, see `send_rest`).
-                    (Some(s), Some(Move::OwnFolder)) => (s.dir.clone(), vec![folder.clone()]),
+                    (Some(s), Some(Move::OwnFolder)) => (s.dir.clone(), vec![folder]),
                     (Some(s), Some(Move::Into { folders, .. })) => (s.dir.clone(), folders),
-                    (None, Some(Move::OwnFolder)) if !inside => {
-                        (file.dir.clone(), vec![folder.clone()])
-                    }
+                    (None, Some(Move::OwnFolder)) if !inside => (file.dir.clone(), vec![folder]),
                     (None, Some(Move::Into { root, folders })) => (root, folders),
                     _ => (file.dir.clone(), Vec::new()),
                 };

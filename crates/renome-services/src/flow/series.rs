@@ -79,7 +79,7 @@ pub fn targets(items: &[Item]) -> Vec<TvItem> {
         .filter(|i| !i.is_dir && renome_core::tmdb::is_screen(&i.ext()))
         .map(|i| TvItem {
             path: i.path.clone(),
-            name: i.read_name().to_string(),
+            name: i.read_name(),
             is_dir: false,
         })
         .collect()

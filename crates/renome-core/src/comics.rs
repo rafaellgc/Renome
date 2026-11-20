@@ -681,7 +681,7 @@ pub fn parse_name(stem: &str, folder: &str) -> ComicGuess {
         s = split_joined(&s);
     }
     // What is in brackets: the year, the count, or release notes.
-    for c in BRACKETS.captures_iter(&s.clone()) {
+    for c in BRACKETS.captures_iter(&s) {
         let inner = c
             .iter()
             .skip(1)

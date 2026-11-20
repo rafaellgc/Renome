@@ -1113,7 +1113,7 @@ fn make(
         (false, false, false) => format!("{series} #{number} - {title}"),
         (false, false, true) => format!("{series} #{number}"),
         (false, true, _) => series.clone(),
-        _ if !title.is_empty() => title.clone(),
+        _ if !title.is_empty() => title,
         _ => path
             .file_stem()
             .map(|s| s.to_string_lossy().trim_end_matches(".kepub").to_string())

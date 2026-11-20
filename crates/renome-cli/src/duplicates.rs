@@ -123,7 +123,7 @@ pub fn command(m: &ArgMatches, settings: Option<&Value>) -> Result<Exit, String>
         println!(
             "{}",
             serde_json::to_string_pretty(&json!({
-                "identical": if want_identical { identical.clone() } else { vec![] },
+                "identical": if want_identical { identical } else { vec![] },
                 "songs": songs,
                 "works": works,
                 "similar": similar,

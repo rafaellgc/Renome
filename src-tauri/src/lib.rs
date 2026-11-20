@@ -1939,7 +1939,7 @@ fn print_webview(
                 f(Ok(()));
             }
         });
-        let s2 = send.clone();
+        let s2 = send;
         op.connect_failed(move |_, e| {
             if let Some(f) = s2.borrow_mut().take() {
                 f(Err(format!("pdfPrint: {e}")));
