@@ -5,7 +5,7 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { api } from "./api";
   import { TABLE } from "./rules";
-  import { LANG_NAMES, MOD, t, tError, type Key } from "./i18n";
+  import { LANG_NAMES, MOD, said, t, tError, type Key } from "./i18n";
   import { applyTextSize, applyTheme, loadSecrets, secrets, settings, type Lang } from "./settings.svelte";
 
   let { onclose }: { onclose: () => void } = $props();
@@ -30,157 +30,40 @@
   /** The TMDB languages offered (empty: the interface's, shown apart). */
   const TMDB_LANGS = words("tmdbLang").map((c) => c.value).filter(Boolean);
   let showKey = $state(false);
-  let keyStatus = $state<{ ok: boolean; text: string } | null>(null);
-  let testing = $state(false);
 
   /** The Flatpak is updated by Flatpak: no option for it. */
   let updateWay = $state<"itself" | "page" | "system">("itself");
   api.updateWay().then((w) => (updateWay = w)).catch(() => {});
 
   let showDgKey = $state(false);
-  let dgStatus = $state<{ ok: boolean; text: string } | null>(null);
-  let dgTesting = $state(false);
-
-  async function testDgKey() {
-    dgTesting = true;
-    dgStatus = null;
-    try {
-      await api.discogsCheck(settings.discogsToken.trim());
-      dgStatus = { ok: true, text: t("tmdbKeyOk") };
-    } catch (e) {
-      dgStatus = { ok: false, text: tError(e) };
-    } finally {
-      dgTesting = false;
-    }
-  }
 
   let showOs = $state(false);
-  let osStatus = $state<{ ok: boolean; text: string } | null>(null);
-  let osTesting = $state(false);
-
-  async function testOs() {
-    osTesting = true;
-    osStatus = null;
-    try {
-      const left = await api.osCheck({ osKey: settings.osKey.trim(), osUser: settings.osUser.trim(), osPassword: settings.osPassword, subdlKey: "" });
-      osStatus = { ok: true, text: left === null ? t("tmdbKeyOk") : t("osAccountOk", { n: left }) };
-    } catch (e) {
-      osStatus = { ok: false, text: tError(e) };
-    } finally {
-      osTesting = false;
-    }
-  }
 
   let showSubdl = $state(false);
-  let subsourceStatus = $state<{ ok: boolean; text: string } | null>(null);
-  let subsourceTesting = $state(false);
   let showSubsource = $state(false);
-  async function testSubsource() {
-    subsourceTesting = true;
-    subsourceStatus = null;
-    try {
-      await api.subsourceCheck(settings.subsourceKey.trim());
-      subsourceStatus = { ok: true, text: t("tmdbKeyOk") };
-    } catch (e) {
-      subsourceStatus = { ok: false, text: tError(e) };
-    } finally {
-      subsourceTesting = false;
-    }
-  }
-  let subdlStatus = $state<{ ok: boolean; text: string } | null>(null);
-  let subdlTesting = $state(false);
-
-  async function testSubdl() {
-    subdlTesting = true;
-    subdlStatus = null;
-    try {
-      await api.subdlCheck(settings.subdlKey.trim());
-      subdlStatus = { ok: true, text: t("tmdbKeyOk") };
-    } catch (e) {
-      subdlStatus = { ok: false, text: tError(e) };
-    } finally {
-      subdlTesting = false;
-    }
-  }
 
   let showGcd = $state(false);
-  let gcdStatus = $state<{ ok: boolean; text: string } | null>(null);
-  let gcdTesting = $state(false);
-
-  async function testGcd() {
-    gcdTesting = true;
-    gcdStatus = null;
-    try {
-      await api.gcdCheck(settings.gcdEmail.trim(), settings.gcdPassword);
-      gcdStatus = { ok: true, text: t("gcdAccountOk") };
-    } catch (e) {
-      gcdStatus = { ok: false, text: tError(e) };
-    } finally {
-      gcdTesting = false;
-    }
-  }
 
   let showGbKey = $state(false);
-  let gbStatus = $state<{ ok: boolean; text: string } | null>(null);
-  let gbTesting = $state(false);
-
-  async function testGbKey() {
-    gbTesting = true;
-    gbStatus = null;
-    try {
-      await api.googleBooksCheck(settings.googleBooksKey.trim());
-      gbStatus = { ok: true, text: t("tmdbKeyOk") };
-    } catch (e) {
-      gbStatus = { ok: false, text: tError(e) };
-    } finally {
-      gbTesting = false;
-    }
-  }
 
   let showMtKey = $state(false);
-  let mtStatus = $state<{ ok: boolean; text: string } | null>(null);
-  let mtTesting = $state(false);
-
-  async function testMtKey() {
-    mtTesting = true;
-    mtStatus = null;
-    try {
-      await api.metronCheck(settings.metronToken.trim());
-      mtStatus = { ok: true, text: t("tmdbKeyOk") };
-    } catch (e) {
-      mtStatus = { ok: false, text: tError(e) };
-    } finally {
-      mtTesting = false;
-    }
-  }
 
   let showCvKey = $state(false);
-  let cvStatus = $state<{ ok: boolean; text: string } | null>(null);
-  let cvTesting = $state(false);
 
-  async function testCvKey() {
-    cvTesting = true;
-    cvStatus = null;
+  /** What each Test button said (by service), and those still asking:
+   *  the shared check says (`checks::test`, the command line's too). */
+  let status = $state<Record<string, { ok: boolean; text: string } | null>>({});
+  let testing = $state<Record<string, boolean>>({});
+  async function check(name: string) {
+    testing[name] = true;
+    status[name] = null;
+    const values = Object.fromEntries(Object.entries(settings).filter((e): e is [string, string] => typeof e[1] === "string"));
     try {
-      await api.comicCheck(settings.comicVineKey.trim());
-      cvStatus = { ok: true, text: t("tmdbKeyOk") };
+      status[name] = { ok: true, text: said([await api.accountCheck(name, values)])[0] };
     } catch (e) {
-      cvStatus = { ok: false, text: tError(e) };
+      status[name] = { ok: false, text: tError(e) };
     } finally {
-      cvTesting = false;
-    }
-  }
-
-  async function testKey() {
-    testing = true;
-    keyStatus = null;
-    try {
-      await api.tmdbCheck(settings.tmdbKey);
-      keyStatus = { ok: true, text: t("tmdbKeyOk") };
-    } catch (e) {
-      keyStatus = { ok: false, text: tError(e) };
-    } finally {
-      testing = false;
+      testing[name] = false;
     }
   }
 
@@ -309,16 +192,16 @@
             type={showKey ? "text" : "password"}
             bind:value={settings.tmdbKey}
             disabled={!secrets.ready}
-            oninput={() => (keyStatus = null)}
+            oninput={() => (status["tmdb"] = null)}
             spellcheck="false"
             autocomplete="off"
           />
           <button onclick={() => (showKey = !showKey)}>{t(showKey ? "hide" : "show")}</button>
-          <button disabled={!settings.tmdbKey.trim() || testing} onclick={testKey}>{t("tmdbTest")}</button>
+          <button disabled={!settings.tmdbKey.trim() || testing["tmdb"]} onclick={() => check("tmdb")}>{t("tmdbTest")}</button>
         </div>
         <span></span>
         <small>
-          {#if keyStatus}<b class:good={keyStatus.ok} class:bad={!keyStatus.ok}>{keyStatus.text}</b> · {/if}
+          {#if status["tmdb"]}{@const st = status["tmdb"]}<b class:good={st.ok} class:bad={!st.ok}>{st.text}</b> · {/if}
           {t("tmdbKeyHint")}
           <button class="link" onclick={() => openUrl("https://www.themoviedb.org/settings/api")}>{t("tmdbGetKey")}</button>
         </small>
@@ -343,7 +226,7 @@
             type={showOs ? "text" : "password"}
             bind:value={settings.osKey}
             disabled={!secrets.ready}
-            oninput={() => (osStatus = null)}
+            oninput={() => (status["opensubtitles"] = null)}
             spellcheck="false"
             autocomplete="off"
           />
@@ -354,7 +237,7 @@
           id="opt-os-user"
           bind:value={settings.osUser}
           disabled={!secrets.ready}
-          oninput={() => (osStatus = null)}
+          oninput={() => (status["opensubtitles"] = null)}
           spellcheck="false"
           autocomplete="off"
         />
@@ -365,14 +248,14 @@
             type={showOs ? "text" : "password"}
             bind:value={settings.osPassword}
             disabled={!secrets.ready}
-            oninput={() => (osStatus = null)}
+            oninput={() => (status["opensubtitles"] = null)}
             autocomplete="off"
           />
-          <button disabled={!settings.osKey.trim() || osTesting} onclick={testOs}>{t("tmdbTest")}</button>
+          <button disabled={!settings.osKey.trim() || testing["opensubtitles"]} onclick={() => check("opensubtitles")}>{t("tmdbTest")}</button>
         </div>
         <span></span>
         <small>
-          {#if osStatus}<b class:good={osStatus.ok} class:bad={!osStatus.ok}>{osStatus.text}</b> · {/if}
+          {#if status["opensubtitles"]}{@const st = status["opensubtitles"]}<b class:good={st.ok} class:bad={!st.ok}>{st.text}</b> · {/if}
           {t("osKeyHint")}
           <button class="link" onclick={() => openUrl("https://www.opensubtitles.com/consumers")}>{t("osGetKey")}</button>
         </small>
@@ -386,16 +269,16 @@
             type={showSubdl ? "text" : "password"}
             bind:value={settings.subdlKey}
             disabled={!secrets.ready}
-            oninput={() => (subdlStatus = null)}
+            oninput={() => (status["subdl"] = null)}
             spellcheck="false"
             autocomplete="off"
           />
           <button onclick={() => (showSubdl = !showSubdl)}>{t(showSubdl ? "hide" : "show")}</button>
-          <button disabled={!settings.subdlKey.trim() || subdlTesting} onclick={testSubdl}>{t("tmdbTest")}</button>
+          <button disabled={!settings.subdlKey.trim() || testing["subdl"]} onclick={() => check("subdl")}>{t("tmdbTest")}</button>
         </div>
         <span></span>
         <small>
-          {#if subdlStatus}<b class:good={subdlStatus.ok} class:bad={!subdlStatus.ok}>{subdlStatus.text}</b> · {/if}
+          {#if status["subdl"]}{@const st = status["subdl"]}<b class:good={st.ok} class:bad={!st.ok}>{st.text}</b> · {/if}
           {t("subdlKeyHint")}
           <button class="link" onclick={() => openUrl("https://subdl.com/panel/api")}>{t("subdlGetKey")}</button>
         </small>
@@ -409,16 +292,16 @@
             type={showSubsource ? "text" : "password"}
             bind:value={settings.subsourceKey}
             disabled={!secrets.ready}
-            oninput={() => (subsourceStatus = null)}
+            oninput={() => (status["subsource"] = null)}
             spellcheck="false"
             autocomplete="off"
           />
           <button onclick={() => (showSubsource = !showSubsource)}>{t(showSubsource ? "hide" : "show")}</button>
-          <button disabled={!settings.subsourceKey.trim() || subsourceTesting} onclick={testSubsource}>{t("tmdbTest")}</button>
+          <button disabled={!settings.subsourceKey.trim() || testing["subsource"]} onclick={() => check("subsource")}>{t("tmdbTest")}</button>
         </div>
         <span></span>
         <small>
-          {#if subsourceStatus}<b class:good={subsourceStatus.ok} class:bad={!subsourceStatus.ok}>{subsourceStatus.text}</b> · {/if}
+          {#if status["subsource"]}{@const st = status["subsource"]}<b class:good={st.ok} class:bad={!st.ok}>{st.text}</b> · {/if}
           {t("subsourceKeyHint")}
           <button class="link" onclick={() => openUrl("https://subsource.net/api-docs")}>{t("subdlGetKey")}</button>
         </small>
@@ -435,16 +318,16 @@
             type={showGbKey ? "text" : "password"}
             bind:value={settings.googleBooksKey}
             disabled={!secrets.ready}
-            oninput={() => (gbStatus = null)}
+            oninput={() => (status["google-books"] = null)}
             spellcheck="false"
             autocomplete="off"
           />
           <button onclick={() => (showGbKey = !showGbKey)}>{t(showGbKey ? "hide" : "show")}</button>
-          <button disabled={!settings.googleBooksKey.trim() || gbTesting} onclick={testGbKey}>{t("tmdbTest")}</button>
+          <button disabled={!settings.googleBooksKey.trim() || testing["google-books"]} onclick={() => check("google-books")}>{t("tmdbTest")}</button>
         </div>
         <span></span>
         <small>
-          {#if gbStatus}<b class:good={gbStatus.ok} class:bad={!gbStatus.ok}>{gbStatus.text}</b> · {/if}
+          {#if status["google-books"]}{@const st = status["google-books"]}<b class:good={st.ok} class:bad={!st.ok}>{st.text}</b> · {/if}
           {t("gbKeyHint")}
           <button class="link" onclick={() => openUrl("https://developers.google.com/books/docs/v1/using#APIKey")}>{t("tmdbGetKey")}</button>
         </small>
@@ -461,16 +344,16 @@
             type={showCvKey ? "text" : "password"}
             bind:value={settings.comicVineKey}
             disabled={!secrets.ready}
-            oninput={() => (cvStatus = null)}
+            oninput={() => (status["comicvine"] = null)}
             spellcheck="false"
             autocomplete="off"
           />
           <button onclick={() => (showCvKey = !showCvKey)}>{t(showCvKey ? "hide" : "show")}</button>
-          <button disabled={!settings.comicVineKey.trim() || cvTesting} onclick={testCvKey}>{t("tmdbTest")}</button>
+          <button disabled={!settings.comicVineKey.trim() || testing["comicvine"]} onclick={() => check("comicvine")}>{t("tmdbTest")}</button>
         </div>
         <span></span>
         <small>
-          {#if cvStatus}<b class:good={cvStatus.ok} class:bad={!cvStatus.ok}>{cvStatus.text}</b> · {/if}
+          {#if status["comicvine"]}{@const st = status["comicvine"]}<b class:good={st.ok} class:bad={!st.ok}>{st.text}</b> · {/if}
           {t("cvKeyHint")}
           <button class="link" onclick={() => openUrl("https://comicvine.gamespot.com/api/")}>{t("tmdbGetKey")}</button>
         </small>
@@ -487,16 +370,16 @@
             type={showMtKey ? "text" : "password"}
             bind:value={settings.metronToken}
             disabled={!secrets.ready}
-            oninput={() => (mtStatus = null)}
+            oninput={() => (status["metron"] = null)}
             spellcheck="false"
             autocomplete="off"
           />
           <button onclick={() => (showMtKey = !showMtKey)}>{t(showMtKey ? "hide" : "show")}</button>
-          <button disabled={!settings.metronToken.trim() || mtTesting} onclick={testMtKey}>{t("tmdbTest")}</button>
+          <button disabled={!settings.metronToken.trim() || testing["metron"]} onclick={() => check("metron")}>{t("tmdbTest")}</button>
         </div>
         <span></span>
         <small>
-          {#if mtStatus}<b class:good={mtStatus.ok} class:bad={!mtStatus.ok}>{mtStatus.text}</b> · {/if}
+          {#if status["metron"]}{@const st = status["metron"]}<b class:good={st.ok} class:bad={!st.ok}>{st.text}</b> · {/if}
           {t("mtKeyHint")}
           <button class="link" onclick={() => openUrl("https://metron.cloud")}>{t("mtGetKey")}</button>
         </small>
@@ -512,7 +395,7 @@
           type="email"
           bind:value={settings.gcdEmail}
             disabled={!secrets.ready}
-          oninput={() => (gcdStatus = null)}
+          oninput={() => (status["gcd"] = null)}
           spellcheck="false"
           autocomplete="off"
         />
@@ -523,15 +406,15 @@
             type={showGcd ? "text" : "password"}
             bind:value={settings.gcdPassword}
             disabled={!secrets.ready}
-            oninput={() => (gcdStatus = null)}
+            oninput={() => (status["gcd"] = null)}
             autocomplete="off"
           />
           <button onclick={() => (showGcd = !showGcd)}>{t(showGcd ? "hide" : "show")}</button>
-          <button disabled={!settings.gcdEmail.trim() || !settings.gcdPassword || gcdTesting} onclick={testGcd}>{t("tmdbTest")}</button>
+          <button disabled={!settings.gcdEmail.trim() || !settings.gcdPassword || testing["gcd"]} onclick={() => check("gcd")}>{t("tmdbTest")}</button>
         </div>
         <span></span>
         <small>
-          {#if gcdStatus}<b class:good={gcdStatus.ok} class:bad={!gcdStatus.ok}>{gcdStatus.text}</b> · {/if}
+          {#if status["gcd"]}{@const st = status["gcd"]}<b class:good={st.ok} class:bad={!st.ok}>{st.text}</b> · {/if}
           {t("gcdAccountHint")}
           <button class="link" onclick={() => openUrl("https://www.comics.org/accounts/register/")}>{t("gcdRegister")}</button>
         </small>
@@ -548,16 +431,16 @@
             type={showDgKey ? "text" : "password"}
             bind:value={settings.discogsToken}
             disabled={!secrets.ready}
-            oninput={() => (dgStatus = null)}
+            oninput={() => (status["discogs"] = null)}
             spellcheck="false"
             autocomplete="off"
           />
           <button onclick={() => (showDgKey = !showDgKey)}>{t(showDgKey ? "hide" : "show")}</button>
-          <button disabled={!settings.discogsToken.trim() || dgTesting} onclick={testDgKey}>{t("tmdbTest")}</button>
+          <button disabled={!settings.discogsToken.trim() || testing["discogs"]} onclick={() => check("discogs")}>{t("tmdbTest")}</button>
         </div>
         <span></span>
         <small>
-          {#if dgStatus}<b class:good={dgStatus.ok} class:bad={!dgStatus.ok}>{dgStatus.text}</b> · {/if}
+          {#if status["discogs"]}{@const st = status["discogs"]}<b class:good={st.ok} class:bad={!st.ok}>{st.text}</b> · {/if}
           {t("dgKeyHint")}
           <button class="link" onclick={() => openUrl("https://www.discogs.com/settings/developers")}>{t("dgGetKey")}</button>
         </small>

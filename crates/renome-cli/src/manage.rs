@@ -429,6 +429,11 @@ pub fn rules(m: &ArgMatches) -> Result<Exit, String> {
                     "default": catalog::default_value(o, lang()),
                     "label": t(o.label, &[]),
                     "hint": o.hint.map(|h| t(h, &[])),
+                    "whenOn": catalog::LABELS_WHEN
+                        .iter()
+                        .filter(|w| w.0 == spec.kind && w.1 == o.name)
+                        .map(|w| json!({ "option": w.2, "label": t(w.3, &[]), "hint": w.4.map(|h| t(h, &[])) }))
+                        .collect::<Vec<_>>(),
                 })
             })
             .collect();
@@ -469,6 +474,16 @@ pub fn rules(m: &ArgMatches) -> Result<Exit, String> {
         println!("      {}", t(o.label, &[]));
         if let Some(h) = o.hint {
             println!("      {}", out::dim(&t(h, &[])));
+        }
+        for w in catalog::LABELS_WHEN
+            .iter()
+            .filter(|w| w.0 == spec.kind && w.1 == o.name)
+        {
+            let label = t(w.3, &[]);
+            println!(
+                "      {}",
+                out::dim(&t("labelWhenOn", &[("option", &w.2), ("label", &label)]))
+            );
         }
         println!(
             "      {} · {}: {}",
@@ -598,57 +613,15 @@ const KEYS: &[(&str, &str)] = &[
     ("gcd-password", "gcdPassword"),
 ];
 
-/// What the Options' Test button of a service says: its answer, or the
-/// error as the window words it.
-async fn test_key(name: &str, get: &dyn Fn(&str) -> String) -> Result<String, String> {
-    use renome_services::{comicvine, discogs, gcd, googlebooks, metron, subtitles, tmdb};
-    let need = |field: &str| {
-        let v = get(field);
-        if v.is_empty() {
-            Err(t("keyUnsetTest", &[("name", &name)]))
-        } else {
-            Ok(v)
-        }
-    };
-    let ok = t("tmdbKeyOk", &[]);
-    let done = match name {
-        "tmdb" => tmdb::Client::new(&need("tmdbKey")?, "en-US").check().await,
-        "google-books" => {
-            googlebooks::Client::default()
-                .check(&need("googleBooksKey")?)
-                .await
-        }
-        "comicvine" => {
-            comicvine::Client::default()
-                .check(&need("comicVineKey")?)
-                .await
-        }
-        "metron" => metron::Client::default().check(&need("metronToken")?).await,
-        "discogs" => {
-            discogs::Client::default()
-                .check(&need("discogsToken")?)
-                .await
-        }
-        "subdl" => subtitles::check_subdl(need("subdlKey")?).await,
-        "subsource" => subtitles::check_subsource(need("subsourceKey")?).await,
-        n if n.starts_with("gcd") => {
-            gcd::Client::default()
-                .check(&need("gcdEmail")?, &need("gcdPassword")?)
-                .await
-        }
-        _ => {
-            let auth: subtitles::Auth = serde_json::from_value(json!({
-                "osKey": need("osKey")?, "osUser": get("osUser"), "osPassword": get("osPassword"),
-            }))
-            .map_err(|e| e.to_string())?;
-            return match subtitles::check_os(auth).await {
-                Ok(Some(n)) => Ok(t("osAccountOk", &[("n", &n)])),
-                Ok(None) => Ok(ok),
-                Err(e) => Err(crate::text::error_text(&e)),
-            };
-        }
-    };
-    done.map(|()| ok).map_err(|e| crate::text::error_text(&e))
+/// What the Options' Test button of a service says (`checks::test`):
+/// its answer, or the error as the window words it.
+async fn test_key(name: &str, get: &(dyn Fn(&str) -> String + Sync)) -> Result<String, String> {
+    use renome_services::checks;
+    match checks::test(name, get).await {
+        Ok(line) => Ok(crate::lookup::said(&[line]).concat()),
+        Err(e) if e == checks::UNSET => Err(t("keyUnsetTest", &[("name", &name)])),
+        Err(e) => Err(crate::text::error_text(&e)),
+    }
 }
 
 /// The secrets and whether they come from the system's store.
@@ -715,7 +688,6 @@ pub fn keys(m: &ArgMatches) -> Result<Exit, String> {
                 all.get(f)
                     .and_then(Value::as_str)
                     .unwrap_or_default()
-                    .trim()
                     .to_string()
             };
             let rt = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;

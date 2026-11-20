@@ -9,6 +9,7 @@
 pub mod acoustid;
 pub mod after;
 pub mod anilist;
+pub mod checks;
 pub mod comics;
 pub mod comicvine;
 pub mod covers;

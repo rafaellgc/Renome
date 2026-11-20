@@ -1018,10 +1018,16 @@ pub const RULES: &[RuleSpec] = &[
                 "device",
                 Kind::Choice(DEVICES),
                 Default::Text("kindle-pw"),
-                "comicDevice",
+                "readerFor",
                 None,
             ),
-            o("model", Kind::Text, EMPTY, "comicModel", None),
+            o(
+                "model",
+                Kind::Text,
+                EMPTY,
+                "comicModel",
+                Some("comicModelHint"),
+            ),
             renamed(
                 "otherReaderApps",
                 "anyProgram",
@@ -1425,6 +1431,35 @@ pub fn labels() -> Value {
         .into()
 }
 
+/// Options whose label and hint change while another is on: (rule,
+/// option, the option it follows, label, hint).
+pub const LABELS_WHEN: &[(&str, &str, &str, &str, Option<&str>)] = &[(
+    "comic",
+    "cleanInfo",
+    "writeInfo",
+    "comicCleanInfoWrite",
+    Some("comicCleanInfoWriteHint"),
+)];
+
+/// A rule's options' labels and hints as the rule is set (see [`labels`]
+/// and [`LABELS_WHEN`]).
+pub fn labels_of(rule: &Value) -> Map<String, Value> {
+    let kind = rule.get("type").and_then(Value::as_str).unwrap_or("");
+    let Some(spec) = self::rule(kind) else {
+        return Map::new();
+    };
+    spec.options
+        .iter()
+        .map(|o| {
+            let when = LABELS_WHEN.iter().find(|w| {
+                w.0 == kind && w.1 == o.name && set_value(rule, w.2) == Value::Bool(true)
+            });
+            let (label, hint) = when.map_or((o.label, o.hint), |w| (w.3, w.4));
+            (o.name.to_string(), serde_json::json!([label, hint]))
+        })
+        .collect()
+}
+
 /// A new rule of this type with every option at its default.
 pub fn new_rule(spec: &RuleSpec, lang: &str) -> Map<String, Value> {
     let mut rule = Map::new();
@@ -1728,6 +1763,17 @@ pub fn normalize_rule(rule: &mut Map<String, Value>) {
             Kind::Bool if v.is_null() => *v = Value::Bool(false),
             Kind::Text | Kind::Template | Kind::Lines if v.is_null() => *v = Value::from(""),
             _ => {}
+        }
+    }
+    // A comic made for a reader model fits its screen, whatever screen the
+    // rule says (a model given alone on the command line).
+    if spec.kind == "comic" {
+        let device = rule
+            .get("model")
+            .and_then(Value::as_str)
+            .and_then(crate::readers::device_of);
+        if let Some(device) = device {
+            rule.insert("device".into(), Value::from(device));
         }
     }
 }
@@ -2074,6 +2120,33 @@ fn limits() -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_comic_reader_model_brings_its_screen() {
+        use serde_json::json;
+        let (device, model) = crate::readers::choose("kobo-sage");
+        assert_eq!(model, "kobo-sage");
+        assert_eq!(
+            crate::readers::choose("custom"),
+            ("custom".into(), String::new())
+        );
+        let mut rule = json!({"type": "comic", "device": "kindle-pw", "model": "kobo-sage"});
+        normalize_rule(rule.as_object_mut().unwrap());
+        assert_eq!(rule["device"], Value::from(device));
+        // A model not in the list leaves the screen as it is.
+        let mut rule = json!({"type": "comic", "device": "custom", "model": ""});
+        normalize_rule(rule.as_object_mut().unwrap());
+        assert_eq!(rule["device"], "custom");
+    }
+
+    #[test]
+    fn a_label_follows_the_option_it_depends_on() {
+        use serde_json::json;
+        let off = labels_of(&json!({"type": "comic", "writeInfo": false}));
+        assert_eq!(off["cleanInfo"][0], "comicCleanInfo");
+        let on = labels_of(&json!({"type": "comic", "writeInfo": true}));
+        assert_eq!(on["cleanInfo"][0], "comicCleanInfoWrite");
+        assert_eq!(on["device"][0], "readerFor");
+    }
 
     #[test]
     fn saved_rules_come_whole_and_as_the_core_reads_them() {

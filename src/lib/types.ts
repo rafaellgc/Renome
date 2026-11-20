@@ -213,6 +213,11 @@ export interface Preview {
    *  then), and old folders left with nothing else, sent whole. */
   trash: string[];
   trashFolders: string[];
+  /** The totals under the list, the old folders left with files and each
+   *  row's tags, as Rust says them (`flow::said`, the command line's too). */
+  totals: SaidLine[];
+  left: SaidLine[];
+  tags: Record<string, RowTag[]>;
   /** What the rule cards show of the list (see the core's `Hints`). */
   hints: {
     sample: string;
@@ -709,12 +714,16 @@ export interface AfterCounts {
 
 /** A line Rust says of the work: a text's key, its count and, for some,
  *  the text's other fields (`dir`, `folders`). */
-export interface SaidLine {
-  key: string;
-  n: number;
-  more?: [string, string][];
-  /** Fields that are errors, said as errors are. */
-  errors?: [string, string][];
+export type { SaidLine } from "./i18n";
+import type { SaidLine } from "./i18n";
+
+/** A tag a row of the list carries (Rust's `flow::said::tags`): where it
+ *  shows (beside the current name, beside the new one, or as the new
+ *  name's note), its few words and its longer why. */
+export interface RowTag {
+  at: "name" | "new" | "note";
+  text: SaidLine[];
+  tip: SaidLine[];
 }
 
 /** What the question before renaming says (Rust's: `flow::after::ask`). */
@@ -722,8 +731,10 @@ export interface RenameAsk {
   /** Renaming, or moving or copying to a folder; null when nothing is renamed. */
   question: SaidLine | null;
   lines: SaidLine[];
-  /** Old folders left with files that do not go to the new one. */
-  left: { from: string; to: string; files: number }[];
+  /** Old folders left with files that do not go to the new one, one line each. */
+  left: SaidLine[];
+  /** What is said before them. */
+  leftHead: SaidLine | null;
   /** Asked even when the options say not to. */
   always: boolean;
 }
@@ -742,7 +753,8 @@ export interface AfterReport {
   subExtracted: number;
   subtitles: number;
   remaining: number | null;
-  troubles: { stage: string; done: number; errors: [string, string][] }[];
+  /** What is said of each stage that went wrong (Rust's `said::troubles`). */
+  told: { title: string; text: SaidLine[]; errors: SaidLine[]; warnings: SaidLine[] }[];
   /** Where each file of the list went with conversions. */
   followed?: [string, string][];
   /** What was done, as the notice says it (Rust's lines). */

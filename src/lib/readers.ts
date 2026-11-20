@@ -292,10 +292,3 @@ const POPULAR_IDS = [
 const ALL = READERS.flatMap(([, brand, list]) => list.map((m) => ({ ...m, formats: m.formats ?? brand })));
 
 export const POPULAR: Reader[] = POPULAR_IDS.map((id) => ALL.find((m) => m.id === id)!).filter(Boolean);
-
-/** What an option stands for: the device, and the model (empty for a
- *  device alone). */
-export function chooseReader(value: string): { device: ComicDevice; model: string } {
-  const m = ALL.find((x) => x.id === value);
-  return m ? { device: m.device, model: m.id } : { device: value as ComicDevice, model: "" };
-}

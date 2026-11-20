@@ -1519,19 +1519,10 @@ pub async fn subtitles(
 /// the renames (as the window's question says them).
 pub fn planned(ask: &flow::after::Ask) -> Vec<String> {
     let mut out = said(&ask.lines);
-    if !ask.left.is_empty() {
-        let suffix = t("leftoverSuffix", &[]);
-        out.push(t(
-            "confirmLeftoverHead",
-            &[("n", &ask.left.len()), ("suffix", &suffix)],
-        ));
-        for f in &ask.left {
-            out.push(format!(
-                "  {} ({}) → {}",
-                crate::out::path(&f.from),
-                t("files", &[("n", &f.files)]),
-                crate::out::path(&f.to)
-            ));
+    if let Some(head) = &ask.left_head {
+        out.extend(said(std::slice::from_ref(head)));
+        for f in said(&ask.left) {
+            out.push(format!("  {}", f.replace('\n', "\n  ")));
         }
     }
     out
@@ -1547,11 +1538,20 @@ pub fn said(lines: &[flow::after::Line]) -> Vec<String> {
                 .iter()
                 .map(|(k, v)| (*k, crate::text::error_text(v)))
                 .collect();
+            let names: Vec<(&str, String)> = l
+                .names
+                .iter()
+                .map(|(k, keys)| {
+                    let said: Vec<String> = keys.iter().map(|key| t(key, &[])).collect();
+                    (*k, said.join(", "))
+                })
+                .collect();
             let mut vars: Vec<(&str, &dyn std::fmt::Display)> = vec![("n", &l.n)];
             vars.extend(
                 l.more
                     .iter()
                     .chain(errors.iter())
+                    .chain(names.iter())
                     .map(|(k, v)| (*k, v as &dyn std::fmt::Display)),
             );
             t(l.key, &vars)
@@ -1618,19 +1618,13 @@ pub async fn after(
         &services,
     )
     .await;
-    for trouble in &r.troubles {
-        for (file, why) in &trouble.errors {
-            let text = if file.is_empty() {
-                crate::text::error_text(why)
-            } else {
-                format!("{file}: {}", crate::text::error_text(why))
-            };
-            // Saved all the same, maybe out of time: a warning, not an error.
-            if why == "subsLengthKept" {
-                out::note(&out::yellow(&text));
-            } else {
-                out::error(&text);
-            }
+    // What went wrong, each file as the window's notice says it.
+    for trouble in flow::said::troubles(&r) {
+        for text in said(&trouble.errors) {
+            out::error(&text);
+        }
+        for text in said(&trouble.warnings) {
+            out::note(&out::yellow(&text));
         }
     }
     said(&r.lines)

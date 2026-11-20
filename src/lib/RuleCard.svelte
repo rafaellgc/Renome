@@ -1,7 +1,7 @@
 <script lang="ts">
   import { slide } from "svelte/transition";
   import Icon from "./Icon.svelte";
-  import { t, type Key } from "./i18n";
+  import { LOCALES, t, type Key } from "./i18n";
   import { TABLE, choicesOf, comicPreset, comicPresetOf, limitsOf, menuOf, type ComicPreset } from "./rules";
   import { settings } from "./settings.svelte";
   import type { RuleType, Step } from "./types";
@@ -15,7 +15,7 @@
     return `${modelName(m)} · ${w} × ${h}${isColourInk(m.device) ? ` · ${t("comicColour")}` : ""}`;
   };
   import { api } from "./api";
-  import { OTHER_DEVICES, POPULAR, READERS, SCREENS, chooseReader, isColourInk, type Reader } from "./readers";
+  import { OTHER_DEVICES, POPULAR, READERS, SCREENS, isColourInk, type Reader } from "./readers";
 
   /** Whether this system can print books to PDF (asked once). */
   let canPrint = $state(false);
@@ -96,16 +96,22 @@
    *  `catalog::hidden`, those under another that leaves them nothing to
    *  do, and the inert ones, which the flows take as off). */
   let hidden = $state<string[]>([]);
+  /** The options' labels and hints as the rule is set (some follow
+   *  another option: `catalog::labels_of`, the command line's `rules`
+   *  too); the catalog's own until they come. */
+  let labels = $state<Record<string, [string, string | null]>>({});
   $effect(() => {
     const rule = $state.snapshot(step.rule);
-    api.ruleHidden(rule).then((v) => (hidden = v), () => {});
+    api.ruleView(rule).then((v) => {
+      hidden = v.hidden;
+      labels = v.labels;
+    }, () => {});
   });
   const applies = (name: string) => !hidden.includes(name);
-  /** An option's label and hint, as the Rust catalog names them (the
-   *  command line's `rules` too). */
-  const label = (name: string) => t((TABLE.labels[r.type]?.[name]?.[0] ?? name) as Key);
+  const labelOf = (name: string) => labels[name] ?? TABLE.labels[r.type]?.[name];
+  const label = (name: string) => t((labelOf(name)?.[0] ?? name) as Key);
   const optHint = (name: string) => {
-    const k = TABLE.labels[r.type]?.[name]?.[1];
+    const k = labelOf(name)?.[1];
     return k ? t(k as Key) : "";
   };
   /** A whole-number option's bounds in this rule (the Rust catalog's). */
@@ -499,7 +505,7 @@
         <label class="check"><input type="checkbox" bind:checked={r.setModified} /> <span>{label("setModified")}<small>{optHint("setModified")}</small></span></label>
         <p class="hint">{t("photoCopiesHint")}</p>
       {:else if r.type === "subtitle"}
-        {@const fps = (n: number) => n.toLocaleString(settings.lang === "en" ? "en-US" : "pt-BR")}
+        {@const fps = (n: number) => n.toLocaleString(LOCALES[settings.lang])}
         <p class="hint top">{t("subToolsHint")}</p>
         <h4 class="sect">{t("sectFormat")}</h4>
         <label class="check"><input type="checkbox" bind:checked={r.toSrt} /> <span>{label("toSrt")}<small>{optHint("toSrt")}</small></span></label>
@@ -677,7 +683,7 @@
         {@render actions(t("comicSearch"), "comicSummary")}
         <h4 class="sect">{t("sectInside")}</h4>
         <label class="check"><input type="checkbox" bind:checked={r.writeInfo} /> <span>{label("writeInfo")}<small>{optHint("writeInfo")}</small></span></label>
-        <label class="check"><input type="checkbox" bind:checked={r.cleanInfo} /> <span>{t(r.writeInfo ? "comicCleanInfoWrite" : "comicCleanInfo")}<small>{t(r.writeInfo ? "comicCleanInfoWriteHint" : "comicCleanInfoHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.cleanInfo} /> <span>{label("cleanInfo")}<small>{optHint("cleanInfo")}</small></span></label>
         <h4 class="sect">{t("sectConvert")}</h4>
         <label class="check"><input type="checkbox" bind:checked={r.convert} /> <span>{label("convert")}<small>{optHint("convert")}</small></span></label>
         {#if applies("drawPdfPages")}
@@ -708,13 +714,13 @@
         </label>
         <p class="hint">{t("comicEbookHint")}</p>
         {#if applies("device")}
-          <label class="sub">{t("readerFor")}
+          <label class="sub">{label("device")}
             <select
               value={reader.reader || r.device}
-              onchange={(e) => {
-                const c = chooseReader((e.currentTarget as HTMLSelectElement).value);
-                r.device = c.device;
-                r.model = c.model;
+              onchange={async (e) => {
+                const [device, model] = await api.readerChoice((e.currentTarget as HTMLSelectElement).value);
+                r.device = device as typeof r.device;
+                r.model = model;
               }}
             >
               {@render readerOptions(true)}

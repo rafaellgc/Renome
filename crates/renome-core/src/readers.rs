@@ -29,6 +29,16 @@ pub fn device_of(model_id: &str) -> Option<&'static str> {
     model(model_id).map(|m| m.2)
 }
 
+/// What a reader menu's choice stands for: a model, with its screen; or a
+/// screen alone (another device, a custom size, the pages as they are),
+/// with no model.
+pub fn choose(value: &str) -> (String, String) {
+    match device_of(value) {
+        Some(device) => (device.to_string(), value.to_string()),
+        None => (value.to_string(), String::new()),
+    }
+}
+
 /// The reader a rule names, as its menu shows it: its model when that is
 /// one of the screen's, else (rules made before models) the screen's
 /// first model, else the screen itself (a custom size, the pages as they

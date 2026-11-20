@@ -2747,7 +2747,26 @@ model's screen and the formats it opens, read from `src/lib/readers.ts`
 by the core's build alone; the page a book is printed to PDF on, and
 the format a comic or book rule makes that its reader does not open as
 it comes, unless any reading program will do: the window marks it, the
-command line warns). Plurals
+command line warns). Since the later 2026-11-20 re-audit, also: a comic
+rule's reader model brings its screen (`catalog::normalize_rule`, so
+`comic:model=kobo-sage` alone is made for that screen; the window's menu
+asks `readers::choose`), labels that follow another option
+(`catalog::labels_of`/`LABELS_WHEN`: clearing the ComicInfo.xml reads
+"write from scratch" while writing it is on; `rules comic` shows both),
+what is said under the list and of its rows (`flow::said::{totals,
+left, tags}`: files or files shown by the filter, changed, the real
+conflicts (`Preview::real_conflicts`), already there, old folders left
+with files and each one's line; each row's tags — outside the rule,
+pages drawn, DRM, a movie's extra, an advert and whether it goes to the
+Trash, what the subtitle rule does, subtitles extracted or pictures, by
+hand, a name Windows does not take — shown by the window beside the
+names and printed by the command line after them, also in `--json`),
+the rules left out of saved ones (`said::dropped`, each named once),
+what went wrong after the renames (`said::troubles`: the stage's title
+and count for the window's notice, each file as `file — why`, a
+subtitle saved out of time a warning) and the Test buttons of keys and
+accounts (`checks::test`, also `keys test`: a GCD account "works", an
+OpenSubtitles account says the downloads left). Plurals
 in texts are written twice (TypeScript for the window, Rust for the
 command line); both run the cases of `src/lib/plurals.json`. And
 `crates/renome-cli` the program: every command below, the lookup rules
@@ -2957,7 +2976,8 @@ Human output: one line per changed file (`old → new`, folders shortened
 from the left like the window), grouped by folder, colours for added and
 removed parts when the terminal has them, then the totals and notices.
 `--all` also lists unchanged files. `--json`: one object with `items`
-(path, newPath, status, problem, tags, match), `totals`, `notices`,
+(path, newPath, status, problem, tags, match), `totals` (files, changed,
+the real conflicts, already there, old folders left with files), `notices`,
 `missing`; for `apply`/`undo` also `historyId` and `failed`. Messages
 follow the language; JSON keys are English and stable.
 

@@ -412,6 +412,8 @@ const pt = {
   ruleOnce: "Já está na lista",
   ruleClash: "Não combina com {rule}",
   lookupsDropped: "Uma regra por tipo de arquivo de cada vez: {rules} ficou de fora",
+  troubleFile: "{file} — {why}",
+  troubleWhy: "{why}",
   error: "Erro",
   // dialogs
   confirmTitle: "Renomear arquivos",
@@ -435,7 +437,6 @@ const pt = {
   outsideMusic: "Não é música, letra, playlist nem capa: a regra de música não mexe nele. Dá para renomear à mão (clique duas vezes no novo nome).",
   outsideBook: "Não é livro: a busca de livros não mexe nele. Dá para renomear à mão (clique duas vezes no novo nome).",
   outsideComic: "Não é quadrinho: a busca de quadrinhos não mexe nele. Dá para renomear à mão (clique duas vezes no novo nome).",
-  confirmLeftover: "A pasta “{from}” fica com {n} arquivo(s) que não [vai|vão] para a pasta nova e passa a se chamar “{to}”, ao lado dela.",
   confirmLeftoverHead: "{n} pasta(s) antiga(s) fica(m) com arquivos que não vão para a pasta nova. Nada é apagado: ela(s) ganha(m) “({suffix})” no nome e fica(m) ao lado da nova.",
   confirmLeftoverItem: "{from}  ({n} arquivo(s))\n→ {to}",
   leftoverCount: "{n} pasta(s) com sobras",
@@ -785,6 +786,8 @@ const pt = {
   readerAny: "Qualquer um",
   readerForOptional: "Para o leitor (opcional)",
   readerFor: "Para o leitor",
+  comicModel: "Modelo do leitor",
+  comicModelHint: "Um modelo da lista de leitores (o mesmo id do menu da janela): o quadrinho é feito para a tela dele, qualquer que seja o aparelho dito.",
   comicModel_phone: "Celular",
   comicModel_tablet: "Tablet Android 10″–11″",
   comicDevices_tablets: "Tablets e celulares",
@@ -851,6 +854,7 @@ const pt = {
   subExtractLangs: "Idiomas",
   subExtractAll: "todos (ou: pt-BR, en)",
   subRowSrt: "SRT",
+  subRowUtf8: "UTF-8",
   subRowAds: "−{n} propag.",
   subRowHearing: "−{n} surdos",
   subRowRetime: "tempo",
@@ -1652,6 +1656,8 @@ const en: Dict = {
   ruleOnce: "Already in the list",
   ruleClash: "Does not go with {rule}",
   lookupsDropped: "One rule by kind of file at a time: {rules} left out",
+  troubleFile: "{file} — {why}",
+  troubleWhy: "{why}",
   error: "Error",
   confirmTitle: "Rename files",
   confirmText: "Rename {n} file(s)?",
@@ -1674,7 +1680,6 @@ const en: Dict = {
   outsideMusic: "Not a song, lyrics, playlist or cover: the music rule leaves it alone. You can rename it by hand (double-click the new name).",
   outsideBook: "Not a book: the book lookup leaves it alone. You can rename it by hand (double-click the new name).",
   outsideComic: "Not a comic: the comic lookup leaves it alone. You can rename it by hand (double-click the new name).",
-  confirmLeftover: "The folder “{from}” keeps {n} file(s) that [does|do] not go to the new folder and is renamed “{to}”, next to it.",
   confirmLeftoverHead: "{n} old folder(s) will keep files that do not go to the new folder. Nothing is deleted: each one gets “({suffix})” in its name and stays next to the new one.",
   confirmLeftoverItem: "{from}  ({n} file(s))\n→ {to}",
   leftoverCount: "{n} folder(s) with leftovers",
@@ -2023,6 +2028,8 @@ const en: Dict = {
   readerAny: "Any",
   readerForOptional: "For the reader (optional)",
   readerFor: "For the reader",
+  comicModel: "Reader model",
+  comicModelHint: "A model of the readers' list (the same id as the window's menu): the comic is made for its screen, whatever device is given.",
   comicModel_phone: "Phone",
   comicModel_tablet: "Android tablet 10″–11″",
   comicDevices_tablets: "Tablets and phones",
@@ -2089,6 +2096,7 @@ const en: Dict = {
   subExtractLangs: "Languages",
   subExtractAll: "all (or: pt-BR, en)",
   subRowSrt: "SRT",
+  subRowUtf8: "UTF-8",
   subRowAds: "−{n} ads",
   subRowHearing: "−{n} SDH",
   subRowRetime: "timing",
@@ -2887,6 +2895,8 @@ const es: Dict = {
   ruleOnce: "Ya está en la lista",
   ruleClash: "No combina con {rule}",
   lookupsDropped: "Una regla por tipo de archivo a la vez: {rules} quedó fuera",
+  troubleFile: "{file} — {why}",
+  troubleWhy: "{why}",
   error: "Error",
   confirmTitle: "Renombrar archivos",
   confirmText: "¿Renombrar {n} archivo(s)?",
@@ -2909,7 +2919,6 @@ const es: Dict = {
   outsideMusic: "No es canción, letra, lista ni portada: la regla de música no lo toca. Puede renombrarlo a mano (doble clic en el nombre nuevo).",
   outsideBook: "No es un libro: la búsqueda de libros no lo toca. Puede renombrarlo a mano (doble clic en el nombre nuevo).",
   outsideComic: "No es un cómic: la búsqueda de cómics no lo toca. Puede renombrarlo a mano (doble clic en el nombre nuevo).",
-  confirmLeftover: "La carpeta “{from}” se queda con {n} archivo(s) que no [va|van] a la carpeta nueva y pasa a llamarse “{to}”, junto a ella.",
   confirmLeftoverHead: "{n} carpeta(s) antigua(s) se queda(n) con archivos que no van a la carpeta nueva. No se borra nada: cada una recibe “({suffix})” en el nombre y queda junto a la nueva.",
   confirmLeftoverItem: "{from}  ({n} archivo(s))\n→ {to}",
   leftoverCount: "{n} carpeta(s) con sobrantes",
@@ -3258,6 +3267,8 @@ const es: Dict = {
   readerAny: "Cualquiera",
   readerForOptional: "Para el lector (opcional)",
   readerFor: "Para el lector",
+  comicModel: "Modelo del lector",
+  comicModelHint: "Un modelo de la lista de lectores (el mismo id del menú de la ventana): el cómic se hace para su pantalla, sea cual sea el aparato indicado.",
   comicModel_phone: "Móvil",
   comicModel_tablet: "Tableta Android 10″–11″",
   comicDevices_tablets: "Tabletas y móviles",
@@ -3324,6 +3335,7 @@ const es: Dict = {
   subExtractLangs: "Idiomas",
   subExtractAll: "todos (o: es, en)",
   subRowSrt: "SRT",
+  subRowUtf8: "UTF-8",
   subRowAds: "−{n} public.",
   subRowHearing: "−{n} sordos",
   subRowRetime: "tiempo",
@@ -3727,6 +3739,30 @@ export const MOD = navigator.userAgent.includes("Mac") ? "⌘" : "Ctrl";
 export function t(key: Key, vars: Record<string, string | number> = {}): string {
   const text = dicts[settings.lang]?.[key] ?? pt[key] ?? key;
   return plurals(text, vars).replace(/\{(\w+)\}/g, (m, v) => (v in vars ? String(vars[v]) : m));
+}
+
+/** A line Rust says (`flow::after::Line`, the command line's `said` too):
+ *  a text's key with its count, its other fields, those that are errors
+ *  (said as errors are) and those that are lists of texts' keys (each
+ *  said, joined by commas). */
+export interface SaidLine {
+  key: string;
+  n: number;
+  more?: [string, string][];
+  errors?: [string, string][];
+  names?: [string, string[]][];
+}
+
+/** Lines Rust says, in the interface's language. */
+export function said(lines: SaidLine[]): string[] {
+  return lines.map((l) =>
+    t(l.key as Key, {
+      n: l.n,
+      ...Object.fromEntries(l.more ?? []),
+      ...Object.fromEntries((l.errors ?? []).map(([k, v]) => [k, tError(v)])),
+      ...Object.fromEntries((l.names ?? []).map(([k, keys]) => [k, keys.map((x) => t(x as Key)).join(", ")])),
+    }),
+  );
 }
 
 /** Translates an error from Rust in the form `code` or `code: detail`. */

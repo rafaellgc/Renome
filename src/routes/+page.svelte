@@ -34,18 +34,18 @@
   import RuleCard from "$lib/RuleCard.svelte";
   import ShowPicker from "$lib/ShowPicker.svelte";
   import SubtitleReview from "$lib/SubtitleReview.svelte";
-  import { LOCALES, MOD, t, tError, type Key } from "$lib/i18n";
+  import { LOCALES, MOD, said, t, tError, type Key } from "$lib/i18n";
   import { TABLE, isKindRule, ruleNames, setRuleTable, type Blocked, newRule, newStep } from "$lib/rules";
   import { loadSecrets, refreshLangs, saveSecrets, saveSettings, secretFields, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
-    AfterCounts, AfterReport, ApplyReport, RenameAsk, SaidLine, Candidate, Copies, MovieStatus, HistoryEntry, Preview, PreviewItem, Rule, RuleType, Step, View, ViewSort,
+    AfterCounts, AfterReport, ApplyReport, RenameAsk, Candidate, Copies, MovieStatus, HistoryEntry, Preview, PreviewItem, Rule, RuleType, Step, View, ViewSort,
   } from "$lib/types";
   import type { DetailColumn, UpdateFound } from "$lib/types";
 
   let ready = $state(false);
   let steps = $state<Step[]>([]);
   let overrides = $state<Record<string, string>>({});
-  let preview = $state<Preview>({ items: [], ruleErrors: [], filterError: null, total: 0, changed: 0, conflicts: 0, sameThere: 0, leftFolders: [], trash: [], trashFolders: [], hints: { sample: "", files: 0, pairs: 0, names: [], pairNames: [], steps: [] } });
+  let preview = $state<Preview>({ items: [], ruleErrors: [], filterError: null, total: 0, changed: 0, conflicts: 0, sameThere: 0, leftFolders: [], trash: [], trashFolders: [], totals: [], left: [], tags: {}, hints: { sample: "", files: 0, pairs: 0, names: [], pairNames: [], steps: [] } });
   let selected = $state(new Set<string>());
   let filter = $state("");
   let sortKey = $state<ViewSort>("newName");
@@ -153,9 +153,6 @@
     });
   }
   const NO_COUNTS: AfterCounts = { sidecars: 0, bookMeta: 0, covers: 0, playlists: 0, tags: 0, inside: 0, videoTags: 0, subTools: 0, subtitles: 0, besides: 0, lines: [] };
-  /** Lines Rust says of the work besides the renames, in the texts. */
-  const said = (lines: SaidLine[]) =>
-    lines.map((l) => t(l.key as Key, { n: l.n, ...Object.fromEntries(l.more ?? []), ...Object.fromEntries((l.errors ?? []).map(([k, v]) => [k, tError(v)])) }));
   /** What renaming would write besides the renames (asked of the shared flow whenever the list or the choices change). */
   let afterCounts = $state<AfterCounts>(NO_COUNTS);
   $effect(() => {
@@ -319,16 +316,6 @@
   let ruleMenu = $state(false);
   let table = $state<FileTable>();
 
-  /** Files the lookup rules on leave alone (a `.zip` in a show's folder),
-   *  with why: tagged in the list, which can still name them by hand. */
-  const outside = $derived.by(() => {
-    // Which files the rule leaves alone, the Rust core says (`outside`).
-    const key = { movie: "outsideMovie", series: "outsideSeries", music: "outsideMusic", book: "outsideBook", comic: "outsideComic" } as const;
-    const out: Record<string, string> = {};
-    for (const i of preview.items) if (i.outside) out[i.path] = t(key[i.outside]);
-    return out;
-  });
-
   const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, alikeOnly, similarOnly, movies: movies.matches, episodes: tv.matches, songs: music.matches, books: books.matches, comics: comics.matches, dates: photos.dates, leftoverSuffix: t("leftoverSuffix"), lang: settings.lang, numberClashes: settings.numberClashes, sendTo });
   /** The lookup rule in the stack (on or off): the others wait until it
    *  is removed. */
@@ -380,7 +367,7 @@
   async function refresh() {
     const run = ++previewRun;
     try {
-      const p = await api.preview(payload(), $state.snapshot(overrides), $state.snapshot(view));
+      const p = await api.preview(payload(), $state.snapshot(overrides), $state.snapshot(view), settings.warnWindows);
       if (run === previewRun) {
         preview = p;
         // An empty list has nothing selected, whatever finished last.
@@ -398,6 +385,7 @@
     JSON.stringify(steps);
     JSON.stringify(overrides);
     JSON.stringify(view);
+    settings.warnWindows;
     if (!ready) return;
     clearTimeout(timer);
     timer = setTimeout(refresh, 120);
@@ -597,7 +585,7 @@
     // command line's too): one lookup rule, every option, all back on
     // when a saved set had them all off.
     const [kept, dropped] = await api.completeSteps($state.snapshot(loaded) as Step[], settings.lang, saved);
-    if (dropped.length) notice = t("lookupsDropped", { rules: [...new Set(dropped)].map((r) => t(`rule.${r}`)).join(", ") });
+    if (dropped) notice = said([dropped])[0];
     else if (done) notice = done;
     return kept;
   }
@@ -630,14 +618,14 @@
     const picked = chosen();
     // What the question says, and whether it is asked anyway (old folders
     // left behind, adverts to the trash): the shared flow decides.
-    const [counts, ask] = await api.renameAsk(rules, picked, $state.snapshot(sendTo)).catch((): [AfterCounts, RenameAsk] => [afterCounts, { question: null, lines: [], left: [], always: false }]);
+    const [counts, ask] = await api.renameAsk(rules, picked, $state.snapshot(sendTo)).catch((): [AfterCounts, RenameAsk] => [afterCounts, { question: null, lines: [], left: [], leftHead: null, always: false }]);
     if (!preview.changed && !counts.besides) return;
-    const left = ask.left.map((f) => t("confirmLeftoverItem", { n: f.files, from: basename(f.from), to: basename(f.to) }));
+    const left = said(ask.left);
     if (settings.confirmApply || ask.always) {
       const lines = said(ask.question ? [ask.question, ...ask.lines] : ask.lines);
       const ok = await confirm({
         title: t(sendTo ? (sendTo.copy ? "confirmCopyTitle" : "confirmMoveTitle") : "confirmTitle"),
-        text: left.length ? `${lines.join("\n")}\n\n${t("confirmLeftoverHead", { n: left.length, suffix: t("leftoverSuffix") })}` : `${lines.join("\n")}\n\n${t("confirmUndoHint")}`,
+        text: ask.leftHead ? `${lines.join("\n")}\n\n${said([ask.leftHead])[0]}` : `${lines.join("\n")}\n\n${t("confirmUndoHint")}`,
         items: left.length ? left : undefined,
         after: left.length ? t("confirmUndoHint") : undefined,
         ok: t(sendTo ? (sendTo.copy ? "confirmCopyOk" : "confirmMoveOk") : "confirmOk"),
@@ -672,20 +660,12 @@
           for (const op of r.done) delete subs.found[op.from];
           for (const i of preview.items) if (i.status === "unchanged") delete subs.found[i.path];
         }
-        const told: Record<string, [string, (n: number) => string]> = {
-          sidecars: ["sidecarsTitle", (n) => t("sidecarsN", { n })],
-          tags: ["tagsTitle", (n) => t("tagsN", { n })],
-          audioTags: ["tagsTitle", (n) => t("audioTagsN", { n })],
-          inside: ["insideTitle", (n) => t("insideN", { n })],
-          subTools: ["subToolsTitle", () => said(after!.lines.filter((l) => l.key.startsWith("subTools"))).join(", ")],
-          subtitles: ["subsTitle", (n) => t("subsSavedN", { n })],
-        };
-        for (const x of after.troubles) {
-          const [title, text] = told[x.stage] ?? ["resultTitle", () => ""];
+        // What went wrong, stage by stage (Rust says it: `said::troubles`).
+        for (const x of after.told) {
           await notify({
-            title: t(title as "resultTitle"),
-            text: text(x.done),
-            items: x.errors.map(([file, why]) => (file ? `${file} — ${tError(why)}` : tError(why))),
+            title: t(x.title as Key),
+            text: said(x.text).join(", "),
+            items: said([...x.errors, ...x.warnings]),
           });
         }
       }
@@ -1025,7 +1005,7 @@
     try {
       const [loaded, dropped] = await api.loadPreset(path, settings.lang);
       steps = loaded;
-      notice = dropped.length ? t("lookupsDropped", { rules: [...new Set(dropped)].map((r) => t(`rule.${r}`)).join(", ") }) : t("rulesLoaded");
+      notice = dropped ? said([dropped])[0] : t("rulesLoaded");
     } catch (e) {
       await notify({ title: t("openRules"), text: tError(e) });
     }
@@ -1441,7 +1421,7 @@
           oncompare={openCompare}
           {matches}
           ghosts={settings.showMissing ? ghosts : []}
-          {outside}
+          tags={preview.tags}
           available={availableColumns}
           onmatch={(p) => {
             if (tv.rule && tv.state[p]) tv.openReview(p);
@@ -1468,20 +1448,16 @@
 
   <footer>
     {#if preview.total}
-      <span>
-        {preview.items.length === preview.total
-          ? t("files", { n: preview.total })
-          : t("shownOf", { shown: preview.items.length, total: preview.total })}
-      </span>
-      <span class="ok">{t("changed", { n: preview.changed })}</span>
-    {/if}
-    {#if preview.conflicts - preview.sameThere}<span class="bad">{t("conflicts", { n: preview.conflicts - preview.sameThere })}</span>{/if}
-    {#if preview.sameThere}<span title={t("problem.sameThere")}>{t("sameThereN", { n: preview.sameThere })}</span>{/if}
-    {#if preview.leftFolders.length}
-      <span
-        class="warn"
-        title={preview.leftFolders.map((f) => t("confirmLeftover", { n: f.files, from: basename(f.from), to: basename(f.to) })).join("\n")}
-      >{t("leftoverCount", { n: preview.leftFolders.length })}</span>
+      <!-- The totals Rust says (the command line's too): files, changed,
+           conflicts, already there, folders left with files. -->
+      {#each preview.totals as l (l.key)}
+        {@const text = said([l])[0]}
+        {#if l.key === "changed"}<span class="ok">{text}</span>
+        {:else if l.key === "conflicts"}<span class="bad">{text}</span>
+        {:else if l.key === "sameThereN"}<span title={t("problem.sameThere")}>{text}</span>
+        {:else if l.key === "leftoverCount"}<span class="warn" title={said(preview.left).join("\n\n")}>{text}</span>
+        {:else}<span>{text}</span>{/if}
+      {/each}
     {/if}
     {#if selected.size}<span>{t("selected", { n: selected.size })}</span>{/if}
     {#if ghosts.length}

@@ -838,6 +838,14 @@ const CLI: &[(&str, [&str; 3])] = &[
         ],
     ),
     ("wasNamed", ["antes", "formerly", "antes"]),
+    (
+        "labelWhenOn",
+        [
+            "com {option} ligado: {label}",
+            "with {option} on: {label}",
+            "con {option} activado: {label}",
+        ],
+    ),
     ("kindText", ["texto", "text", "texto"]),
     (
         "kindTemplate",

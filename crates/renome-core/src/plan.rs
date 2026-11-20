@@ -367,6 +367,14 @@ fn rule_takes(kind: &str, audiobooks: bool, i: &PreviewItem) -> bool {
     }
 }
 
+impl Preview {
+    /// The conflicts, without the files already where they go (the same
+    /// file is there): those stay, and nothing is wrong.
+    pub fn real_conflicts(&self) -> usize {
+        self.conflicts - self.same_there
+    }
+}
+
 fn is_zero(n: &usize) -> bool {
     *n == 0
 }

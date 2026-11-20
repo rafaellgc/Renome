@@ -321,7 +321,8 @@ async fn preview(
     steps: Vec<Value>,
     overrides: Overrides,
     mut view: View,
-) -> Result<Preview, String> {
+    warn_windows: bool,
+) -> Result<Shown, String> {
     let steps = rule_steps(steps, &mut view)?;
     let emitter = app.clone();
     in_background(app, move |state| {
@@ -365,9 +366,44 @@ async fn preview(
                 f.keep_read(other);
             }
         }
-        preview
+        Shown::of(preview, warn_windows)
     })
     .await
+}
+
+/// The list as the window shows it, with what is said under it and of
+/// its rows (see `flow::said`, the command line's preview too).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Shown {
+    #[serde(flatten)]
+    preview: Preview,
+    /// Its totals (`said::totals`).
+    totals: Vec<renome_services::flow::after::Line>,
+    /// The old folders left with files (`said::left`).
+    left: Vec<renome_services::flow::after::Line>,
+    /// Each row's tags, by path (`said::tags`; rows without none left out).
+    tags: HashMap<PathBuf, Vec<renome_services::flow::said::Tag>>,
+}
+
+impl Shown {
+    fn of(preview: Preview, warn_windows: bool) -> Self {
+        use renome_services::flow::said;
+        let tags = preview
+            .items
+            .iter()
+            .filter_map(|i| {
+                let t = said::tags(i, warn_windows);
+                (!t.is_empty()).then(|| (i.path.clone(), t))
+            })
+            .collect();
+        Self {
+            totals: said::totals(&preview),
+            left: said::left(&preview.left_folders),
+            tags,
+            preview,
+        }
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -985,11 +1021,6 @@ fn tmdb_images() -> String {
         .unwrap_or_else(|| "https://image.tmdb.org/t/p".into())
 }
 
-#[tauri::command]
-async fn tmdb_check(key: String) -> Result<(), String> {
-    tmdb::Client::new(&key, "en-US").check().await
-}
-
 /// The movie rule's search: what is sure is picked, the rest are doubts
 /// (the flow the command line runs too).
 #[tauri::command]
@@ -1178,12 +1209,33 @@ fn gcd_few(source: String, email: String, password: String) -> bool {
     renome_services::options::gcd_few(&source, &email, &password)
 }
 
-/// The options a rule's card hides as the rule is set (see
-/// `catalog::hidden`: those under another that leaves them nothing to
-/// do, and the inert ones).
+/// How a rule's card shows its options as the rule is set: those it
+/// hides (`catalog::hidden`: under another that leaves them nothing to
+/// do, and the inert ones) and their labels (`catalog::labels_of`).
 #[tauri::command]
-fn rule_hidden(rule: Value) -> Vec<&'static str> {
-    renome_core::catalog::hidden(&rule)
+fn rule_view(rule: Value) -> Value {
+    serde_json::json!({
+        "hidden": renome_core::catalog::hidden(&rule),
+        "labels": renome_core::catalog::labels_of(&rule),
+    })
+}
+
+/// The options' Test button of a key or account (`checks::test`, the
+/// command line's `keys test` too): what to say when it works.
+#[tauri::command]
+async fn account_check(
+    name: String,
+    values: HashMap<String, String>,
+) -> Result<renome_services::flow::after::Line, String> {
+    let get = |k: &str| values.get(k).cloned().unwrap_or_default();
+    renome_services::checks::test(&name, &get).await
+}
+
+/// What a reader menu's choice stands for (`readers::choose`): a model
+/// and its screen, or a screen alone.
+#[tauri::command]
+fn reader_choice(value: String) -> (String, String) {
+    renome_core::readers::choose(&value)
 }
 
 /// Episodes as file names write them (`S01E02-E03`: `flow::series::code`,
@@ -1256,8 +1308,13 @@ fn rule_blocks(types: Vec<String>) -> HashMap<String, Option<renome_core::catalo
 /// Saved steps made ready to use (see `catalog::complete_steps`, the
 /// command line's too), and the types left out.
 #[tauri::command]
-fn complete_steps(steps: Vec<Value>, lang: String, saved: bool) -> (Vec<Value>, Vec<String>) {
-    renome_core::catalog::complete_steps(steps, &lang, saved)
+fn complete_steps(
+    steps: Vec<Value>,
+    lang: String,
+    saved: bool,
+) -> (Vec<Value>, Option<renome_services::flow::after::Line>) {
+    let (steps, dropped) = renome_core::catalog::complete_steps(steps, &lang, saved);
+    (steps, renome_services::flow::said::dropped(&dropped))
 }
 
 /// The details typed in a details window over each file's (see
@@ -1475,7 +1532,7 @@ async fn after_rename(
     tmdb_key: String,
     tmdb_lang: String,
     subs: subtitles::Auth,
-) -> Result<renome_services::flow::after::Report, String> {
+) -> Result<Value, String> {
     use renome_services::flow::after;
     let state = app.state::<AppState>();
     // The list as renamed (as shown, when nothing was).
@@ -1514,7 +1571,12 @@ async fn after_rename(
         report.followed = followed(&mut s.files, &report.moved);
     }
     forget_tags_of(&state, report.retagged.clone());
-    Ok(report)
+    // With what is said of each stage that went wrong (the command line
+    // says the same of each file).
+    let told = renome_services::flow::said::troubles(&report);
+    let mut v = serde_json::to_value(&report).map_err(|e| e.to_string())?;
+    v["told"] = serde_json::to_value(told).map_err(|e| e.to_string())?;
+    Ok(v)
 }
 
 /// The videos whose subtitles are searched (the flow the command line
@@ -1571,16 +1633,6 @@ fn subs_tally(
     remaining: Option<i64>,
 ) -> renome_services::flow::subtitles::Tally {
     renome_services::flow::subtitles::tally(&videos, &langs, remaining)
-}
-
-#[tauri::command]
-async fn os_check(auth: subtitles::Auth) -> Result<Option<i64>, String> {
-    subtitles::check_os(auth).await
-}
-
-#[tauri::command]
-async fn subdl_check(key: String) -> Result<(), String> {
-    subtitles::check_subdl(key).await
 }
 
 #[tauri::command]
@@ -1666,11 +1718,6 @@ async fn server_tell(
     renome_services::flow::said::told(&answers)
 }
 
-#[tauri::command]
-async fn subsource_check(key: String) -> Result<(), String> {
-    subtitles::check_subsource(key).await
-}
-
 /// The list's files at these paths.
 fn session_files(app: &AppHandle, paths: &HashSet<PathBuf>) -> Vec<FileEntry> {
     let state = app.state::<AppState>();
@@ -1754,18 +1801,6 @@ fn discogs_token(state: State<AppState>, token: String) {
 #[tauri::command]
 fn google_books_key(state: State<AppState>, key: String) {
     state.ol.gb.set_key(&key);
-}
-
-/// Checks a Google Books key.
-#[tauri::command]
-async fn google_books_check(app: AppHandle, key: String) -> Result<(), String> {
-    app.state::<AppState>().ol.gb.check(&key).await
-}
-
-/// Checks a Discogs token.
-#[tauri::command]
-async fn discogs_check(app: AppHandle, token: String) -> Result<(), String> {
-    app.state::<AppState>().dg.check(&token).await
 }
 
 /// Matches an album's songs to the release the user chose.
@@ -1977,21 +2012,10 @@ async fn book_search(
     Ok(found)
 }
 
-#[tauri::command]
-async fn comic_check(app: AppHandle, key: String) -> Result<(), String> {
-    app.state::<AppState>().cv.check(&key).await
-}
-
 /// The Grand Comics Database account from the options (empty: none).
 #[tauri::command]
 fn gcd_account(state: State<AppState>, email: String, password: String) {
     state.gcd.set_account(&email, &password);
-}
-
-/// Checks a Grand Comics Database account.
-#[tauri::command]
-async fn gcd_check(app: AppHandle, email: String, password: String) -> Result<(), String> {
-    app.state::<AppState>().gcd.check(&email, &password).await
 }
 
 /// Series with a name in a catalogue (`gcd`, `comicvine`, `metron`,
@@ -2057,12 +2081,6 @@ fn comic_named(
     volumes: HashMap<String, renome_services::flow::comics::Listed>,
 ) -> HashMap<PathBuf, renome_services::flow::comics::Named> {
     renome_services::flow::comics::named(&files, &volumes)
-}
-
-/// Checks a Metron token.
-#[tauri::command]
-async fn metron_check(app: AppHandle, token: String) -> Result<(), String> {
-    app.state::<AppState>().mt.check(&token).await
 }
 
 #[tauri::command]
@@ -2164,7 +2182,13 @@ fn save_csv(path: PathBuf, rows: Vec<Vec<String>>, lang: String) -> Result<(), S
 fn load_preset(
     path: PathBuf,
     lang: String,
-) -> Result<(Vec<serde_json::Value>, Vec<String>), String> {
+) -> Result<
+    (
+        Vec<serde_json::Value>,
+        Option<renome_services::flow::after::Line>,
+    ),
+    String,
+> {
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     let v: Value = serde_json::from_str(&text).map_err(|e| format!("invalidPreset: {e}"))?;
     // A list of steps, a set or a list of sets (the command line reads the
@@ -2175,7 +2199,7 @@ fn load_preset(
     let (steps, dropped) = renome_core::catalog::complete_steps(steps, &lang, true);
     serde_json::from_value::<Vec<Step>>(serde_json::Value::Array(steps.clone()))
         .map_err(|e| format!("invalidPreset: {e}"))?;
-    Ok((steps, dropped))
+    Ok((steps, renome_services::flow::said::dropped(&dropped)))
 }
 
 /// The settings file is read and written whole by the settings and the
@@ -2385,17 +2409,16 @@ pub fn run() {
             export_missing,
             discogs_token,
             google_books_key,
-            google_books_check,
-            discogs_check,
             preview,
             find_identical,
-            tmdb_check,
             movie_search,
             series_search,
             series_named,
             movie_named,
             episode_codes,
-            rule_hidden,
+            rule_view,
+            account_check,
+            reader_choice,
             subs_tally,
             gcd_few,
             picture_places,
@@ -2406,9 +2429,6 @@ pub fn run() {
             subs_targets,
             subs_wanted,
             subs_ready,
-            os_check,
-            subdl_check,
-            subsource_check,
             server_check,
             server_read,
             server_new,
@@ -2445,14 +2465,11 @@ pub fn run() {
             books_search,
             book_matches,
             book_search,
-            comic_check,
             comic_search,
             anime_search,
             comics_search,
             comic_named,
-            metron_check,
             gcd_account,
-            gcd_check,
             save_csv,
             tmdb_images,
             recover,

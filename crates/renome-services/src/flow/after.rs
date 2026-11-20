@@ -225,6 +225,10 @@ pub struct Line {
     /// said in the language as errors are (`err.tags: …`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub errors: Vec<(&'static str, String)>,
+    /// Fields that are lists of texts' keys (rules' names): each said in
+    /// the language, joined by commas.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub names: Vec<(&'static str, Vec<String>)>,
 }
 
 /// The lines with a count, in order.
@@ -253,7 +257,10 @@ pub struct Ask {
     pub lines: Vec<Line>,
     /// Old folders left with files that do not go to the new one (they
     /// are renamed beside it), listed.
-    pub left: Vec<renome_core::plan::LeftFolder>,
+    /// (one line each: see [`super::said::left`]).
+    pub left: Vec<Line>,
+    /// What is said before them: how many, and the name they get.
+    pub left_head: Option<Line>,
     /// Asked even when the options say not to ask: old folders left
     /// behind and adverts sent to the trash are always told.
     pub always: bool,
@@ -284,7 +291,7 @@ pub fn ask(preview: &Preview, counts: &Counts, send_to: Option<(&Path, bool)>) -
     });
     let mut said = counts.lines.clone();
     said.extend(lines(&[
-        ("confirmConflicts", preview.conflicts - preview.same_there),
+        ("confirmConflicts", preview.real_conflicts()),
         ("confirmSameThere", preview.same_there),
     ]));
     if ads > 0 {
@@ -298,7 +305,13 @@ pub fn ask(preview: &Preview, counts: &Counts, send_to: Option<(&Path, bool)>) -
     Ask {
         question,
         lines: said,
-        left: preview.left_folders.clone(),
+        left: super::said::left(&preview.left_folders),
+        left_head: (!preview.left_folders.is_empty()).then(|| Line {
+            key: "confirmLeftoverHead",
+            n: preview.left_folders.len(),
+            names: vec![("suffix", vec!["leftoverSuffix".into()])],
+            ..Line::default()
+        }),
         always: !preview.left_folders.is_empty() || ads > 0,
     }
 }

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Ghost } from "./missing";
 import type { Blocked, RuleTable } from "./rules";
+import type { SaidLine } from "./i18n";
 import type { RuleType, AfterCounts, RenameAsk, AfterReport, Rule, AlbumLookup, BookTarget, ComicFormat, ComicDevice, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, MbCandidate, SongMatch, HistoryEntry, ListedTrack, EpisodeMatch, EpKey, BookFound, BookPart, MovieFound, MovieMatch, PreviewItem, SeriesOutcome, AudioBook, ServerCall, ServerLibrary, UpdateFound, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
 
 type Overrides = Record<string, string>;
@@ -53,7 +54,7 @@ export const api = {
   /** The manual's sections in order, by their ids: each one's place, and a group's title key. */
   manualOrder: (ids: string[], names: Record<string, string>) => invoke<[number, string | null][]>("manual_order", { ids, names }),
   /** Saved steps made whole and up to date, and the types left out. */
-  completeSteps: (steps: Step[], lang: string, saved: boolean) => invoke<[Step[], RuleType[]]>("complete_steps", { steps, lang, saved }),
+  completeSteps: (steps: Step[], lang: string, saved: boolean) => invoke<[Step[], SaidLine | null]>("complete_steps", { steps, lang, saved }),
   /** The files that take an answer given for `path` (its undecided group). */
   sameAnswer: (path: string, files: [string, string, string][]) => invoke<string[]>("same_answer", { path, files }),
   /** The details typed in a details window over each file's (the command line's --edit does the same). */
@@ -123,7 +124,8 @@ export const api = {
   ruleReader: (rule: Rule) =>
     invoke<{ reader: string; device: ComicDevice | null; limited: boolean; marked: string[]; notOpens: { model: string; name: string; format: string; best: string } | null }>("rule_reader", { rule }),
   /** The options a rule's card hides as the rule is set (`catalog::hidden`). */
-  ruleHidden: (rule: Rule) => invoke<string[]>("rule_hidden", { rule }),
+  ruleView: (rule: Rule) => invoke<{ hidden: string[]; labels: Record<string, [string, string | null]> }>("rule_view", { rule }),
+  readerChoice: (value: string) => invoke<[string, string]>("reader_choice", { value }),
   /** Each list of episodes as file names write it (`S01E02-E03`). */
   episodeCodes: (lists: EpKey[][]) => invoke<string[]>("episode_codes", { lists }),
   /** A larger copy of a catalogue's cover, where there is one. */
@@ -137,12 +139,13 @@ export const api = {
   picturePlaces: (group: string[]) => invoke<string[]>("picture_places", { group }),
   pictureCards: (paths: string[], max: number) => invoke<PictureCard[]>("picture_cards", { paths, max }),
   trashFiles: (paths: string[]) => invoke<{ trashed: string[]; failed: [string, string][] }>("trash_files", { paths }),
-  preview: (steps: Step[], overrides: Overrides, view: View) =>
-    invoke<Preview>("preview", { steps, overrides, view }),
+  preview: (steps: Step[], overrides: Overrides, view: View, warnWindows: boolean) =>
+    invoke<Preview>("preview", { steps, overrides, view, warnWindows }),
   apply: (steps: Step[], overrides: Overrides, view: View) =>
     invoke<ApplyReport>("apply", { steps, overrides, view }),
   history: () => invoke<HistoryEntry[]>("history"),
-  tmdbCheck: (key: string) => invoke<void>("tmdb_check", { key }),
+  /** The Test button of a key or account: what to say when it works. */
+  accountCheck: (name: string, values: Record<string, string>) => invoke<SaidLine>("account_check", { name, values }),
   /** The movie rule's search (shared with the command line): sure picks
    *  and doubts. An error when nothing could be searched. */
   movieSearch: (key: string, lang: string, items: PreviewItem[]) =>
@@ -203,8 +206,6 @@ export const api = {
   /** What is chosen across the videos' subtitles (the shared count). */
   subsTally: (videos: { have: string[]; inside: string[]; candidates: SubCandidate[]; pick: Record<string, number> }[], langs: string[], remaining: number | null) =>
     invoke<{ subs: number; videos: number; missing: number; overQuota: boolean }>("subs_tally", { videos, langs, remaining }),
-  osCheck: (auth: SubsAuth) => invoke<number | null>("os_check", { auth }),
-  subdlCheck: (key: string) => invoke<void>("subdl_check", { key }),
   updateCheck: () => invoke<UpdateFound | null>("update_check"),
   updateInstall: () => invoke<void>("update_install"),
   updateWay: () => invoke<"itself" | "page" | "system">("update_way"),
@@ -220,17 +221,13 @@ export const api = {
   /** Tells the servers in the options about the folders the files left and went to (which servers: the shared choice). */
   serverTell: (servers: unknown, keys: string, done: { from: string; to: string }[]) =>
     invoke<import("./types").SaidLine[]>("server_tell", { servers, keys, done }),
-  subsourceCheck: (key: string) => invoke<void>("subsource_check", { key }),
-  discogsCheck: (token: string) => invoke<void>("discogs_check", { token }),
   googleBooksKey: (key: string) => invoke<void>("google_books_key", { key }),
-  googleBooksCheck: (key: string) => invoke<void>("google_books_check", { key }),
   mbChoose: (id: string, paths: string[], fromName: boolean) =>
     invoke<{ matches: [string, SongMatch][]; tracks: ListedTrack[]; agree: number }>("mb_choose", { id, paths, fromName }),
   /** Saves rows as a CSV file, as the command line writes them. */
   saveCsv: (path: string, rows: string[][], lang: string) => invoke<void>("save_csv", { path, rows, lang }),
   /** Where TMDB images come from (`…/t/p`, sizes added). */
   tmdbImages: () => invoke<string>("tmdb_images"),
-  comicCheck: (key: string) => invoke<void>("comic_check", { key }),
   /** Series found, those that could hold issue `highest` first. */
   comicSearch: (source: ComicSource, key: string, query: string, lang: string, year = "", publisher = "", skip = "", highest = 0) =>
     invoke<ComicVolume[]>("comic_search", { source, key, query, year, publisher, lang, skip, highest }),
@@ -252,9 +249,7 @@ export const api = {
     files: { path: string; volumeKey: string; own: ComicMatch; choice: string | null }[],
     volumes: Record<string, { volume: ComicVolume; issues: ComicIssue[] }>,
   ) => invoke<Record<string, { comic: ComicMatch; web: string; manga: boolean }>>("comic_named", { files, volumes }),
-  metronCheck: (token: string) => invoke<void>("metron_check", { token }),
   gcdAccount: (email: string, password: string) => invoke<void>("gcd_account", { email, password }),
-  gcdCheck: (email: string, password: string) => invoke<void>("gcd_check", { email, password }),
   /** The book rule's search (shared with the command line). An error
    *  when nothing could be searched. */
   booksSearch: (lang: string, items: PreviewItem[], settled: string[], audiobooks: boolean) =>
@@ -274,5 +269,5 @@ export const api = {
   /** Forgets the kept answers; the bytes freed. */
   clearCache: () => invoke<number>("clear_cache"),
   savePreset: (path: string, steps: Step[]) => invoke<void>("save_preset", { path, steps }),
-  loadPreset: (path: string, lang: string) => invoke<[Step[], RuleType[]]>("load_preset", { path, lang }),
+  loadPreset: (path: string, lang: string) => invoke<[Step[], SaidLine | null]>("load_preset", { path, lang }),
 };

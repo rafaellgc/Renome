@@ -333,7 +333,7 @@ pub fn preview_or_apply(
             &missing,
             setting_bool(settings, "warnWindows"),
         );
-        return Ok(if real_conflicts(&preview) > 0 || doubtful > 0 {
+        return Ok(if preview.real_conflicts() > 0 || doubtful > 0 {
             Exit::Doubts
         } else {
             Exit::Done
@@ -369,14 +369,14 @@ pub fn preview_or_apply(
                 json!({ "renamed": 0, "historyId": null, "failed": [] })
             );
         }
-        return Ok(if real_conflicts(&preview) > 0 || doubtful > 0 {
+        return Ok(if preview.real_conflicts() > 0 || doubtful > 0 {
             Exit::Doubts
         } else {
             Exit::Done
         });
     }
-    if real_conflicts(&preview) > 0 && m.get_flag("strict") {
-        out::note(&t("strictConflicts", &[("n", &real_conflicts(&preview))]));
+    if preview.real_conflicts() > 0 && m.get_flag("strict") {
+        out::note(&t("strictConflicts", &[("n", &preview.real_conflicts())]));
         return Ok(Exit::Doubts);
     }
     // What the window's question says (the shared lines): the work besides
@@ -433,7 +433,7 @@ pub fn preview_or_apply(
         out::note(&note);
     }
     // Renamed what was certain; conflicts or doubts left say so.
-    if matches!(exit, Exit::Done) && (real_conflicts(&preview) > 0 || doubtful > 0) {
+    if matches!(exit, Exit::Done) && (preview.real_conflicts() > 0 || doubtful > 0) {
         return Ok(Exit::Doubts);
     }
     Ok(exit)
@@ -602,13 +602,13 @@ fn show(p: &Preview, all: bool, missing: &[crate::missing::Missing], warn_window
             .items
             .iter()
             .filter(|i| all || i.status != Status::Unchanged)
-            .map(item_json)
+            .map(|i| item_json(i, warn_windows))
             .collect();
         println!(
             "{}",
             serde_json::to_string_pretty(&json!({
                 "items": items,
-                "totals": { "files": p.total, "changed": p.changed, "conflicts": p.conflicts, "sameThere": p.same_there },
+                "totals": { "files": p.total, "changed": p.changed, "conflicts": p.real_conflicts(), "sameThere": p.same_there, "leftFolders": p.left_folders.len() },
                 "trash": p.trash,
                 "trashFolders": p.trash_folders,
                 "missing": missing,
@@ -638,11 +638,6 @@ fn show(p: &Preview, all: bool, missing: &[crate::missing::Missing], warn_window
             _ => i.new_name.clone(),
         };
         match i.status {
-            Status::Unchanged if i.to_trash => println!(
-                "  {}  {}",
-                out::dim(&i.original),
-                out::yellow(&format!("({})", t("junkRowTrash", &[])))
-            ),
             Status::Unchanged => println!("  {}{}", out::dim(&i.original), note(i, warn_windows)),
             Status::Ok => println!(
                 "  {} → {}{}",
@@ -656,24 +651,28 @@ fn show(p: &Preview, all: bool, missing: &[crate::missing::Missing], warn_window
                     .map(|pr| t(&format!("problem.{}", problem_key(pr)), &[]))
                     .unwrap_or_default();
                 println!(
-                    "  {} → {}  {}",
+                    "  {} → {}  {}{}",
                     i.original,
                     out::red(&new),
-                    out::yellow(&format!("({why})"))
+                    out::yellow(&format!("({why})")),
+                    note(i, warn_windows)
                 );
             }
         }
     }
-    let mut totals = vec![
-        t("files", &[("n", &p.total)]),
-        t("changed", &[("n", &p.changed)]),
-    ];
-    if real_conflicts(p) > 0 {
-        totals.push(out::red(&t("conflicts", &[("n", &real_conflicts(p))])));
-    }
-    if p.same_there > 0 {
-        totals.push(out::dim(&t("sameThereN", &[("n", &p.same_there)])));
-    }
+    // The list's totals, as under the window's list (`said::totals`).
+    let mut totals: Vec<String> = renome_services::flow::said::totals(p)
+        .iter()
+        .map(|l| {
+            let text = crate::lookup::said(std::slice::from_ref(l)).concat();
+            match l.key {
+                "conflicts" => out::red(&text),
+                "leftoverCount" => out::yellow(&text),
+                "sameThereN" => out::dim(&text),
+                _ => text,
+            }
+        })
+        .collect();
     if unchanged > 0 && p.changed > 0 {
         totals.push(out::dim(&t("unchangedN", &[("n", &unchanged)])));
     }
@@ -705,36 +704,19 @@ fn show(p: &Preview, all: bool, missing: &[crate::missing::Missing], warn_window
     }
 }
 
-/// The conflicts, without the files already where they go (the same
-/// file is there): those stay, and nothing is wrong.
-fn real_conflicts(p: &Preview) -> usize {
-    p.conflicts - p.same_there
-}
-
-/// A problem's name as the page's texts call it (`problem.<name>`).
-/// What the window tags a row with besides its problem: a name Windows
-/// does not take (when asked to warn), a file the lookup rule leaves alone.
+/// What the window tags a row with besides its problem (`said::tags`):
+/// left alone by the lookup rule, pages drawn, a release's advert, what
+/// the subtitle rule does, a name Windows does not take (when asked to
+/// warn)…
 fn note(i: &PreviewItem, warn_windows: bool) -> String {
-    let mut notes = Vec::new();
-    if i.windows_unsafe && warn_windows {
-        notes.push(t("windowsUnsafe", &[]));
-    }
-    if let Some(kind) = i.outside {
-        let key = serde_json::to_value(kind)
-            .ok()
-            .and_then(|v| v.as_str().map(str::to_string))
-            .unwrap_or_default();
-        let mut k = key.chars();
-        let cap = k
-            .next()
-            .map(|c| c.to_uppercase().collect::<String>() + k.as_str())
-            .unwrap_or_default();
-        notes.push(t(&format!("outside{cap}"), &[]));
-    }
-    if notes.is_empty() {
+    let tags: Vec<String> = renome_services::flow::said::tags(i, warn_windows)
+        .iter()
+        .map(|g| crate::lookup::said(&g.text).join(" · "))
+        .collect();
+    if tags.is_empty() {
         String::new()
     } else {
-        format!("  {}", out::yellow(&format!("({})", notes.join(" · "))))
+        format!("  {}", out::yellow(&format!("({})", tags.join(" · "))))
     }
 }
 
@@ -745,8 +727,19 @@ fn problem_key(p: renome_core::Problem) -> String {
         .unwrap_or_default()
 }
 
-fn item_json(i: &PreviewItem) -> Value {
+fn item_json(i: &PreviewItem, warn_windows: bool) -> Value {
+    let tags: Vec<Value> = renome_services::flow::said::tags(i, warn_windows)
+        .iter()
+        .map(|g| {
+            json!({
+                "at": g.at,
+                "text": crate::lookup::said(&g.text).join(" · "),
+                "tip": crate::lookup::said(&g.tip).join("\n"),
+            })
+        })
+        .collect();
     json!({
+        "tags": tags,
         "path": i.path,
         "newPath": i.target(),
         "status": i.status,

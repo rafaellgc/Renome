@@ -77,13 +77,8 @@ fn complete(steps: Value, saved: bool) -> Result<Vec<Value>, String> {
     if let Some(bad) = dropped.iter().find(|k| catalog::rule(k).is_none()) {
         return Err(t("unknownRule", &[("name", bad)]));
     }
-    if !dropped.is_empty() {
-        let mut names: Vec<String> = dropped
-            .iter()
-            .map(|k| t(&format!("rule.{k}"), &[]))
-            .collect();
-        names.dedup();
-        crate::out::note(&t("lookupsDropped", &[("rules", &names.join(", "))]));
+    if let Some(line) = renome_services::flow::said::dropped(&dropped) {
+        crate::out::note(&crate::lookup::said(&[line]).concat());
     }
     Ok(kept)
 }
