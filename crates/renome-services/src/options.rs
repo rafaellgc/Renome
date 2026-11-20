@@ -25,11 +25,6 @@ const fn c(value: &'static str, label: &'static str) -> Choice {
     }
 }
 
-/// The languages of TMDB titles offered; empty follows the interface.
-pub const TMDB_LANGS: [&str; 10] = [
-    "pt-BR", "pt-PT", "en-US", "en-GB", "es-ES", "es-MX", "fr-FR", "it-IT", "de-DE", "ja-JP",
-];
-
 pub const SETTINGS: &[Setting] = &[
     Setting {
         name: "lang",
@@ -240,12 +235,28 @@ pub fn comic_key_name(source: &str) -> &'static str {
 }
 
 /// Everything the window reads its options from: the options, the
-/// fields kept in the password store, the TMDB languages.
+/// fields kept in the password store, each menu's choices (words with
+/// their labels' keys, numbers as they are; the TMDB languages, empty
+/// following the interface).
 pub fn table() -> Value {
+    let menus: Map<String, Value> = SETTINGS
+        .iter()
+        .filter_map(|s| match s.kind {
+            Kind::Choice(list) => Some((
+                s.name.to_string(),
+                list.iter()
+                    .map(|c| serde_json::json!({ "value": c.value, "label": c.label }))
+                    .collect(),
+            )),
+            Kind::IntChoice(list) => Some((s.name.to_string(), Value::from(list.to_vec()))),
+            _ => None,
+        })
+        .collect();
     serde_json::json!({
         "defaults": defaults(),
         "secrets": crate::secrets::FIELDS,
-        "tmdbLangs": TMDB_LANGS,
+        "menus": menus,
+        "serverKinds": crate::mediaserver::KINDS,
         "comicKeys": { "comicvine": comic_key_name("comicvine"), "metron": comic_key_name("metron") },
     })
 }
@@ -276,6 +287,17 @@ mod tests {
             "fr-FR"
         );
         assert_eq!(comic_lang("pt"), "pt-br");
+    }
+
+    #[test]
+    fn the_window_gets_each_menu() {
+        let t = table();
+        assert_eq!(
+            t["menus"]["cacheDays"],
+            serde_json::json!([0, 1, 7, 30, 180])
+        );
+        assert_eq!(t["menus"]["tmdbLang"][0]["value"], "");
+        assert_eq!(t["menus"]["theme"][2]["label"], "themeSystem");
     }
 }
 

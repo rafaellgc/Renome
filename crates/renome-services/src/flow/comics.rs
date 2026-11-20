@@ -175,6 +175,16 @@ fn targets(items: &[Item], settled: &HashSet<PathBuf>) -> Vec<Item> {
 
 /// Looks up the comics of `items` not `settled`. A series the flow is not
 /// sure of is asked ([`Question::ComicSeries`]).
+/// Why a catalogue cannot be asked with this key: Comic Vine and Metron
+/// take none (the text's key), the others need none.
+pub fn needs_key(source: &str, key: &str) -> Option<&'static str> {
+    match source {
+        "comicvine" if key.trim().is_empty() => Some("cvNeedsKey"),
+        "metron" if key.trim().is_empty() => Some("mtNeedsKey"),
+        _ => None,
+    }
+}
+
 pub async fn search(
     host: &dyn Host,
     sources: &Sources<'_>,
@@ -184,6 +194,9 @@ pub async fn search(
     picked: HashMap<String, Volume>,
 ) -> Result<Outcome, String> {
     let source = p.source.as_str();
+    if let Some(why) = needs_key(source, &p.key) {
+        return Err(why.to_string());
+    }
     let mut out = Outcome {
         picked,
         ..Outcome::default()
@@ -601,20 +614,6 @@ pub fn named(files: &[Settled], volumes: &HashMap<String, Listed>) -> HashMap<Pa
         .collect()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn pages_in_the_catalogues() {
-        assert_eq!(web("gcd", "77", "901"), "https://www.comics.org/issue/901/");
-        assert_eq!(
-            web("mangaupdates", "36", ""),
-            "https://www.mangaupdates.com/series/10"
-        );
-    }
-}
-
 /// What was read from a comic file, for a review's header and the
 /// chooser: `Series v01 #2 c3 (1999)`.
 pub fn read(o: &ComicMatch) -> String {
@@ -632,4 +631,18 @@ pub fn read(o: &ComicMatch) -> String {
         parts.push(format!("({y})"));
     }
     parts.join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pages_in_the_catalogues() {
+        assert_eq!(web("gcd", "77", "901"), "https://www.comics.org/issue/901/");
+        assert_eq!(
+            web("mangaupdates", "36", ""),
+            "https://www.mangaupdates.com/series/10"
+        );
+    }
 }

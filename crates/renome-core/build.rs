@@ -1,6 +1,7 @@
 //! The readers' screens (`src/lib/readers.ts`, the window's list) made
 //! into a table: the size and kind of ink the comic converter fits pages
-//! to, with no second copy of the list to keep in step.
+//! to, and the readers the comic rule offers, with no second copy of
+//! the list to keep in step.
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -48,6 +49,16 @@ fn main() {
         .filter(|n| !n.is_empty())
         .collect();
     writeln!(out, "pub static NO_PNG: &[&str] = &{names:?};").unwrap();
-    let dest = Path::new(&std::env::var("OUT_DIR").unwrap()).join("screens.rs");
-    std::fs::write(dest, out).unwrap();
+    let out_dir = std::env::var("OUT_DIR").unwrap();
+    // The rule's choice of reader: the pages as they are, each screen in
+    // the list's order, a custom size (`OTHER_DEVICES`).
+    let mut devices = String::from("&[\n    c(\"original\", \"comicDevice_original\"),\n");
+    for line in out.lines().filter(|l| l.starts_with("    (\"")) {
+        let name = line.trim().trim_start_matches("(\"");
+        let name = &name[..name.find('"').unwrap()];
+        writeln!(devices, "    c({name:?}, \"comicDevice_{name}\"),").unwrap();
+    }
+    devices.push_str("    c(\"custom\", \"comicDevice_custom\"),\n]");
+    std::fs::write(Path::new(&out_dir).join("devices.rs"), devices).unwrap();
+    std::fs::write(Path::new(&out_dir).join("screens.rs"), out).unwrap();
 }

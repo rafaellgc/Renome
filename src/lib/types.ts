@@ -11,16 +11,16 @@ export type BookTarget = "" | "epub" | "azw3" | "fb2" | "pdf";
 export type Rule =
   | { type: "replace"; find: string; replace: string; caseSensitive: boolean; firstOnly: boolean; target: Target }
   | { type: "regex"; pattern: string; replace: string; caseSensitive: boolean; firstOnly: boolean; target: Target }
-  | { type: "case"; mode: CaseMode; target: Target; keepWords?: string }
+  | { type: "case"; mode: CaseMode; target: Target; keepWords: string }
   | {
       type: "insert";
       source: "text" | "now" | "modified" | "taken" | "folder";
       text: string; dateFormat: string; fallback: boolean;
       at: Anchor; position: number;
     }
-  | { type: "number"; template: string; start: number; step: number; digits: number; perFolder: boolean; pairs?: boolean }
+  | { type: "number"; template: string; start: number; step: number; digits: number; perFolder: boolean; pairs: boolean }
   | { type: "remove"; allSpaces: boolean; extraSpaces: boolean; accents: boolean; digits: boolean; chars: string; leadingNumber: boolean; maxLength: number; target: Target }
-  | { type: "convert"; mojibake: boolean; transliterate: boolean; webSafe: "" | "-" | "_"; splitWords?: boolean; target: Target }
+  | { type: "convert"; mojibake: boolean; transliterate: boolean; webSafe: "" | "-" | "_"; splitWords: boolean; target: Target }
   | {
       type: "removeRange";
       from: Bound; fromPosition: number; fromText: string;
@@ -30,57 +30,57 @@ export type Rule =
   | { type: "charAt"; position: number; fromEnd: boolean; onlyIf: string; caseSensitive: boolean; replace: string }
   | { type: "extension"; mode: "set" | "lower" | "upper" | "remove" | "content"; value: string }
   | { type: "rearrange"; separator: string; order: string; target: Target }
-  | { type: "list"; names: string; pairs?: boolean }
+  | { type: "list"; names: string; pairs: boolean }
   | {
       type: "movie"; template: string; colonAs: string; nfo: boolean; backdrop: boolean; folder: boolean; missing: boolean;
       /** Download subtitles in `subLangs` (`pt-BR, en`) with the rename. */
-      subtitles?: boolean; subLangs?: string;
+      subtitles: boolean; subLangs: string;
       /** Title, date and cover written inside MKV and MP4 videos. */
-      videoTags?: boolean;
+      videoTags: boolean;
       /** The release's advertisements go to the trash (with their old
        *  folder when nothing else is left in it). */
-      trashAds?: boolean;
+      trashAds: boolean;
       /** What came inside the video taken out first. */
-      videoClean?: boolean;
+      videoClean: boolean;
       /** The audio and subtitle tracks named by language. */
-      videoTracks?: boolean;
+      videoTracks: boolean;
     }
   | {
       type: "series"; template: string; colonAs: string; show: string;
       folders: boolean; folderTemplate: string; nfo: boolean; backdrop: boolean; missing: boolean;
       /** As the movie rule's. */
-      trashAds?: boolean;
-      subtitles?: boolean; subLangs?: string;
-      videoTags?: boolean; videoClean?: boolean; videoTracks?: boolean;
-      /** Where shows are looked up (TMDB when not set). */
-      source?: "tmdb" | "anilist";
+      trashAds: boolean;
+      subtitles: boolean; subLangs: string;
+      videoTags: boolean; videoClean: boolean; videoTracks: boolean;
+      /** Where shows are looked up. */
+      source: "tmdb" | "anilist";
     }
   | {
       type: "music"; template: string; colonAs: string; discPrefix: boolean; fromName: boolean;
       folders: boolean; folderTemplate: string; cover: boolean; playlist: boolean; identifyBySound: boolean; writeTags: boolean; embedCover: boolean; coverSize: number; cleanTags: boolean; missing: boolean;
     }
   | {
-      type: "book"; template: string; colonAs: string; folders: boolean; folderTemplate: string; cover: boolean; metadataOpf: boolean; writeEpub?: boolean; missing: boolean; convertTo?: BookTarget; original?: "keep" | "delete";
+      type: "book"; template: string; colonAs: string; folders: boolean; folderTemplate: string; cover: boolean; metadataOpf: boolean; writeEpub: boolean; missing: boolean; convertTo: BookTarget; original: "keep" | "delete";
       /** The reader the books are for (window only: marks formats it does not open; PDF pages its screen's size). */
-      model?: string; otherReaderApps?: boolean;
+      model: string; otherReaderApps: boolean;
       /** EPUB 2 brought to EPUB 3; large pictures made smaller. */
-      epub3?: boolean; shrinkImages?: boolean;
+      epub3: boolean; shrinkImages: boolean;
       /** Audiobooks too (audio files; off: books only). */
-      audiobooks?: boolean;
+      audiobooks: boolean;
       /** The book's details and cover written inside audiobooks' files;
        *  with `audioClean`, their other tags go. */
-      audioTags?: boolean; audioClean?: boolean;
+      audioTags: boolean; audioClean: boolean;
     }
-  | { type: "comic"; template: string; colonAs: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; seriesByFolder: boolean; writeInfo?: boolean; cleanInfo?: boolean; convert?: boolean; original?: "keep" | "delete"; drawPdfPages?: boolean; pageSize?: number; missing: boolean; barcode?: boolean; skipPublishers?: string; ebook?: ComicFormat; device?: ComicDevice; model?: string;
+  | { type: "comic"; template: string; colonAs: string; series: string; source: ComicSource; folders: boolean; folderTemplate: string; seriesByFolder: boolean; writeInfo: boolean; cleanInfo: boolean; convert: boolean; original: "keep" | "delete"; drawPdfPages: boolean; pageSize: number; missing: boolean; barcode: boolean; skipPublishers: string; ebook: ComicFormat; device: ComicDevice; model: string;
       /** The reader opens more formats with another reading program on it (KOReader, an app). */
-      otherReaderApps?: boolean; crop?: boolean; split?: boolean;
+      otherReaderApps: boolean; crop: boolean;
       /** Screen of a custom reader. */
-      width?: number; height?: number;
-      cropPageNumbers?: boolean; spread?: ComicSpread; contrast?: boolean; upscale?: boolean; sixteenGreys?: boolean; reduceRainbow?: boolean; webtoon?: boolean;
+      width: number; height: number;
+      cropPageNumbers: boolean; spread: ComicSpread; contrast: boolean; upscale: boolean; sixteenGreys: boolean; reduceRainbow: boolean; webtoon: boolean;
       /** One series' comics in one folder joined into a volume. */
-      join?: boolean;
+      join: boolean;
       /** Books larger than this (MB) made in parts; 0: no limit. */
-      maxMb?: number }
+      maxMb: number }
   | {
       type: "photo"; template: string; fromName: boolean; modified: boolean; shiftHours: number;
       folders: boolean; folderTemplate: string; setModified: boolean;
@@ -92,7 +92,7 @@ export type Rule =
       /** Text tracks of MKV videos written beside them, in `extractLangs` (empty: all). */
       extract: boolean; extractLangs: string;
       /** What becomes of a subtitle made SubRip. */
-      original?: "keep" | "delete";
+      original: "keep" | "delete";
     };
 
 /** What the subtitle rule does to a subtitle. */
@@ -281,8 +281,10 @@ export interface MbCandidate {
 export interface EditField {
   key: string;
   label: string;
-  numeric?: boolean;
-  wide?: boolean;
+  numeric: boolean;
+  wide: boolean;
+  /** The most characters it takes (null: any). */
+  maxLength: number | null;
 }
 
 export interface SongMatch {

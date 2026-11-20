@@ -252,7 +252,7 @@ ${ex("praia.jpg", "Viagem 01.jpg")}
 <p>Para consertar nomes tirados das tags, ponha esta regra abaixo da regra Música (tags).</p>`,
   },
   {
-    id: "r-range",
+    id: "r-removeRange",
     title: "Remover trecho",
     sub: true,
     html: `
@@ -266,7 +266,7 @@ ${ex("Filme [1080p] (2020).mkv", "Filme  (2020).mkv")}
 <p>De texto <code>[</code> até texto <code>]</code>, removendo os delimitadores. Os textos diferenciam maiúsculas. Se um deles não aparece no nome, o nome fica como está.</p>`,
   },
   {
-    id: "r-char",
+    id: "r-charAt",
     title: "Caractere em posição",
     sub: true,
     html: `
@@ -280,7 +280,7 @@ ${ex("_foto.jpg", "foto.jpg")}
 <p>Posição 1, só se for <code>_</code>, trocar por vazio.</p>`,
   },
   {
-    id: "r-ext",
+    id: "r-extension",
     title: "Extensão",
     sub: true,
     html: `
@@ -1037,7 +1037,7 @@ ${ex("Serie.S01E02.720p.WEB.mkv", "Serie S01E02.mkv")}
 <p><code>renome-cli rules</code> lista os tipos; <code>renome-cli rules number</code> mostra as opções de uma regra, com o padrão de cada uma. Toda regra aceita também <code>only=FILTRO</code> (só nos arquivos que o filtro mostra) e <code>off</code>. Os nomes das opções são em inglês e os mesmos em qualquer idioma.</p>
 <p>Também como na janela: <code>--filter</code> (o filtro da lista), <code>--sort</code> e <code>--desc</code> (a ordem, que a numeração segue), <code>--to PASTA</code> (mover) e <code>--copy</code> (copiar), <code>--name CAMINHO=NOME</code> (o nome digitado à mão), <code>--folders</code> (renomear as próprias pastas), <code>--hidden</code>, <code>--all</code> (lista também os que não mudam), <code>--csv ARQUIVO</code> (Exportar lista, com as colunas extras escolhidas nas opções) e <code>--missing-csv ARQUIVO</code> (Exportar o que falta).</p>
 <h4>Buscas online</h4>
-<p>As regras de filme, série, música, livro e quadrinho buscam nos mesmos catálogos e escolhem sozinhas o que a janela escolheria. Nos casos em dúvida, <code>--choose</code> decide: <code>ask</code> (o padrão no terminal) mostra os candidatos numerados e espera o número; <code>auto</code> fica só com o que é certo; <code>skip</code> nem busca os duvidosos. <code>--pick CAMINHO=ID</code> força uma escolha (<code>tmdb:603</code>, um link do catálogo ou um título). <code>--edit CAMINHO:CAMPO=VALOR,…</code> faz o que a janela <b>Editar os dados</b> faz, por exemplo <code>--edit "livro.epub:title=O Título,authors=Fulano; Beltrano"</code> ou, na regra de foto, <code>--edit "IMG_1.jpg:date=2018-03-27 14:30"</code>; o <code>--help</code> lista os campos de cada regra. <code>--missing</code> lista o que falta (episódios, edições, faixas, filmes da coleção, volumes), como as linhas apagadas da janela.</p>
+<p>As regras de filme, série, música, livro e quadrinho buscam nos mesmos catálogos e escolhem sozinhas o que a janela escolheria. Nos casos em dúvida, <code>--choose</code> decide: <code>ask</code> (o padrão no terminal) mostra os candidatos numerados e espera o número; <code>auto</code> fica só com o que é certo; <code>skip</code> nem busca os duvidosos. Em vez do número, dá para digitar outra busca, como nas janelas de escolha: um link ou ID do catálogo, ou o nome, com <code>Título 1999</code> num filme, <code>título / autor</code> num livro, <code>artista / álbum</code> num álbum e <code>nome 1999 / editora</code> numa série de quadrinhos. <code>--pick CAMINHO=ID</code> força uma escolha (<code>tmdb:603</code>, um link do catálogo ou um título). <code>--edit CAMINHO:CAMPO=VALOR,…</code> faz o que a janela <b>Editar os dados</b> faz, por exemplo <code>--edit "livro.epub:title=O Título,authors=Fulano; Beltrano"</code> ou, na regra de foto, <code>--edit "IMG_1.jpg:date=2018-03-27 14:30"</code>; o <code>--help</code> lista os campos de cada regra. <code>--missing</code> lista o que falta (episódios, edições, faixas, filmes da coleção, volumes), como as linhas apagadas da janela.</p>
 <p><kbd>Ctrl</kbd>+<kbd>C</kbd> durante as buscas faz o papel do botão Parar: o que já foi achado fica escolhido, e o programa pergunta se continua com isso. Durante a renomeação, para no ponto em que está: o que já foi renomeado fica no Histórico (e pode ser desfeito), e as etapas seguintes não são feitas. Um segundo <kbd>Ctrl</kbd>+<kbd>C</kbd>, ou um enquanto uma pergunta espera resposta, encerra na hora.</p>
 <p>Depois de renomear, o resto acontece como na janela: tags e capas gravadas, <code>.nfo</code>, listas de reprodução, legendas baixadas, livros convertidos e os servidores de mídia avisados (<code>--no-server</code> não avisa).</p>
 <h4>Os outros comandos</h4>

@@ -506,17 +506,11 @@ async fn find_identical(app: AppHandle) -> Result<Option<Copies>, String> {
             return None;
         }
         drop(hashes);
-        let by_group = |groups: &[Vec<PathBuf>]| -> HashMap<PathBuf, usize> {
-            groups
-                .iter()
-                .enumerate()
-                .flat_map(|(i, g)| g.iter().map(move |p| (p.clone(), i)))
-                .collect()
-        };
+        use renome_core::repeated::by_group;
         let identical = by_group(&groups);
-        // The songs' tags are read on the copy, without holding the list.
-        let songs = renome_core::alike::same_songs(&files, &identical, &stale)?;
-        let works = renome_core::repeated::same_works(&files, &identical, &stale)?;
+        // The songs' tags are read on the copy, without holding the list
+        // (the command line's `duplicates` finds them the same way).
+        let (songs, works) = renome_core::repeated::repeated(&files, &identical, &stale)?;
         if stale() {
             return None;
         }
@@ -584,11 +578,7 @@ async fn find_similar(app: AppHandle) -> Result<Option<Vec<Vec<PathBuf>>>, Strin
         cache.save();
         drop(cache);
         let groups = groups.filter(|_| !stale())?;
-        state.session.lock().unwrap().similar = groups
-            .iter()
-            .enumerate()
-            .flat_map(|(i, g)| g.iter().map(move |p| (p.clone(), i)))
-            .collect();
+        state.session.lock().unwrap().similar = renome_core::repeated::by_group(&groups);
         Some(groups)
     })
     .await
@@ -1087,6 +1077,17 @@ fn rule_table(lang: String) -> Value {
     let mut t = renome_core::catalog::table(&lang);
     t["options"] = renome_services::options::table();
     t["editFields"] = renome_services::flow::edit::fields_table();
+    // Each optional column's title (its key in the texts), as the CSV's.
+    t["columnLabels"] = renome_core::catalog::COLUMNS
+        .iter()
+        .map(|c| {
+            (
+                c.to_string(),
+                Value::from(renome_services::flow::export::column_label(c)),
+            )
+        })
+        .collect::<serde_json::Map<String, Value>>()
+        .into();
     // The comic catalogues of whole series (a file's volume and chapter stay).
     let sources = renome_core::catalog::rule("comic")
         .and_then(|r| r.option("source"))
@@ -1227,6 +1228,8 @@ struct Known {
 /// The rows a details window opens on for those chosen, and what each
 /// starts from (see `flow::edit`: the command line's `--edit` starts from
 /// the same): `kind` is the rule's (`music`, `book`, `comic`, `photo`).
+// The command's arguments are what the window sends, each by name.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 async fn edit_start(
     app: AppHandle,
@@ -1238,7 +1241,14 @@ async fn edit_start(
     from_name: bool,
     by_folder: bool,
     audiobooks: bool,
-) -> Result<(Vec<PathBuf>, Vec<Value>), String> {
+) -> Result<
+    (
+        Vec<PathBuf>,
+        Vec<Value>,
+        Vec<renome_services::flow::edit::Changed>,
+    ),
+    String,
+> {
     use renome_services::flow::edit;
     in_background(app, move |state| {
         let items = state
@@ -1282,8 +1292,10 @@ async fn edit_start(
                 }
                 .unwrap_or_default()
             })
-            .collect();
-        (paths, values)
+            .collect::<Vec<Value>>();
+        // As the window shows them (the same text the fields are read back from).
+        let rows = values.iter().map(|v| edit::as_text(&kind, v)).collect();
+        (paths, values, rows)
     })
     .await
 }
@@ -1861,7 +1873,8 @@ async fn gcd_check(app: AppHandle, email: String, password: String) -> Result<()
 /// Series with a name in a catalogue (`gcd`, `comicvine`, `metron`,
 /// `mangadex`, `anilist`, `mangaupdates`), from a year and by a publisher
 /// when given (the manga catalogues are not searched by publisher), best
-/// first. `key` is Comic Vine's key or Metron's token.
+/// first (see `flow::typed::comic`). `key` is Comic Vine's key or
+/// Metron's token.
 // The command's arguments are what the window sends, each by name.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
@@ -1870,27 +1883,26 @@ async fn comic_search(
     source: String,
     key: String,
     query: String,
-    year: Option<u16>,
+    year: String,
     publisher: String,
     lang: String,
     skip: Option<String>,
     highest: f64,
 ) -> Result<Vec<renome_core::comics::Volume>, String> {
     let state = app.state::<AppState>();
-    let found = sources(&state)
-        .search(
-            &source,
-            &key,
-            &query,
-            year,
-            &publisher,
-            &lang,
-            skip.as_deref().unwrap_or_default(),
-        )
-        .await?;
-    // Those that could hold the files' highest issue first (the command
-    // line orders them so too).
-    Ok(renome_services::flow::comics::by_fit(found, highest))
+    // As the command line's chooser searches.
+    renome_services::flow::typed::comic(
+        &sources(&state),
+        &source,
+        &key,
+        &query,
+        &year,
+        &publisher,
+        &lang,
+        skip.as_deref().unwrap_or_default(),
+        highest,
+    )
+    .await
 }
 
 /// The comic rule's search (the flow the command line runs too): a

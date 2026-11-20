@@ -67,11 +67,6 @@ export class Movies {
   /** Looks up the visible videos (and folders) without a choice yet; those
    *  picked with confidence are done, the rest go to the review window. */
   async search() {
-    if (!settings.tmdbKey.trim()) {
-      const ok = await confirm({ title: t("rule.movie"), text: t("tmdbNeedsKey"), ok: t("options"), cancel: t("cancel") });
-      if (ok) this.#ctx.openOptions();
-      return;
-    }
     // Those already settled are not searched again; which of the rest are
     // movies, and what is sure, the shared flow says.
     const items = this.#ctx.items.filter((i) => this.state[i.path]?.status !== "auto" && this.state[i.path]?.status !== "chosen");
@@ -94,7 +89,10 @@ export class Movies {
       }
       if (found.some((f) => !f.choice && f.candidates.length)) this.openReview();
     } catch (e) {
-      await notify({ title: t("rule.movie"), text: tError(e) });
+      // No key: it is typed in the options.
+      if (String(e).startsWith("tmdbNeedsKey")) {
+        if (await confirm({ title: t("rule.movie"), text: tError(e), ok: t("options"), cancel: t("cancel") })) this.#ctx.openOptions();
+      } else await notify({ title: t("rule.movie"), text: tError(e) });
     } finally {
       this.progress = null;
     }

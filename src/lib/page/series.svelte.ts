@@ -47,7 +47,6 @@ export class Series {
   }
   counts = $derived.by(() => counts(this.state, this.#ctx.items));
 
-
   /** Finds the show (asking when unsure), then each visible file's episode;
    *  doubtful files go to the review window. With no show typed, each show
    *  the file names (or folders) say is looked up in turn. The flow is the
@@ -58,18 +57,13 @@ export class Series {
     // (their ids would meet), under negative numbers.
     const anime = rule.source === "anilist";
     const showKey = (id: number) => (anime ? -id : id);
-    if (!anime && !settings.tmdbKey.trim()) {
-      const ok = await confirm({ title: t("rule.series"), text: t("tmdbNeedsKey"), ok: t("options"), cancel: t("cancel") });
-      if (ok) this.#ctx.openOptions();
-      return;
-    }
     // Files already settled keep their episode in their show.
     const settled = Object.entries(this.state)
       .filter(([, e]) => (anime ? e.showId < 0 : e.showId > 0) && (e.status === "auto" || e.status === "chosen"))
       .map(([p, e]): [string, number] => [p, Math.abs(e.showId)]);
     this.progress = t("tvFinding");
     try {
-      const res = await api.seriesSearch(settings.tmdbKey, tmdbLang(), rule.source ?? "tmdb", rule.show, this.#ctx.items, settled, this.picked);
+      const res = await api.seriesSearch(settings.tmdbKey, tmdbLang(), rule.source, rule.show, this.#ctx.items, settled, this.picked);
       if (res.empty) {
         this.#ctx.say(t("tvNoFiles"));
         return;
@@ -95,7 +89,10 @@ export class Series {
       else if (res.loose) this.#ctx.say(t("tvLoose", { n: res.loose }));
       if (res.files.some((f) => !f.choice.length)) this.openReview();
     } catch (e) {
-      await notify({ title: t("rule.series"), text: tError(e) });
+      // No key: it is typed in the options.
+      if (String(e).startsWith("tmdbNeedsKey")) {
+        if (await confirm({ title: t("rule.series"), text: tError(e), ok: t("options"), cancel: t("cancel") })) this.#ctx.openOptions();
+      } else await notify({ title: t("rule.series"), text: tError(e) });
     } finally {
       this.pick = null;
       this.progress = null;

@@ -295,6 +295,36 @@ fn hash_full(path: &Path, step: &mut dyn FnMut(u64) -> bool) -> Option<u128> {
     }
 }
 
+/// The identical copies among the files a preview finds heading for one
+/// name (each file's group): the window looks for them in the whole list
+/// in the background; the command line, among these only.
+pub fn copies_among(
+    files: &[FileEntry],
+    preview: &crate::plan::Preview,
+) -> std::collections::HashMap<PathBuf, usize> {
+    let clash: std::collections::HashSet<&PathBuf> = preview
+        .items
+        .iter()
+        .filter(|i| i.problem == Some(crate::plan::Problem::Duplicate))
+        .map(|i| &i.path)
+        .collect();
+    let some: Vec<FileEntry> = files
+        .iter()
+        .filter(|f| clash.contains(&f.path))
+        .cloned()
+        .collect();
+    if some.len() < 2 {
+        return Default::default();
+    }
+    let groups = find_identical(&some, &mut HashCache::default(), &mut |_, _| {}, &|| false)
+        .unwrap_or_default();
+    groups
+        .into_iter()
+        .enumerate()
+        .flat_map(|(i, g)| g.into_iter().map(move |p| (p, i)))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -390,34 +420,4 @@ mod tests {
         let r = find_identical(&files, &mut HashCache::default(), &mut |_, _| {}, &|| true);
         assert!(r.is_none());
     }
-}
-
-/// The identical copies among the files a preview finds heading for one
-/// name (each file's group): the window looks for them in the whole list
-/// in the background; the command line, among these only.
-pub fn copies_among(
-    files: &[FileEntry],
-    preview: &crate::plan::Preview,
-) -> std::collections::HashMap<PathBuf, usize> {
-    let clash: std::collections::HashSet<&PathBuf> = preview
-        .items
-        .iter()
-        .filter(|i| i.problem == Some(crate::plan::Problem::Duplicate))
-        .map(|i| &i.path)
-        .collect();
-    let some: Vec<FileEntry> = files
-        .iter()
-        .filter(|f| clash.contains(&f.path))
-        .cloned()
-        .collect();
-    if some.len() < 2 {
-        return Default::default();
-    }
-    let groups = find_identical(&some, &mut HashCache::default(), &mut |_, _| {}, &|| false)
-        .unwrap_or_default();
-    groups
-        .into_iter()
-        .enumerate()
-        .flat_map(|(i, g)| g.into_iter().map(move |p| (p, i)))
-        .collect()
 }

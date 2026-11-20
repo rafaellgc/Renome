@@ -252,7 +252,7 @@ ${ex("playa.jpg", "Viaje 01.jpg")}
 <p>Para arreglar nombres sacados de las etiquetas, ponga esta regla debajo de la regla Música (etiquetas).</p>`,
   },
   {
-    id: "r-range",
+    id: "r-removeRange",
     title: "Quitar fragmento",
     sub: true,
     html: `
@@ -266,7 +266,7 @@ ${ex("Película [1080p] (2020).mkv", "Película  (2020).mkv")}
 <p>Desde el texto <code>[</code> hasta el texto <code>]</code>, quitando los delimitadores. Los textos distinguen mayúsculas. Si alguno no aparece en un nombre, ese nombre queda como está.</p>`,
   },
   {
-    id: "r-char",
+    id: "r-charAt",
     title: "Carácter en posición",
     sub: true,
     html: `
@@ -280,7 +280,7 @@ ${ex("_foto.jpg", "foto.jpg")}
 <p>Posición 1, solo si es <code>_</code>, cambiar por nada.</p>`,
   },
   {
-    id: "r-ext",
+    id: "r-extension",
     title: "Extensión",
     sub: true,
     html: `
@@ -1037,7 +1037,7 @@ ${ex("Serie.S01E02.720p.WEB.mkv", "Serie S01E02.mkv")}
 <p><code>renome-cli rules</code> lista los tipos; <code>renome-cli rules number</code> muestra las opciones de una regla, cada una con su valor por defecto. Toda regla acepta también <code>only=FILTRO</code> (solo en los archivos que muestra el filtro) y <code>off</code>. Los nombres de las opciones están en inglés y son los mismos en cualquier idioma.</p>
 <p>También como en la ventana: <code>--filter</code> (el filtro de la lista), <code>--sort</code> y <code>--desc</code> (el orden, que la numeración sigue), <code>--to CARPETA</code> (mover) y <code>--copy</code> (copiar), <code>--name RUTA=NOMBRE</code> (el nombre escrito a mano), <code>--folders</code> (renombrar las propias carpetas), <code>--hidden</code>, <code>--all</code> (lista también los que no cambian), <code>--csv ARCHIVO</code> (Exportar lista, con las columnas extra elegidas en las opciones) y <code>--missing-csv ARCHIVO</code> (Exportar lo que falta).</p>
 <h4>Búsquedas en línea</h4>
-<p>Las reglas de película, serie, música, libro y cómic buscan en los mismos catálogos y eligen solas lo que elegiría la ventana. En los casos dudosos, <code>--choose</code> decide: <code>ask</code> (el valor por defecto en una terminal) muestra los candidatos numerados y espera el número; <code>auto</code> se queda solo con lo seguro; <code>skip</code> ni siquiera busca los dudosos. <code>--pick RUTA=ID</code> fuerza una elección (<code>tmdb:603</code>, un enlace del catálogo o un título). <code>--edit RUTA:CAMPO=VALOR,…</code> hace lo que hace <b>Editar los datos</b> en la ventana, por ejemplo <code>--edit "libro.epub:title=El Título,authors=Fulano; Mengano"</code> o, con la regla de foto, <code>--edit "IMG_1.jpg:date=2018-03-27 14:30"</code>; <code>--help</code> lista los campos de cada regla. <code>--missing</code> lista lo que falta (episodios, números, pistas, películas de la colección, volúmenes), como las filas atenuadas de la ventana.</p>
+<p>Las reglas de película, serie, música, libro y cómic buscan en los mismos catálogos y eligen solas lo que elegiría la ventana. En los casos dudosos, <code>--choose</code> decide: <code>ask</code> (el valor por defecto en una terminal) muestra los candidatos numerados y espera el número; <code>auto</code> se queda solo con lo seguro; <code>skip</code> ni siquiera busca los dudosos. En lugar del número, se puede escribir otra búsqueda, como en las ventanas de elección: un enlace o ID del catálogo, o el nombre, con <code>Título 1999</code> en una película, <code>título / autor</code> en un libro, <code>artista / álbum</code> en un álbum y <code>nombre 1999 / editorial</code> en una serie de cómics. <code>--pick RUTA=ID</code> fuerza una elección (<code>tmdb:603</code>, un enlace del catálogo o un título). <code>--edit RUTA:CAMPO=VALOR,…</code> hace lo que hace <b>Editar los datos</b> en la ventana, por ejemplo <code>--edit "libro.epub:title=El Título,authors=Fulano; Mengano"</code> o, con la regla de foto, <code>--edit "IMG_1.jpg:date=2018-03-27 14:30"</code>; <code>--help</code> lista los campos de cada regla. <code>--missing</code> lista lo que falta (episodios, números, pistas, películas de la colección, volúmenes), como las filas atenuadas de la ventana.</p>
 <p><kbd>Ctrl</kbd>+<kbd>C</kbd> durante las búsquedas hace de botón Detener: lo ya encontrado queda elegido, y el programa pregunta si sigue con eso. Durante el renombrado, se detiene donde está: lo ya renombrado queda en el Historial (y se puede deshacer), y los pasos siguientes no se hacen. Un segundo <kbd>Ctrl</kbd>+<kbd>C</kbd>, o uno mientras una pregunta espera respuesta, termina en el acto.</p>
 <p>Después de renombrar, el resto ocurre como en la ventana: etiquetas y portadas grabadas, archivos <code>.nfo</code>, listas de reproducción, subtítulos descargados, libros convertidos y los servidores multimedia avisados (<code>--no-server</code> no avisa).</p>
 <h4>Los demás comandos</h4>

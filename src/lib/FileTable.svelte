@@ -2,9 +2,8 @@
   import Icon from "./Icon.svelte";
   import { tick } from "svelte";
   import { api, type WorkGroup } from "./api";
-  import { COL_LABEL } from "./details";
   import { diff, type Seg } from "./diff";
-  import { LOCALES, t } from "./i18n";
+  import { LOCALES, t, type Key } from "./i18n";
   import { interleave, type Ghost, type Row } from "./missing";
   import { saveSettings, settings } from "./settings.svelte";
   import { TABLE } from "./rules";
@@ -260,7 +259,7 @@
     { key: "name", label: "colOriginal", cls: "c-orig" },
     { key: "newName", label: "colNew", cls: "c-new" },
     { key: "dir", label: "colDir", cls: "c-dir" },
-    ...extra.map((c) => ({ key: c, label: COL_LABEL[c], cls: `c-x${NARROW.includes(c) ? " num" : ""}` })),
+    ...extra.map((c) => ({ key: c, label: TABLE.columnLabels[c] as Key, cls: `c-x${NARROW.includes(c) ? " num" : ""}` })),
     { key: "size", label: "colSize", cls: "c-size" },
     { key: "modified", label: "colModified", cls: "c-date" },
   ]);
@@ -400,7 +399,7 @@
       {#each TABLE.columns.filter((c) => available.includes(c)) as c (c)}
         <label class="cols-item">
           <input type="checkbox" checked={settings.columns.includes(c)} onchange={() => toggleColumn(c)} />
-          {t(COL_LABEL[c])}
+          {t(TABLE.columnLabels[c] as Key)}
         </label>
       {/each}
       <p class="cols-hint">{t("columnsHint")}</p>

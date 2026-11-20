@@ -15,7 +15,7 @@ export class Music {
   /** Songs whose tags were typed in (over what the release said). */
   edits = $state<Record<string, SongMatch>>({});
   /** The details window, while open. */
-  edit = $state<{ paths: string[]; songs: SongMatch[] } | null>(null);
+  edit = $state<{ paths: string[]; songs: SongMatch[]; rows: Record<string, string>[] } | null>(null);
   /** Albums in the review window (indexes); null when closed. */
   review = $state<number[] | null>(null);
   progress = $state<{ done: number; total: number; kind: "search" | "listen" | "save" | "tags" } | null>(null);
@@ -114,14 +114,13 @@ export class Music {
     };
   }
 
-
   /** Opens the details window on the songs chosen in the list; what each
    *  starts from, the shared flow says (the command line's --edit too). */
   async openEdit() {
     if (!this.selected.length) return;
     const r = this.rule?.rule;
     const known = Object.fromEntries(this.selected.map((i) => [i.path, { current: this.matches[i.path] }]));
-    const [paths, songs] = await api.editStart<SongMatch>({
+    const [paths, songs, rows] = await api.editStart<SongMatch>({
       kind: "music",
       chosen: this.selected.map((i) => i.path),
       known: $state.snapshot(known),
@@ -131,7 +130,7 @@ export class Music {
       byFolder: false,
       audiobooks: false,
     });
-    if (paths.length) this.edit = { paths, songs };
+    if (paths.length) this.edit = { paths, songs, rows };
   }
 
   /** The fields changed in the details window, for each of its songs (applied as the command line's --edit does). */

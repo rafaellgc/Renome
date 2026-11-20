@@ -89,22 +89,13 @@ pub fn command(m: &ArgMatches, settings: Option<&Value>) -> Result<Exit, String>
     let identical =
         renome_core::find_identical(&files, &mut cache, &mut p, &crate::stop::requested)
             .unwrap_or_default();
-    let by_group: HashMap<PathBuf, usize> = identical
-        .iter()
-        .enumerate()
-        .flat_map(|(i, g)| g.iter().map(move |p| (p.clone(), i)))
-        .collect();
-    let songs = if want_repeated {
-        renome_core::alike::same_songs(&files, &by_group, &crate::stop::requested)
+    let by_group = renome_core::repeated::by_group(&identical);
+    // The same song or work in other files (as the window finds them).
+    let (songs, works) = if want_repeated {
+        renome_core::repeated::repeated(&files, &by_group, &crate::stop::requested)
             .unwrap_or_default()
     } else {
-        vec![]
-    };
-    let works = if want_repeated {
-        renome_core::repeated::same_works(&files, &by_group, &crate::stop::requested)
-            .unwrap_or_default()
-    } else {
-        vec![]
+        Default::default()
     };
     let similar = if want_similar {
         let mut pictures = renome_core::similar::PictureCache::in_file(

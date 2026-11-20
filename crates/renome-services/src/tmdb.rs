@@ -53,6 +53,11 @@ struct Page<T> {
 }
 
 impl Client {
+    /// Whether it has a key to ask with (TMDB answers nothing without).
+    pub fn ready(&self) -> bool {
+        !self.key.trim().is_empty()
+    }
+
     pub fn new(key: &str, lang: &str) -> Self {
         Self {
             http: reqwest::Client::builder()

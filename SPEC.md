@@ -2684,7 +2684,9 @@ window's settings load whole from it and `renome-cli options` lists it;
 rule sets by name, `save_set`/`rename_set`), `flow::Status` and
 `flow::same_answer` (how each file stands; an answer goes to the
 undecided files of its group), `flow::typed` (searches typed in a review
-or chooser: links, ids, `Title 1999`, `title / author`),
+or chooser: links, ids, `Title 1999`, `title / author`, `artist / album`,
+`name 1999 / publisher` for a comic series, its year only when it can be
+one: `renome_core::comics::is_year`),
 `flow::series::typed` and `covers::issue_order` (episodes and issues a
 text names), `covers` (a file's cover compared with the catalogue's: series
 and issues with it first, in the window's pickers and the command line's
@@ -2699,8 +2701,23 @@ missing), `apply::Follow` (where each file of the list went), the core's
 `Problem::DuplicateIdentical` and `identical::copies_among` (the command
 line finds identical copies heading for one name, as the window does in
 the background: the first goes, the others stay), `mediaserver::{keys_of,
-with_key, paired, read}`. The readers' screens and the readers that get
-no PNG are read from `src/lib/readers.ts` by the core's build too. Plurals
+with_key, paired, read}`. Since the later 2026-11-19 audit, also what
+the window's fields and menus offer: `catalog::table`'s `limits` (each
+whole-number option's bounds), `choices` (number menus: comic book size
+up to 400 MB, cover and page sizes) and `menus` (every word option's
+choices with their labels' keys, in the window's order; a range to remove
+starts at the start, a position or a text and ends at the end, a position
+or a text), `options::table`'s `menus` and `serverKinds`
+(`mediaserver::KINDS`, also `--kind`), `flow::edit::{as_text, fits}`
+(what a details window shows and takes: numbers up to four digits,
+authors joined by `; `; `--edit` checks the same), the key checks inside
+the flows (`tmdbNeedsKey`, `flow::comics::needs_key`),
+`repeated::{by_group, repeated}` (the duplicates' order of search) and
+the manual's order (each rule's chapter is `r-<type>`; `renome-cli
+manual` lists them as the window does). The readers' screens, the
+readers that get no PNG and the comic rule's reader choices
+(`catalog::DEVICES`) are read from `src/lib/readers.ts` by the core's
+build too. Plurals
 in texts are written twice (TypeScript for the window, Rust for the
 command line); both run the cases of `src/lib/plurals.json`. And
 `crates/renome-cli` the program: every command below, the lookup rules

@@ -22,6 +22,42 @@ fn pages() -> &'static [Page] {
     }
 }
 
+/// The pages in the window's order: the rules' (`r-<type>`) in the
+/// order of its "+ Rule" menu (those by kind of file, then those on the
+/// name's text, each by the rule's name in the language), each group's
+/// first with the group's title; the others where they are.
+fn ordered() -> Vec<(&'static Page, Option<String>)> {
+    let all = pages();
+    let rule_of = |p: &Page| {
+        p.0.strip_prefix("r-")
+            .filter(|k| renome_core::catalog::rule(k).is_some())
+    };
+    let (media, text) = renome_core::catalog::groups();
+    let sorted = |group: &[&str], title: &str| {
+        let mut list: Vec<&'static Page> = all
+            .iter()
+            .filter(|p| rule_of(p).is_some_and(|k| group.contains(&k)))
+            .collect();
+        list.sort_by_cached_key(|p| plain(&t(&format!("rule.{}", rule_of(p).unwrap()), &[])));
+        list.into_iter()
+            .enumerate()
+            .map(|(i, p)| (p, (i == 0).then(|| t(title, &[]))))
+            .collect::<Vec<_>>()
+    };
+    let mut rules = sorted(&media, "ruleGroupMedia");
+    rules.extend(sorted(&text, "ruleGroupText"));
+    let mut rules = rules.into_iter();
+    all.iter()
+        .map(|p| {
+            if rule_of(p).is_some() {
+                rules.next().unwrap()
+            } else {
+                (p, None)
+            }
+        })
+        .collect()
+}
+
 fn plain(s: &str) -> String {
     renome_core::text::strip_accents(s).to_lowercase()
 }
@@ -97,7 +133,7 @@ fn show(page: &Page) {
 
 pub fn command(m: &ArgMatches) -> Result<Exit, String> {
     if m.get_flag("all") {
-        for (n, page) in pages().iter().enumerate() {
+        for (n, (page, _)) in ordered().into_iter().enumerate() {
             if n > 0 {
                 println!("\n");
             }
@@ -107,9 +143,9 @@ pub fn command(m: &ArgMatches) -> Result<Exit, String> {
     }
     let Some(topic) = m.get_one::<String>("topic") else {
         if out::json() {
-            let list: Vec<_> = pages()
-                .iter()
-                .map(|p| serde_json::json!({ "id": p.0, "title": p.1 }))
+            let list: Vec<_> = ordered()
+                .into_iter()
+                .map(|(p, group)| serde_json::json!({ "id": p.0, "title": p.1, "group": group }))
                 .collect();
             println!(
                 "{}",
@@ -117,7 +153,10 @@ pub fn command(m: &ArgMatches) -> Result<Exit, String> {
             );
             return Ok(Exit::Done);
         }
-        for p in pages() {
+        for (p, group) in ordered() {
+            if let Some(group) = group {
+                println!("  {}", out::dim(&group));
+            }
             let indent = if p.2 { "    " } else { "  " };
             println!("{indent}{:<14} {}", out::bold(p.0), p.1);
         }

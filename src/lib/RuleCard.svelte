@@ -2,9 +2,9 @@
   import { slide } from "svelte/transition";
   import Icon from "./Icon.svelte";
   import { t, type Key } from "./i18n";
-  import { TABLE, comicPreset, comicPresetOf, newRule, type ComicPreset } from "./rules";
+  import { TABLE, choicesOf, comicPreset, comicPresetOf, limitsOf, menuOf, type ComicPreset } from "./rules";
   import { settings } from "./settings.svelte";
-  import type { ComicDevice, ComicSpread, RuleType, Step } from "./types";
+  import type { ComicDevice, RuleType, Step } from "./types";
   /** Rules that pick their own kind of file: no filter of their own (the
    *  Rust catalog's group). */
   const byKind = (type: RuleType) => TABLE.media.includes(type);
@@ -27,9 +27,6 @@
     const best = formatsOf(device, model)?.[0];
     return t("readerNotOpens", { reader: m ? modelName(m) : "", format: f.toUpperCase(), best: (best ?? "").toUpperCase() });
   };
-  const SPREADS: ComicSpread[] = ["split", "rotate", "both", "keep"];
-  const COMIC_FORMATS = ["azw3", "kepub", "epub", "cbz", "pdf"] as const;
-  const FORMAT_LABEL: Record<(typeof COMIC_FORMATS)[number], Key> = { azw3: "comicEbookAzw3", kepub: "comicEbookKepub", epub: "comicEbookEpub", cbz: "comicEbookCbz", pdf: "comicEbookPdf" };
   import { api } from "./api";
   import { NO_PNG, OTHER_DEVICES, POPULAR, READERS, SCREENS, chooseReader, formatsOf, isColourInk, isGreyInk, modelOf, opens, readerOf, type Format, type Reader } from "./readers";
 
@@ -108,6 +105,10 @@
 
   let open = $state(true);
   const r = $derived(step.rule);
+  /** A whole-number option's bounds in this rule (the Rust catalog's). */
+  const lim = (name: string) => limitsOf(r.type, name);
+  /** Bounds in milliseconds as a field in seconds. */
+  const seconds = (b: { min?: number; max?: number }) => ({ min: b.min === undefined ? undefined : b.min / 1000, max: b.max === undefined ? undefined : b.max / 1000 });
   /** The screen of the reader a book rule converts for, if one is chosen. */
   const bookDev = $derived(step.rule.type === "book" ? modelOf(step.rule.model)?.device : undefined);
 
@@ -258,11 +259,7 @@
       {:else if r.type === "case"}
         <label>{t("mode")}
           <select bind:value={r.mode}>
-            <option value="lower">{t("caseLower")}</option>
-            <option value="upper">{t("caseUpper")}</option>
-            <option value="sentence">{t("caseSentence")}</option>
-            <option value="title">{t("caseTitle")}</option>
-            <option value="titleSmart">{t("caseTitleSmart")}</option>
+            {@render options("mode")}
           </select>
         </label>
         <label>{t("caseKeep")} <input bind:value={r.keepWords} spellcheck="false" placeholder="swat, dvd" title={t("caseKeepHint")} /></label>
@@ -270,11 +267,7 @@
       {:else if r.type === "insert"}
         <label>{t("what")}
           <select bind:value={r.source}>
-            <option value="text">{t("srcText")}</option>
-            <option value="now">{t("srcNow")}</option>
-            <option value="modified">{t("srcModified")}</option>
-            <option value="taken">{t("srcTaken")}</option>
-            <option value="folder">{t("srcFolder")}</option>
+            {@render options("source")}
           </select>
         </label>
         {#if r.source === "text"}
@@ -290,23 +283,20 @@
         <div class="row">
           <label>{t("where")}
             <select bind:value={r.at}>
-              <option value="start">{t("atStart")}</option>
-              <option value="end">{t("atEnd")}</option>
-              <option value="index">{t("atIndex")}</option>
-              <option value="fromEnd">{t("atFromEnd")}</option>
+              {@render options("at")}
             </select>
           </label>
           {#if r.at === "index" || r.at === "fromEnd"}
-            <label class="narrow">{t("position")} <input type="number" min="0" bind:value={r.position} /></label>
+            <label class="narrow">{t("position")} <input type="number" {...lim("position")} bind:value={r.position} /></label>
           {/if}
         </div>
       {:else if r.type === "number"}
         <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
         <p class="hint mono">{t("templateHint")}</p>
         <div class="row">
-          <label class="narrow">{t("start")} <input type="number" bind:value={r.start} /></label>
-          <label class="narrow">{t("step")} <input type="number" bind:value={r.step} /></label>
-          <label class="narrow">{t("digits")} <input type="number" min="0" max="12" bind:value={r.digits} /></label>
+          <label class="narrow">{t("start")} <input type="number" {...lim("start")} bind:value={r.start} /></label>
+          <label class="narrow">{t("step")} <input type="number" {...lim("step")} bind:value={r.step} /></label>
+          <label class="narrow">{t("digits")} <input type="number" {...lim("digits")} bind:value={r.digits} /></label>
         </div>
         <label class="check"><input type="checkbox" bind:checked={r.perFolder} /> {t("perFolder")}</label>
         <label class="check" title={t("pairsHint")}><input type="checkbox" bind:checked={r.pairs} /> {t("pairs")}</label>
@@ -320,7 +310,7 @@
         </div>
         <label>{t("chars")} <input class="mono" bind:value={r.chars} spellcheck="false" placeholder="_#[]" /></label>
         <div class="row">
-          <label>{t("maxLength")} <input type="number" min="0" bind:value={r.maxLength} /></label>
+          <label>{t("maxLength")} <input type="number" {...lim("maxLength")} bind:value={r.maxLength} /></label>
         </div>
         {@render target()}
       {:else if r.type === "convert"}
@@ -331,9 +321,7 @@
         </div>
         <label>{t("cvWeb")}
           <select bind:value={r.webSafe} title={t("cvWebHint")}>
-            <option value="">{t("cvWebOff")}</option>
-            <option value="-">{t("cvWebDash")}</option>
-            <option value="_">{t("cvWebUnderscore")}</option>
+            {@render options("webSafe")}
           </select>
         </label>
         {@render target()}
@@ -341,13 +329,11 @@
         <div class="row">
           <label>{t("from")}
             <select bind:value={r.from}>
-              <option value="start">{t("bStart")}</option>
-              <option value="position">{t("bPosition")}</option>
-              <option value="text">{t("bText")}</option>
+              {@render options("from")}
             </select>
           </label>
           {#if r.from === "position"}
-            <label class="narrow">{t("position")} <input type="number" min="1" bind:value={r.fromPosition} /></label>
+            <label class="narrow">{t("position")} <input type="number" {...lim("fromPosition")} bind:value={r.fromPosition} /></label>
           {:else if r.from === "text"}
             <label>{t("text")} <input bind:value={r.fromText} spellcheck="false" /></label>
           {/if}
@@ -355,13 +341,11 @@
         <div class="row">
           <label>{t("to")}
             <select bind:value={r.to}>
-              <option value="end">{t("bEnd")}</option>
-              <option value="position">{t("bPosition")}</option>
-              <option value="text">{t("bText")}</option>
+              {@render options("to")}
             </select>
           </label>
           {#if r.to === "position"}
-            <label class="narrow">{t("position")} <input type="number" min="1" bind:value={r.toPosition} /></label>
+            <label class="narrow">{t("position")} <input type="number" {...lim("toPosition")} bind:value={r.toPosition} /></label>
           {:else if r.to === "text"}
             <label>{t("text")} <input bind:value={r.toText} spellcheck="false" /></label>
           {/if}
@@ -371,7 +355,7 @@
         {/if}
       {:else if r.type === "charAt"}
         <div class="row">
-          <label class="narrow">{t("position")} <input type="number" min="1" bind:value={r.position} /></label>
+          <label class="narrow">{t("position")} <input type="number" {...lim("position")} bind:value={r.position} /></label>
           <label class="check"><input type="checkbox" bind:checked={r.fromEnd} /> {t("countFromEnd")}</label>
         </div>
         <div class="row">
@@ -385,11 +369,7 @@
         <div class="row">
           <label>{t("action")}
             <select bind:value={r.mode}>
-              <option value="lower">{t("extLower")}</option>
-              <option value="upper">{t("extUpper")}</option>
-              <option value="set">{t("extSet")}</option>
-              <option value="remove">{t("extRemove")}</option>
-              <option value="content">{t("extContent")}</option>
+              {@render options("mode")}
             </select>
           </label>
           {#if r.mode === "set"}
@@ -435,8 +415,7 @@
         <h4 class="sect">{t("sectSearch")}</h4>
         <label>{t("seriesSource")}
           <select bind:value={r.source}>
-            <option value="tmdb">{t("seriesSourceTmdb")}</option>
-            <option value="anilist">{t("seriesSourceAnilist")}</option>
+            {@render options("source")}
           </select>
         </label>
         {#if r.source === "anilist"}<p class="hint">{t("animeHint")}</p>{/if}
@@ -475,7 +454,7 @@
         <label class="check"><input type="checkbox" bind:checked={r.fromName} /> <span>{t("photoFromName")}<small>{t("photoFromNameHint")}</small></span></label>
         <label class="check"><input type="checkbox" bind:checked={r.modified} /> <span>{t("photoModified")}<small>{t("photoModifiedHint")}</small></span></label>
         <label class="shift">{t("photoShift")}
-          <input type="number" min="-48" max="48" step="1" bind:value={r.shiftHours} />
+          <input type="number" {...lim("shiftHours")} step="1" bind:value={r.shiftHours} />
         </label>
         <p class="hint">{t("photoShiftHint")}</p>
         {#if edit}
@@ -506,8 +485,7 @@
         {#if r.toSrt}
           <label class="sub">{t("comicOriginal")}
             <select bind:value={r.original}>
-              <option value="keep">{t("subOriginalKeep")}</option>
-              <option value="delete">{t("comicOriginalDelete")}</option>
+              {@render options("original")}
             </select>
           </label>
         {/if}
@@ -520,8 +498,7 @@
           <input
             type="number"
             step="0.1"
-            min="-36000"
-            max="36000"
+            {...seconds(lim("shiftMs"))}
             value={r.shiftMs / 1000}
             oninput={(e) => {
               const v = Number((e.currentTarget as HTMLInputElement).value);
@@ -575,9 +552,7 @@
           {#if r.embedCover}
             <label class="sub">{t("musicCoverSize")}
               <select bind:value={r.coverSize}>
-                <option value={1200}>{t("musicCoverSize1200")}</option>
-                <option value={500}>500 px</option>
-                <option value={250}>250 px</option>
+                {#each choicesOf("music", "coverSize") as n (n)}<option value={n}>{n === 1200 ? t("musicCoverSize1200") : `${n} px`}</option>{/each}
               </select>
             </label>
           {/if}
@@ -595,7 +570,7 @@
         {#if r.folders}
           <label class="sub">{t("musicFolderName")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
         {/if}
-        <label class="check"><input type="checkbox" checked={r.audiobooks !== false} onchange={(e) => (r.audiobooks = e.currentTarget.checked)} /> <span>{t("bookAudio")}<small>{t("bookAudioHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.audiobooks} /> <span>{t("bookAudio")}<small>{t("bookAudioHint")}</small></span></label>
         <h4 class="sect">{t("sectSearch")}</h4>
         {@render actions(t("olSearch"), "bookSummary")}
         <h4 class="sect">{t("sectBeside")}</h4>
@@ -605,7 +580,7 @@
         <label class="check"><input type="checkbox" bind:checked={r.writeEpub} /> <span>{t("bookWriteEpub")}<small>{t("bookWriteEpubHint")}</small></span></label>
         <label class="check"><input type="checkbox" bind:checked={r.epub3} /> <span>{t("bookEpub3")}<small>{t("bookEpub3Hint")}</small></span></label>
         <label class="check"><input type="checkbox" bind:checked={r.shrinkImages} /> <span>{t("bookShrink")}<small>{t("bookShrinkHint")}</small></span></label>
-        {#if r.audiobooks !== false}
+        {#if r.audiobooks}
           <label class="check"><input type="checkbox" bind:checked={r.audioTags} /> <span>{t("bookAudioTags")}<small>{t("bookAudioTagsHint")}</small></span></label>
           {#if r.audioTags}
             <label class="check sub"><input type="checkbox" bind:checked={r.audioClean} /> <span>{t("bookAudioClean")}<small>{t("bookAudioCleanHint")}</small></span></label>
@@ -614,31 +589,28 @@
         <h4 class="sect">{t("sectConvert")}</h4>
         <label>{t("bookConvert")}
           <select bind:value={r.convertTo}>
-            <option value="">{t("bookConvertNone")}</option>
-            <option value="epub">{formatOption("EPUB", "epub", bookDev, r.model, r.otherReaderApps)}</option>
-            <option value="azw3">{formatOption(t("bookConvertAzw3"), "azw3", bookDev, r.model, r.otherReaderApps)}</option>
-            <option value="fb2">{formatOption("FB2", "fb2", bookDev, r.model, r.otherReaderApps)}</option>
-            {#if canPrint || r.convertTo === "pdf"}<option value="pdf">{formatOption("PDF", "pdf", bookDev, r.model, r.otherReaderApps)}</option>{/if}
+            {#each menuOf("book", "convertTo") as c (c.value)}
+              {#if c.value !== "pdf" || canPrint || r.convertTo === "pdf"}<option value={c.value}>{c.value ? formatOption(t(c.label as Key), c.value as Format, bookDev, r.model, r.otherReaderApps) : t(c.label as Key)}</option>{/if}
+            {/each}
           </select>
         </label>
         <p class="hint">{t("bookConvertHint")}</p>
         {#if r.convertTo}
           <label class="sub">{t("readerForOptional")}
             <select bind:value={r.model}>
-              <option value={undefined}>{t("readerAny")}</option>
+              <option value="">{t("readerAny")}</option>
               {@render readerOptions(false)}
             </select>
           </label>
           {@const why = notOpens(r.convertTo, bookDev, r.model, r.otherReaderApps)}
           {#if why}<p class="warn sub">{why}</p>{/if}
           {#if bookDev}
-            <label class="check sub"><input type="checkbox" checked={r.otherReaderApps ?? false} onchange={(e) => (r.otherReaderApps = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicAnyProgram")}<small>{t("comicAnyProgramHint")}</small></span></label>
+            <label class="check sub"><input type="checkbox" bind:checked={r.otherReaderApps} /> <span>{t("comicAnyProgram")}<small>{t("comicAnyProgramHint")}</small></span></label>
           {/if}
           <p class="hint sub">{t(r.convertTo === "pdf" ? (bookDev ? "bookPdfScreen" : "bookPdfA5") : "bookReaderHint")}</p>
           <label class="sub">{t("comicOriginal")}
             <select bind:value={r.original}>
-              <option value="keep">{t("bookOriginalKeep")}</option>
-              <option value="delete">{t("comicOriginalDelete")}</option>
+              {@render options("original")}
             </select>
           </label>
         {/if}
@@ -655,8 +627,7 @@
             }}
           >
             <option value="" disabled>{t("comicPresetCustom")}</option>
-            <option value="renome">{t("comicPresetRenome")}</option>
-            <option value="kavita">{t("comicPresetKavita")}</option>
+            {#each Object.keys(TABLE.comicPresets) as p (p)}<option value={p}>{t(`comicPreset${p[0].toUpperCase()}${p.slice(1)}` as Key)}</option>{/each}
           </select>
         </label>
         <p class="hint">{t("comicPresetHint")}</p>
@@ -672,12 +643,7 @@
         <h4 class="sect">{t("sectSearch")}</h4>
         <label>{t("comicSource")}
           <select bind:value={r.source}>
-            <option value="gcd">{t("comicSourceGcd")}</option>
-            <option value="metron">{t("comicSourceMetron")}</option>
-            <option value="comicvine">{t("comicSourceCv")}</option>
-            <option value="mangadex">{t("comicSourceMangadex")}</option>
-            <option value="anilist">{t("comicSourceAnilist")}</option>
-            <option value="mangaupdates">{t("comicSourceMangaupdates")}</option>
+            {@render options("source")}
           </select>
         </label>
         <p class="hint">{t(SOURCE_HINT[r.source] ?? "gcdHint")}</p>
@@ -697,8 +663,7 @@
         {#if r.convert}
           <label class="sub">{t("comicOriginal")}
             <select bind:value={r.original}>
-              <option value="keep">{t("comicOriginalKeep")}</option>
-              <option value="delete">{t("comicOriginalDelete")}</option>
+              {@render options("original")}
             </select>
           </label>
           <label class="sub" title={t("comicDrawPagesHint")}>{t("comicDrawPages")}
@@ -707,12 +672,10 @@
               <option value={false}>{t("comicDrawPagesNo")}</option>
             </select>
           </label>
-          {#if r.drawPdfPages !== false}
+          {#if r.drawPdfPages}
             <label class="sub" title={t("comicPageSizeHint")}>{t("comicPageSize")}
               <select bind:value={r.pageSize}>
-                <option value={1600}>1600 px</option>
-                <option value={2400}>{t("comicPageSize2400")}</option>
-                <option value={3200}>3200 px</option>
+                {#each choicesOf("comic", "pageSize") as n (n)}<option value={n}>{n === 2400 ? t("comicPageSize2400") : `${n} px`}</option>{/each}
               </select>
             </label>
           {/if}
@@ -720,15 +683,14 @@
         <h4 class="sect">{t("sectEbook")}</h4>
         <label>{t("comicEbook")}
           <select bind:value={r.ebook}>
-            <option value="">{t("comicEbookNone")}</option>
-            {#each COMIC_FORMATS as f (f)}<option value={f}>{formatOption(t(FORMAT_LABEL[f]), f, r.device ?? "kindle-pw", r.model, r.otherReaderApps)}</option>{/each}
+            {#each menuOf("comic", "ebook") as c (c.value)}<option value={c.value}>{c.value ? formatOption(t(c.label as Key), c.value as Format, r.device, r.model, r.otherReaderApps) : t(c.label as Key)}</option>{/each}
           </select>
         </label>
         <p class="hint">{t("comicEbookHint")}</p>
         {#if r.ebook}
           <label class="sub">{t("readerFor")}
             <select
-              value={readerOf(r.device ?? "kindle-pw", r.model)}
+              value={readerOf(r.device, r.model)}
               onchange={(e) => {
                 const c = chooseReader((e.currentTarget as HTMLSelectElement).value);
                 r.device = c.device;
@@ -741,54 +703,50 @@
               </optgroup>
             </select>
           </label>
-          {@const why = notOpens(r.ebook, r.device ?? "kindle-pw", r.model, r.otherReaderApps)}
+          {@const why = notOpens(r.ebook, r.device, r.model, r.otherReaderApps)}
           {#if why}<p class="warn sub">{why}</p>{/if}
-          {#if formatsOf(r.device ?? "kindle-pw", r.model)}
-            <label class="check sub"><input type="checkbox" checked={r.otherReaderApps ?? false} onchange={(e) => (r.otherReaderApps = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicAnyProgram")}<small>{t("comicAnyProgramHint")}</small></span></label>
+          {#if formatsOf(r.device, r.model)}
+            <label class="check sub"><input type="checkbox" bind:checked={r.otherReaderApps} /> <span>{t("comicAnyProgram")}<small>{t("comicAnyProgramHint")}</small></span></label>
           {/if}
           {#if r.device === "custom"}
             <div class="sub size">
-              <label>{t("comicWidth")} <input type="number" min="100" max="8000" value={r.width ?? 1264} onchange={(e) => (r.width = Number((e.currentTarget as HTMLInputElement).value) || 0)} /></label>
-              <label>{t("comicHeight")} <input type="number" min="100" max="8000" value={r.height ?? 1680} onchange={(e) => (r.height = Number((e.currentTarget as HTMLInputElement).value) || 0)} /></label>
+              <label>{t("comicWidth")} <input type="number" {...lim("width")} bind:value={r.width} /></label>
+              <label>{t("comicHeight")} <input type="number" {...lim("height")} bind:value={r.height} /></label>
             </div>
           {/if}
-          {@const dev = r.device ?? "kindle-pw"}
-          <label class="check sub"><input type="checkbox" checked={r.crop ?? true} onchange={(e) => (r.crop = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicCrop")}<small>{t("comicCropHint")}</small></span></label>
-          {#if r.crop ?? true}
-            <label class="check sub2"><input type="checkbox" checked={r.cropPageNumbers ?? false} onchange={(e) => (r.cropPageNumbers = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicNumbers")}<small>{t("comicNumbersHint")}</small></span></label>
+          {@const dev = r.device}
+          <label class="check sub"><input type="checkbox" bind:checked={r.crop} /> <span>{t("comicCrop")}<small>{t("comicCropHint")}</small></span></label>
+          {#if r.crop}
+            <label class="check sub2"><input type="checkbox" bind:checked={r.cropPageNumbers} /> <span>{t("comicNumbers")}<small>{t("comicNumbersHint")}</small></span></label>
           {/if}
           <label class="sub">{t("comicSpread")}
-            <select value={r.spread ?? (r.split === false ? "keep" : "split")} onchange={(e) => (r.spread = (e.currentTarget as HTMLSelectElement).value as ComicSpread)}>
-              {#each SPREADS as s (s)}<option value={s}>{t(`comicSpread_${s}` as Key)}</option>{/each}
+            <select bind:value={r.spread}>
+              {@render options("spread")}
             </select>
           </label>
           <p class="hint sub">{t("comicSpreadHint")}</p>
-          <label class="check sub"><input type="checkbox" checked={r.contrast ?? true} onchange={(e) => (r.contrast = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicContrast")}<small>{t("comicContrastHint")}</small></span></label>
+          <label class="check sub"><input type="checkbox" bind:checked={r.contrast} /> <span>{t("comicContrast")}<small>{t("comicContrastHint")}</small></span></label>
           {#if dev !== "original"}
-            <label class="check sub"><input type="checkbox" checked={r.upscale ?? false} onchange={(e) => (r.upscale = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicUpscale")}<small>{t("comicUpscaleHint")}</small></span></label>
+            <label class="check sub"><input type="checkbox" bind:checked={r.upscale} /> <span>{t("comicUpscale")}<small>{t("comicUpscaleHint")}</small></span></label>
           {/if}
           {#if isGreyInk(dev) && !NO_PNG.includes(dev)}
-            <label class="check sub"><input type="checkbox" checked={r.sixteenGreys ?? false} onchange={(e) => (r.sixteenGreys = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicGreys16")}<small>{t("comicGreys16Hint")}</small></span></label>
+            <label class="check sub"><input type="checkbox" bind:checked={r.sixteenGreys} /> <span>{t("comicGreys16")}<small>{t("comicGreys16Hint")}</small></span></label>
           {/if}
           {#if isColourInk(dev)}
-            <label class="check sub"><input type="checkbox" checked={r.reduceRainbow ?? false} onchange={(e) => (r.reduceRainbow = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicSoften")}<small>{t("comicSoftenHint")}</small></span></label>
+            <label class="check sub"><input type="checkbox" bind:checked={r.reduceRainbow} /> <span>{t("comicSoften")}<small>{t("comicSoftenHint")}</small></span></label>
           {/if}
-          <label class="check sub"><input type="checkbox" checked={r.webtoon ?? false} onchange={(e) => (r.webtoon = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicWebtoon")}<small>{t("comicWebtoonHint")}</small></span></label>
-          <label class="check sub"><input type="checkbox" checked={r.join ?? false} onchange={(e) => (r.join = (e.currentTarget as HTMLInputElement).checked)} /> <span>{t("comicJoin")}<small>{t("comicJoinHint")}</small></span></label>
+          <label class="check sub"><input type="checkbox" bind:checked={r.webtoon} /> <span>{t("comicWebtoon")}<small>{t("comicWebtoonHint")}</small></span></label>
+          <label class="check sub"><input type="checkbox" bind:checked={r.join} /> <span>{t("comicJoin")}<small>{t("comicJoinHint")}</small></span></label>
           <label class="sub">{t("comicMaxMb")}
-            <select value={r.maxMb ?? 0} onchange={(e) => (r.maxMb = Number((e.currentTarget as HTMLSelectElement).value))}>
-              <option value={0}>{t("comicMaxMbNone")}</option>
-              <option value={50}>{t("comicMaxMb50")}</option>
-              <option value={200}>{t("comicMaxMb200")}</option>
-              <option value={400}>400 MB</option>
+            <select bind:value={r.maxMb}>
+              {#each choicesOf("comic", "maxMb") as n (n)}<option value={n}>{n === 0 ? t("comicMaxMbNone") : n === 50 ? t("comicMaxMb50") : n === 200 ? t("comicMaxMb200") : `${n} MB`}</option>{/each}
             </select>
           </label>
           {#if r.maxMb}<p class="hint sub">{t("comicMaxMbHint")}</p>{/if}
           {#if !r.convert}
             <label class="sub">{t("comicOriginal")}
               <select bind:value={r.original}>
-                <option value="keep">{t("comicOriginalKeep")}</option>
-                <option value="delete">{t("comicOriginalDelete")}</option>
+                {@render options("original")}
               </select>
             </label>
           {/if}
@@ -824,13 +782,15 @@
   {/if}
 {/snippet}
 
+{#snippet options(name: string)}
+  {#each menuOf(r.type, name) as c (c.value)}<option value={c.value}>{t(c.label as Key)}</option>{/each}
+{/snippet}
+
 {#snippet subtitles()}
   {#if r.type === "movie" || r.type === "series"}
     <label class="check"><input type="checkbox" bind:checked={r.subtitles} /> <span>{t("subsLabel")}<small>{t("subsHint")}</small></span></label>
     {#if r.subtitles}
-      <label class="sub">{t("subsLangs")} <input value={r.subLangs ?? (newRule("movie") as { subLangs: string }).subLangs} oninput={(e) => {
-        if (r.type === "movie" || r.type === "series") r.subLangs = e.currentTarget.value;
-      }} placeholder="pt-BR, en" spellcheck="false" /></label>
+      <label class="sub">{t("subsLangs")} <input bind:value={r.subLangs} placeholder="pt-BR, en" spellcheck="false" /></label>
       {#if subs}
         <div class="movie-actions sub">
           <button disabled={!!subs.progress} onclick={subs.onsearch}>{t("subsSearch")}</button>
@@ -868,9 +828,7 @@
   {#if "target" in r}
     <label>{t("applyTo")}
       <select bind:value={r.target}>
-        <option value="name">{t("targetName")}</option>
-        <option value="ext">{t("targetExt")}</option>
-        <option value="full">{t("targetFull")}</option>
+        {@render options("target")}
       </select>
     </label>
   {/if}

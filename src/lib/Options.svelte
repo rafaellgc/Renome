@@ -24,8 +24,11 @@
     [settings.tmdbKey, settings.osKey || settings.subdlKey || settings.subsourceKey, settings.googleBooksKey, settings.comicVineKey, settings.metronToken, settings.gcdEmail, settings.discogsToken].filter((v) => v.trim()).length,
   );
 
-  /** The TMDB languages offered (the Rust options table's). */
-  const TMDB_LANGS = TABLE.options.tmdbLangs;
+  /** An option's menu (the Rust options table's, the command line's too). */
+  const words = (name: string) => (TABLE.options.menus[name] ?? []) as { value: string; label: string }[];
+  const numbers = (name: string) => (TABLE.options.menus[name] ?? []) as number[];
+  /** The TMDB languages offered (empty: the interface's, shown apart). */
+  const TMDB_LANGS = words("tmdbLang").map((c) => c.value).filter(Boolean);
   let showKey = $state(false);
   let keyStatus = $state<{ ok: boolean; text: string } | null>(null);
   let testing = $state(false);
@@ -227,22 +230,22 @@
       <div class="grid">
         <label for="opt-lang">{t("language")}</label>
         <select id="opt-lang" bind:value={settings.lang}>
-          {#each Object.entries(LANG_NAMES) as [code, name] (code)}
-            <option value={code as Lang}>{name}</option>
+          {#each words("lang") as { value } (value)}
+            <option value={value as Lang}>{LANG_NAMES[value as Lang]}</option>
           {/each}
         </select>
 
         <span>{t("theme")}</span>
         <div class="seg">
-          {#each [["light", "themeLight"], ["dark", "themeDark"], ["system", "themeSystem"]] as const as [value, label] (value)}
-            <button class:on={settings.theme === value} onclick={() => { settings.theme = value; applyTheme(); }}>{t(label)}</button>
+          {#each words("theme") as { value, label } (value)}
+            <button class:on={settings.theme === value} onclick={() => { settings.theme = value as typeof settings.theme; applyTheme(); }}>{t(label as Key)}</button>
           {/each}
         </div>
 
         <span>{t("textSize")}</span>
         <div class="seg">
-          {#each [["normal", "textSizeNormal"], ["large", "textSizeLarge"], ["larger", "textSizeLarger"]] as const as [value, label] (value)}
-            <button class:on={(settings.textSize ?? "normal") === value} onclick={() => { settings.textSize = value; applyTextSize(); }}>{t(label)}</button>
+          {#each words("textSize") as { value, label } (value)}
+            <button class:on={settings.textSize === value} onclick={() => { settings.textSize = value as typeof settings.textSize; applyTextSize(); }}>{t(label as Key)}</button>
           {/each}
         </div>
       </div>
@@ -289,11 +292,7 @@
       <div class="grid">
         <label for="opt-cache">{t("cacheDays")}</label>
         <select id="opt-cache" bind:value={settings.cacheDays}>
-          <option value={0}>{t("cacheOff")}</option>
-          <option value={1}>{t("cache1")}</option>
-          <option value={7}>{t("cache7")}</option>
-          <option value={30}>{t("cache30")}</option>
-          <option value={180}>{t("cache180")}</option>
+          {#each numbers("cacheDays") as n (n)}<option value={n}>{t(n ? (`cache${n}` as Key) : "cacheOff")}</option>{/each}
         </select>
       </div>
       <small>{t("cacheHint")}</small>
@@ -568,7 +567,6 @@
         </small>
       </div>
     </section>
-
 
     <p class="stored" class:bad={secrets.ready && secrets.status !== "stored"}>
       {#if !secrets.ready}

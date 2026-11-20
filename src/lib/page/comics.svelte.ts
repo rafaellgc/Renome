@@ -30,7 +30,7 @@ export class Comics {
   /** Comics whose details were typed in (over what the catalogue said). */
   edits = $state<Record<string, ComicMatch>>({});
   /** The details window, while open. */
-  edit = $state<{ paths: string[]; comics: ComicMatch[] } | null>(null);
+  edit = $state<{ paths: string[]; comics: ComicMatch[]; rows: Record<string, string>[] } | null>(null);
 
   constructor(ctx: PageCtx) {
     this.#ctx = ctx;
@@ -59,8 +59,6 @@ export class Comics {
   /** The details window's fields. */
   fields = $derived<EditField[]>(editFields("comic"));
 
-
-
   /** The chosen catalogue (GCD, Metron, Comic Vine, a manga one) for the
    *  visible comics: on Metron, first each file's barcode (recorded in it,
    *  or read in its pages when asked); then one series per group of files
@@ -68,14 +66,9 @@ export class Comics {
    *  when only one has that name (and year), else asked; then each file's
    *  issue by its number. */
   async search(rule: Extract<Rule, { type: "comic" }>) {
-    const source = rule.source ?? "gcd";
-    const skip = rule.skipPublishers?.trim() ?? "";
+    const source = rule.source;
+    const skip = rule.skipPublishers.trim();
     const key = comicKey(source);
-    if ((source === "comicvine" || source === "metron") && !key) {
-      const ok = await confirm({ title: t("rule.comic"), text: t(source === "metron" ? "mtNeedsKey" : "cvNeedsKey"), ok: t("options"), cancel: t("cancel") });
-      if (ok) this.#ctx.openOptions();
-      return;
-    }
     // Without an account the GCD takes few searches: said once per session.
     if (source === "gcd" && !this.#gcdWarned && !(settings.gcdEmail.trim() && settings.gcdPassword)) {
       this.#gcdWarned = true;
@@ -112,8 +105,9 @@ export class Comics {
       if (Object.values(this.state).some((c) => c.status === "choose")) this.openReview();
     } catch (e) {
       const err = String(e);
-      // A refused account is fixed in the options.
-      if (err.startsWith("gcdBadLogin") || err.startsWith("mtBadKey")) {
+      // A key missing or refused is fixed in the options (which, the
+      // shared flow says).
+      if (["gcdBadLogin", "mtBadKey", "cvNeedsKey", "mtNeedsKey"].some((k) => err.startsWith(k))) {
         if (await confirm({ title: t("rule.comic"), text: tError(e), ok: t("options"), cancel: t("close") })) this.#ctx.openOptions();
       } else {
         await notify({ title: t("rule.comic"), text: tError(e) });
@@ -171,7 +165,7 @@ export class Comics {
     if (!this.selected.length) return;
     const r = this.rule?.rule;
     const known = Object.fromEntries(this.selected.map((i) => [i.path, { current: this.matches[i.path], guess: this.state[i.path]?.own }]));
-    const [paths, comics] = await api.editStart<ComicMatch>({
+    const [paths, comics, rows] = await api.editStart<ComicMatch>({
       kind: "comic",
       chosen: this.selected.map((i) => i.path),
       known: $state.snapshot(known),
@@ -181,7 +175,7 @@ export class Comics {
       byFolder: r?.type === "comic" && !!r.seriesByFolder,
       audiobooks: false,
     });
-    if (paths.length) this.edit = { paths, comics };
+    if (paths.length) this.edit = { paths, comics, rows };
   }
 
   /** The fields changed in the details window, for each of its comics (applied as the command line's --edit does). */

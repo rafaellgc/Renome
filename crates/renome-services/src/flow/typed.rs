@@ -63,13 +63,26 @@ pub async fn show(
 }
 
 /// An album: a MusicBrainz or Discogs link, else the album (and artist)
-/// typed, on Discogs when asked (with the person's token).
+/// typed, apart or as `artist / album`, on Discogs when asked (with the
+/// person's token).
 pub async fn album(
     mb: &musicbrainz::Client,
     dg: &discogs::Client,
     query: &renome_core::musicbrainz::AlbumQuery,
     on_discogs: bool,
 ) -> Result<Vec<renome_core::musicbrainz::Candidate>, String> {
+    let split;
+    let query = match query.album.split_once(" / ") {
+        Some((artist, album)) if !artist.trim().is_empty() && !album.trim().is_empty() => {
+            split = renome_core::musicbrainz::AlbumQuery {
+                artist: artist.trim().to_string(),
+                album: album.trim().to_string(),
+                ..query.clone()
+            };
+            &split
+        }
+        _ => query,
+    };
     match links::parse(query.album.trim()) {
         Some(Link::MusicBrainz(id)) => {
             let r = mb.release(&id).await?;
@@ -120,6 +133,60 @@ pub async fn book(
     Ok(ol.find(&guess, lang).await?.0)
 }
 
+/// A comic series: a link of the catalogue, else its name, from a year
+/// and by a publisher when given (typed apart, or as `name 1999 /
+/// publisher`; the year only when it can be one, see
+/// [`renome_core::comics::is_year`]). Those that could hold the files'
+/// highest issue first ([`super::comics::by_fit`]).
+#[allow(clippy::too_many_arguments)]
+pub async fn comic(
+    sources: &crate::comics::Sources<'_>,
+    source: &str,
+    key: &str,
+    text: &str,
+    year: &str,
+    publisher: &str,
+    lang: &str,
+    skip: &str,
+    highest: f64,
+) -> Result<Vec<renome_core::comics::Volume>, String> {
+    let (name, year, publisher) = comic_query(text, year, publisher);
+    let found = sources
+        .search(source, key, &name, year, &publisher, lang, skip)
+        .await?;
+    Ok(super::comics::by_fit(found, highest))
+}
+
+/// What a comic search asks: the name, the year (typed apart, or at the
+/// end of the name, when it can be one) and the publisher (typed apart,
+/// or after ` / `); a link as it is.
+fn comic_query(text: &str, year: &str, publisher: &str) -> (String, Option<u16>, String) {
+    let year_of = |y: &str| {
+        y.trim()
+            .trim_matches(|c| c == '(' || c == ')')
+            .parse::<u32>()
+            .ok()
+            .filter(|y| renome_core::comics::is_year(*y))
+            .and_then(|y| u16::try_from(y).ok())
+    };
+    let mut name = text.trim();
+    let mut publisher = publisher.trim();
+    if links::parse(name).is_none()
+        && publisher.is_empty()
+        && let Some((n, p)) = name.split_once(" / ")
+    {
+        (name, publisher) = (n.trim(), p.trim());
+    }
+    let mut year = year_of(year);
+    if year.is_none()
+        && let Some((n, y)) = name.rsplit_once(' ')
+        && let Some(y) = year_of(y)
+    {
+        (name, year) = (n.trim(), Some(y));
+    }
+    (name.to_string(), year, publisher.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,5 +196,31 @@ mod tests {
         assert!(album_on_discogs(Some("discogs:123"), true));
         assert!(!album_on_discogs(Some("discogs:123"), false));
         assert!(!album_on_discogs(Some("abc-def"), true));
+    }
+
+    #[test]
+    fn comic_searches_read_year_and_publisher() {
+        let q = |t, y, p| super::comic_query(t, y, p);
+        assert_eq!(
+            q("Lanterna 1999", "", ""),
+            ("Lanterna".into(), Some(1999), String::new())
+        );
+        assert_eq!(
+            q("Lanterna 1999 / Editora Sol", "", ""),
+            ("Lanterna".into(), Some(1999), "Editora Sol".into())
+        );
+        // An issue number is not a year; one typed apart wins.
+        assert_eq!(
+            q("Lanterna 52", "", ""),
+            ("Lanterna 52".into(), None, String::new())
+        );
+        assert_eq!(
+            q("Lanterna 1999", "(2004)", "X"),
+            ("Lanterna 1999".into(), Some(2004), "X".into())
+        );
+        assert_eq!(
+            q("Lanterna", "12", ""),
+            ("Lanterna".into(), None, String::new())
+        );
     }
 }

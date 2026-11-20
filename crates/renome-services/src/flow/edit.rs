@@ -14,16 +14,62 @@ pub type Changed = BTreeMap<String, String>;
 
 /// A field of a details window (and of `--edit`).
 #[derive(Debug, Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Field {
     pub key: &'static str,
     /// Typed as a whole number.
     pub numeric: bool,
     /// Shown across the window.
     pub wide: bool,
+    /// The most characters it takes (numbers: digits), when limited.
+    pub max_length: Option<usize>,
 }
 
+/// The digits a number field takes (a year, a track, a minute).
+pub const DIGITS: usize = 4;
+
 const fn f(key: &'static str, numeric: bool, wide: bool) -> Field {
-    Field { key, numeric, wide }
+    Field {
+        key,
+        numeric,
+        wide,
+        max_length: if numeric { Some(DIGITS) } else { None },
+    }
+}
+
+/// Whether a value suits a field: a number field only digits, and no
+/// more characters than it takes (empty clears it).
+pub fn fits(field: &Field, value: &str) -> bool {
+    (!field.numeric || value.chars().all(|c| c.is_ascii_digit()))
+        && field.max_length.is_none_or(|n| value.chars().count() <= n)
+}
+
+/// A file's details as a details window shows them, by field: numbers as
+/// digits (none or 0: empty), a book's authors joined by `; ` (as typed
+/// back, see [`book`]), its language from its extra details.
+pub fn as_text(kind: &str, value: &serde_json::Value) -> BTreeMap<String, String> {
+    use serde_json::Value;
+    fields_of(kind)
+        .iter()
+        .map(|f| {
+            let v = if kind == "book" && f.key == "language" {
+                &value["extra"]["language"]
+            } else {
+                &value[f.key]
+            };
+            let text = match v {
+                Value::String(s) => s.clone(),
+                Value::Number(n) if n.as_f64() != Some(0.0) => n.to_string(),
+                Value::Array(list) => list
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join("; "),
+                _ => String::new(),
+            };
+            (f.key.to_string(), text)
+        })
+        .collect()
 }
 
 pub const SONG: &[Field] = &[
@@ -277,55 +323,6 @@ pub fn photo_date(old: &str, changed: &Changed) -> Option<String> {
     joined(&y, &mo, &d, &h, &mi).filter(|j| *j == text && !y.is_empty())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn c(pairs: &[(&str, &str)]) -> Changed {
-        pairs
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect()
-    }
-
-    #[test]
-    fn dates_typed_in_parts_or_whole() {
-        assert_eq!(
-            photo_date("", &c(&[("year", "2018"), ("month", "3"), ("day", "27")])),
-            Some("2018-03-27".into())
-        );
-        assert_eq!(
-            photo_date("2018-03-27", &c(&[("hour", "14"), ("minute", "5")])),
-            Some("2018-03-27 14:05".into())
-        );
-        assert_eq!(
-            photo_date("2018-03-27", &c(&[("day", "31"), ("month", "2")])),
-            None
-        );
-        assert_eq!(
-            photo_date("2018-03-27", &c(&[("date", "")])),
-            Some(String::new())
-        );
-        assert_eq!(photo_date("", &c(&[("date", "2018-02-30")])), None);
-    }
-
-    #[test]
-    fn retyped_details_lose_their_catalogue() {
-        let m = BookMatch {
-            work: "OL1W".into(),
-            ..Default::default()
-        };
-        assert_eq!(book(m.clone(), &c(&[("publisher", "X")])).work, "OL1W");
-        assert_eq!(book(m, &c(&[("title", "Y")])).work, "");
-        let s = SongMatch {
-            release: "r".into(),
-            ..Default::default()
-        };
-        assert_eq!(song(s.clone(), &c(&[("title", "t")])).release, "r");
-        assert!(song(s, &c(&[("album", "a")])).typed);
-    }
-}
-
 /// A name's stem, as the lookups read it (a folder's whole name).
 fn stem_of(name: &str, is_dir: bool) -> String {
     if is_dir {
@@ -423,4 +420,78 @@ pub fn comic_start(
         .or_else(|| own.cloned())
         .or_else(|| renome_core::comics::from_path(path, Some(&stem_of(name, is_dir)), by_folder))
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn c(pairs: &[(&str, &str)]) -> Changed {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn dates_typed_in_parts_or_whole() {
+        assert_eq!(
+            photo_date("", &c(&[("year", "2018"), ("month", "3"), ("day", "27")])),
+            Some("2018-03-27".into())
+        );
+        assert_eq!(
+            photo_date("2018-03-27", &c(&[("hour", "14"), ("minute", "5")])),
+            Some("2018-03-27 14:05".into())
+        );
+        assert_eq!(
+            photo_date("2018-03-27", &c(&[("day", "31"), ("month", "2")])),
+            None
+        );
+        assert_eq!(
+            photo_date("2018-03-27", &c(&[("date", "")])),
+            Some(String::new())
+        );
+        assert_eq!(photo_date("", &c(&[("date", "2018-02-30")])), None);
+    }
+
+    #[test]
+    fn retyped_details_lose_their_catalogue() {
+        let m = BookMatch {
+            work: "OL1W".into(),
+            ..Default::default()
+        };
+        assert_eq!(book(m.clone(), &c(&[("publisher", "X")])).work, "OL1W");
+        assert_eq!(book(m, &c(&[("title", "Y")])).work, "");
+        let s = SongMatch {
+            release: "r".into(),
+            ..Default::default()
+        };
+        assert_eq!(song(s.clone(), &c(&[("title", "t")])).release, "r");
+        assert!(song(s, &c(&[("album", "a")])).typed);
+    }
+
+    #[test]
+    fn fields_show_as_they_are_typed_back() {
+        let book = serde_json::json!({
+            "title": "Um Livro", "authors": ["Ana Lima", "Rui Sá"], "year": 0,
+            "extra": { "language": "por" }, "seriesIndex": "2",
+        });
+        let text = as_text("book", &book);
+        assert_eq!(text["authors"], "Ana Lima; Rui Sá");
+        assert_eq!(text["year"], "");
+        assert_eq!(text["language"], "por");
+        assert_eq!(text["seriesIndex"], "2");
+        // Read back, the same authors.
+        let changed: Changed = [("authors".to_string(), text["authors"].clone())].into();
+        assert_eq!(book_with(&changed).authors, vec!["Ana Lima", "Rui Sá"]);
+        let year = BOOK.iter().find(|f| f.key == "year").unwrap();
+        assert!(fits(year, "1999") && fits(year, ""));
+        assert!(!fits(year, "19999") && !fits(year, "19a9"));
+        let title = BOOK.iter().find(|f| f.key == "title").unwrap();
+        assert!(fits(title, "Qualquer coisa, 123"));
+    }
+
+    fn book_with(changed: &Changed) -> BookMatch {
+        book(BookMatch::default(), changed)
+    }
 }

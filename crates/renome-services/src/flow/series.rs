@@ -105,6 +105,12 @@ pub async fn search(
     settled: &HashSet<(PathBuf, u64)>,
     picked: HashMap<String, Candidate>,
 ) -> Result<Outcome, String> {
+    // AniList takes no key; TMDB answers nothing without one.
+    if let Source::Tmdb(client) = &source
+        && !client.ready()
+    {
+        return Err("tmdbNeedsKey".into());
+    }
     let typed = typed.trim();
     let all = targets(items);
     let mut out = Outcome {
@@ -364,39 +370,6 @@ fn read_code(text: &str) -> Option<(u16, u16, u16)> {
     (b >= a).then_some((season, a, b))
 }
 
-#[cfg(test)]
-mod typed_tests {
-    use super::*;
-
-    #[test]
-    fn codes_and_names() {
-        let ep = |season, number, name: &str| renome_core::tv::Episode {
-            season,
-            number,
-            name: name.into(),
-            names: vec![],
-            air_date: None,
-            overview: String::new(),
-            still_path: None,
-            runtime: None,
-        };
-        let show: Show = serde_json::from_value(serde_json::json!({
-            "id": 1, "name": "A", "originalName": "A", "year": null, "overview": "",
-            "posterPath": null, "episodes": [],
-        }))
-        .unwrap();
-        let show = Show {
-            episodes: vec![ep(1, 1, "Começo"), ep(1, 2, "Meio"), ep(2, 1, "Volta")],
-            ..show
-        };
-        assert_eq!(typed(&show, "S01E01-E02").exact, Some(vec![(1, 1), (1, 2)]));
-        assert_eq!(typed(&show, "2x01").exact, Some(vec![(2, 1)]));
-        assert_eq!(typed(&show, "comeco").matches, vec![(1, 1)]);
-        assert_eq!(typed(&show, "s01").matches, vec![(1, 1), (1, 2)]);
-        assert!(typed(&show, "S09E01").exact.is_none());
-    }
-}
-
 /// Episodes as file names write them: `S01E02`, `S01E02-E03`.
 pub fn code(keys: &[Key]) -> String {
     match keys.first() {
@@ -431,4 +404,37 @@ pub fn read(g: &EpisodeGuess) -> String {
         parts.push(format!("“{}”", g.title));
     }
     parts.join(" · ")
+}
+
+#[cfg(test)]
+mod typed_tests {
+    use super::*;
+
+    #[test]
+    fn codes_and_names() {
+        let ep = |season, number, name: &str| renome_core::tv::Episode {
+            season,
+            number,
+            name: name.into(),
+            names: vec![],
+            air_date: None,
+            overview: String::new(),
+            still_path: None,
+            runtime: None,
+        };
+        let show: Show = serde_json::from_value(serde_json::json!({
+            "id": 1, "name": "A", "originalName": "A", "year": null, "overview": "",
+            "posterPath": null, "episodes": [],
+        }))
+        .unwrap();
+        let show = Show {
+            episodes: vec![ep(1, 1, "Começo"), ep(1, 2, "Meio"), ep(2, 1, "Volta")],
+            ..show
+        };
+        assert_eq!(typed(&show, "S01E01-E02").exact, Some(vec![(1, 1), (1, 2)]));
+        assert_eq!(typed(&show, "2x01").exact, Some(vec![(2, 1)]));
+        assert_eq!(typed(&show, "comeco").matches, vec![(1, 1)]);
+        assert_eq!(typed(&show, "s01").matches, vec![(1, 1), (1, 2)]);
+        assert!(typed(&show, "S09E01").exact.is_none());
+    }
 }

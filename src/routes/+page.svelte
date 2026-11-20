@@ -13,7 +13,7 @@
   import { Series } from "$lib/page/series.svelte";
   import { Subtitles } from "$lib/page/subtitles.svelte";
   import { Photos } from "$lib/page/photos.svelte";
-  import { asText, counts, moved, without, type PageCtx } from "$lib/page/common";
+  import type { PageCtx } from "$lib/page/common";
   import Dialog from "$lib/Dialog.svelte";
   import Icon from "$lib/Icon.svelte";
   import RuleSets from "$lib/RuleSets.svelte";
@@ -312,7 +312,6 @@
   /** Another folder the files go to (moved or copied); for this session only. */
   let sendTo = $state<{ dir: string; copy: boolean } | null>(null);
   let sendMenu = $state(false);
-  /** Bytes copied so far, while copying. */
   /** How far an undo is: songs whose tags are back, then bytes moved
    *  back from another disk. */
   let undoProgress = $state<{ done: number; total: number; kind: "tags" | "files" } | null>(null);
@@ -329,13 +328,8 @@
     for (const i of preview.items) if (i.outside) out[i.path] = t(key[i.outside]);
     return out;
   });
-;
 
   const view = $derived<View>({ filter, sortByNewName: sortKey === "newName", descending: sortDesc, identicalOnly, alikeOnly, similarOnly, movies: movies.matches, episodes: tv.matches, songs: music.matches, books: books.matches, comics: comics.matches, dates: photos.dates, leftoverSuffix: t("leftoverSuffix"), lang: settings.lang, numberClashes: settings.numberClashes, sendTo });
-  /** Example name for rule cards: the first file in natural name order, so
-   *  it does not jump around while the preview re-sorts. */
-  const collator = new Intl.Collator(undefined, { numeric: true });
-  /** "+ Rule" menu in alphabetical order of the current language. */
   /** The lookup rule in the stack (on or off): the others wait until it
    *  is removed. */
   const lookupType = $derived(steps.find((s) => isKindRule(s.rule.type))?.rule.type ?? null);
@@ -364,7 +358,6 @@
   /** Example name for rule cards (the preview's: the first in natural order). */
   const sample = $derived(preview.hints.sample);
   const canMove = $derived(selected.size > 0 && sortKey !== "newName");
-
 
   function ruleError(i: number) {
     const e = preview.ruleErrors.find((e) => e.index === i);
@@ -609,7 +602,6 @@
     return kept;
   }
 
-
   function moveStep(i: number, delta: -1 | 1) {
     const j = i + delta;
     [steps[i], steps[j]] = [steps[j], steps[i]];
@@ -831,7 +823,6 @@
       .catch(() => {});
   }
 
-
   async function openHistory() {
     history = await api.history();
   }
@@ -948,10 +939,6 @@
     for (const m of [movies, tv, subs, books, comics, music, photos]) m.follow(follow);
   }
 
-
-  /** Writes .nfo files and images (undone with the rename); movies.progress
-   *  must be set. Returns how many files were created. */
-  /** Saves the list and the hand-edited names before an edit, for Ctrl+Z. */
   /** What the lookups found per file, kept along each list checkpoint
    *  that takes files out (null: the edit left them as they were). */
   type Found = { movies: ReturnType<Movies["snapshot"]>; tv: ReturnType<Series["snapshot"]>; books: ReturnType<Books["snapshot"]>; music: ReturnType<Music["snapshot"]>; comics: ReturnType<Comics["snapshot"]>; photos: ReturnType<Photos["snapshot"]> };
@@ -1740,7 +1727,7 @@
     heading={t("comicEditTitleN", { n: comics.edit.comics.length })}
     hint={t("detailsEditHint")}
     fields={comics.fields}
-    rows={comics.edit.comics.map((m) => asText(m, comics.fields))}
+    rows={comics.edit.rows}
     onsave={(c) => comics.saveEdit(c)}
     onclose={() => (comics.edit = null)}
   />
@@ -1760,7 +1747,7 @@
     heading={t("bookEditTitleN", { n: books.edit.books.length })}
     hint={t("detailsEditHint")}
     fields={books.fields}
-    rows={books.edit.books.map((m) => books.text(m))}
+    rows={books.edit.rows}
     onsave={(c) => books.saveEdit(c)}
     onclose={() => (books.edit = null)}
   />
@@ -1770,7 +1757,7 @@
     heading={t("songEditTitleN", { n: music.edit.songs.length })}
     hint={t("detailsEditHint")}
     fields={music.fields}
-    rows={music.edit.songs.map((m) => asText(m, music.fields))}
+    rows={music.edit.rows}
     onsave={(c) => music.saveEdit(c)}
     onclose={() => (music.edit = null)}
   />

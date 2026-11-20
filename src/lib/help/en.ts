@@ -252,7 +252,7 @@ ${ex("beach.jpg", "Trip 01.jpg")}
 <p>To fix names taken from tags, put this rule below the Music (tags) rule.</p>`,
   },
   {
-    id: "r-range",
+    id: "r-removeRange",
     title: "Remove range",
     sub: true,
     html: `
@@ -266,7 +266,7 @@ ${ex("Movie [1080p] (2020).mkv", "Movie  (2020).mkv")}
 <p>From text <code>[</code> to text <code>]</code>, removing the delimiters. The texts are case-sensitive. If one of them is missing from a name, that name is left as it is.</p>`,
   },
   {
-    id: "r-char",
+    id: "r-charAt",
     title: "Character at position",
     sub: true,
     html: `
@@ -280,7 +280,7 @@ ${ex("_photo.jpg", "photo.jpg")}
 <p>Position 1, only if <code>_</code>, replace with nothing.</p>`,
   },
   {
-    id: "r-ext",
+    id: "r-extension",
     title: "Extension",
     sub: true,
     html: `
@@ -1037,7 +1037,7 @@ ${ex("Show.S01E02.720p.WEB.mkv", "Show S01E02.mkv")}
 <p><code>renome-cli rules</code> lists the types; <code>renome-cli rules number</code> shows a rule's options, each with its default. Every rule also takes <code>only=FILTER</code> (only on the files the filter shows) and <code>off</code>. Option names are in English and the same in every language.</p>
 <p>Also as in the window: <code>--filter</code> (the list's filter), <code>--sort</code> and <code>--desc</code> (the order numbering follows), <code>--to FOLDER</code> (move) and <code>--copy</code> (copy), <code>--name PATH=NAME</code> (a name typed by hand), <code>--folders</code> (rename the folders themselves), <code>--hidden</code>, <code>--all</code> (also lists files that do not change), <code>--csv FILE</code> (Export list, with the extra columns chosen in the options) and <code>--missing-csv FILE</code> (Export what is missing).</p>
 <h4>Online lookups</h4>
-<p>The movie, series, music, book and comic rules search the same catalogues and choose on their own what the window would choose. For doubtful cases, <code>--choose</code> decides: <code>ask</code> (the default in a terminal) shows numbered candidates and waits for the number; <code>auto</code> keeps only what is certain; <code>skip</code> does not even look up the doubtful ones. <code>--pick PATH=ID</code> forces a choice (<code>tmdb:603</code>, a catalogue link or a title). <code>--edit PATH:FIELD=VALUE,…</code> does what the window's <b>Edit details</b> does, for example <code>--edit "book.epub:title=The Title,authors=Someone; Someone Else"</code> or, with the photo rule, <code>--edit "IMG_1.jpg:date=2018-03-27 14:30"</code>; <code>--help</code> lists each rule's fields. <code>--missing</code> lists what is missing (episodes, issues, tracks, collection movies, volumes), like the window's faded rows.</p>
+<p>The movie, series, music, book and comic rules search the same catalogues and choose on their own what the window would choose. For doubtful cases, <code>--choose</code> decides: <code>ask</code> (the default in a terminal) shows numbered candidates and waits for the number; <code>auto</code> keeps only what is certain; <code>skip</code> does not even look up the doubtful ones. Instead of the number you can type another search, as in the choice windows: a link or id from the catalogue, or the name, with <code>Title 1999</code> for a movie, <code>title / author</code> for a book, <code>artist / album</code> for an album and <code>name 1999 / publisher</code> for a comic series. <code>--pick PATH=ID</code> forces a choice (<code>tmdb:603</code>, a catalogue link or a title). <code>--edit PATH:FIELD=VALUE,…</code> does what the window's <b>Edit details</b> does, for example <code>--edit "book.epub:title=The Title,authors=Someone; Someone Else"</code> or, with the photo rule, <code>--edit "IMG_1.jpg:date=2018-03-27 14:30"</code>; <code>--help</code> lists each rule's fields. <code>--missing</code> lists what is missing (episodes, issues, tracks, collection movies, volumes), like the window's faded rows.</p>
 <p><kbd>Ctrl</kbd>+<kbd>C</kbd> during the searches works as the Stop button: what was found stays chosen, and the program asks whether to go on with it. During the renames, it stops where it is: what was renamed stays in the History (and can be undone), and the later steps are not done. A second <kbd>Ctrl</kbd>+<kbd>C</kbd>, or one while a question waits for an answer, quits at once.</p>
 <p>After renaming, the rest happens as in the window: tags and covers written, <code>.nfo</code> files, playlists, subtitles downloaded, books converted and media servers told (<code>--no-server</code> does not tell them).</p>
 <h4>The other commands</h4>

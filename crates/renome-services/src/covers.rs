@@ -160,6 +160,8 @@ pub struct SeriesByCover {
 /// catalogues of whole series only when the file is the first volume
 /// (they keep that cover alone); a long series (many pages of issues) is
 /// left out. `progress(i, n)` as each is compared.
+// What the picker knows, each by name (the window and the chooser alike).
+#[allow(clippy::too_many_arguments)]
 pub async fn series_by_cover(
     covers: &Covers,
     sources: &Sources<'_>,

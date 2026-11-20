@@ -15,6 +15,12 @@ use crate::files::FileEntry;
 use crate::text;
 use crate::tmdb::safe_title;
 
+/// A number that can be a comic's year (a cover date, a series' first
+/// year), not an issue or volume number.
+pub fn is_year(y: u32) -> bool {
+    (1800..=2200).contains(&y)
+}
+
 /// Extensions of comic files: comics are also kept as PDFs, EPUBs and
 /// Kindle books.
 pub fn is_comic(ext: &str) -> bool {
@@ -256,7 +262,7 @@ pub fn parse_info(xml: &str) -> Option<ComicInfo> {
         year: field("Year")
             .parse()
             .ok()
-            .filter(|y| (1800..=2200).contains(y)),
+            .filter(|y| is_year(u32::from(*y))),
         publisher: field("Publisher"),
         writer: field("Writer"),
         penciller: field("Penciller"),
@@ -270,7 +276,7 @@ pub fn parse_info(xml: &str) -> Option<ComicInfo> {
                 field("Year")
                     .parse()
                     .ok()
-                    .filter(|y| (1800..=2200).contains(y)),
+                    .filter(|y| is_year(u32::from(*y))),
                 number("Month"),
                 number("Day"),
             );
@@ -458,7 +464,7 @@ pub fn parse_metron(xml: &str) -> Option<ComicInfo> {
         year: cover_date
             .get(..4)
             .and_then(|y| y.parse().ok())
-            .filter(|y| (1800..=2200).contains(y)),
+            .filter(|y| is_year(u32::from(*y))),
         publisher: at(&["Publisher", "Name"]),
         writer: people(&["writer", "script", "story", "plot"]),
         penciller: people(&[
@@ -514,7 +520,7 @@ pub fn parse_cbi(json: &str) -> Option<ComicInfo> {
     };
     let year = n("publicationYear")
         .and_then(|y| u16::try_from(y).ok())
-        .filter(|y| (1800..=2200).contains(y));
+        .filter(|y| is_year(u32::from(*y)));
     let mut extra = crate::fields::Extra::new();
     crate::fields::add_ymd(
         &mut extra,
@@ -1082,7 +1088,7 @@ pub fn merge(g: &ComicGuess, info: &ComicInfo) -> ComicMatch {
     };
     // `Volume` holds a volume number or the series' first year.
     let (volume, series_year) = match info.volume.parse::<u32>() {
-        Ok(v) if (1800..=2200).contains(&v) => (g.volume, u16::try_from(v).ok()),
+        Ok(v) if is_year(v) => (g.volume, u16::try_from(v).ok()),
         Ok(v) => (Some(v), g.series_year),
         Err(_) => (g.volume, g.series_year),
     };

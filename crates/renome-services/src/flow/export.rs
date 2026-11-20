@@ -105,6 +105,9 @@ pub struct MissingCsv {
     pub rows: Vec<Vec<Cell>>,
 }
 
+/// How a kind of missing item makes its CSV row.
+type Row = fn(&Missing) -> Vec<String>;
+
 pub fn missing(list: &[Missing], dir_of: &dyn Fn(&Path) -> Option<PathBuf>) -> MissingCsv {
     let mut kinds: Vec<&str> = list.iter().map(|m| m.kind).collect();
     kinds.sort_unstable();
@@ -137,7 +140,7 @@ pub fn missing(list: &[Missing], dir_of: &dyn Fn(&Path) -> Option<PathBuf>) -> M
             .then(a.season.cmp(&b.season))
             .then(a.number.cmp(&b.number))
     });
-    let (head, row): (Vec<&str>, fn(&Missing) -> Vec<String>) = match one {
+    let (head, row): (Vec<&str>, Row) = match one {
         Some("episode") => (
             vec![
                 "csv.show",

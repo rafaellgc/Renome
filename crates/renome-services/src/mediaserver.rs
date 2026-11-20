@@ -12,6 +12,10 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+/// The kinds of server, as saved and typed, with their names: the
+/// window's menu and the command line's `--kind`.
+pub const KINDS: &[(&str, &str)] = &[("jellyfin", "Jellyfin / Emby"), ("plex", "Plex")];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {

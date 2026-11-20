@@ -88,11 +88,11 @@
     },
   ];
 
-  /** Each rule's section, by rule type. */
-  const RULE_OF: Record<string, RuleType> = {
-    "r-replace": "replace", "r-regex": "regex", "r-rearrange": "rearrange", "r-list": "list", "r-case": "case", "r-insert": "insert",
-    "r-number": "number", "r-remove": "remove", "r-convert": "convert", "r-range": "removeRange", "r-char": "charAt", "r-ext": "extension",
-    "r-movie": "movie", "r-series": "series", "r-music": "music", "r-book": "book", "r-comic": "comic", "r-photo": "photo", "r-subtitle": "subtitle",
+  /** The rule a section is about: its id is `r-` and the rule's type
+   *  (the command line's `manual` reads them so too). */
+  const RULE_OF = (id: string): RuleType | undefined => {
+    const type = id.startsWith("r-") ? (id.slice(2) as RuleType) : undefined;
+    return type && TABLE.defaults[type] ? type : undefined;
   };
   /** The rules by kind of file (the Rust catalog's group). */
   const MEDIA: RuleType[] = TABLE.media;
@@ -102,16 +102,16 @@
    *  the group's title for the index. */
   const sections = $derived.by(() => {
     const all = { pt, en, es }[settings.lang];
-    const name = (id: string) => t(`rule.${RULE_OF[id]}`);
+    const name = (id: string) => t(`rule.${RULE_OF(id)!}`);
     const byName = (a: { id: string }, b: { id: string }) => name(a.id).localeCompare(name(b.id), LOCALES[settings.lang]);
-    const media = all.filter((s) => RULE_OF[s.id] && MEDIA.includes(RULE_OF[s.id])).sort(byName);
-    const text = all.filter((s) => RULE_OF[s.id] && !MEDIA.includes(RULE_OF[s.id])).sort(byName);
+    const media = all.filter((s) => RULE_OF(s.id) && MEDIA.includes(RULE_OF(s.id)!)).sort(byName);
+    const text = all.filter((s) => RULE_OF(s.id) && !MEDIA.includes(RULE_OF(s.id)!)).sort(byName);
     const rules: ((typeof all)[number] & { group?: string })[] = [
       ...media.map((s, i) => (i ? s : { ...s, group: t("ruleGroupMedia") })),
       ...text.map((s, i) => (i ? s : { ...s, group: t("ruleGroupText") })),
     ];
     let next = 0;
-    return all.map((s) => (RULE_OF[s.id] ? rules[next++] : s)) as ((typeof all)[number] & { group?: string })[];
+    return all.map((s) => (RULE_OF(s.id) ? rules[next++] : s)) as ((typeof all)[number] & { group?: string })[];
   });
   let current = $state("start");
   let content = $state<HTMLElement>();

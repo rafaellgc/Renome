@@ -68,6 +68,9 @@ pub async fn search(
     client: &tmdb::Client,
     items: &[Item],
 ) -> Result<Vec<Found>, String> {
+    if !client.ready() {
+        return Err("tmdbNeedsKey".into());
+    }
     let wanted: Vec<tmdb::LookupItem> = targets(items)
         .into_iter()
         .map(|i| tmdb::LookupItem {

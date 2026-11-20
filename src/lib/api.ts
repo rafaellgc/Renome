@@ -54,7 +54,8 @@ export const api = {
   editDetails: <T>(kind: "song" | "book" | "comic", items: T[], changed: Record<string, string>) => invoke<T[]>("edit_details", { kind, items, changed }),
   /** Photo dates typed over the ones they had; null when the fields make no date. */
   editDates: (old: string[], changed: Record<string, string>) => invoke<string[] | null>("edit_dates", { old, changed }),
-  /** The rows a details window opens on for those chosen, and what each starts from. */
+  /** The rows a details window opens on for those chosen, what each starts
+   *  from and how its fields show it. */
   editStart: <T>(args: {
     kind: "music" | "book" | "comic" | "photo";
     chosen: string[];
@@ -64,7 +65,7 @@ export const api = {
     fromName: boolean;
     byFolder: boolean;
     audiobooks: boolean;
-  }) => invoke<[string[], T[]]>("edit_start", args),
+  }) => invoke<[string[], T[], Record<string, string>[]]>("edit_start", args),
   /** What the lookups say is missing from the list as shown (the shared flow decides). */
   missingItems: (rules: Rule[], known: unknown, descending: boolean) => invoke<Omit<Ghost, "ghost">[]>("missing_items", { rules, known, descending }).then((l) => l.map((g): Ghost => ({ ...g, ghost: true }))),
   /** What renaming would write besides the renames (the shared flow decides). */
@@ -207,7 +208,7 @@ export const api = {
   tmdbImages: () => invoke<string>("tmdb_images"),
   comicCheck: (key: string) => invoke<void>("comic_check", { key }),
   /** Series found, those that could hold issue `highest` first. */
-  comicSearch: (source: ComicSource, key: string, query: string, lang: string, year: number | null = null, publisher = "", skip = "", highest = 0) =>
+  comicSearch: (source: ComicSource, key: string, query: string, lang: string, year = "", publisher = "", skip = "", highest = 0) =>
     invoke<ComicVolume[]>("comic_search", { source, key, query, year, publisher, lang, skip, highest }),
   /** The barcodes printed in the comics' first and last pages. */
   /** The issue a barcode belongs to, on Metron. */

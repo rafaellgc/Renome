@@ -301,10 +301,11 @@ export function readerOf(device: ComicDevice, model: string | undefined): string
   return ALL.find((m) => m.device === device)?.id ?? device;
 }
 
-/** What an option stands for: the device, and the model when it is one. */
-export function chooseReader(value: string): { device: ComicDevice; model?: string } {
+/** What an option stands for: the device, and the model (empty for a
+ *  device alone). */
+export function chooseReader(value: string): { device: ComicDevice; model: string } {
   const m = ALL.find((x) => x.id === value);
-  return m ? { device: m.device, model: m.id } : { device: value as ComicDevice };
+  return m ? { device: m.device, model: m.id } : { device: value as ComicDevice, model: "" };
 }
 
 /** A model by its id. */

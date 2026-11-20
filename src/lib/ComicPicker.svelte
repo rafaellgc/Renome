@@ -53,9 +53,8 @@
     if (!query.trim()) return;
     searching = true;
     searchError = "";
-    const y = Number.parseInt(year, 10);
     try {
-      candidates = await api.comicSearch(source, comicKey(source), query.trim(), langs.comic, y >= 1800 && y <= 2200 ? y : null, publisher.trim(), skip, highest);
+      candidates = await api.comicSearch(source, comicKey(source), query.trim(), langs.comic, year, publisher, skip, highest);
       if (own) compareCovers(candidates);
     } catch (err) {
       searchError = tError(err);

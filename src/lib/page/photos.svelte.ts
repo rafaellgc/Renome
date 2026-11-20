@@ -8,14 +8,12 @@ import { t } from "$lib/i18n";
 import type { EditField } from "$lib/types";
 import { editFields, moved, ruleOf, without, type PageCtx } from "./common";
 
-type Parts = { day: string; month: string; year: string; hour: string; minute: string };
-
 export class Photos {
   #ctx: PageCtx;
   /** Dates typed in, by path (`2018-03-27`, `2018-03-27 14:05`). */
   dates = $state<Record<string, string>>({});
   /** The date window, while open. */
-  edit = $state<{ paths: string[]; rows: Parts[] } | null>(null);
+  edit = $state<{ paths: string[]; rows: Record<string, string>[] } | null>(null);
 
   constructor(ctx: PageCtx) {
     this.#ctx = ctx;
@@ -32,7 +30,7 @@ export class Photos {
    *  in its parts, as the shared flow splits it). */
   async openEdit() {
     if (!this.selected.length) return;
-    const [paths, rows] = await api.editStart<Parts>({
+    const [paths, , rows] = await api.editStart<unknown>({
       kind: "photo",
       chosen: this.selected.map((i) => i.path),
       known: {},

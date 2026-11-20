@@ -29,6 +29,7 @@ pub fn fields_of(kind: &str) -> Vec<Field> {
                 key: "date",
                 numeric: false,
                 wide: false,
+                max_length: None,
             },
         );
     }
@@ -73,9 +74,15 @@ pub fn parse(specs: &[String], fields: &[Field]) -> Result<Edits, String> {
             let to = starts.get(n + 1).map_or(rest.len(), |next| next - 1);
             let (key, value) = rest[from..to].split_once('=').unwrap();
             let value = value.trim();
-            let numeric = fields.iter().any(|f| f.key == key && f.numeric);
-            if numeric && !value.chars().all(|c| c.is_ascii_digit()) {
-                return Err(t("badEditNumber", &[("key", &key), ("value", &value)]));
+            // Checked as the window's details window takes it.
+            if let Some(f) = fields.iter().find(|f| f.key == key)
+                && !edit::fits(f, value)
+            {
+                let n = f.max_length.unwrap_or_default();
+                return Err(t(
+                    "badEditNumber",
+                    &[("key", &key), ("value", &value), ("n", &n)],
+                ));
             }
             typed.insert(key.to_string(), value.to_string());
         }
@@ -191,6 +198,7 @@ mod tests {
         assert_eq!(f["title"], "Hello, world");
         assert_eq!(f["year"], "1999");
         assert!(parse(&["x.mp3:year=abc".into()], &fields_of("music")).is_err());
+        assert!(parse(&["x.mp3:year=19999".into()], &fields_of("music")).is_err());
         assert!(parse(&["x.mp3:nope=1".into()], &fields_of("music")).is_err());
     }
 

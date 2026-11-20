@@ -132,7 +132,6 @@ export class Subtitles {
     }
   }
 
-
   /** Forgets the files taken out of the list (all, with null). */
   forget(paths: Set<string> | null) {
     this.found = paths ? without(this.found, paths) : {};

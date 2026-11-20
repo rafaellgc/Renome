@@ -86,7 +86,7 @@ impl Host for Cli {
 }
 
 /// The TMDB key and the language of its titles, from the options.
-fn tmdb_access(settings: Option<&Value>) -> Result<(String, String), String> {
+fn tmdb_access(settings: Option<&Value>) -> (String, String) {
     let secrets = renome_services::load_secrets();
     let key = secrets
         .get("secrets")
@@ -96,11 +96,8 @@ fn tmdb_access(settings: Option<&Value>) -> Result<(String, String), String> {
         .unwrap_or_default()
         .trim()
         .to_string();
-    if key.is_empty() {
-        return Err(t("tmdbNeedsKey", &[]));
-    }
     let tmdb_lang = renome_services::options::tmdb_lang(settings, lang());
-    Ok((key, tmdb_lang))
+    (key, tmdb_lang)
 }
 
 /// What the movie rule found and chose, kept for after the renames.
@@ -119,7 +116,7 @@ pub async fn movies(
     settings: Option<&Value>,
     ask: &Ask,
 ) -> Result<Movies, String> {
-    let (key, tmdb_lang) = tmdb_access(settings)?;
+    let (key, tmdb_lang) = tmdb_access(settings);
     let client = tmdb::Client::new(&key, &tmdb_lang);
     let items: Vec<flow::Item> = preview.items.iter().map(flow::Item::from).collect();
     let mut chosen: HashMap<PathBuf, Candidate> = HashMap::new();
@@ -485,7 +482,7 @@ pub async fn series(
     let (key, tmdb_lang) = if anime {
         (String::new(), String::new())
     } else {
-        tmdb_access(settings)?
+        tmdb_access(settings)
     };
     let client = tmdb::Client::new(&key, &tmdb_lang);
     let anilist = renome_services::anilist::Client::default();
@@ -1086,16 +1083,6 @@ pub async fn comics(
         "comicvine" | "metron" => secret(renome_services::options::comic_key_name(&source)),
         _ => String::new(),
     };
-    if matches!(source.as_str(), "comicvine" | "metron") && key.is_empty() {
-        return Err(t(
-            if source == "metron" {
-                "mtNeedsKey"
-            } else {
-                "cvNeedsKey"
-            },
-            &[],
-        ));
-    }
     let (cv, mt, gcd_c, md, al, mu) = (
         comicvine::Client::default(),
         metron::Client::default(),
@@ -1271,13 +1258,12 @@ async fn choose_volume(
             Pick::Number(n) => return Answer::Pick(candidates.remove(n)),
             Pick::Skip => return Answer::Skip,
             Pick::Stop => return Answer::Stop,
-            Pick::Search(text) => match sources
-                .search(&p.source, &p.key, &text, None, "", &p.lang, &p.skip)
-                .await
+            Pick::Search(text) => match flow::typed::comic(
+                sources, &p.source, &p.key, &text, "", "", &p.lang, &p.skip, highest,
+            )
+            .await
             {
-                // Those that could hold the files' highest issue first, as
-                // in the window's picker.
-                Ok(v) => (candidates, far) = compare(flow::comics::by_fit(v, highest)).await,
+                Ok(v) => (candidates, far) = compare(v).await,
                 Err(e) => out::error(&crate::text::error_text(&e)),
             },
         }
@@ -1560,7 +1546,7 @@ pub async fn after(
     let (tmdb_key, tmdb_lang) = match found {
         Some(Found::Movies(m)) => (m.key.clone(), m.lang.clone()),
         Some(Found::Series(s)) => (s.key.clone(), s.lang.clone()),
-        _ => tmdb_access(settings).unwrap_or_default(),
+        _ => tmdb_access(settings),
     };
     let (own_mb, own_dg);
     let (mb, dg) = match found {

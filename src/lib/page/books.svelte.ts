@@ -9,8 +9,6 @@ import { tmdbLang } from "$lib/settings.svelte";
 import type { BookCandidate, BookMatch, BookPart, BookState, EditField } from "$lib/types";
 import { counts, editFields, moved, ruleOf, takers, without, type PageCtx } from "./common";
 
-
-
 export class Books {
   #ctx: PageCtx;
   /** Audiobooks' files, by path. */
@@ -20,7 +18,7 @@ export class Books {
   /** Books whose details were typed in (over what the catalogue said). */
   edits = $state<Record<string, BookMatch>>({});
   /** The details window, while open. */
-  edit = $state<{ paths: string[]; books: BookMatch[] } | null>(null);
+  edit = $state<{ paths: string[]; books: BookMatch[]; rows: Record<string, string>[] } | null>(null);
   /** Files in the review window; null when closed. */
   review = $state<string[] | null>(null);
   progress = $state<{ done: number; total: number; kind: "search" | "save" } | null>(null);
@@ -33,7 +31,7 @@ export class Books {
   /** The rule takes audiobooks too (unless turned off). */
   audio = $derived.by(() => {
     const r = this.rule?.rule;
-    return r?.type === "book" && r.audiobooks !== false;
+    return r?.type === "book" && r.audiobooks;
   });
 
   /** Each chosen book's details as the rule names it (made by the shared
@@ -54,26 +52,6 @@ export class Books {
 
   /** The details window's fields. */
   fields = $derived<EditField[]>(editFields("book"));
-
-  /** A book's details as the window shows them. */
-  text(m: BookMatch): Record<string, string> {
-    return {
-      title: m.title,
-      authors: m.authors.join("; "),
-      year: m.year ? String(m.year) : "",
-      publisher: m.publisher,
-      language: m.extra?.language ?? "",
-      series: m.series,
-      seriesIndex: m.seriesIndex,
-      isbn: m.isbn,
-    };
-  }
-
-
-
-
-
-
 
   /** Looks up the visible books without a choice yet on Open Library;
    *  books picked with confidence are done, the rest go to the review.
@@ -137,7 +115,7 @@ export class Books {
     const known = Object.fromEntries(
       this.#ctx.items.map((i) => [i.path, { current: this.matches[i.path], guess: this.state[i.path]?.guess }]),
     );
-    const [paths, books] = await api.editStart<BookMatch>({
+    const [paths, books, rows] = await api.editStart<BookMatch>({
       kind: "book",
       chosen: [...this.#ctx.selected],
       known: $state.snapshot(known),
@@ -147,7 +125,7 @@ export class Books {
       byFolder: false,
       audiobooks: this.audio,
     });
-    if (paths.length) this.edit = { paths, books };
+    if (paths.length) this.edit = { paths, books, rows };
   }
 
   /** The fields changed in the details window, for each of its books (applied as the command line's --edit does). */

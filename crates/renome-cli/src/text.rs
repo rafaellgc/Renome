@@ -1237,9 +1237,9 @@ const CLI: &[(&str, [&str; 3])] = &[
     (
         "badEditNumber",
         [
-            "--edit: {key} leva só algarismos, não \"{value}\".",
-            "--edit: {key} takes digits only, not \"{value}\".",
-            "--edit: {key} lleva solo dígitos, no \"{value}\".",
+            "--edit: {key} leva até {n} algarismos, não \"{value}\".",
+            "--edit: {key} takes up to {n} digits, not \"{value}\".",
+            "--edit: {key} lleva hasta {n} dígitos, no \"{value}\".",
         ],
     ),
     (
@@ -1256,6 +1256,31 @@ const CLI: &[(&str, [&str; 3])] = &[
             "Testa uma chave ou conta, como o botão Testar das Opções",
             "Tests a key or account, as the Options' Test button",
             "Prueba una clave o cuenta, como el botón Probar de las Opciones",
+        ],
+    ),
+    // The window's texts end by offering the Options; here, the command.
+    (
+        "mtNeedsKey",
+        [
+            "A busca no Metron precisa do token de uma conta gratuita (renome-cli keys set metronToken).",
+            "Searching Metron needs the token of a free account (renome-cli keys set metronToken).",
+            "La búsqueda en Metron necesita el token de una cuenta gratuita (renome-cli keys set metronToken).",
+        ],
+    ),
+    (
+        "cvNeedsKey",
+        [
+            "A busca no Comic Vine precisa de uma chave da API gratuita (renome-cli keys set comicVineKey).",
+            "Searching Comic Vine needs a free API key (renome-cli keys set comicVineKey).",
+            "La búsqueda en Comic Vine necesita una clave de API gratuita (renome-cli keys set comicVineKey).",
+        ],
+    ),
+    (
+        "tmdbNeedsKey",
+        [
+            "Para buscar filmes e séries, informe a chave da API do TMDB (renome-cli keys set tmdbKey).",
+            "To look up movies and TV shows, set the TMDB API key (renome-cli keys set tmdbKey).",
+            "Para buscar películas y series, indica la clave de API de TMDB (renome-cli keys set tmdbKey).",
         ],
     ),
     (

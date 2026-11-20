@@ -315,6 +315,29 @@ fn best(kind: Kind, files: &[&FileEntry]) -> Option<PathBuf> {
 /// Groups of files that are the same work (two or more each). Files that
 /// are only identical copies of one another are left out (already shown
 /// as copies). `None` when `stale` turned true.
+/// Each file's group among `groups`, by path (the filters' and the
+/// finders' form).
+pub fn by_group(groups: &[Vec<PathBuf>]) -> HashMap<PathBuf, usize> {
+    groups
+        .iter()
+        .enumerate()
+        .flat_map(|(i, g)| g.iter().map(move |p| (p.clone(), i)))
+        .collect()
+}
+
+/// What is there twice besides identical copies (`identical`: their
+/// groups, by path): the same song in other files, the same movie,
+/// episode, comic or book. `None` when stopped.
+pub fn repeated(
+    files: &[FileEntry],
+    identical: &HashMap<PathBuf, usize>,
+    stale: &dyn Fn() -> bool,
+) -> Option<(Vec<Vec<PathBuf>>, Vec<Group>)> {
+    let songs = crate::alike::same_songs(files, identical, stale)?;
+    let works = same_works(files, identical, stale)?;
+    Some((songs, works))
+}
+
 pub fn same_works(
     files: &[FileEntry],
     identical: &HashMap<PathBuf, usize>,

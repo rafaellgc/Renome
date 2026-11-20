@@ -182,8 +182,13 @@ const KEEP_DELETE_SUB: Kind = Kind::Choice(&[
     c("keep", "subOriginalKeep"),
     c("delete", "comicOriginalDelete"),
 ]);
-const BOUND: Kind = Kind::Choice(&[
+/// Where a range to remove starts (its end is not a start) and ends.
+const FROM_BOUND: Kind = Kind::Choice(&[
     c("start", "bStart"),
+    c("position", "bPosition"),
+    c("text", "bText"),
+]);
+const TO_BOUND: Kind = Kind::Choice(&[
     c("end", "bEnd"),
     c("position", "bPosition"),
     c("text", "bText"),
@@ -213,48 +218,9 @@ const COLON: Opt = renamed(
 );
 const SUB_LANGS: Default = Default::Lang(["pt-BR", "en", "es"]);
 
-/// The comic readers pages are fit to.
-pub const DEVICES: &[Choice] = &[
-    c("original", "comicDevice_original"),
-    c("kindle", "comicDevice_kindle"),
-    c("kindle-pw", "comicDevice_kindle-pw"),
-    c("kindle-pw2024", "comicDevice_kindle-pw2024"),
-    c("kindle-oasis", "comicDevice_kindle-oasis"),
-    c("kindle-pw-old", "comicDevice_kindle-pw-old"),
-    c("kindle-basic", "comicDevice_kindle-basic"),
-    c("kindle-dx", "comicDevice_kindle-dx"),
-    c("kindle-scribe", "comicDevice_kindle-scribe"),
-    c("kindle-scribe2025", "comicDevice_kindle-scribe2025"),
-    c("kindle-color", "comicDevice_kindle-color"),
-    c("kindle-scribe-color", "comicDevice_kindle-scribe-color"),
-    c("kobo", "comicDevice_kobo"),
-    c("kobo-clara-color", "comicDevice_kobo-clara-color"),
-    c("kobo-libra", "comicDevice_kobo-libra"),
-    c("kobo-color", "comicDevice_kobo-color"),
-    c("kobo-h2o", "comicDevice_kobo-h2o"),
-    c("kobo-sage", "comicDevice_kobo-sage"),
-    c("kobo-elipsa", "comicDevice_kobo-elipsa"),
-    c("kobo-nia", "comicDevice_kobo-nia"),
-    c("remarkable", "comicDevice_remarkable"),
-    c("remarkable-pro", "comicDevice_remarkable-pro"),
-    c("remarkable-move", "comicDevice_remarkable-move"),
-    c("eink480", "comicDevice_eink480"),
-    c("eink528", "comicDevice_eink528"),
-    c("eink824", "comicDevice_eink824"),
-    c("colour824", "comicDevice_colour824"),
-    c("colour1404", "comicDevice_colour1404"),
-    c("eink1650", "comicDevice_eink1650"),
-    c("eink1860", "comicDevice_eink1860"),
-    c("colour1860", "comicDevice_colour1860"),
-    c("eink1920", "comicDevice_eink1920"),
-    c("eink2400", "comicDevice_eink2400"),
-    c("colour2400", "comicDevice_colour2400"),
-    c("tablet", "comicDevice_tablet"),
-    c("ipad", "comicDevice_ipad"),
-    c("ipad13", "comicDevice_ipad13"),
-    c("phone", "comicDevice_phone"),
-    c("custom", "comicDevice_custom"),
-];
+/// The comic readers pages are fit to (made from the window's list of
+/// readers, `src/lib/readers.ts`, by the build script).
+pub const DEVICES: &[Choice] = include!(concat!(env!("OUT_DIR"), "/devices.rs"));
 
 /// Every rule, in the order of the window's "+ Rule" menu.
 pub const RULES: &[RuleSpec] = &[
@@ -405,7 +371,7 @@ pub const RULES: &[RuleSpec] = &[
                 "where",
                 None,
             ),
-            o("position", POSITION, Default::Int(1), "position", None),
+            o("position", COUNT, Default::Int(1), "position", None),
         ],
     },
     RuleSpec {
@@ -488,10 +454,10 @@ pub const RULES: &[RuleSpec] = &[
         hint: None,
         whole_name: false,
         options: &[
-            o("from", BOUND, Default::Text("text"), "from", None),
+            o("from", FROM_BOUND, Default::Text("text"), "from", None),
             o("fromPosition", POSITION, Default::Int(1), "position", None),
             o("fromText", Kind::Text, EMPTY, "text", None),
-            o("to", BOUND, Default::Text("text"), "to", None),
+            o("to", TO_BOUND, Default::Text("text"), "to", None),
             o("toPosition", POSITION, Default::Int(1), "position", None),
             o("toText", Kind::Text, EMPTY, "text", None),
             o("inclusive", Kind::Bool, YES, "inclusive", None),
@@ -881,7 +847,7 @@ pub const RULES: &[RuleSpec] = &[
                     cw("", "no", "bookConvertNone"),
                     c("epub", "comicEbookEpub"),
                     c("azw3", "bookConvertAzw3"),
-                    c("fb2", "bookConvert"),
+                    c("fb2", "bookConvertFb2"),
                     c("pdf", "comicEbookPdf"),
                 ]),
                 EMPTY,
@@ -940,8 +906,8 @@ pub const RULES: &[RuleSpec] = &[
                 "source",
                 Kind::Choice(&[
                     c("gcd", "comicSourceGcd"),
-                    c("comicvine", "comicSourceCv"),
                     c("metron", "comicSourceMetron"),
+                    c("comicvine", "comicSourceCv"),
                     c("mangadex", "comicSourceMangadex"),
                     c("anilist", "comicSourceAnilist"),
                     c("mangaupdates", "comicSourceMangaupdates"),
@@ -1038,9 +1004,9 @@ pub const RULES: &[RuleSpec] = &[
                 "ebook",
                 Kind::Choice(&[
                     cw("", "no", "comicEbookNone"),
-                    c("epub", "comicEbookEpub"),
-                    c("kepub", "comicEbookKepub"),
                     c("azw3", "comicEbookAzw3"),
+                    c("kepub", "comicEbookKepub"),
+                    c("epub", "comicEbookEpub"),
                     c("cbz", "comicEbookCbz"),
                     c("pdf", "comicEbookPdf"),
                 ]),
@@ -1096,10 +1062,10 @@ pub const RULES: &[RuleSpec] = &[
             o(
                 "spread",
                 Kind::Choice(&[
-                    c("keep", "comicSpread_keep"),
                     c("split", "comicSpread_split"),
                     c("rotate", "comicSpread_rotate"),
                     c("both", "comicSpread_both"),
+                    c("keep", "comicSpread_keep"),
                 ]),
                 Default::Text("split"),
                 "comicSpread",
@@ -1145,7 +1111,7 @@ pub const RULES: &[RuleSpec] = &[
             o("join", Kind::Bool, NO, "comicJoin", Some("comicJoinHint")),
             o(
                 "maxMb",
-                Kind::IntChoice(&[0, 50, 200]),
+                Kind::IntChoice(&[0, 50, 200, 400]),
                 Default::Int(0),
                 "comicMaxMb",
                 Some("comicMaxMbHint"),
@@ -1247,7 +1213,10 @@ pub const RULES: &[RuleSpec] = &[
             ),
             o(
                 "shiftMs",
-                NUMBER,
+                Kind::Int {
+                    min: -36_000_000,
+                    max: 36_000_000,
+                },
                 Default::Int(0),
                 "subShift",
                 Some("subShiftHint"),
@@ -1803,7 +1772,86 @@ pub fn table(lang: &str) -> Value {
         "photoTemplates": { "names": PHOTO_TEMPLATES[i].0, "folders": PHOTO_TEMPLATES[i].1 },
         "fpsPairs": FPS_PAIRS,
         "columns": COLUMNS,
+        "limits": limits(),
+        "choices": int_choices(),
+        "menus": menus(),
     })
+}
+
+/// The choices of each rule's word options, by rule and option, with the
+/// key of each one's label: the window's menus are these.
+fn menus() -> Value {
+    RULES
+        .iter()
+        .map(|spec| {
+            let opts: Map<String, Value> = spec
+                .options
+                .iter()
+                .filter_map(|o| match o.kind {
+                    Kind::Choice(list) => Some((
+                        o.name.to_string(),
+                        list.iter()
+                            .map(|c| serde_json::json!({ "value": c.value, "label": c.label }))
+                            .collect(),
+                    )),
+                    _ => None,
+                })
+                .collect();
+            (spec.kind.to_string(), Value::Object(opts))
+        })
+        .collect::<Map<String, Value>>()
+        .into()
+}
+
+/// The numbers each rule's number menus offer, by rule and option: the
+/// window's menus show what the core accepts.
+fn int_choices() -> Value {
+    RULES
+        .iter()
+        .map(|spec| {
+            let opts: Map<String, Value> = spec
+                .options
+                .iter()
+                .filter_map(|o| match o.kind {
+                    Kind::IntChoice(list) => Some((o.name.to_string(), Value::from(list.to_vec()))),
+                    _ => None,
+                })
+                .collect();
+            (spec.kind.to_string(), Value::Object(opts))
+        })
+        .collect::<Map<String, Value>>()
+        .into()
+}
+
+/// The bounds of each rule's whole-number options, by rule and option
+/// (`[min, max]`, null where there is none): what the window's fields
+/// offer is what the core accepts.
+fn limits() -> Value {
+    let bound = |n: i64| {
+        if n == i64::MIN || n == i64::MAX {
+            Value::Null
+        } else {
+            Value::from(n)
+        }
+    };
+    RULES
+        .iter()
+        .map(|spec| {
+            let opts: Map<String, Value> = spec
+                .options
+                .iter()
+                .filter_map(|o| match o.kind {
+                    Kind::Int { min, max } => Some((
+                        o.name.to_string(),
+                        serde_json::json!([bound(min), bound(max)]),
+                    )),
+                    _ => None,
+                })
+                .collect();
+            (spec.kind.to_string(), Value::Object(opts))
+        })
+        .collect::<Map<String, Value>>()
+        .into()
 }
 
 #[cfg(test)]
@@ -1981,5 +2029,53 @@ mod tests {
         let mut both = serde_json::json!({"type": "case", "keep": "old", "keepWords": "new"});
         migrate_step(&mut both);
         assert_eq!(both["keepWords"], "new");
+    }
+
+    #[test]
+    fn the_window_gets_every_bound_choice_and_reader() {
+        let t = table("pt");
+        assert_eq!(
+            t["limits"]["comic"]["width"],
+            serde_json::json!([100, 10_000])
+        );
+        assert_eq!(
+            t["limits"]["number"]["start"],
+            serde_json::json!([null, null])
+        );
+        // "0 from the end" is the end: allowed.
+        assert_eq!(t["limits"]["insert"]["position"][0], 0);
+        assert_eq!(
+            t["choices"]["comic"]["maxMb"],
+            serde_json::json!([0, 50, 200, 400])
+        );
+        let spread: Vec<&str> = t["menus"]["comic"]["spread"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["value"].as_str().unwrap())
+            .collect();
+        assert_eq!(spread, ["split", "rotate", "both", "keep"]);
+        // A range starts nowhere at its end, and ends nowhere at its start.
+        let words = |o: &str| -> Vec<String> {
+            t["menus"]["removeRange"][o]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| c["value"].as_str().unwrap().to_string())
+                .collect()
+        };
+        assert!(
+            !words("from").contains(&"end".to_string())
+                && !words("to").contains(&"start".to_string())
+        );
+        // 400 MB is kept.
+        let mut steps = vec![serde_json::json!({ "rule": { "type": "comic", "maxMb": 400 } })];
+        normalize_steps(&mut steps);
+        assert_eq!(steps[0]["rule"]["maxMb"], 400);
+        // Every reader screen is a choice, with the pages as they are and a custom size.
+        let devices: Vec<&str> = DEVICES.iter().map(|d| d.value).collect();
+        assert_eq!(devices.first(), Some(&"original"));
+        assert_eq!(devices.last(), Some(&"custom"));
+        assert_eq!(devices.len(), crate::comicbook::SCREENS.len() + 2);
     }
 }

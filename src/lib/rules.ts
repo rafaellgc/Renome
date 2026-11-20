@@ -18,8 +18,16 @@ export type RuleTable = {
   photoTemplates: { names: string[]; folders: string[] };
   /** Frame rates the subtitle rule retimes between: subtitle's → video's. */
   fpsPairs: [number, number][];
-  /** Every optional column of the list, in its order. */
+  /** Every optional column of the list, in its order, and each one's
+   *  title (its key in the texts, as the CSV's). */
   columns: DetailColumn[];
+  columnLabels: Record<DetailColumn, string>;
+  /** The bounds the core takes for each rule's whole-number options
+   *  (null: none), and the numbers its number menus offer. */
+  limits: Record<string, Record<string, [number | null, number | null]>>;
+  choices: Record<string, Record<string, number[]>>;
+  /** The choices of each rule's word options, with their labels' keys. */
+  menus: Record<string, Record<string, { value: string; label: string }[]>>;
   /** The comic catalogues of whole series (a file's volume and chapter stay). */
   seriesOnly: string[];
   /** The details windows' fields (labels apart), by rule. */
@@ -29,7 +37,10 @@ export type RuleTable = {
     defaults: Record<string, unknown>;
     /** Settings kept in the system's password store, not in the file. */
     secrets: string[];
-    tmdbLangs: string[];
+    /** Each option's menu: words with their labels' keys, or numbers. */
+    menus: Record<string, { value: string; label: string }[] | number[]>;
+    /** The kinds of media server, with their names. */
+    serverKinds: [string, string][];
     /** The setting holding each comic catalogue's key. */
     comicKeys: Record<string, string>;
   };
@@ -45,9 +56,13 @@ export let TABLE: RuleTable = {
   photoTemplates: { names: [], folders: [] },
   fpsPairs: [],
   columns: [],
+  columnLabels: {} as Record<DetailColumn, string>,
+  limits: {},
+  choices: {},
+  menus: {},
   seriesOnly: [],
   editFields: { music: [], book: [], comic: [], photo: [] },
-  options: { defaults: {}, secrets: [], tmdbLangs: [], comicKeys: {} },
+  options: { defaults: {}, secrets: [], menus: {}, serverKinds: [], comicKeys: {} },
 };
 export function setRuleTable(table: RuleTable) {
   TABLE = table;
@@ -63,7 +78,7 @@ export function comicPreset(preset: ComicPreset): { template: string; folderTemp
 
 /** The preset a rule's templates match, if any. */
 export function comicPresetOf(r: { template: string; folderTemplate: string; folders: boolean }): ComicPreset | "" {
-  for (const p of ["renome", "kavita"] as const) {
+  for (const p of Object.keys(TABLE.comicPresets) as ComicPreset[]) {
     const t = TABLE.comicPresets[p];
     if (r.folders && r.template === t.template && r.folderTemplate === t.folderTemplate) return p;
   }
@@ -80,6 +95,18 @@ let counter = 0;
 export function newStep(rule: Rule): Step {
   return { id: `s${Date.now().toString(36)}${counter++}`, enabled: true, rule };
 }
+
+/** A whole-number option's bounds, as a field's `min` and `max`. */
+export function limitsOf(type: RuleType, name: string): { min?: number; max?: number } {
+  const [min, max] = TABLE.limits[type]?.[name] ?? [null, null];
+  return { min: min ?? undefined, max: max ?? undefined };
+}
+
+/** The numbers a rule's number menu offers. */
+export const choicesOf = (type: RuleType, name: string): number[] => TABLE.choices[type]?.[name] ?? [];
+
+/** A rule's menu of words: each value with its label's key. */
+export const menuOf = (type: RuleType, name: string) => TABLE.menus[type]?.[name] ?? [];
 
 /** The rules that name a whole kind of file (one at a time). */
 export const isKindRule = (type: RuleType) => TABLE.kinds.includes(type);

@@ -45,16 +45,6 @@ export function without<T>(m: Record<string, T>, paths: Set<string>): Record<str
   return Object.fromEntries(Object.entries(m).filter(([p]) => !paths.has(p)));
 }
 
-/** Values as the details window shows them (nothing: empty). */
-export function asText(m: object, keys: EditField[]): Record<string, string> {
-  return Object.fromEntries(
-    keys.map((f) => {
-      const v = (m as Record<string, unknown>)[f.key];
-      return [f.key, v == null || v === 0 ? "" : String(v)];
-    }),
-  );
-}
-
 /** A details window's fields (the Rust table's), with their labels:
  *  `songEditTitle`, `bookEditAuthors`… */
 export function editFields(kind: "music" | "book" | "comic" | "photo"): EditField[] {

@@ -2,6 +2,7 @@
   import { open } from "@tauri-apps/plugin-dialog";
   import Icon from "./Icon.svelte";
   import { api } from "./api";
+  import { TABLE } from "./rules";
   import { t, tError } from "./i18n";
   import { secrets, settings } from "./settings.svelte";
   import type { MediaServer, ServerFolder } from "./types";
@@ -69,8 +70,7 @@
         <label for="srv-kind-{s.id}">{t("serverKind")}</label>
         <div class="row">
           <select id="srv-kind-{s.id}" bind:value={s.kind} onchange={() => { s.folders = []; status[s.id] = null; }}>
-            <option value="jellyfin">Jellyfin / Emby</option>
-            <option value="plex">Plex</option>
+            {#each TABLE.options.serverKinds as [kind, name] (kind)}<option value={kind}>{name}</option>{/each}
           </select>
           <span class="grow"></span>
           <button class="icon" title={t("serverRemove")} aria-label={t("serverRemove")} onclick={() => remove(s)}><Icon name="x" size={14} /></button>

@@ -567,7 +567,12 @@ fn commands() -> Command {
                             Arg::new("kind")
                                 .help(t("argServerKind", &[]))
                                 .required(true)
-                                .value_parser(["jellyfin", "plex"]),
+                                .value_parser(
+                                    renome_services::mediaserver::KINDS
+                                        .iter()
+                                        .map(|k| k.0)
+                                        .collect::<Vec<_>>(),
+                                ),
                         )
                         .arg(Arg::new("url").help(t("argServerUrl", &[])).required(true))
                         .arg(

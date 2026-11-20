@@ -63,7 +63,7 @@
               if (f.numeric) values[f.key] = values[f.key].replace(/\D/g, "");
             }}
             inputmode={f.numeric ? "numeric" : undefined}
-            maxlength={f.numeric ? 4 : undefined}
+            maxlength={f.maxLength ?? undefined}
             placeholder={start[f.key] === null ? t("editMixed") : ""}
             spellcheck="false"
           />
