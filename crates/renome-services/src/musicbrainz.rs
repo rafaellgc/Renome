@@ -35,28 +35,13 @@ pub struct Client {
 }
 
 fn net_error(e: reqwest::Error) -> String {
-    if e.is_connect() {
-        "mbOffline".into()
-    } else if e.is_timeout() {
-        "mbTimeout".into()
-    } else {
-        format!("mbNetwork: {}", e.without_url())
-    }
+    crate::net_error("mb", e)
 }
 
 impl Default for Client {
     fn default() -> Self {
         Self {
-            http: reqwest::Client::builder()
-                .user_agent(concat!(
-                    "Renome/",
-                    env!("CARGO_PKG_VERSION"),
-                    " ( https://github.com/rafaellgc/Renome )"
-                ))
-                .connect_timeout(Duration::from_secs(10))
-                .timeout(Duration::from_secs(30))
-                .build()
-                .unwrap_or_default(),
+            http: crate::http(crate::AGENT, 10, 30),
             last: tokio::sync::Mutex::new(None),
         }
     }
@@ -683,7 +668,7 @@ pub async fn covers(
         if !has_cover(&item.dir) {
             let path = item.dir.join("cover.jpg");
             match front_cover(client, dg, &item.release, 1200).await {
-                Ok(Some(bytes)) => match crate::tmdb::write_new(&path, &bytes) {
+                Ok(Some(bytes)) => match renome_core::files::write_new(&path, &bytes) {
                     Ok(()) => report.created.push(path),
                     Err(e) => report.errors.push(("cover.jpg".into(), e)),
                 },

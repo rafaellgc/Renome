@@ -38,13 +38,7 @@ pub struct Client {
 /// A network error for the user: no connection, too slow, or the
 /// reason, never the address (it holds the API key).
 fn net_error(e: reqwest::Error) -> String {
-    if e.is_connect() {
-        "tmdbOffline".into()
-    } else if e.is_timeout() {
-        "tmdbTimeout".into()
-    } else {
-        format!("tmdbNetwork: {}", e.without_url())
-    }
+    crate::net_error("tmdb", e)
 }
 
 #[derive(Deserialize)]
@@ -60,12 +54,7 @@ impl Client {
 
     pub fn new(key: &str, lang: &str) -> Self {
         Self {
-            http: reqwest::Client::builder()
-                .user_agent(concat!("Renome/", env!("CARGO_PKG_VERSION")))
-                .connect_timeout(std::time::Duration::from_secs(10))
-                .timeout(std::time::Duration::from_secs(30))
-                .build()
-                .unwrap_or_default(),
+            http: crate::http(concat!("Renome/", env!("CARGO_PKG_VERSION")), 10, 30),
             key: key.trim().to_string(),
             lang: lang.to_string(),
         }
@@ -852,7 +841,9 @@ pub async fn sidecars(
                                 None => Ok(tmdb::nfo(&d, &client.lang).into_bytes()),
                                 Some(p) => client.image(p).await,
                             };
-                            match data.and_then(|bytes| write_new(&path, &bytes)) {
+                            match data
+                                .and_then(|bytes| renome_core::files::write_new(&path, &bytes))
+                            {
                                 Ok(()) => created.push(path),
                                 Err(e) => errors.push((name(&path), e)),
                             }
@@ -1035,7 +1026,7 @@ pub async fn tv_sidecars(
                 Source::Text(t) => Ok(t.into_bytes()),
                 Source::Image(p) => client.image(&p).await,
             };
-            let r = data.and_then(|bytes| write_new(&path, &bytes));
+            let r = data.and_then(|bytes| renome_core::files::write_new(&path, &bytes));
             (path, r)
         })
         .buffer_unordered(4);
@@ -1049,20 +1040,6 @@ pub async fn tv_sidecars(
         crate::report(host, "tmdb-progress", Progress { done, total });
     }
     report
-}
-
-/// Creates the file only if it does not exist yet.
-pub fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    use std::io::Write;
-    let mut f = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|e| match e.kind() {
-            std::io::ErrorKind::AlreadyExists => "alreadyExists".to_string(),
-            _ => e.to_string(),
-        })?;
-    f.write_all(bytes).map_err(|e| e.to_string())
 }
 
 /// A renamed video whose details go inside it: a movie, or a show's

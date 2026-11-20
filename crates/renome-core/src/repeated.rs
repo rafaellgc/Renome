@@ -347,13 +347,6 @@ pub fn same_works(
 ) -> Option<Vec<Group>> {
     // Union-find over the files: each key joins the files that have it.
     let mut parent: Vec<usize> = (0..files.len()).collect();
-    fn root(parent: &mut [usize], mut i: usize) -> usize {
-        while parent[i] != i {
-            parent[i] = parent[parent[i]];
-            i = parent[i];
-        }
-        i
-    }
     let mut kinds: Vec<Option<Kind>> = vec![None; files.len()];
     let mut seen: HashMap<String, usize> = HashMap::new();
     // Files joined by something they carry (an ISBN, a comic's details),
@@ -450,6 +443,15 @@ pub fn same_works(
         )
     });
     Some(groups)
+}
+
+/// Union-find: the group `i` is in, the path to it shortened on the way.
+pub(crate) fn root(parent: &mut [usize], mut i: usize) -> usize {
+    while parent[i] != i {
+        parent[i] = parent[parent[i]];
+        i = parent[i];
+    }
+    i
 }
 
 #[cfg(test)]

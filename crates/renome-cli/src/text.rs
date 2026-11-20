@@ -34,31 +34,16 @@ pub fn lang() -> &'static str {
 
 /// The language asked for, else the options', else the system's.
 pub fn pick_lang(asked: Option<&str>, settings: Option<&serde_json::Value>) -> &'static str {
-    let from = |s: &str| -> Option<&'static str> {
-        let s = s.to_ascii_lowercase();
-        if s.starts_with("pt") {
-            Some("pt")
-        } else if s.starts_with("es") {
-            Some("es")
-        } else if s.starts_with("en") {
-            Some("en")
-        } else {
-            None
-        }
-    };
-    if let Some(l) = asked.and_then(from) {
-        return l;
-    }
-    if let Some(l) = settings
-        .and_then(|s| s.get("lang")?.as_str())
-        .and_then(from)
-    {
-        return l;
-    }
-    ["LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"]
-        .iter()
-        .filter_map(|v| std::env::var(v).ok())
-        .find_map(|v| from(&v))
+    use renome_services::options::ui_lang;
+    asked
+        .and_then(ui_lang)
+        .or_else(|| {
+            settings
+                .and_then(|s| s.get("lang")?.as_str())
+                .and_then(ui_lang)
+        })
+        // As the window's first run picks it.
+        .or_else(|| ui_lang(&renome_services::system_language()))
         .unwrap_or("en")
 }
 

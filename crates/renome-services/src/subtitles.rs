@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use crate::Host;
+use crate::{Host, net_error};
 use renome_core::subtitles::{self as subs, Candidate, Lang, Source};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -70,26 +70,8 @@ impl Auth {
 }
 
 fn http() -> reqwest::Client {
-    reqwest::Client::builder()
-        // OpenSubtitles asks for the program's name and version.
-        .user_agent(concat!("Renome v", env!("CARGO_PKG_VERSION")))
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(30))
-        .build()
-        .unwrap_or_default()
-}
-
-fn net_error(prefix: &str, e: &reqwest::Error) -> String {
-    if e.is_connect() {
-        format!("{prefix}Offline")
-    } else if e.is_timeout() {
-        format!("{prefix}Timeout")
-    } else {
-        format!(
-            "{prefix}Network: {}",
-            e.to_string().split(" for url").next().unwrap_or("")
-        )
-    }
+    // OpenSubtitles asks for the program's name and version.
+    crate::http(concat!("Renome v", env!("CARGO_PKG_VERSION")), 10, 30)
 }
 
 /// A login, kept for the session (tokens last a day): the account it is
@@ -166,9 +148,9 @@ impl Os {
                 .json(&serde_json::json!({ "username": who.0, "password": who.1 }))
                 .send()
                 .await
-                .map_err(|e| net_error("os", &e))?;
+                .map_err(|e| net_error("os", e))?;
             let code = res.status().as_u16();
-            let body = res.text().await.map_err(|e| net_error("os", &e))?;
+            let body = res.text().await.map_err(|e| net_error("os", e))?;
             match code {
                 200 => break body,
                 429 | 503 if attempt < 3 => {
@@ -221,9 +203,9 @@ impl Os {
             if let Some(t) = &token {
                 req = req.bearer_auth(t);
             }
-            let res = req.send().await.map_err(|e| net_error("os", &e))?;
+            let res = req.send().await.map_err(|e| net_error("os", e))?;
             let code = res.status().as_u16();
-            let text = res.text().await.map_err(|e| net_error("os", &e))?;
+            let text = res.text().await.map_err(|e| net_error("os", e))?;
             match code {
                 200 => return serde_json::from_str(&text).map_err(|e| format!("osNetwork: {e}")),
                 401 if token.is_some() && !again => again = true,
@@ -338,11 +320,11 @@ impl Os {
             .get(link)
             .send()
             .await
-            .map_err(|e| net_error("os", &e))?;
+            .map_err(|e| net_error("os", e))?;
         if !bytes.status().is_success() {
             return Err(os_status(bytes.status().as_u16(), ""));
         }
-        let bytes = bytes.bytes().await.map_err(|e| net_error("os", &e))?;
+        let bytes = bytes.bytes().await.map_err(|e| net_error("os", e))?;
         Ok((bytes.to_vec(), ext, v["remaining"].as_i64()))
     }
 }
@@ -399,9 +381,9 @@ impl Subdl {
                 .query(&q)
                 .send()
                 .await
-                .map_err(|e| net_error("subdl", &e))?;
+                .map_err(|e| net_error("subdl", e))?;
             let code = r.status().as_u16();
-            let text = r.text().await.map_err(|e| net_error("subdl", &e))?;
+            let text = r.text().await.map_err(|e| net_error("subdl", e))?;
             if code == 429 && attempt < 2 && !text.to_lowercase().contains("limit") {
                 tokio::time::sleep(Duration::from_secs(5 * (attempt + 1))).await;
                 continue;
@@ -498,16 +480,13 @@ impl Subdl {
             .get(format!("{}{}", subdl_dl(), c.id))
             .send()
             .await
-            .map_err(|e| net_error("subdl", &e))?;
+            .map_err(|e| net_error("subdl", e))?;
         let code = r.status().as_u16();
         if code != 200 {
             let text = r.text().await.unwrap_or_default();
             return Err(subdl_status(code, &text));
         }
-        Ok(r.bytes()
-            .await
-            .map_err(|e| net_error("subdl", &e))?
-            .to_vec())
+        Ok(r.bytes().await.map_err(|e| net_error("subdl", e))?.to_vec())
     }
 }
 
@@ -565,7 +544,7 @@ impl Subsource {
             .query(query)
             .send()
             .await
-            .map_err(|e| net_error("subsource", &e))?;
+            .map_err(|e| net_error("subsource", e))?;
         match r.status().as_u16() {
             200 => Ok(r),
             code => Err(subsource_status(code)),
@@ -574,7 +553,7 @@ impl Subsource {
 
     async fn get(&self, path: &str, query: &[(&str, String)]) -> Result<Value, String> {
         match self.send(path, query).await {
-            Ok(r) => r.json().await.map_err(|e| net_error("subsource", &e)),
+            Ok(r) => r.json().await.map_err(|e| net_error("subsource", e)),
             // Nothing there.
             Err(e) if e == "subsourceNetwork: HTTP 404" => Ok(Value::Null),
             Err(e) => Err(e),
@@ -702,7 +681,7 @@ impl Subsource {
         let r = self
             .send(&format!("/subtitles/{}/download", c.id), &[])
             .await?;
-        let b = r.bytes().await.map_err(|e| net_error("subsource", &e))?;
+        let b = r.bytes().await.map_err(|e| net_error("subsource", e))?;
         Ok(b.to_vec())
     }
 }
@@ -1108,7 +1087,7 @@ fn spare_quota(items: &mut [Write], left: usize, subdl: bool, subsource: bool) {
 
 /// Writes a downloaded subtitle, noting it or why it could not be.
 fn save(out: &mut Written, to: &std::path::Path, bytes: &[u8]) {
-    match write_new(to, bytes) {
+    match renome_core::files::write_new(to, bytes) {
         Ok(()) => out.created.push(to.to_path_buf()),
         Err(e) => {
             let file = to
@@ -1118,24 +1097,6 @@ fn save(out: &mut Written, to: &std::path::Path, bytes: &[u8]) {
             out.errors.push((file, e));
         }
     }
-}
-
-/// Writes a file that must not be there yet.
-fn write_new(to: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
-    use std::io::Write as _;
-    let mut f = std::fs::File::options()
-        .write(true)
-        .create_new(true)
-        .open(to)
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::AlreadyExists {
-                "err.targetExists".to_string()
-            } else {
-                format!("err.io: {e}")
-            }
-        })?;
-    f.write_all(bytes).map_err(|e| format!("err.io: {e}"))?;
-    f.sync_all().map_err(|e| format!("err.io: {e}"))
 }
 
 /// Checks OpenSubtitles' key (and account, when given): the downloads

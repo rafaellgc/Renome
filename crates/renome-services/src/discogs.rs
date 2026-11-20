@@ -28,16 +28,15 @@ pub struct Client {
 impl Default for Client {
     fn default() -> Self {
         Self {
-            http: reqwest::Client::builder()
-                .user_agent(concat!(
+            http: crate::http(
+                concat!(
                     "Renome/",
                     env!("CARGO_PKG_VERSION"),
                     " +https://github.com/rafaellgc/Renome"
-                ))
-                .connect_timeout(Duration::from_secs(10))
-                .timeout(Duration::from_secs(30))
-                .build()
-                .unwrap_or_default(),
+                ),
+                10,
+                30,
+            ),
             last: tokio::sync::Mutex::new(None),
             token: std::sync::Mutex::new(String::new()),
             releases: tokio::sync::Mutex::new(HashMap::new()),
@@ -46,13 +45,7 @@ impl Default for Client {
 }
 
 fn net_error(e: reqwest::Error) -> String {
-    if e.is_connect() {
-        "dgOffline".into()
-    } else if e.is_timeout() {
-        "dgTimeout".into()
-    } else {
-        format!("dgNetwork: {}", e.without_url())
-    }
+    crate::net_error("dg", e)
 }
 
 impl Client {

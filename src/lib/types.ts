@@ -218,6 +218,8 @@ export interface Preview {
   totals: SaidLine[];
   left: SaidLine[];
   tags: Record<string, RowTag[]>;
+  /** What each step's card says under it (`said::summaries`). */
+  summaries: (SaidLine | null)[];
   /** What the rule cards show of the list (see the core's `Hints`). */
   hints: {
     sample: string;

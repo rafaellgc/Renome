@@ -758,35 +758,12 @@ pub fn extract(
         } else {
             text
         };
-        match write_new(&to, text.as_bytes()) {
+        match crate::files::write_new(&to, text.as_bytes()) {
             Ok(()) => out.created.push(to),
             Err(e) => out.errors.push((name, e)),
         }
     }
     Ok(out)
-}
-
-/// Writes a file that must not be there yet.
-fn write_new(to: &Path, bytes: &[u8]) -> Result<(), String> {
-    use std::io::Write as _;
-    let mut f = File::options()
-        .write(true)
-        .create_new(true)
-        .open(to)
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::AlreadyExists {
-                "err.targetExists".to_string()
-            } else {
-                format!("err.io: {e}")
-            }
-        })?;
-    let r = f.write_all(bytes).and_then(|_| f.sync_all());
-    if let Err(e) = r {
-        drop(f);
-        let _ = std::fs::remove_file(to);
-        return Err(format!("err.io: {e}"));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

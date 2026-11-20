@@ -48,22 +48,10 @@ pub async fn tell(settings: Option<&Value>, ops: &[renome_core::Operation]) -> V
     crate::lookup::said(&renome_services::flow::said::told(&answers))
 }
 
-fn settings_now() -> Value {
-    renome_services::read_settings_file().unwrap_or_else(|| Value::Object(Map::new()))
-}
-
-fn save(settings: &Value) -> Result<(), String> {
-    let _file = renome_services::SETTINGS_FILE.lock().unwrap();
-    renome_services::write_settings_file(settings)
-}
+use crate::manage::{save_settings as save, settings_now};
 
 fn servers_of(settings: &mut Value) -> &mut Vec<Value> {
-    let obj = settings.as_object_mut().expect("settings object");
-    let list = obj.entry("servers").or_insert_with(|| Value::Array(vec![]));
-    if !list.is_array() {
-        *list = Value::Array(vec![]);
-    }
-    list.as_array_mut().unwrap()
+    crate::manage::list_of(settings, "servers")
 }
 
 fn find<'a>(list: &'a mut [Value], id: &str) -> Result<&'a mut Value, String> {

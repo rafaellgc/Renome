@@ -1617,17 +1617,7 @@ impl Writer<'_> {
     }
 }
 
-fn heading(name: &str) -> Option<usize> {
-    match name {
-        "h1" => Some(1),
-        "h2" => Some(2),
-        "h3" => Some(3),
-        "h4" => Some(4),
-        "h5" => Some(5),
-        "h6" => Some(6),
-        _ => None,
-    }
-}
+use super::text_in::level as heading;
 
 #[cfg(test)]
 mod tests {

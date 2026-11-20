@@ -199,6 +199,13 @@ pub fn whole(saved: Option<Value>) -> Value {
     Value::Object(out)
 }
 
+/// The interface's language for a language code (`pt_BR`, `es-ES`,
+/// `en`): Portuguese, Spanish or English; `None` for any other.
+pub fn ui_lang(code: &str) -> Option<&'static str> {
+    let code = code.to_ascii_lowercase();
+    ["pt", "es", "en"].into_iter().find(|l| code.starts_with(l))
+}
+
 /// The language TMDB titles are asked in: the one chosen, else the
 /// interface's.
 pub fn tmdb_lang(settings: Option<&Value>, ui: &str) -> String {
@@ -351,6 +358,17 @@ pub fn save_set(
     }
 }
 
+/// The sets' places in the order they are listed (the window's menu, the
+/// command line's `sets`): by name, case and accents ignored.
+pub fn set_order(sets: &[Value]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..sets.len()).collect();
+    order.sort_by_cached_key(|&i| {
+        let name = sets[i]["name"].as_str().unwrap_or_default();
+        (renome_core::text::fold(name), name.to_string())
+    });
+    order
+}
+
 /// Renames a set; refused when another has that name (its place).
 pub fn rename_set(sets: &mut [Value], at: usize, name: &str) -> Result<(), usize> {
     if let Some(other) = set_index(sets, name, Some(at)) {
@@ -365,6 +383,16 @@ pub fn rename_set(sets: &mut [Value], at: usize, name: &str) -> Result<(), usize
 #[cfg(test)]
 mod set_tests {
     use super::*;
+
+    #[test]
+    fn sets_listed_by_name() {
+        let sets = vec![
+            serde_json::json!({ "name": "Zeta" }),
+            serde_json::json!({ "name": "álbuns" }),
+            serde_json::json!({ "name": "Bandas" }),
+        ];
+        assert_eq!(set_order(&sets), vec![1, 2, 0]);
+    }
 
     #[test]
     fn sets_by_name() {

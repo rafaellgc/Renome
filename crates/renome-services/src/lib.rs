@@ -33,6 +33,37 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// How the program names itself to the catalogues (they ask for a name,
+/// a version and where to reach its makers).
+pub const AGENT: &str = concat!(
+    "Renome/",
+    env!("CARGO_PKG_VERSION"),
+    " ( https://github.com/rafaellgc/Renome )"
+);
+
+/// An HTTP client as the services are asked with: named `agent`, given
+/// `connect` seconds to reach the server and `total` for the whole answer.
+pub fn http(agent: &str, connect: u64, total: u64) -> reqwest::Client {
+    reqwest::Client::builder()
+        .user_agent(agent)
+        .connect_timeout(std::time::Duration::from_secs(connect))
+        .timeout(std::time::Duration::from_secs(total))
+        .build()
+        .unwrap_or_default()
+}
+
+/// A network failure as a text key of the service `prefix`:
+/// `<prefix>Offline`, `<prefix>Timeout`, else `<prefix>Network: detail`.
+pub(crate) fn net_error(prefix: &str, e: reqwest::Error) -> String {
+    if e.is_connect() {
+        format!("{prefix}Offline")
+    } else if e.is_timeout() {
+        format!("{prefix}Timeout")
+    } else {
+        format!("{prefix}Network: {}", e.without_url())
+    }
+}
+
 /// A report sender that can go to another thread.
 pub type Sender = Arc<dyn Fn(&str, Value) + Send + Sync>;
 

@@ -276,13 +276,7 @@ pub fn similar_pictures(
     // Join each pair that is near (a picture alike two others joins all
     // three).
     let mut parent: Vec<usize> = (0..known.len()).collect();
-    fn root(parent: &mut [usize], mut i: usize) -> usize {
-        while parent[i] != i {
-            parent[i] = parent[parent[i]];
-            i = parent[i];
-        }
-        i
-    }
+    use crate::repeated::root;
     for i in 0..known.len() {
         if i % 256 == 0 && cancelled() {
             return None;

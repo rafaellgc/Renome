@@ -45,7 +45,7 @@
   let ready = $state(false);
   let steps = $state<Step[]>([]);
   let overrides = $state<Record<string, string>>({});
-  let preview = $state<Preview>({ items: [], ruleErrors: [], filterError: null, total: 0, changed: 0, conflicts: 0, sameThere: 0, leftFolders: [], trash: [], trashFolders: [], totals: [], left: [], tags: {}, hints: { sample: "", files: 0, pairs: 0, names: [], pairNames: [], steps: [] } });
+  let preview = $state<Preview>({ items: [], ruleErrors: [], filterError: null, total: 0, changed: 0, conflicts: 0, sameThere: 0, leftFolders: [], trash: [], trashFolders: [], totals: [], left: [], tags: {}, summaries: [], hints: { sample: "", files: 0, pairs: 0, names: [], pairNames: [], steps: [] } });
   let selected = $state(new Set<string>());
   let filter = $state("");
   let sortKey = $state<ViewSort>("newName");
@@ -226,8 +226,6 @@
     }
   });
   const photoRule = $derived(steps.find((s) => s.enabled && s.rule.type === "photo"));
-  /** Photos and videos the photo rule leaves as they are (no date). */
-  const undatedCount = $derived(photoRule ? preview.items.filter((i) => i.photoDate === "none").length : 0);
 
   /** Aired episodes missing from the seasons the listed videos cover,
    *  issues from the series the listed comics are from, tracks from the
@@ -1370,15 +1368,7 @@
                   onclick: () => photos.openEdit(),
                 }
               : undefined}
-            summary={step.rule.type === "music" && step.enabled && music.untagged
-              ? t(step.rule.identifyBySound ? "musicUntaggedListenN" : "musicUntaggedN", { n: music.untagged })
-              : step.rule.type === "photo" && step.enabled && undatedCount
-                ? t("photoUndatedN", { n: undatedCount })
-                : step.rule.type === "list" && step.rule.names.trim()
-                  ? step.only?.trim()
-                    ? t("listOrderN", { n: preview.hints.steps[i]?.names ?? 0 })
-                    : t("listCountN", { names: preview.hints.steps[i]?.names ?? 0, files: step.rule.pairs ? preview.hints.pairs : preview.hints.files })
-                  : null}
+            summary={preview.summaries[i] ? said([preview.summaries[i]!])[0] : null}
             currentNames={step.rule.type === "list" && !step.only?.trim() ? (step.rule.pairs ? preview.hints.pairNames : preview.hints.names) : []}
             hint={preview.hints.steps[i] ?? null}
           />

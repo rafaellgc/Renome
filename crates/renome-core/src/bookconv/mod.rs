@@ -702,9 +702,8 @@ pub fn fix_links(book: &mut Book) {
     toc(&mut book.toc, &at);
 }
 
-/// Chapters without a title take the one the table of contents gives
-/// their file.
-pub fn titles_from_toc(book: &mut Book) {
+/// Each chapter file's title in the table of contents (its first entry).
+pub(crate) fn toc_titles(toc: &[Toc]) -> std::collections::HashMap<String, String> {
     fn walk(t: &[Toc], m: &mut std::collections::HashMap<String, String>) {
         for e in t {
             let file = e.href.split('#').next().unwrap_or_default().to_string();
@@ -713,7 +712,14 @@ pub fn titles_from_toc(book: &mut Book) {
         }
     }
     let mut m = std::collections::HashMap::new();
-    walk(&book.toc, &mut m);
+    walk(toc, &mut m);
+    m
+}
+
+/// Chapters without a title take the one the table of contents gives
+/// their file.
+pub fn titles_from_toc(book: &mut Book) {
+    let m = toc_titles(&book.toc);
     for c in &mut book.chapters {
         if c.title.trim().is_empty()
             && let Some(t) = m.get(&c.name)

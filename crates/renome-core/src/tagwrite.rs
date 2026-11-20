@@ -5,6 +5,7 @@
 //! never leaves it half written. What was changed is returned, so undo can
 //! put it back.
 
+use crate::files::ext_of;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -529,12 +530,6 @@ pub fn writable(path: &Path) -> bool {
         ext_of(path).as_str(),
         "mp3" | "flac" | "ogg" | "oga" | "opus" | "m4a" | "m4b"
     )
-}
-
-fn ext_of(path: &Path) -> String {
-    path.extension()
-        .map(|e| e.to_string_lossy().to_lowercase())
-        .unwrap_or_default()
 }
 
 fn mime_of(data: &[u8]) -> MimeType {

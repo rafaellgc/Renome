@@ -280,6 +280,36 @@ impl FileEntry {
     }
 }
 
+/// A path's extension, lowercase (empty when it has none).
+pub fn ext_of(path: &Path) -> String {
+    path.extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default()
+}
+
+/// Writes a file that must not be there yet, to the disk before it says
+/// so; what failed half-way is taken away.
+pub fn write_new(to: &Path, bytes: &[u8]) -> Result<(), String> {
+    use std::io::Write as _;
+    let mut f = std::fs::File::options()
+        .write(true)
+        .create_new(true)
+        .open(to)
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                "err.targetExists".to_string()
+            } else {
+                format!("err.io: {e}")
+            }
+        })?;
+    if let Err(e) = f.write_all(bytes).and_then(|_| f.sync_all()) {
+        drop(f);
+        let _ = std::fs::remove_file(to);
+        return Err(format!("err.io: {e}"));
+    }
+    Ok(())
+}
+
 /// Sends a file or folder to the system's trash. In a Flatpak, GLib's
 /// `gio` asks the desktop's trash through its portal (the trash found
 /// from inside would be the sandbox's own, which no file manager shows).

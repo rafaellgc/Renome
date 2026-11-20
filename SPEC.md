@@ -2766,7 +2766,19 @@ what went wrong after the renames (`said::troubles`: the stage's title
 and count for the window's notice, each file as `file — why`, a
 subtitle saved out of time a warning) and the Test buttons of keys and
 accounts (`checks::test`, also `keys test`: a GCD account "works", an
-OpenSubtitles account says the downloads left). Plurals
+OpenSubtitles account says the downloads left). Since the 2026-11-20
+audit made with the local model, also: what each rule card says under
+it (`said::summaries`: songs without tags, photos without a date, a list
+rule's names against the files; the command line prints them after the
+totals and as `notes` in `--json`), the order rule sets are listed in
+(`options::set_order`: by name, case and accents aside; also `sets`),
+the interface's language for a system's (`options::ui_lang`), and, inside
+Rust, one HTTP client builder (`renome_services::http`, `AGENT`), one
+network error (`net_error`), one way to write a new file
+(`files::write_new`) and one each of small helpers once copied
+(`files::ext_of`, `tmdb::year_of`, `pages::{be16, be32}`,
+`repeated::root`, `ebook::xml`, `bookconv::toc_titles`, the command
+line's options file and lists). Plurals
 in texts are written twice (TypeScript for the window, Rust for the
 command line); both run the cases of `src/lib/plurals.json`. And
 `crates/renome-cli` the program: every command below, the lookup rules

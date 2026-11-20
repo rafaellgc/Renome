@@ -198,7 +198,7 @@ pub fn playlists(
         if !seen.insert(path.clone()) {
             continue;
         }
-        match tmdb::write_new(&path, text.as_bytes()) {
+        match renome_core::files::write_new(&path, text.as_bytes()) {
             Ok(()) => report.created.push(path),
             Err(e) => report.errors.push((path.display().to_string(), e)),
         }

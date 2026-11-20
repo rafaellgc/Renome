@@ -5,7 +5,6 @@
 use renome_core::text::fold;
 use std::collections::HashMap;
 use std::path::Path;
-use std::time::Duration;
 
 use futures_util::StreamExt;
 use renome_core::comics::{ComicMatch, Issue, Volume};
@@ -36,16 +35,7 @@ pub struct Covers {
 impl Default for Covers {
     fn default() -> Self {
         Self {
-            http: reqwest::Client::builder()
-                .user_agent(concat!(
-                    "Renome/",
-                    env!("CARGO_PKG_VERSION"),
-                    " ( https://github.com/rafaellgc/Renome )"
-                ))
-                .connect_timeout(Duration::from_secs(10))
-                .timeout(Duration::from_secs(30))
-                .build()
-                .unwrap_or_default(),
+            http: crate::http(crate::AGENT, 10, 30),
             known: tokio::sync::Mutex::new(HashMap::new()),
         }
     }

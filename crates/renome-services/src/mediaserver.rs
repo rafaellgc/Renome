@@ -8,7 +8,6 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -108,23 +107,14 @@ struct PlexLocation {
 }
 
 fn http() -> reqwest::Client {
-    reqwest::Client::builder()
-        .user_agent(concat!("Renome/", env!("CARGO_PKG_VERSION")))
-        .connect_timeout(Duration::from_secs(8))
-        .timeout(Duration::from_secs(20))
-        .build()
-        .unwrap_or_default()
+    crate::http(concat!("Renome/", env!("CARGO_PKG_VERSION")), 8, 20)
 }
 
 fn net_error(e: reqwest::Error) -> String {
-    if e.is_connect() {
-        "srvOffline".into()
-    } else if e.is_timeout() {
-        "srvTimeout".into()
-    } else if e.is_builder() {
+    if e.is_builder() {
         "srvAddress".into()
     } else {
-        format!("srvNetwork: {}", e.without_url())
+        crate::net_error("srv", e)
     }
 }
 

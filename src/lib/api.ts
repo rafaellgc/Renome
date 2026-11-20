@@ -218,6 +218,7 @@ export const api = {
   /** The rule sets with rules saved by name; refused `exists:<place>`. */
   setsSave: (sets: unknown[], name: string, steps: Step[], replace: boolean) => invoke<unknown[]>("sets_save", { sets, name, steps, replace }),
   setsRename: (sets: unknown[], at: number, name: string) => invoke<unknown[]>("sets_rename", { sets, at, name }),
+  setsOrder: (sets: unknown[]) => invoke<number[]>("sets_order", { sets }),
   /** Tells the servers in the options about the folders the files left and went to (which servers: the shared choice). */
   serverTell: (servers: unknown, keys: string, done: { from: string; to: string }[]) =>
     invoke<import("./types").SaidLine[]>("server_tell", { servers, keys, done }),

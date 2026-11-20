@@ -117,6 +117,7 @@ pub struct Candidate {
     pub score: f64,
 }
 
+/// The year of a catalogue's date (`1999-03-31`, `1999`).
 pub fn year_of(date: &Option<String>) -> Option<u16> {
     date.as_deref()?.get(..4)?.parse().ok()
 }

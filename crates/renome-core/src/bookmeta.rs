@@ -7,6 +7,8 @@
 //! anew beside itself and takes its place, the old one kept whole in the
 //! history's folder for undo ([`Backup::saved`]).
 
+use crate::files::ext_of;
+use crate::pages::{be16, be32};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{BufWriter, Read, Write};
@@ -21,12 +23,6 @@ use crate::tmdb::xml as esc;
 /// The largest book rewritten (an EPUB of scans can be hundreds of
 /// megabytes; it is still copied whole for undo).
 const MAX_BOOK: u64 = 1 << 30;
-
-fn ext_of(path: &Path) -> String {
-    path.extension()
-        .map(|e| e.to_string_lossy().to_lowercase())
-        .unwrap_or_default()
-}
 
 /// Books whose details this module writes: FB2 and unlocked Kindle files.
 pub fn writable(path: &Path) -> bool {
@@ -305,14 +301,6 @@ fn fb2_write(bytes: &[u8], v: &BookValues) -> Result<Option<Vec<u8>>, String> {
 }
 
 // --------------------------------------------------------------- Kindle
-
-fn be16(b: &[u8], at: usize) -> Option<u16> {
-    Some(u16::from_be_bytes(b.get(at..at + 2)?.try_into().ok()?))
-}
-
-fn be32(b: &[u8], at: usize) -> Option<u32> {
-    Some(u32::from_be_bytes(b.get(at..at + 4)?.try_into().ok()?))
-}
 
 /// The records of a Palm database: their start offsets (and the end).
 fn pdb_records(b: &[u8]) -> Option<Vec<usize>> {

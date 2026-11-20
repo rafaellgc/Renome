@@ -28,16 +28,7 @@ pub struct Client {
 impl Default for Client {
     fn default() -> Self {
         Self {
-            http: reqwest::Client::builder()
-                .user_agent(concat!(
-                    "Renome/",
-                    env!("CARGO_PKG_VERSION"),
-                    " ( https://github.com/rafaellgc/Renome )"
-                ))
-                .connect_timeout(Duration::from_secs(10))
-                .timeout(Duration::from_secs(30))
-                .build()
-                .unwrap_or_default(),
+            http: crate::http(crate::AGENT, 10, 30),
             last: tokio::sync::Mutex::new(None),
             cache: tokio::sync::Mutex::new(HashMap::new()),
         }
@@ -45,13 +36,7 @@ impl Default for Client {
 }
 
 fn net_error(e: reqwest::Error) -> String {
-    if e.is_connect() {
-        "cvOffline".into()
-    } else if e.is_timeout() {
-        "cvTimeout".into()
-    } else {
-        format!("cvNetwork: {}", e.without_url())
-    }
+    crate::net_error("cv", e)
 }
 
 /// A Comic Vine image, unless it is the blank one put where there is none.

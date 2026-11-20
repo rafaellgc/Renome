@@ -205,6 +205,45 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
+    fn summaries_say_the_list_rule_against_the_files() {
+        use renome_core::rules::Rule;
+        let list = |names: &str, pairs: bool, only: &str| renome_core::Step {
+            enabled: true,
+            rule: Rule::List {
+                names: names.into(),
+                pairs,
+            },
+            only: only.into(),
+        };
+        let mut p = Preview::default();
+        p.hints.files = 4;
+        p.hints.pairs = 2;
+        p.hints.steps = vec![
+            renome_core::plan::StepHint {
+                names: Some(3),
+                parts: vec![],
+            };
+            3
+        ];
+        let said = summaries(
+            &p,
+            &[
+                list("a\nb\nc", true, ""),
+                list("a", false, "*.srt"),
+                list(" ", false, ""),
+            ],
+        );
+        let count = said[0].as_ref().unwrap();
+        assert_eq!(count.key, "listCountN");
+        assert_eq!(
+            count.more,
+            vec![("names", "3".to_string()), ("files", "2".to_string())]
+        );
+        assert_eq!(said[1].as_ref().unwrap().key, "listOrderN");
+        assert!(said[2].is_none());
+    }
+
+    #[test]
     fn totals_count_only_real_conflicts_and_the_filter() {
         let p = Preview {
             total: 5,
@@ -337,6 +376,54 @@ pub fn totals(p: &Preview) -> Vec<Line> {
         }
     }
     out
+}
+
+/// What each step's card says under it (the command line's preview says
+/// it too), in the steps' order: songs without tags the music rule leaves
+/// (or listens to), photos without a date, a list rule's names against
+/// the files they go to.
+pub fn summaries(p: &Preview, steps: &[renome_core::Step]) -> Vec<Option<Line>> {
+    use renome_core::rules::Rule;
+    let untagged = p.items.iter().filter(|i| i.untagged).count();
+    let undated = p
+        .items
+        .iter()
+        .filter(|i| i.photo_date == Some(renome_core::photos::DateFrom::None))
+        .count();
+    steps
+        .iter()
+        .enumerate()
+        .map(|(at, s)| {
+            let names = p.hints.steps.get(at).and_then(|h| h.names).unwrap_or(0);
+            match &s.rule {
+                Rule::Music { listen, .. } if s.enabled && untagged > 0 => Some(line(
+                    if *listen {
+                        "musicUntaggedListenN"
+                    } else {
+                        "musicUntaggedN"
+                    },
+                    untagged,
+                )),
+                Rule::Photo { .. } if s.enabled && undated > 0 => {
+                    Some(line("photoUndatedN", undated))
+                }
+                Rule::List { names: typed, .. } if typed.trim().is_empty() => None,
+                Rule::List { .. } if !s.only.trim().is_empty() => Some(line("listOrderN", names)),
+                Rule::List { pairs, .. } => Some(Line {
+                    key: "listCountN",
+                    more: vec![
+                        ("names", names.to_string()),
+                        (
+                            "files",
+                            if *pairs { p.hints.pairs } else { p.hints.files }.to_string(),
+                        ),
+                    ],
+                    ..Line::default()
+                }),
+                _ => None,
+            }
+        })
+        .collect()
 }
 
 /// Each old folder left with files that do not go to the new one: its

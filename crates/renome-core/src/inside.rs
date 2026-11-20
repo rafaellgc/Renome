@@ -4,6 +4,7 @@
 //! again), then takes the file's place; what the entry held is kept for
 //! undo, like a song's tags (see [`crate::tagwrite`]).
 
+use crate::files::ext_of;
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::Path;
@@ -30,12 +31,6 @@ pub struct Entry {
 const INFO: &str = "ComicInfo.xml";
 /// An entry with details is a few kilobytes; more is not one.
 const MAX_TEXT: u64 = 8 << 20;
-
-fn ext_of(path: &Path) -> String {
-    path.extension()
-        .map(|e| e.to_string_lossy().to_lowercase())
-        .unwrap_or_default()
-}
 
 /// A zip by its content (a `.cbz` is sometimes a 7z or a RAR).
 fn is_zip(path: &Path) -> bool {

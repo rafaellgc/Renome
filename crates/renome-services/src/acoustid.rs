@@ -23,29 +23,14 @@ pub struct Client {
 impl Default for Client {
     fn default() -> Self {
         Self {
-            http: reqwest::Client::builder()
-                .user_agent(concat!(
-                    "Renome/",
-                    env!("CARGO_PKG_VERSION"),
-                    " ( https://github.com/rafaellgc/Renome )"
-                ))
-                .connect_timeout(Duration::from_secs(10))
-                .timeout(Duration::from_secs(30))
-                .build()
-                .unwrap_or_default(),
+            http: crate::http(crate::AGENT, 10, 30),
             last: tokio::sync::Mutex::new(None),
         }
     }
 }
 
 fn net_error(e: reqwest::Error) -> String {
-    if e.is_connect() {
-        "acoustidOffline".into()
-    } else if e.is_timeout() {
-        "acoustidTimeout".into()
-    } else {
-        format!("acoustidNetwork: {}", e.without_url())
-    }
+    crate::net_error("acoustid", e)
 }
 
 impl Client {

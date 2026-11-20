@@ -29,16 +29,7 @@ pub struct Client {
 impl Default for Client {
     fn default() -> Self {
         Self {
-            http: reqwest::Client::builder()
-                .user_agent(concat!(
-                    "Renome/",
-                    env!("CARGO_PKG_VERSION"),
-                    " ( https://github.com/rafaellgc/Renome )"
-                ))
-                .connect_timeout(Duration::from_secs(10))
-                .timeout(Duration::from_secs(30))
-                .build()
-                .unwrap_or_default(),
+            http: crate::http(crate::AGENT, 10, 30),
             key: Mutex::new(String::new()),
             last: tokio::sync::Mutex::new(None),
             cache: tokio::sync::Mutex::new(HashMap::new()),
@@ -47,13 +38,7 @@ impl Default for Client {
 }
 
 fn net_error(e: reqwest::Error) -> String {
-    if e.is_connect() {
-        "gbOffline".into()
-    } else if e.is_timeout() {
-        "gbTimeout".into()
-    } else {
-        format!("gbNetwork: {}", e.without_url())
-    }
+    crate::net_error("gb", e)
 }
 
 /// Words only: quotes and the search's own signs would change the search.

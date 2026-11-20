@@ -366,7 +366,7 @@ async fn preview(
                 f.keep_read(other);
             }
         }
-        Shown::of(preview, warn_windows)
+        Shown::of(preview, &steps, warn_windows)
     })
     .await
 }
@@ -384,10 +384,12 @@ struct Shown {
     left: Vec<renome_services::flow::after::Line>,
     /// Each row's tags, by path (`said::tags`; rows without none left out).
     tags: HashMap<PathBuf, Vec<renome_services::flow::said::Tag>>,
+    /// What each step's card says under it (`said::summaries`).
+    summaries: Vec<Option<renome_services::flow::after::Line>>,
 }
 
 impl Shown {
-    fn of(preview: Preview, warn_windows: bool) -> Self {
+    fn of(preview: Preview, steps: &[Step], warn_windows: bool) -> Self {
         use renome_services::flow::said;
         let tags = preview
             .items
@@ -401,6 +403,7 @@ impl Shown {
             totals: said::totals(&preview),
             left: said::left(&preview.left_folders),
             tags,
+            summaries: said::summaries(&preview, steps),
             preview,
         }
     }
@@ -750,18 +753,8 @@ async fn own_cover(path: PathBuf) -> Option<OwnCover> {
 
 /// For catalogue covers, fetched by the program (some catalogues refuse
 /// their pictures to a page that is not theirs).
-static HTTP: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
-    reqwest::Client::builder()
-        .user_agent(concat!(
-            "Renome/",
-            env!("CARGO_PKG_VERSION"),
-            " ( https://github.com/rafaellgc/Renome )"
-        ))
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(30))
-        .build()
-        .unwrap_or_default()
-});
+static HTTP: std::sync::LazyLock<reqwest::Client> =
+    std::sync::LazyLock::new(|| renome_services::http(renome_services::AGENT, 10, 30));
 
 /// A catalogue's cover that the page could not show by its address, as
 /// a data address; `None` when it cannot be read either.
@@ -1680,6 +1673,12 @@ fn sets_save(
 }
 
 /// The rule sets with one renamed; refused when another has that name.
+/// The sets' places in the order the menu lists them (`options::set_order`).
+#[tauri::command]
+fn sets_order(sets: Vec<Value>) -> Vec<usize> {
+    renome_services::options::set_order(&sets)
+}
+
 #[tauri::command]
 fn sets_rename(mut sets: Vec<Value>, at: usize, name: String) -> Result<Vec<Value>, String> {
     renome_services::options::rename_set(&mut sets, at, &name)
@@ -2225,10 +2224,7 @@ fn load_settings(fallback_lang: String) -> Result<Value, String> {
                     .collect::<String>()
                     .to_lowercase();
             }
-            first["lang"] = Value::from(match sys.as_str() {
-                "pt" | "es" => sys.as_str(),
-                _ => "en",
-            });
+            first["lang"] = Value::from(renome_services::options::ui_lang(&sys).unwrap_or("en"));
             write_settings_file(&first)?;
             Ok(first)
         }
@@ -2434,6 +2430,7 @@ pub fn run() {
             server_new,
             sets_save,
             sets_rename,
+            sets_order,
             server_keys,
             server_key_with,
             server_tell,

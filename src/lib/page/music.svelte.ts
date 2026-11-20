@@ -25,8 +25,6 @@ export class Music {
   }
 
   rule = $derived.by(() => ruleOf(this.#ctx.steps, "music"));
-  /** Songs the rule leaves as they are (no title in their tags). */
-  untagged = $derived.by(() => (this.rule ? this.#ctx.items.filter((i) => i.untagged).length : 0));
   /** Each song's details: from its chosen release, or typed in. */
   matches = $derived.by(() => ({
     ...(Object.fromEntries(this.albums.flatMap((a) => (a.choice ? Object.entries(a.matches) : []))) as Record<string, SongMatch>),

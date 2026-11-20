@@ -175,7 +175,8 @@ pub fn add_document_with(
     }
 }
 
-fn level(name: &str) -> Option<usize> {
+/// A heading's level by its tag (`h2` → 2).
+pub(super) fn level(name: &str) -> Option<usize> {
     match name {
         "h1" => Some(1),
         "h2" => Some(2),

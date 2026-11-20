@@ -193,24 +193,27 @@ pub fn history(m: &ArgMatches) -> Result<Exit, String> {
 }
 
 /// The options file as it is now, to change and save.
-fn settings_now() -> Value {
+pub(crate) fn settings_now() -> Value {
     renome_services::read_settings_file().unwrap_or_else(|| Value::Object(Map::new()))
 }
 
-fn save_settings(settings: &Value) -> Result<(), String> {
+pub(crate) fn save_settings(settings: &Value) -> Result<(), String> {
     let _file = renome_services::SETTINGS_FILE.lock().unwrap();
     renome_services::write_settings_file(settings)
 }
 
 fn sets_of(settings: &mut Value) -> &mut Vec<Value> {
+    list_of(settings, "ruleSets")
+}
+
+/// An option holding a list (`ruleSets`, `servers`), made one if it is not.
+pub(crate) fn list_of<'a>(settings: &'a mut Value, key: &str) -> &'a mut Vec<Value> {
     let obj = settings.as_object_mut().expect("settings object");
-    let sets = obj
-        .entry("ruleSets")
-        .or_insert_with(|| Value::Array(vec![]));
-    if !sets.is_array() {
-        *sets = Value::Array(vec![]);
+    let list = obj.entry(key).or_insert_with(|| Value::Array(vec![]));
+    if !list.is_array() {
+        *list = Value::Array(vec![]);
     }
-    sets.as_array_mut().unwrap()
+    list.as_array_mut().unwrap()
 }
 
 pub fn sets(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> {
@@ -292,6 +295,11 @@ pub fn sets(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> {
                 .as_ref()
                 .and_then(|s| s.get("ruleSets")?.as_array().cloned())
                 .unwrap_or_default();
+            // In the window's menu order (`options::set_order`).
+            let sets: Vec<&Value> = renome_services::options::set_order(&sets)
+                .into_iter()
+                .map(|i| &sets[i])
+                .collect();
             if out::json() {
                 let list: Vec<Value> = sets
                     .iter()
@@ -302,7 +310,7 @@ pub fn sets(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> {
                     serde_json::to_string_pretty(&list).unwrap_or_default()
                 );
             } else {
-                for s in &sets {
+                for s in sets {
                     let n = s["steps"].as_array().map_or(0, Vec::len);
                     println!(
                         "{}  {}",

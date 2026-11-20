@@ -304,10 +304,6 @@ pub struct Candidate {
     pub discogs: bool,
 }
 
-fn year_of(date: &Option<String>) -> Option<u16> {
-    date.as_deref()?.get(..4)?.parse().ok()
-}
-
 pub fn summary(r: &Release, score: f64) -> Candidate {
     let mut formats: Vec<String> = r.media.iter().filter_map(|m| m.format.clone()).collect();
     formats.dedup();
@@ -362,7 +358,7 @@ pub fn rank(q: &AlbumQuery, releases: &[Release]) -> Vec<Candidate> {
                 n if n > q.tracks => 0.1, // bonus tracks missing from the files
                 _ => -0.2,
             };
-            let year = match (q.year, year_of(&r.date)) {
+            let year = match (q.year, crate::tmdb::year_of(&r.date)) {
                 (Some(a), Some(b)) if a == b => 0.1,
                 _ => 0.0,
             };
@@ -557,7 +553,7 @@ pub fn match_tracks(release: &Release, songs: &[Song]) -> (Vec<(PathBuf, SongMat
     let original_year = release
         .release_group
         .as_ref()
-        .and_then(|g| year_of(&g.first_release_date));
+        .and_then(|g| crate::tmdb::year_of(&g.first_release_date));
     let label = release.label_info.iter().find_map(|l| {
         l.label
             .as_ref()
@@ -570,7 +566,7 @@ pub fn match_tracks(release: &Release, songs: &[Song]) -> (Vec<(PathBuf, SongMat
             .filter(|c| !c.is_empty() && c != "[none]")
     });
     let discs = release.media.len().max(1) as u32;
-    let year = year_of(&release.date);
+    let year = crate::tmdb::year_of(&release.date);
     let mut used = HashSet::new();
     let mut out = Vec::new();
     let mut agree = 0;

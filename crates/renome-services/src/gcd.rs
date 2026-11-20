@@ -28,16 +28,7 @@ pub struct Client {
 impl Default for Client {
     fn default() -> Self {
         Self {
-            http: reqwest::Client::builder()
-                .user_agent(concat!(
-                    "Renome/",
-                    env!("CARGO_PKG_VERSION"),
-                    " ( https://github.com/rafaellgc/Renome )"
-                ))
-                .connect_timeout(Duration::from_secs(10))
-                .timeout(Duration::from_secs(40))
-                .build()
-                .unwrap_or_default(),
+            http: crate::http(crate::AGENT, 10, 40),
             last: tokio::sync::Mutex::new(None),
             login: std::sync::Mutex::new(None),
             cache: tokio::sync::Mutex::new(HashMap::new()),
@@ -46,13 +37,7 @@ impl Default for Client {
 }
 
 fn net_error(e: reqwest::Error) -> String {
-    if e.is_connect() {
-        "gcdOffline".into()
-    } else if e.is_timeout() {
-        "gcdTimeout".into()
-    } else {
-        format!("gcdNetwork: {}", e.without_url())
-    }
+    crate::net_error("gcd", e)
 }
 
 /// The id at the end of an API link (`…/series/194284/?format=json`).

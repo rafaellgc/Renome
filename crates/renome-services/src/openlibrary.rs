@@ -13,7 +13,8 @@ use renome_core::ebook;
 use renome_core::links::Link;
 use serde::{Deserialize, Serialize};
 
-use crate::tmdb::{SidecarReport, write_new};
+use crate::tmdb::SidecarReport;
+use renome_core::files::write_new;
 
 const API: &str = "https://openlibrary.org";
 const COVERS: &str = "https://covers.openlibrary.org";
@@ -42,28 +43,13 @@ pub struct Client {
 }
 
 fn net_error(e: reqwest::Error) -> String {
-    if e.is_connect() {
-        "olOffline".into()
-    } else if e.is_timeout() {
-        "olTimeout".into()
-    } else {
-        format!("olNetwork: {}", e.without_url())
-    }
+    crate::net_error("ol", e)
 }
 
 impl Default for Client {
     fn default() -> Self {
         Self {
-            http: reqwest::Client::builder()
-                .user_agent(concat!(
-                    "Renome/",
-                    env!("CARGO_PKG_VERSION"),
-                    " ( https://github.com/rafaellgc/Renome )"
-                ))
-                .connect_timeout(Duration::from_secs(10))
-                .timeout(Duration::from_secs(30))
-                .build()
-                .unwrap_or_default(),
+            http: crate::http(crate::AGENT, 10, 30),
             last: tokio::sync::Mutex::new(None),
             gb: crate::googlebooks::Client::default(),
         }

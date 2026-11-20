@@ -286,15 +286,7 @@ pub fn read(path: &Path) -> Result<Book, String> {
     }
     // A chapter's title is its entry in the table of contents; the
     // `<title>` of its file is often the book's.
-    let mut titles: HashMap<String, String> = HashMap::new();
-    fn walk(t: &[Toc], m: &mut HashMap<String, String>) {
-        for e in t {
-            let file = e.href.split('#').next().unwrap_or_default().to_string();
-            m.entry(file).or_insert_with(|| e.title.clone());
-            walk(&e.kids, m);
-        }
-    }
-    walk(&book.toc, &mut titles);
+    let titles = super::toc_titles(&book.toc);
     let book_title = book.meta.title.clone();
     for c in &mut book.chapters {
         match titles.get(&c.name) {
@@ -306,16 +298,7 @@ pub fn read(path: &Path) -> Result<Book, String> {
     Ok(book)
 }
 
-fn parse(text: &str) -> Option<roxmltree::Document<'_>> {
-    roxmltree::Document::parse_with_options(
-        text,
-        roxmltree::ParsingOptions {
-            allow_dtd: true,
-            ..Default::default()
-        },
-    )
-    .ok()
-}
+use crate::ebook::xml as parse;
 
 fn viewport(s: &str) -> Option<(u32, u32)> {
     let mut w = None;

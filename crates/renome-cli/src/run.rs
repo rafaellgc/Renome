@@ -329,6 +329,7 @@ pub fn preview_or_apply(
     if !apply {
         show(
             &preview,
+            &steps,
             m.get_flag("all"),
             &missing,
             setting_bool(settings, "warnWindows"),
@@ -342,6 +343,7 @@ pub fn preview_or_apply(
     if !out::json() {
         show(
             &preview,
+            &steps,
             m.get_flag("all"),
             &missing,
             setting_bool(settings, "warnWindows"),
@@ -596,7 +598,20 @@ pub fn ask(question: &str) -> bool {
 
 /// The list: one line per changed file (all with `all`), grouped by
 /// folder, then the totals.
-fn show(p: &Preview, all: bool, missing: &[crate::missing::Missing], warn_windows: bool) {
+fn show(
+    p: &Preview,
+    steps: &[Step],
+    all: bool,
+    missing: &[crate::missing::Missing],
+    warn_windows: bool,
+) {
+    // What the window's rule cards say under them (`said::summaries`).
+    let notes: Vec<String> = crate::lookup::said(
+        &renome_services::flow::said::summaries(p, steps)
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>(),
+    );
     if out::json() {
         let items: Vec<Value> = p
             .items
@@ -611,6 +626,7 @@ fn show(p: &Preview, all: bool, missing: &[crate::missing::Missing], warn_window
                 "totals": { "files": p.total, "changed": p.changed, "conflicts": p.real_conflicts(), "sameThere": p.same_there, "leftFolders": p.left_folders.len() },
                 "trash": p.trash,
                 "trashFolders": p.trash_folders,
+                "notes": notes,
                 "missing": missing,
             }))
             .unwrap_or_default()
@@ -677,6 +693,9 @@ fn show(p: &Preview, all: bool, missing: &[crate::missing::Missing], warn_window
         totals.push(out::dim(&t("unchangedN", &[("n", &unchanged)])));
     }
     out::note(&totals.join(" · "));
+    for l in &notes {
+        out::note(&out::dim(l));
+    }
     if !missing.is_empty() {
         println!();
         println!(

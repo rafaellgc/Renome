@@ -6,7 +6,7 @@
   import Icon from "./Icon.svelte";
   import { confirm } from "./dialogs.svelte";
   import { api } from "./api";
-  import { LOCALES, t } from "./i18n";
+  import { t } from "./i18n";
   import { menu as menuNav } from "./modal";
   import { settings, type RuleSet } from "./settings.svelte";
   import type { Step } from "./types";
@@ -33,9 +33,14 @@
   let field = $state<HTMLInputElement>();
 
   const sets = $derived(settings.ruleSets ?? []);
-  const sorted = $derived(
-    sets.map((s, i) => ({ s, i })).sort((a, b) => a.s.name.localeCompare(b.s.name, LOCALES[settings.lang])),
-  );
+  /** The sets in the order Rust lists them (`options::set_order`, the
+   *  command line's `sets` too). */
+  let order = $state<number[]>([]);
+  $effect(() => {
+    const now = $state.snapshot(sets);
+    api.setsOrder(now).then((o) => (order = o), () => {});
+  });
+  const sorted = $derived(order.filter((i) => i < sets.length).map((i) => ({ s: sets[i], i })));
 
   let root = $state<HTMLElement>();
   /** A click outside closes the menu. */

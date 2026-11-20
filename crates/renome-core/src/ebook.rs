@@ -2,6 +2,7 @@
 //! from EPUB, MOBI/AZW3, PDF and FB2 files, and ISBNs found in their text
 //! (the copyright page) when their details lack one.
 
+use crate::pages::be32;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
@@ -291,7 +292,8 @@ fn entry<R: Read + Seek>(zip: &mut zip::ZipArchive<R>, name: &str, limit: u64) -
     Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-fn xml(text: &str) -> Option<roxmltree::Document<'_>> {
+/// An XML document, with its DTD allowed (e-books' files often have one).
+pub(crate) fn xml(text: &str) -> Option<roxmltree::Document<'_>> {
     roxmltree::Document::parse_with_options(
         text,
         roxmltree::ParsingOptions {
@@ -555,10 +557,6 @@ pub(crate) fn opf_meta(doc: &roxmltree::Document) -> BookMeta {
 }
 
 // ---------------------------------------------------------------- MOBI
-
-fn be32(b: &[u8], at: usize) -> Option<u32> {
-    Some(u32::from_be_bytes(b.get(at..at + 4)?.try_into().ok()?))
-}
 
 /// MOBI and AZW3 (Kindle): the full title and the EXTH records of the
 /// first record's header.
