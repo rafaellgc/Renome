@@ -28,6 +28,8 @@ export type RuleTable = {
   choices: Record<string, Record<string, number[]>>;
   /** The choices of each rule's word options, with their labels' keys. */
   menus: Record<string, Record<string, { value: string; label: string }[]>>;
+  /** Each rule's options' labels and hints (keys of the texts). */
+  labels: Record<string, Record<string, [string, string | null]>>;
   /** The comic catalogues of whole series (a file's volume and chapter stay). */
   seriesOnly: string[];
   /** The details windows' fields (labels apart), by rule. */
@@ -62,6 +64,7 @@ export let TABLE: RuleTable = {
   limits: {},
   choices: {},
   menus: {},
+  labels: {},
   seriesOnly: [],
   editFields: { music: [], book: [], comic: [], photo: [] },
   options: { defaults: {}, secrets: [], menus: {}, serverKinds: [], comicKeys: {}, keyErrors: [] },

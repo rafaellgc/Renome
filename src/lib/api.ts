@@ -50,6 +50,8 @@ export const api = {
   columnsFor: (steps: Step[]) => invoke<import("./types").DetailColumn[]>("columns_for", { steps }),
   /** Why each rule cannot join the rules there, when it cannot. */
   ruleBlocks: (types: string[]) => invoke<Record<string, Blocked | null>>("rule_blocks", { types }),
+  /** The manual's sections in order, by their ids: each one's place, and a group's title key. */
+  manualOrder: (ids: string[], names: Record<string, string>) => invoke<[number, string | null][]>("manual_order", { ids, names }),
   /** Saved steps made whole and up to date, and the types left out. */
   completeSteps: (steps: Step[], lang: string, saved: boolean) => invoke<[Step[], RuleType[]]>("complete_steps", { steps, lang, saved }),
   /** The files that take an answer given for `path` (its undecided group). */
@@ -217,7 +219,7 @@ export const api = {
   setsRename: (sets: unknown[], at: number, name: string) => invoke<unknown[]>("sets_rename", { sets, at, name }),
   /** Tells the servers in the options about the folders the files left and went to (which servers: the shared choice). */
   serverTell: (servers: unknown, keys: string, done: { from: string; to: string }[]) =>
-    invoke<{ name: string; folders: { Ok: number } | { Err: string } }[]>("server_tell", { servers, keys, done }),
+    invoke<import("./types").SaidLine[]>("server_tell", { servers, keys, done }),
   subsourceCheck: (key: string) => invoke<void>("subsource_check", { key }),
   discogsCheck: (token: string) => invoke<void>("discogs_check", { token }),
   googleBooksKey: (key: string) => invoke<void>("google_books_key", { key }),
@@ -264,7 +266,7 @@ export const api = {
     invoke<BookCandidate[]>("book_search", { lang, title, author }),
   undo: (id: string) => invoke<ApplyReport>("undo", { id }),
   /** Puts back renames a stopped program left halfway. */
-  recover: () => invoke<{ restored: number; renamed: number; undone: number; tagged: number; stuck: { from: string; to: string }[] }>("recover"),
+  recover: () => invoke<{ title: string; lines: import("./types").SaidLine[]; stuck: [string, string][] } | null>("recover"),
   deleteHistory: (id: string) => invoke<void>("delete_history", { id }),
   clearHistory: () => invoke<number>("clear_history"),
   /** Bytes the kept answers of the catalogues take. */

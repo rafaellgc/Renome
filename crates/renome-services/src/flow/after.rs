@@ -221,6 +221,10 @@ pub struct Line {
     pub n: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub more: Vec<(&'static str, String)>,
+    /// Fields that are errors (a text's key, maybe with `: detail`):
+    /// said in the language as errors are (`err.tags: …`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<(&'static str, String)>,
 }
 
 /// The lines with a count, in order.
@@ -270,6 +274,7 @@ pub fn ask(preview: &Preview, counts: &Counts, send_to: Option<(&Path, bool)>) -
             key: if copy { "confirmCopy" } else { "confirmMove" },
             n: renames,
             more: vec![("dir", dir.display().to_string())],
+            ..Line::default()
         },
         None => Line {
             key: "confirmText",
@@ -287,6 +292,7 @@ pub fn ask(preview: &Preview, counts: &Counts, send_to: Option<(&Path, bool)>) -
             key: "confirmTrashAds",
             n: ads,
             more: vec![("folders", preview.trash_folders.len().to_string())],
+            ..Line::default()
         });
     }
     Ask {

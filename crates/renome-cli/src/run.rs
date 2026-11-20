@@ -188,6 +188,7 @@ pub fn preview_or_apply(
                     &edits,
                     &mut f.chosen,
                     &by_path,
+                    &first.items,
                     rule.get("fromName")
                         .and_then(Value::as_bool)
                         .unwrap_or(false),
@@ -499,13 +500,14 @@ fn rename(
                 line.clone()
             });
         }
-        for e in &report.errors {
-            out::error(&format!(
-                "{} → {}: {}",
-                out::path(&e.from),
-                out::path(&e.to),
-                e.detail
-            ));
+        // As the window says them (`flow::said::failed`).
+        let failed: Vec<_> = report
+            .errors
+            .iter()
+            .map(renome_services::flow::said::failed)
+            .collect();
+        for line in crate::lookup::said(&failed) {
+            out::error(&line);
         }
     }
     let exit = if report.errors.is_empty() {

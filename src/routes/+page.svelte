@@ -38,7 +38,7 @@
   import { TABLE, isKindRule, setRuleTable, type Blocked, newRule, newStep } from "$lib/rules";
   import { loadSecrets, refreshLangs, saveSecrets, saveSettings, secretFields, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
-    AfterCounts, AfterReport, ApplyReport, RenameAsk, SaidLine, Candidate, Copies, MovieStatus, HistoryEntry, OpError, Preview, PreviewItem, Rule, RuleType, Step, View, ViewSort,
+    AfterCounts, AfterReport, ApplyReport, RenameAsk, SaidLine, Candidate, Copies, MovieStatus, HistoryEntry, Preview, PreviewItem, Rule, RuleType, Step, View, ViewSort,
   } from "$lib/types";
   import type { DetailColumn, UpdateFound } from "$lib/types";
 
@@ -154,7 +154,8 @@
   }
   const NO_COUNTS: AfterCounts = { sidecars: 0, bookMeta: 0, covers: 0, playlists: 0, tags: 0, inside: 0, videoTags: 0, subTools: 0, subtitles: 0, besides: 0, lines: [] };
   /** Lines Rust says of the work besides the renames, in the texts. */
-  const said = (lines: SaidLine[]) => lines.map((l) => t(l.key as Key, { n: l.n, ...Object.fromEntries(l.more ?? []) }));
+  const said = (lines: SaidLine[]) =>
+    lines.map((l) => t(l.key as Key, { n: l.n, ...Object.fromEntries(l.more ?? []), ...Object.fromEntries((l.errors ?? []).map(([k, v]) => [k, tError(v)])) }));
   /** What renaming would write besides the renames (asked of the shared flow whenever the list or the choices change). */
   let afterCounts = $state<AfterCounts>(NO_COUNTS);
   $effect(() => {
@@ -614,24 +615,11 @@
   }
 
   const basename = baseName;
-  const errText = (e: OpError) => {
-    if (e.kind === "history") return `${t("err.history")} (${e.detail})`;
-    const why =
-      e.kind === "io"
-        ? e.detail || t("err.io")
-        : e.kind === "tags"
-          ? `${t("err.tags")}: ${tError(e.detail)}`
-          : // The temporary name it was left under, to find it.
-            e.kind === "restoreFailed" && e.detail
-            ? `${t("err.restoreFailed")} ${basename(e.detail)}`
-            : t(`err.${e.kind}`);
-    return `${basename(e.from)} — ${why}`;
-  };
 
-  /** Shows the files that failed, if any. */
+  /** Shows the files that failed, if any (each as the shared flow says it). */
   function showErrors(r: ApplyReport, title: string, text: string) {
     if (!r.errors.length) return;
-    return notify({ title, text, items: r.errors.map(errText) });
+    return notify({ title, text, items: said(r.failed ?? []) });
   }
 
   async function applyAll() {
@@ -779,12 +767,9 @@
     if (!done.length || !settings.servers.length) return;
     api
       .serverTell($state.snapshot(settings.servers), settings.serverKeys || "{}", done.map((op) => ({ from: op.from, to: op.to })))
-      .then((answers) => {
-        const texts = answers
-          .map(({ name, folders: a }) =>
-            "Ok" in a ? (a.Ok ? t("serverTold", { name, n: a.Ok }) : "") : `${t("serverNotTold", { name })}: ${tError(a.Err)}`,
-          )
-          .filter(Boolean);
+      .then((lines) => {
+        // As the shared flow says it (the command line's too).
+        const texts = said(lines);
         if (texts.length) notice = [notice, ...texts].filter(Boolean).join(" · ");
       })
       .catch(() => {});
@@ -803,13 +788,8 @@
       foundUndo = [];
       followMatches(r.moved);
       const restored = r.done.filter((op) => !op.copy).length;
-      notice = [
-        restored || !r.copiesRemoved ? t("restoredN", { n: restored }) : "",
-        r.copiesRemoved ? t("copiesRemovedN", { n: r.copiesRemoved }) : "",
-        r.stopped ? t("undoStopped") : "",
-      ]
-        .filter(Boolean)
-        .join(" · ");
+      // As the shared flow says it (the command line's too).
+      notice = said(r.said ?? []).join(" · ");
       if (history) history = await api.history();
       if (r.kept?.length) await notify({ title: t("copiesKeptTitle"), text: t("copiesKeptText"), items: r.kept });
       await refresh();
@@ -1193,18 +1173,13 @@
       // A rename the program could not finish (it was closed, the
       // computer went off) is put back first.
       try {
+        // As the shared flow says it (the command line's too).
         const r = await api.recover();
-        const renames = r.restored || r.renamed || r.stuck.length;
-        if (renames || r.undone || r.tagged)
+        if (r)
           await notify({
-            title: t(renames || r.undone ? "recoverTitle" : "recoverTagsTitle"),
-            text: [
-              renames ? t("recoverText", { restored: r.restored, renamed: r.renamed }) : "",
-              r.undone ? t("recoverUndone", { undone: r.undone }) : "",
-              r.tagged ? t("recoverTags", { n: r.tagged }) : "",
-              r.stuck.length ? t("recoverStuck") : "",
-            ].filter(Boolean).join("\n\n"),
-            items: r.stuck.map((s) => `${s.from} → ${s.to}`),
+            title: t(r.title as Key),
+            text: said(r.lines).join("\n\n"),
+            items: r.stuck.map(([from, to]) => `${from} → ${to}`),
           });
       } catch {
         // Nothing to recover.
@@ -1594,19 +1569,11 @@
           {#each history as h (h.id)}
             <li>
               <span class="when">{new Date(h.created).toLocaleString(LOCALES[settings.lang])}</span>
-              <span class="muted">
-                {[
-                  h.count || (!h.extra && !h.tagged) ? t("files", { n: h.count }) : "",
-                  !h.count && h.extra ? t("metadataN", { n: h.extra }) : "",
-                  h.tagged ? t("taggedN", { n: h.tagged }) : "",
-                ].filter(Boolean).join(" · ")}
-              </span>
+              <span class="muted">{said(h.said.counts).join(" · ")}</span>
               {#if h.undone}
-                <span class="muted">{t("undone")}</span>
-              {:else if h.failed || h.reverted}
-                <span class="failed" title={t("undoFailedHint")}>
-                  {h.reverted ? t("partlyUndone", { n: h.reverted, total: h.count }) : t("undoFailed")}
-                </span>
+                <span class="muted">{said(h.said.state ? [h.said.state] : []).join("")}</span>
+              {:else if h.said.retry}
+                <span class="failed" title={t("undoFailedHint")}>{said(h.said.state ? [h.said.state] : []).join("")}</span>
                 <button onclick={() => undo(h.id)} disabled={busy} title={t("undoFailedHint")}>{t("retry")}</button>
               {:else}
                 <button onclick={() => undo(h.id)} disabled={busy}>{t("undo")}</button>
@@ -1745,7 +1712,7 @@
 {/if}
 
 {#if help}
-  <Help bind:tab={help} order={ruleOrder} onclose={() => (help = null)} />
+  <Help bind:tab={help} onclose={() => (help = null)} />
 {/if}
 
 {#if showOptions}

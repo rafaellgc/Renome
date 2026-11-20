@@ -92,15 +92,25 @@ pub fn parse(specs: &[String], fields: &[Field]) -> Result<Edits, String> {
 
 use renome_services::flow::edit;
 
+/// The files of `edits` a details window edits (`flow::edit::rows`, as
+/// the window's), in the list's order.
+fn rows(kind: &str, edits: &Edits, items: &[renome_core::PreviewItem]) -> Vec<PathBuf> {
+    let chosen = edits.keys().cloned().collect();
+    edit::rows(kind, items, &chosen, &HashMap::new(), false)
+}
+
 pub fn songs(
     edits: &Edits,
     chosen: &mut HashMap<PathBuf, SongMatch>,
     files: &HashMap<&PathBuf, &FileEntry>,
+    items: &[renome_core::PreviewItem],
     from_name: bool,
 ) {
     // What each starts from, as the window's details window (see
     // `flow::edit`).
-    for (path, changed) in edits {
+    for path in rows("music", edits, items) {
+        let changed = &edits[&path];
+        let path = &path;
         let m = edit::song_start(
             chosen.get(path).cloned(),
             files.get(path).copied(),
@@ -120,11 +130,7 @@ pub fn books(
     // An audiobook's files are edited together (as in the window).
     for (path, changed) in edits {
         let one: std::collections::HashSet<PathBuf> = [path.clone()].into();
-        let mut rows = edit::rows("book", items, &one, &found.parts, audiobooks);
-        if rows.is_empty() {
-            rows.push(path.clone());
-        }
-        for p in rows {
+        for p in edit::rows("book", items, &one, &found.parts, audiobooks) {
             let name = names.get(&p).cloned().unwrap_or_default();
             let m = edit::book_start(
                 found.chosen.get(&p).cloned(),
@@ -144,7 +150,9 @@ pub fn comics(
     names: &HashMap<&PathBuf, String>,
     by_folder: bool,
 ) {
-    for (path, changed) in edits {
+    for path in rows("comic", edits, items) {
+        let changed = &edits[&path];
+        let path = &path;
         let own = found
             .settled
             .iter()

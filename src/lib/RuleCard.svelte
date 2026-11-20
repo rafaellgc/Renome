@@ -92,14 +92,22 @@
 
   let open = $state(true);
   const r = $derived(step.rule);
-  /** The options that do nothing as the rule is set (the Rust catalog
-   *  says: `catalog::inert`, the flows take them as off): hidden. */
+  /** The options hidden as the rule is set (the Rust catalog says:
+   *  `catalog::hidden`, those under another that leaves them nothing to
+   *  do, and the inert ones, which the flows take as off). */
   let inert = $state<string[]>([]);
   $effect(() => {
     const rule = $state.snapshot(step.rule);
     api.ruleInert(rule).then((v) => (inert = v), () => {});
   });
   const applies = (name: string) => !inert.includes(name);
+  /** An option's label and hint, as the Rust catalog names them (the
+   *  command line's `rules` too). */
+  const label = (name: string) => t((TABLE.labels[r.type]?.[name]?.[0] ?? name) as Key);
+  const optHint = (name: string) => {
+    const k = TABLE.labels[r.type]?.[name]?.[1];
+    return k ? t(k as Key) : "";
+  };
   /** A whole-number option's bounds in this rule (the Rust catalog's). */
   const lim = (name: string) => limitsOf(r.type, name);
   /** Bounds in milliseconds as a field in seconds. */
@@ -226,24 +234,24 @@
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
     <fieldset class="body" disabled={!step.enabled} onclick={hintClick} onpointerover={hintOver} transition:slide={{ duration: 160 }}>
       {#if r.type === "replace"}
-        <label>{t("find")} <input bind:value={r.find} spellcheck="false" /></label>
-        <label>{t("replaceWith")} <input bind:value={r.replace} spellcheck="false" /></label>
+        <label>{label("find")} <input bind:value={r.find} spellcheck="false" /></label>
+        <label>{label("replace")} <input bind:value={r.replace} spellcheck="false" /></label>
         <div class="row">
-          <label class="check"><input type="checkbox" bind:checked={r.caseSensitive} /> {t("caseSensitive")}</label>
-          <label class="check" title={t("firstOnlyHint")}><input type="checkbox" bind:checked={r.firstOnly} /> {t("firstOnly")}</label>
+          <label class="check"><input type="checkbox" bind:checked={r.caseSensitive} /> {label("caseSensitive")}</label>
+          <label class="check" title={optHint("firstOnly")}><input type="checkbox" bind:checked={r.firstOnly} /> {label("firstOnly")}</label>
         </div>
         {@render target()}
       {:else if r.type === "regex"}
-        <label>{t("expression")} <input class="mono" bind:value={r.pattern} spellcheck="false" placeholder={"(\\d+) - (.*)"} /></label>
-        <label>{t("replaceWith")} <input class="mono" bind:value={r.replace} spellcheck="false" placeholder="$2 ($1)" /></label>
+        <label>{label("pattern")} <input class="mono" bind:value={r.pattern} spellcheck="false" placeholder={"(\\d+) - (.*)"} /></label>
+        <label>{label("replace")} <input class="mono" bind:value={r.replace} spellcheck="false" placeholder="$2 ($1)" /></label>
         <div class="row">
-          <label class="check"><input type="checkbox" bind:checked={r.caseSensitive} /> {t("caseSensitive")}</label>
-          <label class="check" title={t("firstOnlyHint")}><input type="checkbox" bind:checked={r.firstOnly} /> {t("firstOnly")}</label>
+          <label class="check"><input type="checkbox" bind:checked={r.caseSensitive} /> {label("caseSensitive")}</label>
+          <label class="check" title={optHint("firstOnly")}><input type="checkbox" bind:checked={r.firstOnly} /> {label("firstOnly")}</label>
         </div>
         {@render target()}
         <p class="hint mono">{t("groupsHint")}</p>
       {:else if r.type === "rearrange"}
-        <label>{t("separator")} <input class="mono sep" bind:value={r.separator} spellcheck="false" placeholder=" - " /></label>
+        <label>{label("separator")} <input class="mono sep" bind:value={r.separator} spellcheck="false" placeholder=" - " /></label>
         {#if parts.length}
           <div class="parts">
             <span class="hint">{t("partsOfSample")}</span>
@@ -256,7 +264,7 @@
         {:else if sample}
           <p class="hint">{t("noParts")}</p>
         {/if}
-        <label>{t("newOrder")} <input class="mono" bind:value={r.order} spellcheck="false" placeholder="1 - 3 - 2" /></label>
+        <label>{label("order")} <input class="mono" bind:value={r.order} spellcheck="false" placeholder="1 - 3 - 2" /></label>
         <p class="hint">{t("newOrderHint")}</p>
         {@render target()}
       {:else if r.type === "list"}
@@ -266,126 +274,127 @@
         {#if !r.names.trim() && currentNames.length}
           <button class="fill" title={t("listFillHint")} onclick={() => (r.names = currentNames.join("\n"))}>{t("listFill")}</button>
         {/if}
-        <label class="check" title={t("pairsHint")}><input type="checkbox" bind:checked={r.pairs} /> {t("pairs")}</label>
+        <label class="check" title={optHint("pairs")}><input type="checkbox" bind:checked={r.pairs} /> {label("pairs")}</label>
         <p class="hint">{t("listOrderHint")}</p>
       {:else if r.type === "case"}
-        <label>{t("mode")}
+        <label>{label("mode")}
           <select bind:value={r.mode}>
             {@render options("mode")}
           </select>
         </label>
-        <label>{t("caseKeep")} <input bind:value={r.keepWords} spellcheck="false" placeholder="swat, dvd" title={t("caseKeepHint")} /></label>
+        <label>{label("keepWords")} <input bind:value={r.keepWords} spellcheck="false" placeholder="swat, dvd" title={optHint("keepWords")} /></label>
         {@render target()}
       {:else if r.type === "insert"}
-        <label>{t("what")}
+        <label>{label("source")}
           <select bind:value={r.source}>
             {@render options("source")}
           </select>
         </label>
-        {#if r.source === "text"}
-          <label>{t("text")} <input bind:value={r.text} spellcheck="false" /></label>
-        {:else if r.source !== "folder"}
-          <label>{t("format")} <input class="mono" bind:value={r.dateFormat} spellcheck="false" /></label>
+        {#if applies("text")}
+          <label>{label("text")} <input bind:value={r.text} spellcheck="false" /></label>
+        {/if}
+        {#if applies("dateFormat")}
+          <label>{label("dateFormat")} <input class="mono" bind:value={r.dateFormat} spellcheck="false" /></label>
           <p class="hint mono">{t("formatHint")}</p>
-          {#if r.source === "taken"}
-            <label class="check"><input type="checkbox" bind:checked={r.fallback} /> {t("takenFallback")}</label>
-            <p class="hint">{t("takenHint")}</p>
-          {/if}
+        {/if}
+        {#if applies("fallback")}
+          <label class="check"><input type="checkbox" bind:checked={r.fallback} /> {label("fallback")}</label>
+          <p class="hint">{t("takenHint")}</p>
         {/if}
         <div class="row">
-          <label>{t("where")}
+          <label>{label("at")}
             <select bind:value={r.at}>
               {@render options("at")}
             </select>
           </label>
-          {#if r.at === "index" || r.at === "fromEnd"}
-            <label class="narrow">{t("position")} <input type="number" {...lim("position")} bind:value={r.position} /></label>
+          {#if applies("position")}
+            <label class="narrow">{label("position")} <input type="number" {...lim("position")} bind:value={r.position} /></label>
           {/if}
         </div>
       {:else if r.type === "number"}
-        <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
+        <label>{label("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
         <p class="hint mono">{t("templateHint")}</p>
         <div class="row">
-          <label class="narrow">{t("start")} <input type="number" {...lim("start")} bind:value={r.start} /></label>
-          <label class="narrow">{t("step")} <input type="number" {...lim("step")} bind:value={r.step} /></label>
-          <label class="narrow">{t("digits")} <input type="number" {...lim("digits")} bind:value={r.digits} /></label>
+          <label class="narrow">{label("start")} <input type="number" {...lim("start")} bind:value={r.start} /></label>
+          <label class="narrow">{label("step")} <input type="number" {...lim("step")} bind:value={r.step} /></label>
+          <label class="narrow">{label("digits")} <input type="number" {...lim("digits")} bind:value={r.digits} /></label>
         </div>
-        <label class="check"><input type="checkbox" bind:checked={r.perFolder} /> {t("perFolder")}</label>
-        <label class="check" title={t("pairsHint")}><input type="checkbox" bind:checked={r.pairs} /> {t("pairs")}</label>
+        <label class="check"><input type="checkbox" bind:checked={r.perFolder} /> {label("perFolder")}</label>
+        <label class="check" title={optHint("pairs")}><input type="checkbox" bind:checked={r.pairs} /> {label("pairs")}</label>
       {:else if r.type === "remove"}
         <div class="checks">
-          <label class="check"><input type="checkbox" bind:checked={r.extraSpaces} /> {t("rmExtraSpaces")}</label>
-          <label class="check"><input type="checkbox" bind:checked={r.allSpaces} /> {t("rmAllSpaces")}</label>
-          <label class="check"><input type="checkbox" bind:checked={r.accents} /> {t("rmAccents")}</label>
-          <label class="check"><input type="checkbox" bind:checked={r.digits} /> {t("rmDigits")}</label>
-          <label class="check" title={t("rmLeadingNumberHint")}><input type="checkbox" bind:checked={r.leadingNumber} /> {t("rmLeadingNumber")}</label>
+          <label class="check"><input type="checkbox" bind:checked={r.extraSpaces} /> {label("extraSpaces")}</label>
+          <label class="check"><input type="checkbox" bind:checked={r.allSpaces} /> {label("allSpaces")}</label>
+          <label class="check"><input type="checkbox" bind:checked={r.accents} /> {label("accents")}</label>
+          <label class="check"><input type="checkbox" bind:checked={r.digits} /> {label("digits")}</label>
+          <label class="check" title={optHint("leadingNumber")}><input type="checkbox" bind:checked={r.leadingNumber} /> {label("leadingNumber")}</label>
         </div>
-        <label>{t("chars")} <input class="mono" bind:value={r.chars} spellcheck="false" placeholder="_#[]" /></label>
+        <label>{label("chars")} <input class="mono" bind:value={r.chars} spellcheck="false" placeholder="_#[]" /></label>
         <div class="row">
-          <label>{t("maxLength")} <input type="number" {...lim("maxLength")} bind:value={r.maxLength} /></label>
+          <label>{label("maxLength")} <input type="number" {...lim("maxLength")} bind:value={r.maxLength} /></label>
         </div>
         {@render target()}
       {:else if r.type === "convert"}
         <div class="checks">
-          <label class="check" title={t("cvMojibakeHint")}><input type="checkbox" bind:checked={r.mojibake} /> {t("cvMojibake")}</label>
-          <label class="check"><input type="checkbox" bind:checked={r.transliterate} /> {t("cvLatin")}</label>
-          <label class="check"><input type="checkbox" bind:checked={r.splitWords} /> {t("cvSplit")}</label>
+          <label class="check" title={optHint("mojibake")}><input type="checkbox" bind:checked={r.mojibake} /> {label("mojibake")}</label>
+          <label class="check"><input type="checkbox" bind:checked={r.transliterate} /> {label("transliterate")}</label>
+          <label class="check"><input type="checkbox" bind:checked={r.splitWords} /> {label("splitWords")}</label>
         </div>
-        <label>{t("cvWeb")}
-          <select bind:value={r.webSafe} title={t("cvWebHint")}>
+        <label>{label("webSafe")}
+          <select bind:value={r.webSafe} title={optHint("webSafe")}>
             {@render options("webSafe")}
           </select>
         </label>
         {@render target()}
       {:else if r.type === "removeRange"}
         <div class="row">
-          <label>{t("from")}
+          <label>{label("from")}
             <select bind:value={r.from}>
               {@render options("from")}
             </select>
           </label>
-          {#if r.from === "position"}
-            <label class="narrow">{t("position")} <input type="number" {...lim("fromPosition")} bind:value={r.fromPosition} /></label>
-          {:else if r.from === "text"}
-            <label>{t("text")} <input bind:value={r.fromText} spellcheck="false" /></label>
+          {#if applies("fromPosition")}
+            <label class="narrow">{label("fromPosition")} <input type="number" {...lim("fromPosition")} bind:value={r.fromPosition} /></label>
+          {:else if applies("fromText")}
+            <label>{label("fromText")} <input bind:value={r.fromText} spellcheck="false" /></label>
           {/if}
         </div>
         <div class="row">
-          <label>{t("to")}
+          <label>{label("to")}
             <select bind:value={r.to}>
               {@render options("to")}
             </select>
           </label>
-          {#if r.to === "position"}
-            <label class="narrow">{t("position")} <input type="number" {...lim("toPosition")} bind:value={r.toPosition} /></label>
-          {:else if r.to === "text"}
-            <label>{t("text")} <input bind:value={r.toText} spellcheck="false" /></label>
+          {#if applies("toPosition")}
+            <label class="narrow">{label("toPosition")} <input type="number" {...lim("toPosition")} bind:value={r.toPosition} /></label>
+          {:else if applies("toText")}
+            <label>{label("toText")} <input bind:value={r.toText} spellcheck="false" /></label>
           {/if}
         </div>
-        {#if r.from === "text" || r.to === "text"}
-          <label class="check"><input type="checkbox" bind:checked={r.inclusive} /> {t("inclusive")}</label>
+        {#if applies("inclusive")}
+          <label class="check"><input type="checkbox" bind:checked={r.inclusive} /> {label("inclusive")}</label>
         {/if}
       {:else if r.type === "charAt"}
         <div class="row">
-          <label class="narrow">{t("position")} <input type="number" {...lim("position")} bind:value={r.position} /></label>
-          <label class="check"><input type="checkbox" bind:checked={r.fromEnd} /> {t("countFromEnd")}</label>
+          <label class="narrow">{label("position")} <input type="number" {...lim("position")} bind:value={r.position} /></label>
+          <label class="check"><input type="checkbox" bind:checked={r.fromEnd} /> {label("fromEnd")}</label>
         </div>
         <div class="row">
-          <label>{t("onlyIf")} <input bind:value={r.onlyIf} placeholder={t("any")} /></label>
-          <label>{t("replaceBy")} <input bind:value={r.replace} placeholder={t("deleteIt")} /></label>
+          <label>{label("onlyIf")} <input bind:value={r.onlyIf} placeholder={t("any")} /></label>
+          <label>{label("replace")} <input bind:value={r.replace} placeholder={t("deleteIt")} /></label>
         </div>
-        {#if r.onlyIf}
-          <label class="check"><input type="checkbox" bind:checked={r.caseSensitive} /> {t("caseSensitive")}</label>
+        {#if applies("caseSensitive")}
+          <label class="check"><input type="checkbox" bind:checked={r.caseSensitive} /> {label("caseSensitive")}</label>
         {/if}
       {:else if r.type === "extension"}
         <div class="row">
-          <label>{t("action")}
+          <label>{label("mode")}
             <select bind:value={r.mode}>
               {@render options("mode")}
             </select>
           </label>
-          {#if r.mode === "set"}
-            <label>{t("newExt")} <input bind:value={r.value} spellcheck="false" placeholder="jpg" /></label>
+          {#if applies("value")}
+            <label>{label("value")} <input bind:value={r.value} spellcheck="false" placeholder="jpg" /></label>
           {/if}
         </div>
         {#if r.mode === "content"}
@@ -394,58 +403,58 @@
       {:else if r.type === "movie"}
         <p class="hint top">{t("movieHint")}</p>
         <h4 class="sect">{t("sectName")}</h4>
-        <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
+        <label>{label("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
         <p class="hint mono">{t("movieTemplateHint")}</p>
-        <label class="colon">{t("colonLabel")} <input class="mono sep" bind:value={r.colonAs} spellcheck="false" /></label>
-        <label class="check"><input type="checkbox" bind:checked={r.folder} /> <span>{t("folderLabel")}<small>{t("folderHint")}</small></span></label>
-        <label class="check"><input type="checkbox" bind:checked={r.trashAds} /> <span>{t("trashAdsLabel")}<small>{t("trashAdsHint")}</small></span></label>
+        <label class="colon">{label("colonAs")} <input class="mono sep" bind:value={r.colonAs} spellcheck="false" /></label>
+        <label class="check"><input type="checkbox" bind:checked={r.folder} /> <span>{label("folder")}<small>{optHint("folder")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.trashAds} /> <span>{label("trashAds")}<small>{optHint("trashAds")}</small></span></label>
         <h4 class="sect">{t("sectSearch")}</h4>
         {@render actions(t("tmdbSearch"), "movieSummary")}
         <h4 class="sect">{t("sectBeside")}</h4>
-        <label class="check"><input type="checkbox" bind:checked={r.nfo} /> <span>{t("sidecarLabel")}<small>{t("sidecarHint")}</small></span></label>
-        {#if r.nfo}
-          <label class="check sub"><input type="checkbox" bind:checked={r.backdrop} /> {t("fanartLabel")}</label>
+        <label class="check"><input type="checkbox" bind:checked={r.nfo} /> <span>{label("nfo")}<small>{optHint("nfo")}</small></span></label>
+        {#if applies("backdrop")}
+          <label class="check sub"><input type="checkbox" bind:checked={r.backdrop} /> {label("backdrop")}</label>
         {/if}
         <h4 class="sect">{t("sectInside")}</h4>
-        <label class="check"><input type="checkbox" bind:checked={r.videoTags} /> <span>{t("videoTagsLabel")}<small>{t("videoTagsHint")}</small></span></label>
-        {#if r.videoTags}{@render videoOptions()}{/if}
+        <label class="check"><input type="checkbox" bind:checked={r.videoTags} /> <span>{label("videoTags")}<small>{optHint("videoTags")}</small></span></label>
+        {#if applies("videoClean")}{@render videoOptions()}{/if}
         <h4 class="sect">{t("sectList")}</h4>
-        <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("movieMissingLabel")}<small>{t("movieMissingHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{label("missing")}<small>{optHint("missing")}</small></span></label>
         <h4 class="sect">{t("sectSubs")}</h4>
         {@render subtitles()}
       {:else if r.type === "series"}
         <p class="hint top">{t("seriesHint")}</p>
         <h4 class="sect">{t("sectName")}</h4>
-        <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
+        <label>{label("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
         <p class="hint mono">{t("seriesTemplateHint")}</p>
-        <label class="colon">{t("colonLabel")} <input class="mono sep" bind:value={r.colonAs} spellcheck="false" /></label>
-        <label class="check"><input type="checkbox" bind:checked={r.folders} /> <span>{t("seriesFoldersLabel")}<small>{t("seriesFoldersHint")}</small></span></label>
-        {#if r.folders}
-          <label class="sub">{t("seriesFolderName")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
+        <label class="colon">{label("colonAs")} <input class="mono sep" bind:value={r.colonAs} spellcheck="false" /></label>
+        <label class="check"><input type="checkbox" bind:checked={r.folders} /> <span>{label("folders")}<small>{optHint("folders")}</small></span></label>
+        {#if applies("folderTemplate")}
+          <label class="sub">{label("folderTemplate")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
         {/if}
-        <label class="check"><input type="checkbox" bind:checked={r.trashAds} /> <span>{t("trashAdsLabel")}<small>{t("trashAdsHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.trashAds} /> <span>{label("trashAds")}<small>{optHint("trashAds")}</small></span></label>
         <h4 class="sect">{t("sectSearch")}</h4>
-        <label>{t("seriesSource")}
+        <label>{label("source")}
           <select bind:value={r.source}>
             {@render options("source")}
           </select>
         </label>
         {#if r.source === "anilist"}<p class="hint">{t("animeHint")}</p>{/if}
-        <label>{t("seriesShow")} <input bind:value={r.show} placeholder={t(r.source === "anilist" ? "seriesShowPlaceholderAnilist" : "seriesShowPlaceholder")} spellcheck="false" /></label>
+        <label>{label("show")} <input bind:value={r.show} placeholder={t(r.source === "anilist" ? "seriesShowPlaceholderAnilist" : "seriesShowPlaceholder")} spellcheck="false" /></label>
         {#if lookup?.show}<p class="hint">{t("seriesCurrent", { show: lookup.show })}</p>{/if}
         {@render actions(t("tvSearch"), "seriesSummary")}
         {#if applies("nfo")}
           <h4 class="sect">{t("sectBeside")}</h4>
-          <label class="check"><input type="checkbox" bind:checked={r.nfo} /> <span>{t("seriesSidecarLabel")}<small>{t("seriesSidecarHint")}</small></span></label>
-          {#if r.nfo}
-            <label class="check sub"><input type="checkbox" bind:checked={r.backdrop} /> {t("fanartLabel")}</label>
+          <label class="check"><input type="checkbox" bind:checked={r.nfo} /> <span>{label("nfo")}<small>{optHint("nfo")}</small></span></label>
+          {#if applies("backdrop")}
+            <label class="check sub"><input type="checkbox" bind:checked={r.backdrop} /> {label("backdrop")}</label>
           {/if}
           <h4 class="sect">{t("sectInside")}</h4>
-          <label class="check"><input type="checkbox" bind:checked={r.videoTags} /> <span>{t("videoTagsLabel")}<small>{t("videoTagsHintTv")}</small></span></label>
-          {#if r.videoTags}{@render videoOptions()}{/if}
+          <label class="check"><input type="checkbox" bind:checked={r.videoTags} /> <span>{label("videoTags")}<small>{optHint("videoTags")}</small></span></label>
+          {#if applies("videoClean")}{@render videoOptions()}{/if}
         {/if}
         <h4 class="sect">{t("sectList")}</h4>
-        <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("seriesMissingLabel")}<small>{t("seriesMissingHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{label("missing")}<small>{optHint("missing")}</small></span></label>
         {#if applies("subtitles")}
           <h4 class="sect">{t("sectSubs")}</h4>
           {@render subtitles()}
@@ -460,12 +469,12 @@
             {#each ready.names as n, i (n)}<option value={n}>{t(`photoReady${i}` as Key)}</option>{/each}
           </select>
         </label>
-        <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
+        <label>{label("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
         <p class="hint mono">{t("photoTemplateHint")}</p>
         <h4 class="sect">{t("sectDate")}</h4>
-        <label class="check"><input type="checkbox" bind:checked={r.fromName} /> <span>{t("photoFromName")}<small>{t("photoFromNameHint")}</small></span></label>
-        <label class="check"><input type="checkbox" bind:checked={r.modified} /> <span>{t("photoModified")}<small>{t("photoModifiedHint")}</small></span></label>
-        <label class="shift">{t("photoShift")}
+        <label class="check"><input type="checkbox" bind:checked={r.fromName} /> <span>{label("fromName")}<small>{optHint("fromName")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.modified} /> <span>{label("modified")}<small>{optHint("modified")}</small></span></label>
+        <label class="shift">{label("shiftHours")}
           <input type="number" {...lim("shiftHours")} step="1" bind:value={r.shiftHours} />
         </label>
         <p class="hint">{t("photoShiftHint")}</p>
@@ -476,35 +485,35 @@
           <p class="hint">{edit.hint}{edit.typed ? ` ${t("photoEditTypedN", { n: edit.typed })}` : ""}</p>
         {/if}
         <h4 class="sect">{t("sectFolders")}</h4>
-        <label class="check"><input type="checkbox" bind:checked={r.folders} /> <span>{t("photoFolders")}<small>{t("photoFoldersHint")}</small></span></label>
-        {#if r.folders}
+        <label class="check"><input type="checkbox" bind:checked={r.folders} /> <span>{label("folders")}<small>{optHint("folders")}</small></span></label>
+        {#if applies("folderTemplate")}
           <label class="sub">{t("photoFolderReady")}
             <select value={ready.folders.includes(r.folderTemplate as never) ? r.folderTemplate : ""} onchange={(e) => { const v = (e.currentTarget as HTMLSelectElement).value; if (v) r.folderTemplate = v; }}>
               <option value="" disabled>{t("comicPresetCustom")}</option>
               {#each ready.folders as f (f)}<option value={f}>{f}</option>{/each}
             </select>
           </label>
-          <label class="sub">{t("musicFolderName")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
+          <label class="sub">{label("folderTemplate")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
         {/if}
         <h4 class="sect">{t("sectInside")}</h4>
-        <label class="check"><input type="checkbox" bind:checked={r.setModified} /> <span>{t("photoSetModified")}<small>{t("photoSetModifiedHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.setModified} /> <span>{label("setModified")}<small>{optHint("setModified")}</small></span></label>
         <p class="hint">{t("photoCopiesHint")}</p>
       {:else if r.type === "subtitle"}
         {@const fps = (n: number) => n.toLocaleString(settings.lang === "en" ? "en-US" : "pt-BR")}
         <p class="hint top">{t("subToolsHint")}</p>
         <h4 class="sect">{t("sectFormat")}</h4>
-        <label class="check"><input type="checkbox" bind:checked={r.toSrt} /> <span>{t("subToSrt")}<small>{t("subToSrtHint")}</small></span></label>
-        {#if r.toSrt}
-          <label class="sub">{t("comicOriginal")}
+        <label class="check"><input type="checkbox" bind:checked={r.toSrt} /> <span>{label("toSrt")}<small>{optHint("toSrt")}</small></span></label>
+        {#if applies("original")}
+          <label class="sub">{label("original")}
             <select bind:value={r.original}>
               {@render options("original")}
             </select>
           </label>
         {/if}
-        <label class="check"><input type="checkbox" bind:checked={r.utf8} /> <span>{t("subUtf8")}<small>{t("subUtf8Hint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.utf8} /> <span>{label("utf8")}<small>{optHint("utf8")}</small></span></label>
         <h4 class="sect">{t("sectClean")}</h4>
-        <label class="check"><input type="checkbox" bind:checked={r.ads} /> <span>{t("subAds")}<small>{t("subAdsHint")}</small></span></label>
-        <label class="check"><input type="checkbox" bind:checked={r.hearing} /> <span>{t("subHearing")}<small>{t("subHearingHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.ads} /> <span>{label("ads")}<small>{optHint("ads")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.hearing} /> <span>{label("hearing")}<small>{optHint("hearing")}</small></span></label>
         <h4 class="sect">{t("sectTime")}</h4>
         <label class="shift">{t("subShift")}
           <input
@@ -534,72 +543,72 @@
         </label>
         <p class="hint">{t("subFpsHint")}</p>
         <h4 class="sect">{t("sectExtract")}</h4>
-        <label class="check"><input type="checkbox" bind:checked={r.extract} /> <span>{t("subExtract")}<small>{t("subExtractHint")}</small></span></label>
-        {#if r.extract}
-          <label class="sub">{t("subExtractLangs")} <input class="mono" bind:value={r.extractLangs} placeholder={t("subExtractAll")} spellcheck="false" /></label>
+        <label class="check"><input type="checkbox" bind:checked={r.extract} /> <span>{label("extract")}<small>{optHint("extract")}</small></span></label>
+        {#if applies("extractLangs")}
+          <label class="sub">{label("extractLangs")} <input class="mono" bind:value={r.extractLangs} placeholder={t("subExtractAll")} spellcheck="false" /></label>
         {/if}
       {:else if r.type === "music"}
         <p class="hint top">{t("musicHint")}</p>
         <h4 class="sect">{t("sectName")}</h4>
-        <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
+        <label>{label("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
         <p class="hint mono">{t("musicTemplateHint")}</p>
-        <label class="colon">{t("colonLabel")} <input class="mono sep" bind:value={r.colonAs} spellcheck="false" /></label>
-        <label class="check"><input type="checkbox" bind:checked={r.discPrefix} /> <span>{t("musicDiscPrefix")}<small>{t("musicDiscPrefixHint")}</small></span></label>
-        <label class="check"><input type="checkbox" bind:checked={r.fromName} /> <span>{t("musicFromName")}<small>{t("musicFromNameHint")}</small></span></label>
-        <label class="check"><input type="checkbox" bind:checked={r.folders} /> <span>{t("musicFolders")}<small>{t("musicFoldersHint")}</small></span></label>
-        {#if r.folders}
-          <label class="sub">{t("musicFolderName")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
+        <label class="colon">{label("colonAs")} <input class="mono sep" bind:value={r.colonAs} spellcheck="false" /></label>
+        <label class="check"><input type="checkbox" bind:checked={r.discPrefix} /> <span>{label("discPrefix")}<small>{optHint("discPrefix")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.fromName} /> <span>{label("fromName")}<small>{optHint("fromName")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.folders} /> <span>{label("folders")}<small>{optHint("folders")}</small></span></label>
+        {#if applies("folderTemplate")}
+          <label class="sub">{label("folderTemplate")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
         {/if}
         <h4 class="sect">{t("sectBeside")}</h4>
-        <label class="check"><input type="checkbox" bind:checked={r.playlist} /> <span>{t("musicPlaylist")}<small>{t("musicPlaylistHint")}</small></span></label>
-        <label class="check"><input type="checkbox" bind:checked={r.cover} /> <span>{t("musicCover")}<small>{t("musicCoverHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.playlist} /> <span>{label("playlist")}<small>{optHint("playlist")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.cover} /> <span>{label("cover")}<small>{optHint("cover")}</small></span></label>
         <h4 class="sect">{t("sectSearch")}</h4>
         <p class="hint top">{t("mbHint")}</p>
-        <label class="check"><input type="checkbox" bind:checked={r.identifyBySound} /> <span>{t("musicListen")}<small>{t("musicListenHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.identifyBySound} /> <span>{label("identifyBySound")}<small>{optHint("identifyBySound")}</small></span></label>
         {@render actions(t("mbSearch"), "albumSummary")}
         <h4 class="sect">{t("sectInside")}</h4>
-        <label class="check"><input type="checkbox" bind:checked={r.writeTags} /> <span>{t("musicWriteTags")}<small>{t("musicWriteTagsHint")}</small></span></label>
-        {#if r.writeTags}
-          <label class="check sub"><input type="checkbox" bind:checked={r.embedCover} /> <span>{t("musicEmbedCover")}<small>{t("musicEmbedCoverHint")}</small></span></label>
-          {#if r.embedCover}
-            <label class="sub">{t("musicCoverSize")}
+        <label class="check"><input type="checkbox" bind:checked={r.writeTags} /> <span>{label("writeTags")}<small>{optHint("writeTags")}</small></span></label>
+        {#if applies("embedCover")}
+          <label class="check sub"><input type="checkbox" bind:checked={r.embedCover} /> <span>{label("embedCover")}<small>{optHint("embedCover")}</small></span></label>
+          {#if applies("coverSize")}
+            <label class="sub">{label("coverSize")}
               <select bind:value={r.coverSize}>
                 {#each choicesOf("music", "coverSize") as n (n)}<option value={n}>{n === 1200 ? t("musicCoverSize1200") : `${n} px`}</option>{/each}
               </select>
             </label>
           {/if}
-          <label class="check sub"><input type="checkbox" bind:checked={r.cleanTags} /> <span>{t("musicCleanTags")}<small>{t("musicCleanTagsHint")}</small></span></label>
+          <label class="check sub"><input type="checkbox" bind:checked={r.cleanTags} /> <span>{label("cleanTags")}<small>{optHint("cleanTags")}</small></span></label>
         {/if}
         <h4 class="sect">{t("sectList")}</h4>
-        <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("musicMissingLabel")}<small>{t("musicMissingHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{label("missing")}<small>{optHint("missing")}</small></span></label>
       {:else if r.type === "book"}
         <p class="hint top">{t("bookHint")}</p>
         <h4 class="sect">{t("sectName")}</h4>
-        <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
+        <label>{label("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
         <p class="hint mono">{t("bookTemplateHint")}</p>
-        <label class="colon">{t("colonLabel")} <input class="mono sep" bind:value={r.colonAs} spellcheck="false" /></label>
-        <label class="check"><input type="checkbox" bind:checked={r.folders} /> <span>{t("bookFolders")}<small>{t("bookFoldersHint")}</small></span></label>
-        {#if r.folders}
-          <label class="sub">{t("musicFolderName")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
+        <label class="colon">{label("colonAs")} <input class="mono sep" bind:value={r.colonAs} spellcheck="false" /></label>
+        <label class="check"><input type="checkbox" bind:checked={r.folders} /> <span>{label("folders")}<small>{optHint("folders")}</small></span></label>
+        {#if applies("folderTemplate")}
+          <label class="sub">{label("folderTemplate")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
         {/if}
-        <label class="check"><input type="checkbox" bind:checked={r.audiobooks} /> <span>{t("bookAudio")}<small>{t("bookAudioHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.audiobooks} /> <span>{label("audiobooks")}<small>{optHint("audiobooks")}</small></span></label>
         <h4 class="sect">{t("sectSearch")}</h4>
         {@render actions(t("olSearch"), "bookSummary")}
         <h4 class="sect">{t("sectBeside")}</h4>
-        <label class="check"><input type="checkbox" bind:checked={r.cover} /> <span>{t("bookCover")}<small>{t("bookCoverHint")}</small></span></label>
-        <label class="check"><input type="checkbox" bind:checked={r.metadataOpf} /> <span>{t("bookOpf")}<small>{t("bookOpfHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.cover} /> <span>{label("cover")}<small>{optHint("cover")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.metadataOpf} /> <span>{label("metadataOpf")}<small>{optHint("metadataOpf")}</small></span></label>
         <h4 class="sect">{t("sectInside")}</h4>
-        <label class="check"><input type="checkbox" bind:checked={r.writeEpub} /> <span>{t("bookWriteEpub")}<small>{t("bookWriteEpubHint")}</small></span></label>
-        <label class="check"><input type="checkbox" bind:checked={r.epub3} /> <span>{t("bookEpub3")}<small>{t("bookEpub3Hint")}</small></span></label>
-        <label class="check"><input type="checkbox" bind:checked={r.shrinkImages} /> <span>{t("bookShrink")}<small>{t("bookShrinkHint")}</small></span></label>
-        {#if r.audiobooks}
-          <label class="check"><input type="checkbox" bind:checked={r.audioTags} /> <span>{t("bookAudioTags")}<small>{t("bookAudioTagsHint")}</small></span></label>
-          {#if r.audioTags}
-            <label class="check sub"><input type="checkbox" bind:checked={r.audioClean} /> <span>{t("bookAudioClean")}<small>{t("bookAudioCleanHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.writeEpub} /> <span>{label("writeEpub")}<small>{optHint("writeEpub")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.epub3} /> <span>{label("epub3")}<small>{optHint("epub3")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.shrinkImages} /> <span>{label("shrinkImages")}<small>{optHint("shrinkImages")}</small></span></label>
+        {#if applies("audioTags")}
+          <label class="check"><input type="checkbox" bind:checked={r.audioTags} /> <span>{label("audioTags")}<small>{optHint("audioTags")}</small></span></label>
+          {#if applies("audioClean")}
+            <label class="check sub"><input type="checkbox" bind:checked={r.audioClean} /> <span>{label("audioClean")}<small>{optHint("audioClean")}</small></span></label>
           {/if}
         {/if}
         <h4 class="sect">{t("sectConvert")}</h4>
-        <label>{t("bookConvert")}
+        <label>{label("convertTo")}
           <select bind:value={r.convertTo}>
             {#each menuOf("book", "convertTo") as c (c.value)}
               {#if c.value !== "pdf" || canPrint || r.convertTo === "pdf"}<option value={c.value}>{c.value ? formatOption(t(c.label as Key), c.value) : t(c.label as Key)}</option>{/if}
@@ -607,26 +616,26 @@
           </select>
         </label>
         <p class="hint">{t("bookConvertHint")}</p>
-        {#if r.convertTo}
-          <label class="sub">{t("readerForOptional")}
+        {#if applies("model")}
+          <label class="sub">{label("model")}
             <select bind:value={r.model}>
               <option value="">{t("readerAny")}</option>
               {@render readerOptions(false)}
             </select>
           </label>
           {#if why}<p class="warn sub">{why}</p>{/if}
-          {#if bookDev}
-            <label class="check sub"><input type="checkbox" bind:checked={r.otherReaderApps} /> <span>{t("comicAnyProgram")}<small>{t("comicAnyProgramHint")}</small></span></label>
+          {#if applies("otherReaderApps")}
+            <label class="check sub"><input type="checkbox" bind:checked={r.otherReaderApps} /> <span>{label("otherReaderApps")}<small>{optHint("otherReaderApps")}</small></span></label>
           {/if}
           <p class="hint sub">{t(r.convertTo === "pdf" ? (bookDev ? "bookPdfScreen" : "bookPdfA5") : "bookReaderHint")}</p>
-          <label class="sub">{t("comicOriginal")}
+          <label class="sub">{label("original")}
             <select bind:value={r.original}>
               {@render options("original")}
             </select>
           </label>
         {/if}
         <h4 class="sect">{t("sectList")}</h4>
-        <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("bookMissingLabel")}<small>{t("bookMissingHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{label("missing")}<small>{optHint("missing")}</small></span></label>
       {:else if r.type === "comic"}
         <p class="hint top">{t("comicHint")}</p>
         <label>{t("comicPreset")}
@@ -643,48 +652,48 @@
         </label>
         <p class="hint">{t("comicPresetHint")}</p>
         <h4 class="sect">{t("sectName")}</h4>
-        <label>{t("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
+        <label>{label("template")} <input class="mono" bind:value={r.template} spellcheck="false" /></label>
         <p class="hint mono">{t("comicTemplateHint")}</p>
-        <label class="colon">{t("colonLabel")} <input class="mono sep" bind:value={r.colonAs} spellcheck="false" /></label>
-        <label class="check"><input type="checkbox" bind:checked={r.seriesByFolder} /> <span>{t("comicByFolder")}<small>{t("comicByFolderHint")}</small></span></label>
-        <label class="check"><input type="checkbox" bind:checked={r.folders} /> <span>{t("comicFolders")}<small>{t("comicFoldersHint")}</small></span></label>
-        {#if r.folders}
-          <label class="sub">{t("musicFolderName")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
+        <label class="colon">{label("colonAs")} <input class="mono sep" bind:value={r.colonAs} spellcheck="false" /></label>
+        <label class="check"><input type="checkbox" bind:checked={r.seriesByFolder} /> <span>{label("seriesByFolder")}<small>{optHint("seriesByFolder")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.folders} /> <span>{label("folders")}<small>{optHint("folders")}</small></span></label>
+        {#if applies("folderTemplate")}
+          <label class="sub">{label("folderTemplate")} <input class="mono" bind:value={r.folderTemplate} spellcheck="false" /></label>
         {/if}
         <h4 class="sect">{t("sectSearch")}</h4>
-        <label>{t("comicSource")}
+        <label>{label("source")}
           <select bind:value={r.source}>
             {@render options("source")}
           </select>
         </label>
         <p class="hint">{t(SOURCE_HINT[r.source] ?? "gcdHint")}</p>
         {#if applies("barcode")}
-          <label class="check"><input type="checkbox" bind:checked={r.barcode} /> <span>{t("comicBarcodeLabel")}<small>{t("comicBarcodeHint")}</small></span></label>
+          <label class="check"><input type="checkbox" bind:checked={r.barcode} /> <span>{label("barcode")}<small>{optHint("barcode")}</small></span></label>
         {/if}
-        <label>{t("comicSeries")} <input bind:value={r.series} placeholder={t("comicSeriesPlaceholder")} spellcheck="false" /></label>
+        <label>{label("series")} <input bind:value={r.series} placeholder={t("comicSeriesPlaceholder")} spellcheck="false" /></label>
         {#if lookup?.show}<p class="hint">{t("seriesCurrent", { show: lookup.show })}</p>{/if}
-        <label>{t("comicSkipPublishers")} <input bind:value={r.skipPublishers} placeholder={t("comicSkipPublishersPlaceholder")} spellcheck="false" /></label>
+        <label>{label("skipPublishers")} <input bind:value={r.skipPublishers} placeholder={t("comicSkipPublishersPlaceholder")} spellcheck="false" /></label>
         <p class="hint">{t("comicSkipPublishersHint")}</p>
         {@render actions(t("comicSearch"), "comicSummary")}
         <h4 class="sect">{t("sectInside")}</h4>
-        <label class="check"><input type="checkbox" bind:checked={r.writeInfo} /> <span>{t("comicWriteInfo")}<small>{t("comicWriteInfoHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.writeInfo} /> <span>{label("writeInfo")}<small>{optHint("writeInfo")}</small></span></label>
         <label class="check"><input type="checkbox" bind:checked={r.cleanInfo} /> <span>{t(r.writeInfo ? "comicCleanInfoWrite" : "comicCleanInfo")}<small>{t(r.writeInfo ? "comicCleanInfoWriteHint" : "comicCleanInfoHint")}</small></span></label>
         <h4 class="sect">{t("sectConvert")}</h4>
-        <label class="check"><input type="checkbox" bind:checked={r.convert} /> <span>{t("comicConvert")}<small>{t("comicConvertHint")}</small></span></label>
-        {#if r.convert}
-          <label class="sub">{t("comicOriginal")}
+        <label class="check"><input type="checkbox" bind:checked={r.convert} /> <span>{label("convert")}<small>{optHint("convert")}</small></span></label>
+        {#if applies("drawPdfPages")}
+          <label class="sub">{label("original")}
             <select bind:value={r.original}>
               {@render options("original")}
             </select>
           </label>
-          <label class="sub" title={t("comicDrawPagesHint")}>{t("comicDrawPages")}
+          <label class="sub" title={t("comicDrawPagesHint")}>{label("drawPdfPages")}
             <select bind:value={r.drawPdfPages}>
               <option value={true}>{t("comicDrawPagesYes")}</option>
               <option value={false}>{t("comicDrawPagesNo")}</option>
             </select>
           </label>
-          {#if r.drawPdfPages}
-            <label class="sub" title={t("comicPageSizeHint")}>{t("comicPageSize")}
+          {#if applies("pageSize")}
+            <label class="sub" title={t("comicPageSizeHint")}>{label("pageSize")}
               <select bind:value={r.pageSize}>
                 {#each choicesOf("comic", "pageSize") as n (n)}<option value={n}>{n === 2400 ? t("comicPageSize2400") : `${n} px`}</option>{/each}
               </select>
@@ -692,13 +701,13 @@
           {/if}
         {/if}
         <h4 class="sect">{t("sectEbook")}</h4>
-        <label>{t("comicEbook")}
+        <label>{label("ebook")}
           <select bind:value={r.ebook}>
             {#each menuOf("comic", "ebook") as c (c.value)}<option value={c.value}>{c.value ? formatOption(t(c.label as Key), c.value) : t(c.label as Key)}</option>{/each}
           </select>
         </label>
         <p class="hint">{t("comicEbookHint")}</p>
-        {#if r.ebook}
+        {#if applies("device")}
           <label class="sub">{t("readerFor")}
             <select
               value={reader.reader || r.device}
@@ -715,45 +724,45 @@
             </select>
           </label>
           {#if why}<p class="warn sub">{why}</p>{/if}
-          {#if reader.limited}
-            <label class="check sub"><input type="checkbox" bind:checked={r.otherReaderApps} /> <span>{t("comicAnyProgram")}<small>{t("comicAnyProgramHint")}</small></span></label>
+          {#if applies("otherReaderApps")}
+            <label class="check sub"><input type="checkbox" bind:checked={r.otherReaderApps} /> <span>{label("otherReaderApps")}<small>{optHint("otherReaderApps")}</small></span></label>
           {/if}
-          {#if r.device === "custom"}
+          {#if applies("width")}
             <div class="sub size">
-              <label>{t("comicWidth")} <input type="number" {...lim("width")} bind:value={r.width} /></label>
-              <label>{t("comicHeight")} <input type="number" {...lim("height")} bind:value={r.height} /></label>
+              <label>{label("width")} <input type="number" {...lim("width")} bind:value={r.width} /></label>
+              <label>{label("height")} <input type="number" {...lim("height")} bind:value={r.height} /></label>
             </div>
           {/if}
-          <label class="check sub"><input type="checkbox" bind:checked={r.crop} /> <span>{t("comicCrop")}<small>{t("comicCropHint")}</small></span></label>
-          {#if r.crop}
-            <label class="check sub2"><input type="checkbox" bind:checked={r.cropPageNumbers} /> <span>{t("comicNumbers")}<small>{t("comicNumbersHint")}</small></span></label>
+          <label class="check sub"><input type="checkbox" bind:checked={r.crop} /> <span>{label("crop")}<small>{optHint("crop")}</small></span></label>
+          {#if applies("cropPageNumbers")}
+            <label class="check sub2"><input type="checkbox" bind:checked={r.cropPageNumbers} /> <span>{label("cropPageNumbers")}<small>{optHint("cropPageNumbers")}</small></span></label>
           {/if}
-          <label class="sub">{t("comicSpread")}
+          <label class="sub">{label("spread")}
             <select bind:value={r.spread}>
               {@render options("spread")}
             </select>
           </label>
           <p class="hint sub">{t("comicSpreadHint")}</p>
-          <label class="check sub"><input type="checkbox" bind:checked={r.contrast} /> <span>{t("comicContrast")}<small>{t("comicContrastHint")}</small></span></label>
+          <label class="check sub"><input type="checkbox" bind:checked={r.contrast} /> <span>{label("contrast")}<small>{optHint("contrast")}</small></span></label>
           {#if applies("upscale")}
-            <label class="check sub"><input type="checkbox" bind:checked={r.upscale} /> <span>{t("comicUpscale")}<small>{t("comicUpscaleHint")}</small></span></label>
+            <label class="check sub"><input type="checkbox" bind:checked={r.upscale} /> <span>{label("upscale")}<small>{optHint("upscale")}</small></span></label>
           {/if}
           {#if applies("sixteenGreys")}
-            <label class="check sub"><input type="checkbox" bind:checked={r.sixteenGreys} /> <span>{t("comicGreys16")}<small>{t("comicGreys16Hint")}</small></span></label>
+            <label class="check sub"><input type="checkbox" bind:checked={r.sixteenGreys} /> <span>{label("sixteenGreys")}<small>{optHint("sixteenGreys")}</small></span></label>
           {/if}
           {#if applies("reduceRainbow")}
-            <label class="check sub"><input type="checkbox" bind:checked={r.reduceRainbow} /> <span>{t("comicSoften")}<small>{t("comicSoftenHint")}</small></span></label>
+            <label class="check sub"><input type="checkbox" bind:checked={r.reduceRainbow} /> <span>{label("reduceRainbow")}<small>{optHint("reduceRainbow")}</small></span></label>
           {/if}
-          <label class="check sub"><input type="checkbox" bind:checked={r.webtoon} /> <span>{t("comicWebtoon")}<small>{t("comicWebtoonHint")}</small></span></label>
-          <label class="check sub"><input type="checkbox" bind:checked={r.join} /> <span>{t("comicJoin")}<small>{t("comicJoinHint")}</small></span></label>
-          <label class="sub">{t("comicMaxMb")}
+          <label class="check sub"><input type="checkbox" bind:checked={r.webtoon} /> <span>{label("webtoon")}<small>{optHint("webtoon")}</small></span></label>
+          <label class="check sub"><input type="checkbox" bind:checked={r.join} /> <span>{label("join")}<small>{optHint("join")}</small></span></label>
+          <label class="sub">{label("maxMb")}
             <select bind:value={r.maxMb}>
               {#each choicesOf("comic", "maxMb") as n (n)}<option value={n}>{n === 0 ? t("comicMaxMbNone") : n === 50 ? t("comicMaxMb50") : n === 200 ? t("comicMaxMb200") : `${n} MB`}</option>{/each}
             </select>
           </label>
           {#if r.maxMb}<p class="hint sub">{t("comicMaxMbHint")}</p>{/if}
           {#if !r.convert}
-            <label class="sub">{t("comicOriginal")}
+            <label class="sub">{label("original")}
               <select bind:value={r.original}>
                 {@render options("original")}
               </select>
@@ -761,7 +770,7 @@
           {/if}
         {/if}
         <h4 class="sect">{t("sectList")}</h4>
-        <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{t("comicMissingLabel")}<small>{t("comicMissingHint")}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={r.missing} /> <span>{label("missing")}<small>{optHint("missing")}</small></span></label>
       {/if}
 
       {#if !byKind(r.type)}
@@ -786,8 +795,8 @@
 
 {#snippet videoOptions()}
   {#if r.type === "movie" || r.type === "series"}
-    <label class="check sub"><input type="checkbox" bind:checked={r.videoClean} /> <span>{t("videoCleanLabel")}<small>{t("videoCleanHint")}</small></span></label>
-    <label class="check sub"><input type="checkbox" bind:checked={r.videoTracks} /> <span>{t("videoTracksLabel")}<small>{t("videoTracksHint")}</small></span></label>
+    <label class="check sub"><input type="checkbox" bind:checked={r.videoClean} /> <span>{label("videoClean")}<small>{optHint("videoClean")}</small></span></label>
+    <label class="check sub"><input type="checkbox" bind:checked={r.videoTracks} /> <span>{label("videoTracks")}<small>{optHint("videoTracks")}</small></span></label>
   {/if}
 {/snippet}
 
@@ -797,9 +806,9 @@
 
 {#snippet subtitles()}
   {#if r.type === "movie" || r.type === "series"}
-    <label class="check"><input type="checkbox" bind:checked={r.subtitles} /> <span>{t("subsLabel")}<small>{t("subsHint")}</small></span></label>
-    {#if r.subtitles}
-      <label class="sub">{t("subsLangs")} <input bind:value={r.subLangs} placeholder="pt-BR, en" spellcheck="false" /></label>
+    <label class="check"><input type="checkbox" bind:checked={r.subtitles} /> <span>{label("subtitles")}<small>{optHint("subtitles")}</small></span></label>
+    {#if applies("subLangs")}
+      <label class="sub">{label("subLangs")} <input bind:value={r.subLangs} placeholder="pt-BR, en" spellcheck="false" /></label>
       {#if subs}
         <div class="movie-actions sub">
           <button disabled={!!subs.progress} onclick={subs.onsearch}>{t("subsSearch")}</button>

@@ -6,8 +6,7 @@ use std::time::{Duration, Instant};
 
 use renome_core::scan::Skipped;
 use renome_core::{
-    ApplyReport, FileEntry, HashCache, History, HistoryEntry, Preview, ScanOptions, SortKey, Step,
-    View,
+    ApplyReport, FileEntry, HashCache, History, Preview, ScanOptions, SortKey, Step, View,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -892,6 +891,23 @@ struct Applied {
     #[serde(flatten)]
     report: ApplyReport,
     said: Vec<renome_services::flow::after::Line>,
+    /// Each file that failed, as said (`flow::said::failed`).
+    failed: Vec<renome_services::flow::after::Line>,
+}
+
+impl Applied {
+    fn new(report: ApplyReport, said: Vec<renome_services::flow::after::Line>) -> Self {
+        let failed = report
+            .errors
+            .iter()
+            .map(renome_services::flow::said::failed)
+            .collect();
+        Applied {
+            report,
+            said,
+            failed,
+        }
+    }
 }
 
 #[tauri::command]
@@ -954,7 +970,7 @@ async fn apply(
         s.undo.clear();
         let said = renome_services::flow::after::renamed(&plan, &report, sent);
         *state.renamed.lock().unwrap() = Some(plan);
-        Applied { report, said }
+        Applied::new(report, said)
     })
     .await
 }
@@ -1089,6 +1105,17 @@ fn rule_menu(names: HashMap<String, String>) -> (Vec<&'static str>, Vec<&'static
     renome_core::catalog::menu(|k| names.get(k).cloned().unwrap_or_default())
 }
 
+/// The manual's pages in order, by their ids (`catalog::manual_order`, the
+/// command line's `manual` too): each page's place, and a group's title.
+#[tauri::command]
+fn manual_order(
+    ids: Vec<String>,
+    names: HashMap<String, String>,
+) -> Vec<(usize, Option<&'static str>)> {
+    let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+    renome_core::catalog::manual_order(&ids, |k| names.get(k).cloned().unwrap_or_default())
+}
+
 /// The reader a comic or book rule makes its e-book for, and the formats
 /// it does not open (the command line warns of the same:
 /// `readers::reader`).
@@ -1151,11 +1178,12 @@ fn gcd_few(source: String, email: String, password: String) -> bool {
     renome_services::options::gcd_few(&source, &email, &password)
 }
 
-/// The options that do nothing as a rule is set (see `catalog::inert`):
-/// its card hides them.
+/// The options a rule's card hides as the rule is set (see
+/// `catalog::hidden`: those under another that leaves them nothing to
+/// do, and the inert ones).
 #[tauri::command]
 fn rule_inert(rule: Value) -> Vec<&'static str> {
-    renome_core::catalog::inert(&rule)
+    renome_core::catalog::hidden(&rule)
 }
 
 /// Episodes as file names write them (`S01E02-E03`: `flow::series::code`,
@@ -1632,8 +1660,10 @@ async fn server_tell(
     servers: Value,
     keys: String,
     done: Vec<renome_core::Operation>,
-) -> Vec<mediaserver::Told> {
-    mediaserver::tell_all(mediaserver::callable(&servers, &keys), &done).await
+) -> Vec<renome_services::flow::after::Line> {
+    // What is said of it (`flow::said::told`, the command line's too).
+    let answers = mediaserver::tell_all(mediaserver::callable(&servers, &keys), &done).await;
+    renome_services::flow::said::told(&answers)
 }
 
 #[tauri::command]
@@ -2036,12 +2066,23 @@ async fn metron_check(app: AppHandle, token: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn history(state: State<AppState>) -> Vec<HistoryEntry> {
-    state.history.list()
+fn history(state: State<AppState>) -> Vec<Value> {
+    // Each with what is said of it (the command line's `history` too).
+    state
+        .history
+        .list()
+        .iter()
+        .map(|e| {
+            let mut v = serde_json::to_value(e).unwrap_or_default();
+            v["said"] =
+                serde_json::to_value(renome_services::flow::said::entry(e)).unwrap_or_default();
+            v
+        })
+        .collect()
 }
 
 #[tauri::command]
-async fn undo(app: AppHandle, id: String) -> Result<ApplyReport, String> {
+async fn undo(app: AppHandle, id: String) -> Result<Applied, String> {
     let stop = stop_signal(&app);
     let emitter = app.clone();
     in_background(app, move |state| {
@@ -2075,7 +2116,8 @@ async fn undo(app: AppHandle, id: String) -> Result<ApplyReport, String> {
             }
         }
         s.undo.clear();
-        Ok(report)
+        let said = renome_services::flow::said::undone(&report);
+        Ok(Applied::new(report, said))
     })
     .await?
 }
@@ -2083,8 +2125,11 @@ async fn undo(app: AppHandle, id: String) -> Result<ApplyReport, String> {
 /// Puts back renames a stopped program left halfway (see
 /// [`History::recover`]); called once at start.
 #[tauri::command]
-async fn recover(app: AppHandle) -> Result<renome_core::apply::Recovered, String> {
-    in_background(app, |state| state.history.recover()).await
+async fn recover(app: AppHandle) -> Result<Option<renome_services::flow::said::Recovery>, String> {
+    in_background(app, |state| {
+        renome_services::flow::said::recovered(&state.history.recover())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2381,6 +2426,7 @@ pub fn run() {
             after_counts,
             rename_ask,
             rule_menu,
+            manual_order,
             rule_reader,
             edit_details,
             edit_dates,

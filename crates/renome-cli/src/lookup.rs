@@ -1542,10 +1542,16 @@ pub fn said(lines: &[flow::after::Line]) -> Vec<String> {
     lines
         .iter()
         .map(|l| {
+            let errors: Vec<(&str, String)> = l
+                .errors
+                .iter()
+                .map(|(k, v)| (*k, crate::text::error_text(v)))
+                .collect();
             let mut vars: Vec<(&str, &dyn std::fmt::Display)> = vec![("n", &l.n)];
             vars.extend(
                 l.more
                     .iter()
+                    .chain(errors.iter())
                     .map(|(k, v)| (*k, v as &dyn std::fmt::Display)),
             );
             t(l.key, &vars)

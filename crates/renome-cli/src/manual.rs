@@ -22,38 +22,14 @@ fn pages() -> &'static [Page] {
     }
 }
 
-/// The pages in the window's order: the rules' (`r-<type>`) in the
-/// order of its "+ Rule" menu (those by kind of file, then those on the
-/// name's text, each by the rule's name in the language), each group's
-/// first with the group's title; the others where they are.
+/// The pages in the window's order (`catalog::manual_order`): each
+/// group's first rule page with the group's title.
 fn ordered() -> Vec<(&'static Page, Option<String>)> {
     let all = pages();
-    let rule_of = |p: &Page| {
-        p.0.strip_prefix("r-")
-            .filter(|k| renome_core::catalog::rule(k).is_some())
-    };
-    let (media, text) = renome_core::catalog::menu(|k| t(&format!("rule.{k}"), &[]));
-    let sorted = |group: &[&str], title: &str| {
-        let list: Vec<&'static Page> = group
-            .iter()
-            .filter_map(|k| all.iter().find(|p| rule_of(p) == Some(*k)))
-            .collect();
-        list.into_iter()
-            .enumerate()
-            .map(|(i, p)| (p, (i == 0).then(|| t(title, &[]))))
-            .collect::<Vec<_>>()
-    };
-    let mut rules = sorted(&media, "ruleGroupMedia");
-    rules.extend(sorted(&text, "ruleGroupText"));
-    let mut rules = rules.into_iter();
-    all.iter()
-        .map(|p| {
-            if rule_of(p).is_some() {
-                rules.next().unwrap()
-            } else {
-                (p, None)
-            }
-        })
+    let ids: Vec<&str> = all.iter().map(|p| p.0).collect();
+    renome_core::catalog::manual_order(&ids, |k| t(&format!("rule.{k}"), &[]))
+        .into_iter()
+        .map(|(i, title)| (&all[i], title.map(|k| t(k, &[]))))
         .collect()
 }
 

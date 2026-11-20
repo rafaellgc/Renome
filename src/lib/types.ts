@@ -684,8 +684,9 @@ export interface ApplyReport {
   stopped?: boolean;
   /** Where each file of the list went (old path, new path). */
   moved?: [string, string][];
-  /** What is said of the renames (Rust's lines; from `apply` only). */
+  /** What is said of the renames or the undo, and of each file that failed (Rust's lines). */
   said?: SaidLine[];
+  failed?: SaidLine[];
 }
 
 /** What renaming would write besides the renames (see `flow::after`). */
@@ -712,6 +713,8 @@ export interface SaidLine {
   key: string;
   n: number;
   more?: [string, string][];
+  /** Fields that are errors, said as errors are. */
+  errors?: [string, string][];
 }
 
 /** What the question before renaming says (Rust's: `flow::after::ask`). */
@@ -759,6 +762,9 @@ export interface HistoryEntry {
   extra: number;
   /** Songs whose tags were written. */
   tagged: number;
+  /** What the History says of it (Rust's lines): what it holds, how it
+   *  stands, and whether an undo can be tried again. */
+  said: { counts: SaidLine[]; state: SaidLine | null; retry: boolean };
 }
 
 /** A file's identical copies in the list: its group number (from 0) and

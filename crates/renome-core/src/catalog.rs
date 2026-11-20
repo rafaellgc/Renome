@@ -865,7 +865,7 @@ pub const RULES: &[RuleSpec] = &[
                 "model",
                 Kind::Text,
                 EMPTY,
-                "readerFor",
+                "readerForOptional",
                 Some("bookReaderHint"),
             ),
             renamed(
@@ -1311,6 +1311,120 @@ pub fn inert(rule: &Value) -> Vec<&'static str> {
     }
 }
 
+/// The options a rule shows under another, hidden while that one leaves
+/// them nothing to do (`fanart` without the `.nfo`, a position while
+/// inserting at the start): these and the [`inert`] ones. The window's
+/// rule card shows only the others.
+pub fn hidden(rule: &Value) -> Vec<&'static str> {
+    let text = |k: &str| set_value(rule, k).as_str().unwrap_or("").to_string();
+    let on = |k: &str| match set_value(rule, k) {
+        Value::Bool(b) => b,
+        Value::String(s) => !s.trim().is_empty(),
+        Value::Number(n) => n.as_f64().is_some_and(|n| n != 0.0),
+        _ => false,
+    };
+    let mut off = inert(rule);
+    let mut unless = |cond: bool, opts: &[&'static str]| {
+        if !cond {
+            off.extend_from_slice(opts);
+        }
+    };
+    match rule.get("type").and_then(Value::as_str).unwrap_or("") {
+        "insert" => {
+            let source = text("source");
+            let at = text("at");
+            unless(source == "text", &["text"]);
+            unless(source != "text" && source != "folder", &["dateFormat"]);
+            unless(source == "taken", &["fallback"]);
+            unless(at == "index" || at == "fromEnd", &["position"]);
+        }
+        "removeRange" => {
+            let (from, to) = (text("from"), text("to"));
+            unless(from == "position", &["fromPosition"]);
+            unless(from == "text", &["fromText"]);
+            unless(to == "position", &["toPosition"]);
+            unless(to == "text", &["toText"]);
+            unless(from == "text" || to == "text", &["inclusive"]);
+        }
+        "charAt" => unless(on("onlyIf"), &["caseSensitive"]),
+        "extension" => unless(text("mode") == "set", &["value"]),
+        "movie" | "series" => {
+            unless(on("nfo"), &["backdrop"]);
+            unless(on("videoTags"), &["videoClean", "videoTracks"]);
+            unless(on("subtitles"), &["subLangs"]);
+            unless(on("folders"), &["folderTemplate"]);
+        }
+        "photo" => unless(on("folders"), &["folderTemplate"]),
+        "subtitle" => {
+            unless(on("toSrt"), &["original"]);
+            unless(on("extract"), &["extractLangs"]);
+        }
+        "music" => {
+            unless(on("folders"), &["folderTemplate"]);
+            unless(on("writeTags"), &["embedCover", "cleanTags", "coverSize"]);
+            unless(on("embedCover"), &["coverSize"]);
+        }
+        "book" => {
+            unless(on("folders"), &["folderTemplate"]);
+            unless(on("audiobooks"), &["audioTags", "audioClean"]);
+            unless(on("audioTags"), &["audioClean"]);
+            unless(on("convertTo"), &["model", "original", "otherReaderApps"]);
+            unless(on("model"), &["otherReaderApps"]);
+        }
+        "comic" => {
+            let ebook = on("ebook");
+            unless(on("folders"), &["folderTemplate"]);
+            unless(on("convert"), &["drawPdfPages", "pageSize"]);
+            unless(on("drawPdfPages"), &["pageSize"]);
+            unless(on("convert") || ebook, &["original"]);
+            unless(
+                ebook,
+                &[
+                    "device",
+                    "model",
+                    "otherReaderApps",
+                    "width",
+                    "height",
+                    "crop",
+                    "cropPageNumbers",
+                    "spread",
+                    "contrast",
+                    "upscale",
+                    "sixteenGreys",
+                    "reduceRainbow",
+                    "webtoon",
+                    "join",
+                    "maxMb",
+                ],
+            );
+            unless(text("device") == "custom", &["width", "height"]);
+            unless(on("crop"), &["cropPageNumbers"]);
+            unless(crate::readers::reader(rule).limited, &["otherReaderApps"]);
+        }
+        _ => {}
+    }
+    off.sort_unstable();
+    off.dedup();
+    off
+}
+
+/// Each rule's options' labels and hints (keys of the texts), as the
+/// window's rule card and the command line's `rules` show them.
+pub fn labels() -> Value {
+    RULES
+        .iter()
+        .map(|spec| {
+            let opts: Map<String, Value> = spec
+                .options
+                .iter()
+                .map(|o| (o.name.to_string(), serde_json::json!([o.label, o.hint])))
+                .collect();
+            (spec.kind.to_string(), Value::Object(opts))
+        })
+        .collect::<Map<String, Value>>()
+        .into()
+}
+
 /// A new rule of this type with every option at its default.
 pub fn new_rule(spec: &RuleSpec, lang: &str) -> Map<String, Value> {
     let mut rule = Map::new();
@@ -1541,6 +1655,44 @@ pub fn menu(name: impl Fn(&str) -> String) -> (Vec<&'static str>, Vec<&'static s
         group.sort_by_cached_key(|k| (crate::text::fold(&name(k)), *k));
     }
     (media, text)
+}
+
+/// The manual's pages in the window's order (the command line's
+/// `manual` too), by their ids: the rules' pages (`r-<type>`) in the
+/// order of the "+ Rule" menu ([`menu`]), those by kind of file, then
+/// those on the name's text, the first of each group with the group's
+/// title key; the other pages where they are. Each page's place in `ids`.
+pub fn manual_order(
+    ids: &[&str],
+    name: impl Fn(&str) -> String,
+) -> Vec<(usize, Option<&'static str>)> {
+    let rule_of = |id: &str| {
+        id.strip_prefix("r-")
+            .filter(|k| rule(k).is_some())
+            .map(str::to_string)
+    };
+    let (media, text) = menu(name);
+    let mut rules = Vec::new();
+    for (group, title) in [(&media, "ruleGroupMedia"), (&text, "ruleGroupText")] {
+        let pages: Vec<usize> = group
+            .iter()
+            .filter_map(|k| ids.iter().position(|id| rule_of(id).as_deref() == Some(*k)))
+            .collect();
+        rules.extend(
+            pages
+                .into_iter()
+                .enumerate()
+                .map(|(i, p)| (p, (i == 0).then_some(title))),
+        );
+    }
+    let mut rules = rules.into_iter();
+    ids.iter()
+        .enumerate()
+        .map(|(i, id)| match rule_of(id) {
+            Some(_) => rules.next().unwrap_or((i, None)),
+            None => (i, None),
+        })
+        .collect()
 }
 
 /// A value of a step's rule as the core reads it: numbers within the
@@ -1840,6 +1992,7 @@ pub fn table(lang: &str) -> Value {
         "limits": limits(),
         "choices": int_choices(),
         "menus": menus(),
+        "labels": labels(),
     })
 }
 

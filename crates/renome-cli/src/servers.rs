@@ -43,19 +43,9 @@ pub async fn tell(settings: Option<&Value>, ops: &[renome_core::Operation]) -> V
         .cloned()
         .unwrap_or(Value::Null);
     let keys = Value::Object(keys()).to_string();
-    mediaserver::tell_all(mediaserver::callable(&servers, &keys), ops)
-        .await
-        .into_iter()
-        .filter_map(|told| match told.folders {
-            Ok(0) => None,
-            Ok(n) => Some(t("serverTold", &[("name", &told.name), ("n", &n)])),
-            Err(e) => Some(format!(
-                "{}: {}",
-                t("serverNotTold", &[("name", &told.name)]),
-                crate::text::error_text(&e)
-            )),
-        })
-        .collect()
+    let answers = mediaserver::tell_all(mediaserver::callable(&servers, &keys), ops).await;
+    // As the window says it (`flow::said::told`).
+    crate::lookup::said(&renome_services::flow::said::told(&answers))
 }
 
 fn settings_now() -> Value {

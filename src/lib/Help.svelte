@@ -7,22 +7,19 @@
   import { en } from "./help/en";
   import { es } from "./help/es";
   import { pt } from "./help/pt";
-  import { t } from "./i18n";
+  import { t, type Key } from "./i18n";
   import { settings } from "./settings.svelte";
   import { TABLE } from "./rules";
-  import type { RuleType } from "./types";
+  import { api } from "./api";
   import appLicense from "../../LICENSE?raw";
 
   type Tab = "manual" | "about" | "licenses";
   let {
     onclose,
     tab = $bindable("manual"),
-    order,
   }: {
     onclose: () => void;
     tab?: Tab;
-    /** The rules' groups in the "+ Rule" menu's order (Rust's). */
-    order: [RuleType[], RuleType[]];
   } = $props();
 
   /** Written by scripts/licenses.js when building. */
@@ -97,29 +94,19 @@
     },
   ];
 
-  /** The rule a section is about: its id is `r-` and the rule's type
-   *  (the command line's `manual` reads them so too). */
-  const RULE_OF = (id: string): RuleType | undefined => {
-    const type = id.startsWith("r-") ? (id.slice(2) as RuleType) : undefined;
-    return type && TABLE.defaults[type] ? type : undefined;
-  };
-  /** The rules' sections in the order of the "+ Rule" menu (Rust's,
-   *  the command line's manual too): those by kind of file, then those on
-   *  the name's text; the first of each group carries the group's title
-   *  for the index. */
-  const sections = $derived.by(() => {
+  /** The sections in the order of the "+ Rule" menu (Rust's
+   *  `catalog::manual_order`, the command line's manual too); the first of
+   *  each group carries the group's title for the index. */
+  type Section = (typeof pt)[number] & { group?: string };
+  let sections = $state<Section[]>([]);
+  $effect(() => {
     const all = { pt, en, es }[settings.lang];
-    const of = (group: RuleType[]) => group.flatMap((k) => all.filter((s) => RULE_OF(s.id) === k));
-    const media = of(order[0]);
-    const text = of(order[1]);
-    const rules: ((typeof all)[number] & { group?: string })[] = [
-      ...media.map((s, i) => (i ? s : { ...s, group: t("ruleGroupMedia") })),
-      ...text.map((s, i) => (i ? s : { ...s, group: t("ruleGroupText") })),
-    ];
     // Until the order comes, as written.
-    if (rules.length !== all.filter((s) => RULE_OF(s.id)).length) return all as typeof rules;
-    let next = 0;
-    return all.map((s) => (RULE_OF(s.id) ? rules[next++] : s)) as ((typeof all)[number] & { group?: string })[];
+    sections = all;
+    const names = Object.fromEntries([...TABLE.media, ...TABLE.text].map((k) => [k, t(`rule.${k}`)]));
+    api.manualOrder(all.map((s) => s.id), names).then((order) => {
+      if ({ pt, en, es }[settings.lang] === all) sections = order.map(([i, group]) => (group ? { ...all[i], group: t(group as Key) } : all[i]));
+    }, () => {});
   });
   let current = $state("start");
   let content = $state<HTMLElement>();

@@ -714,22 +714,6 @@ const CLI: &[(&str, [&str; 3])] = &[
         ],
     ),
     (
-        "undoneN",
-        [
-            "{n} arquivo(s) de volta ao nome antigo.",
-            "{n} file(s) back to their old name.",
-            "{n} archivo(s) de vuelta a su nombre anterior.",
-        ],
-    ),
-    (
-        "recovered",
-        [
-            "Uma renomeação tinha ficado pela metade: {restored} arquivo(s) [voltou|voltaram] ao nome antigo, {renamed} [ficou|ficaram] renomeado(s) no Histórico.",
-            "A rename had been left halfway: {restored} file(s) got their old name back, {renamed} stayed renamed in the History.",
-            "Un renombrado había quedado a medias: {restored} archivo(s) [recuperó|recuperaron] su nombre, {renamed} [quedó|quedaron] renombrado(s) en el Historial.",
-        ],
-    ),
-    (
         "unknownSetting",
         [
             "Opção desconhecida: {name} (veja renome-cli options list)",

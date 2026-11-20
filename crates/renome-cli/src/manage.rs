@@ -20,11 +20,19 @@ fn the_history() -> renome_core::History {
 /// What a rename left halfway is put right first, as the window does when
 /// it opens.
 pub fn recover() {
-    let r = the_history().recover();
-    if r.restored + r.renamed > 0 {
-        out::note(&t(
-            "recovered",
-            &[("restored", &r.restored), ("renamed", &r.renamed)],
+    // Said as the window says it (`flow::said::recovered`).
+    let Some(said) = renome_services::flow::said::recovered(&the_history().recover()) else {
+        return;
+    };
+    out::note(&out::bold(&t(said.title, &[])));
+    for line in crate::lookup::said(&said.lines) {
+        out::note(&line);
+    }
+    for (from, to) in &said.stuck {
+        out::error(&format!(
+            "{} → {}",
+            out::path(Path::new(from)),
+            out::path(Path::new(to))
         ));
     }
 }
@@ -79,17 +87,25 @@ pub fn undo(m: &ArgMatches) -> Result<Exit, String> {
             json!({ "restored": report.done.len(), "failed": failed })
         );
     } else {
-        out::note(&out::green(&t("undoneN", &[("n", &report.done.len())])));
+        // As the window says it (`flow::said::undone`).
+        let lines = crate::lookup::said(&renome_services::flow::said::undone(&report));
+        out::note(&out::green(&lines.join(" · ")));
+        if !report.kept.is_empty() {
+            out::note(&t("copiesKeptText", &[]));
+            for p in &report.kept {
+                out::note(&format!("  {}", out::path(p)));
+            }
+        }
         for note in server_notes {
             out::note(&note);
         }
-        for e in &report.errors {
-            out::error(&format!(
-                "{} → {}: {}",
-                out::path(&e.from),
-                out::path(&e.to),
-                e.detail
-            ));
+        let failed: Vec<_> = report
+            .errors
+            .iter()
+            .map(renome_services::flow::said::failed)
+            .collect();
+        for line in crate::lookup::said(&failed) {
+            out::error(&line);
         }
     }
     Ok(if report.errors.is_empty() {
@@ -155,18 +171,18 @@ pub fn history(m: &ArgMatches) -> Result<Exit, String> {
                 out::note(&t("historyEmpty", &[]));
             } else {
                 for e in list {
-                    let state = if e.undone {
-                        out::dim(&t("undone", &[]))
-                    } else if e.reverted > 0 {
-                        t("partlyUndone", &[("n", &e.reverted), ("total", &e.count)])
-                    } else {
-                        String::new()
-                    };
+                    // As the window's History says it (`flow::said::entry`).
+                    let said = renome_services::flow::said::entry(&e);
+                    let state = said
+                        .state
+                        .map(|l| crate::lookup::said(&[l]).join(""))
+                        .map(|s| if e.undone { out::dim(&s) } else { s })
+                        .unwrap_or_default();
                     println!(
                         "{}  {}  {}  {}",
                         out::bold(&e.id),
                         e.created.format("%Y-%m-%d %H:%M:%S"),
-                        t("files", &[("n", &e.count)]),
+                        crate::lookup::said(&said.counts).join(" · "),
                         state
                     );
                 }

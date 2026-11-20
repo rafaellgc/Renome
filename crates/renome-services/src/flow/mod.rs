@@ -12,6 +12,7 @@ pub mod export;
 pub mod missing;
 pub mod movies;
 pub mod music;
+pub mod said;
 pub mod series;
 pub mod subtitles;
 pub mod typed;
