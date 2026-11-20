@@ -35,7 +35,7 @@
   import ShowPicker from "$lib/ShowPicker.svelte";
   import SubtitleReview from "$lib/SubtitleReview.svelte";
   import { LOCALES, MOD, t, tError, type Key } from "$lib/i18n";
-  import { TABLE, isKindRule, setRuleTable, type Blocked, newRule, newStep } from "$lib/rules";
+  import { TABLE, isKindRule, ruleNames, setRuleTable, type Blocked, newRule, newStep } from "$lib/rules";
   import { loadSecrets, refreshLangs, saveSecrets, saveSettings, secretFields, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
     AfterCounts, AfterReport, ApplyReport, RenameAsk, SaidLine, Candidate, Copies, MovieStatus, HistoryEntry, Preview, PreviewItem, Rule, RuleType, Step, View, ViewSort,
@@ -351,8 +351,7 @@
    *  order, the command line's too: `catalog::menu`). */
   let ruleOrder = $state<[RuleType[], RuleType[]]>([[], []]);
   $effect(() => {
-    const names = Object.fromEntries([...TABLE.media, ...TABLE.text].map((k) => [k, t(`rule.${k}`)]));
-    api.ruleMenu(names).then((o) => (ruleOrder = o), () => {});
+    api.ruleMenu(ruleNames()).then((o) => (ruleOrder = o), () => {});
   });
   const ruleGroups = $derived([
     { label: "ruleGroupMedia", types: ruleOrder[0] },
@@ -700,7 +699,6 @@
       // lines too), then the work besides them.
       notice = [
         ...said(r.said ?? []),
-        r.stopped ? t("applyStopped") : "",
         ...said(after?.lines ?? []),
         r.errors.length ? t("errorsN", { n: r.errors.length }) : "",
       ].filter(Boolean).join(" · ");
@@ -708,7 +706,7 @@
       checkIdentical();
       if (!r.errors.length && notice) done(notice);
       tellServer(r.done);
-      await showErrors(r, t("resultTitle"), `${t("renamedN", { n: r.done.length })}\n${t("errorsN", { n: r.errors.length })}:`);
+      await showErrors(r, t("resultTitle"), [...said(r.said ?? []), `${t("errorsN", { n: r.errors.length })}:`].join("\n"));
     } catch (e) {
       notice = `${t("error")}: ${tError(e)}`;
     } finally {
@@ -787,7 +785,6 @@
       const r = await api.undo(id);
       foundUndo = [];
       followMatches(r.moved);
-      const restored = r.done.filter((op) => !op.copy).length;
       // As the shared flow says it (the command line's too).
       notice = said(r.said ?? []).join(" · ");
       if (history) history = await api.history();
@@ -799,7 +796,7 @@
       await showErrors(
         r,
         r.done.length ? t("resultTitle") : t("undoFailed"),
-        `${restored ? `${t("restoredN", { n: restored })}\n` : ""}${t("undoFailedHint")}`,
+        [...(r.done.length ? said(r.said ?? []) : []), t("undoFailedHint")].join("\n"),
       );
     } catch (e) {
       await notify({ title: t("undoFailed"), text: tError(e) });

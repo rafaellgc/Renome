@@ -95,12 +95,12 @@
   /** The options hidden as the rule is set (the Rust catalog says:
    *  `catalog::hidden`, those under another that leaves them nothing to
    *  do, and the inert ones, which the flows take as off). */
-  let inert = $state<string[]>([]);
+  let hidden = $state<string[]>([]);
   $effect(() => {
     const rule = $state.snapshot(step.rule);
-    api.ruleInert(rule).then((v) => (inert = v), () => {});
+    api.ruleHidden(rule).then((v) => (hidden = v), () => {});
   });
-  const applies = (name: string) => !inert.includes(name);
+  const applies = (name: string) => !hidden.includes(name);
   /** An option's label and hint, as the Rust catalog names them (the
    *  command line's `rules` too). */
   const label = (name: string) => t((TABLE.labels[r.type]?.[name]?.[0] ?? name) as Key);

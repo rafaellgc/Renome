@@ -307,7 +307,7 @@ pub fn ask(preview: &Preview, counts: &Counts, send_to: Option<(&Path, bool)>) -
 /// (before the work besides the renames): the files renamed, moved or
 /// copied (`sent`: to another folder, copied there), the old folders
 /// renamed for their leftovers, the cue sheets and playlists updated or
-/// deleted.
+/// deleted, and whether it was stopped.
 pub fn renamed(
     preview: &Preview,
     report: &renome_core::ApplyReport,
@@ -330,6 +330,8 @@ pub fn renamed(
         ("leftFoldersN", folders),
         ("listsN", report.lists),
         ("listsRemovedN", report.lists_removed),
+        // Stopped before the end: the rest stays as it was.
+        ("applyStopped", usize::from(report.stopped)),
     ])
 }
 

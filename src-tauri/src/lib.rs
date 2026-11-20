@@ -1182,7 +1182,7 @@ fn gcd_few(source: String, email: String, password: String) -> bool {
 /// `catalog::hidden`: those under another that leaves them nothing to
 /// do, and the inert ones).
 #[tauri::command]
-fn rule_inert(rule: Value) -> Vec<&'static str> {
+fn rule_hidden(rule: Value) -> Vec<&'static str> {
     renome_core::catalog::hidden(&rule)
 }
 
@@ -2395,7 +2395,7 @@ pub fn run() {
             series_named,
             movie_named,
             episode_codes,
-            rule_inert,
+            rule_hidden,
             subs_tally,
             gcd_few,
             picture_places,

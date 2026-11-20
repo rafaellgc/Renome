@@ -122,8 +122,8 @@ export const api = {
   /** The reader a comic or book rule is for, and the formats it does not open (the shared check). */
   ruleReader: (rule: Rule) =>
     invoke<{ reader: string; device: ComicDevice | null; limited: boolean; marked: string[]; notOpens: { model: string; name: string; format: string; best: string } | null }>("rule_reader", { rule }),
-  /** The options that do nothing as the rule is set (hidden on its card). */
-  ruleInert: (rule: Rule) => invoke<string[]>("rule_inert", { rule }),
+  /** The options a rule's card hides as the rule is set (`catalog::hidden`). */
+  ruleHidden: (rule: Rule) => invoke<string[]>("rule_hidden", { rule }),
   /** Each list of episodes as file names write it (`S01E02-E03`). */
   episodeCodes: (lists: EpKey[][]) => invoke<string[]>("episode_codes", { lists }),
   /** A larger copy of a catalogue's cover, where there is one. */

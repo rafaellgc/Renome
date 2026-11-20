@@ -1,3 +1,4 @@
+import { t, type Key } from "./i18n";
 import type { DetailColumn, EditField, Rule, RuleType, Step } from "./types";
 
 /** Everything rules, their menus and the options are built from, in the
@@ -99,6 +100,12 @@ let counter = 0;
  *  catalog: `api.completeSteps`). */
 export function newStep(rule: Rule): Step {
   return { id: `s${Date.now().toString(36)}${counter++}`, enabled: true, rule };
+}
+
+/** Each rule's name in the interface's language, by type: what the Rust
+ *  catalog orders the "+ Rule" menu and the manual by. */
+export function ruleNames(): Record<string, string> {
+  return Object.fromEntries([...TABLE.media, ...TABLE.text].map((k) => [k, t(`rule.${k}` as Key)]));
 }
 
 /** A whole-number option's bounds, as a field's `min` and `max`. */

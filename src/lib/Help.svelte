@@ -9,7 +9,7 @@
   import { pt } from "./help/pt";
   import { t, type Key } from "./i18n";
   import { settings } from "./settings.svelte";
-  import { TABLE } from "./rules";
+  import { ruleNames } from "./rules";
   import { api } from "./api";
   import appLicense from "../../LICENSE?raw";
 
@@ -103,8 +103,7 @@
     const all = { pt, en, es }[settings.lang];
     // Until the order comes, as written.
     sections = all;
-    const names = Object.fromEntries([...TABLE.media, ...TABLE.text].map((k) => [k, t(`rule.${k}`)]));
-    api.manualOrder(all.map((s) => s.id), names).then((order) => {
+    api.manualOrder(all.map((s) => s.id), ruleNames()).then((order) => {
       if ({ pt, en, es }[settings.lang] === all) sections = order.map(([i, group]) => (group ? { ...all[i], group: t(group as Key) } : all[i]));
     }, () => {});
   });
