@@ -1026,7 +1026,7 @@ ${ex("Serie.S01E02.720p.WEB.mkv", "Serie S01E02.mkv")}
   <li><b>macOS</b>: <code>/Applications/Renome.app/Contents/MacOS/renome-cli</code>. Para chamá-lo só pelo nome: <code>sudo mkdir -p /usr/local/bin &amp;&amp; sudo ln -s /Applications/Renome.app/Contents/MacOS/renome-cli /usr/local/bin/renome-cli</code>.</li>
 </ul>
 <h4>Ver antes, renomear depois</h4>
-<p><code>renome-cli preview PASTAS -r REGRA</code> mostra o nome atual e o novo, sem mudar nada. <code>renome-cli apply …</code>, com os mesmos argumentos, mostra a lista e pergunta antes de renomear (<code>--yes</code> não pergunta). As regras vêm na ordem em que são escritas:</p>
+<p><code>renome-cli preview PASTAS -r REGRA</code> mostra o nome atual e o novo, sem mudar nada. <code>renome-cli apply …</code>, com os mesmos argumentos, mostra a lista e pergunta antes de renomear (<code>--yes</code> não pergunta, mas avisa como a janela das pastas antigas que ficam com sobras e das propagandas que vão para a Lixeira; também avisa quando o leitor escolhido não abre o formato do e-book). As regras vêm na ordem em que são escritas:</p>
 <table>
   <tr><td><code>-r 'replace:find=_,replace= '</code></td><td>uma regra: tipo, dois-pontos, opções separadas por vírgula</td></tr>
   <tr><td><code>-r case</code></td><td>só o tipo: as opções ficam com o padrão</td></tr>

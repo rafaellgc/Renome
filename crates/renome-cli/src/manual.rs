@@ -32,13 +32,12 @@ fn ordered() -> Vec<(&'static Page, Option<String>)> {
         p.0.strip_prefix("r-")
             .filter(|k| renome_core::catalog::rule(k).is_some())
     };
-    let (media, text) = renome_core::catalog::groups();
+    let (media, text) = renome_core::catalog::menu(|k| t(&format!("rule.{k}"), &[]));
     let sorted = |group: &[&str], title: &str| {
-        let mut list: Vec<&'static Page> = all
+        let list: Vec<&'static Page> = group
             .iter()
-            .filter(|p| rule_of(p).is_some_and(|k| group.contains(&k)))
+            .filter_map(|k| all.iter().find(|p| rule_of(p) == Some(*k)))
             .collect();
-        list.sort_by_cached_key(|p| plain(&t(&format!("rule.{}", rule_of(p).unwrap()), &[])));
         list.into_iter()
             .enumerate()
             .map(|(i, p)| (p, (i == 0).then(|| t(title, &[]))))

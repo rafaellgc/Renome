@@ -1,6 +1,7 @@
 // The readers comics can be made for, one entry per model, each pointing
 // at the screen it shares with others (`ComicDevice`, what the converter
-// knows) and saying which e-book formats it opens as it comes. Grouped by
+// knows) and saying which e-book formats it opens as it comes (the Rust
+// core reads this list at build: `renome_core::readers`). Grouped by
 // brand in alphabetical order; within a brand, by line in alphabetical
 // order and, in each line, newest first.
 
@@ -292,36 +293,9 @@ const ALL = READERS.flatMap(([, brand, list]) => list.map((m) => ({ ...m, format
 
 export const POPULAR: Reader[] = POPULAR_IDS.map((id) => ALL.find((m) => m.id === id)!).filter(Boolean);
 
-/** The option chosen in a rule: its model, else (rules made before
- *  models) the first model of its device, else the device itself. */
-export function readerOf(device: ComicDevice, model: string | undefined): string {
-  if (model && ALL.some((m) => m.id === model && m.device === device)) return model;
-  return ALL.find((m) => m.device === device)?.id ?? device;
-}
-
 /** What an option stands for: the device, and the model (empty for a
  *  device alone). */
 export function chooseReader(value: string): { device: ComicDevice; model: string } {
   const m = ALL.find((x) => x.id === value);
   return m ? { device: m.device, model: m.id } : { device: value as ComicDevice, model: "" };
-}
-
-/** A model by its id. */
-export const modelOf = (id: string | undefined) => (id ? ALL.find((m) => m.id === id) : undefined);
-
-/** Whether a reader opens a format as it comes (the others, any). */
-export function opens(device: ComicDevice, model: string | undefined, format: Format): boolean {
-  const m = modelOf(readerOf(device, model));
-  return !m || m.formats.includes(format);
-}
-
-/** The formats a reader opens as it comes, best first (none listed: any). */
-export const formatsOf = (device: ComicDevice, model: string | undefined): Format[] | null => modelOf(readerOf(device, model))?.formats ?? null;
-
-/** A screen's size in mm (for pages printed to fit it). */
-export function screenMm(device: ComicDevice): [number, number] | null {
-  const sc = SCREENS[device];
-  if (!sc) return null;
-  const mm = (px: number) => Math.round((px / sc.ppi) * 254) / 10;
-  return [mm(sc.size[0]), mm(sc.size[1])];
 }

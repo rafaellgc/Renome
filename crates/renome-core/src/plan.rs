@@ -381,6 +381,9 @@ pub struct Preview {
     pub total: usize,
     pub changed: usize,
     pub conflicts: usize,
+    /// Of the conflicts, the files that stay because the same file is
+    /// already where they go (nothing is wrong with those).
+    pub same_there: usize,
     /// Old folders renamed for what stays in them.
     pub left_folders: Vec<LeftFolder>,
     /// The release's advertisements to send to the trash after the moves,
@@ -2290,6 +2293,10 @@ pub fn preview(
         .iter()
         .filter(|i| i.status == Status::Conflict)
         .count();
+    let same_there = items
+        .iter()
+        .filter(|i| i.problem == Some(Problem::SameThere))
+        .count();
     let (left_folders, trash_folders) = left_folders(&items, view);
     // Where each advertisement is once its old folder is renamed.
     let trash = items
@@ -2316,6 +2323,7 @@ pub fn preview(
         total: files.len(),
         changed,
         conflicts,
+        same_there,
         left_folders,
         trash,
         trash_folders,

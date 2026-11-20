@@ -105,7 +105,7 @@ pub enum Device {
     Custom,
 }
 
-include!(concat!(env!("OUT_DIR"), "/screens.rs"));
+use crate::readers::{NO_PNG, SCREENS};
 
 impl Device {
     /// Its screen in the readers' list (`src/lib/readers.ts`): size and
@@ -116,7 +116,7 @@ impl Device {
         SCREENS
             .iter()
             .find(|(n, ..)| *n == name)
-            .map(|&(_, w, h, ink)| (w, h, ink))
+            .map(|&(_, w, h, ink, _)| (w, h, ink))
     }
 
     /// The screen's size in pixels (`None`: the pages keep theirs, or the

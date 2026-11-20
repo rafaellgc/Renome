@@ -4,31 +4,18 @@
   import { t, type Key } from "./i18n";
   import { TABLE, choicesOf, comicPreset, comicPresetOf, limitsOf, menuOf, type ComicPreset } from "./rules";
   import { settings } from "./settings.svelte";
-  import type { ComicDevice, RuleType, Step } from "./types";
+  import type { RuleType, Step } from "./types";
   /** Rules that pick their own kind of file: no filter of their own (the
    *  Rust catalog's group). */
   const byKind = (type: RuleType) => TABLE.media.includes(type);
-  /** The readers a comic e-book can be made for, by maker, in the menu's
-   *  order. */
   /** A reader model's label: name, screen and whether it is colour. */
   const modelName = (m: Reader) => (m.name.startsWith("@") ? t(m.name.slice(1) as Key) : m.name);
   const readerLabel = (m: Reader) => {
     const [w, h] = SCREENS[m.device]?.size ?? [0, 0];
     return `${modelName(m)} · ${w} × ${h}${isColourInk(m.device) ? ` · ${t("comicColour")}` : ""}`;
   };
-  /** A format's name in a menu, marked when the reader does not open it as
-   *  it comes (it can still be chosen). */
-  const formatOption = (label: string, f: Format, device: ComicDevice | undefined, model: string | undefined, any: boolean | undefined) =>
-    device && !any && !opens(device, model, f) ? `${label} — ${t("readerNotOpensShort")}` : label;
-  /** Why a format may not suit the reader, if it may not. */
-  const notOpens = (f: Format | "" | undefined, device: ComicDevice | undefined, model: string | undefined, any: boolean | undefined) => {
-    if (!f || !device || any || opens(device, model, f)) return "";
-    const m = modelOf(readerOf(device, model));
-    const best = formatsOf(device, model)?.[0];
-    return t("readerNotOpens", { reader: m ? modelName(m) : "", format: f.toUpperCase(), best: (best ?? "").toUpperCase() });
-  };
   import { api } from "./api";
-  import { OTHER_DEVICES, POPULAR, READERS, SCREENS, chooseReader, formatsOf, isColourInk, modelOf, opens, readerOf, type Format, type Reader } from "./readers";
+  import { OTHER_DEVICES, POPULAR, READERS, SCREENS, chooseReader, isColourInk, type Reader } from "./readers";
 
   /** Whether this system can print books to PDF (asked once). */
   let canPrint = $state(false);
@@ -117,8 +104,25 @@
   const lim = (name: string) => limitsOf(r.type, name);
   /** Bounds in milliseconds as a field in seconds. */
   const seconds = (b: { min?: number; max?: number }) => ({ min: b.min === undefined ? undefined : b.min / 1000, max: b.max === undefined ? undefined : b.max / 1000 });
+  /** The reader a comic or book rule makes its e-book for and the formats
+   *  it does not open (the Rust readers' check, the command line's too). */
+  let reader = $state<Awaited<ReturnType<typeof api.ruleReader>>>({ reader: "", device: null, limited: false, marked: [], notOpens: null });
+  $effect(() => {
+    const rule = $state.snapshot(step.rule);
+    if (rule.type === "comic" || rule.type === "book") api.ruleReader(rule).then((v) => (reader = v), () => {});
+  });
   /** The screen of the reader a book rule converts for, if one is chosen. */
-  const bookDev = $derived(step.rule.type === "book" ? modelOf(step.rule.model)?.device : undefined);
+  const bookDev = $derived(reader.device ?? undefined);
+  /** A format's name in a menu, marked when the reader does not open it as
+   *  it comes (it can still be chosen). */
+  const formatOption = (label: string, f: string) => (reader.marked.includes(f) ? `${label} — ${t("readerNotOpensShort")}` : label);
+  /** Why the format chosen may not suit the reader, if it may not. */
+  const why = $derived.by(() => {
+    const n = reader.notOpens;
+    if (!n) return "";
+    const name = n.name.startsWith("@") ? t(n.name.slice(1) as Key) : n.name;
+    return t("readerNotOpens", { reader: name, format: n.format.toUpperCase(), best: n.best.toUpperCase() });
+  });
 
   /** What a closed card does, in a few words. */
   const brief = $derived.by(() => {
@@ -598,7 +602,7 @@
         <label>{t("bookConvert")}
           <select bind:value={r.convertTo}>
             {#each menuOf("book", "convertTo") as c (c.value)}
-              {#if c.value !== "pdf" || canPrint || r.convertTo === "pdf"}<option value={c.value}>{c.value ? formatOption(t(c.label as Key), c.value as Format, bookDev, r.model, r.otherReaderApps) : t(c.label as Key)}</option>{/if}
+              {#if c.value !== "pdf" || canPrint || r.convertTo === "pdf"}<option value={c.value}>{c.value ? formatOption(t(c.label as Key), c.value) : t(c.label as Key)}</option>{/if}
             {/each}
           </select>
         </label>
@@ -610,7 +614,6 @@
               {@render readerOptions(false)}
             </select>
           </label>
-          {@const why = notOpens(r.convertTo, bookDev, r.model, r.otherReaderApps)}
           {#if why}<p class="warn sub">{why}</p>{/if}
           {#if bookDev}
             <label class="check sub"><input type="checkbox" bind:checked={r.otherReaderApps} /> <span>{t("comicAnyProgram")}<small>{t("comicAnyProgramHint")}</small></span></label>
@@ -691,14 +694,14 @@
         <h4 class="sect">{t("sectEbook")}</h4>
         <label>{t("comicEbook")}
           <select bind:value={r.ebook}>
-            {#each menuOf("comic", "ebook") as c (c.value)}<option value={c.value}>{c.value ? formatOption(t(c.label as Key), c.value as Format, r.device, r.model, r.otherReaderApps) : t(c.label as Key)}</option>{/each}
+            {#each menuOf("comic", "ebook") as c (c.value)}<option value={c.value}>{c.value ? formatOption(t(c.label as Key), c.value) : t(c.label as Key)}</option>{/each}
           </select>
         </label>
         <p class="hint">{t("comicEbookHint")}</p>
         {#if r.ebook}
           <label class="sub">{t("readerFor")}
             <select
-              value={readerOf(r.device, r.model)}
+              value={reader.reader || r.device}
               onchange={(e) => {
                 const c = chooseReader((e.currentTarget as HTMLSelectElement).value);
                 r.device = c.device;
@@ -711,9 +714,8 @@
               </optgroup>
             </select>
           </label>
-          {@const why = notOpens(r.ebook, r.device, r.model, r.otherReaderApps)}
           {#if why}<p class="warn sub">{why}</p>{/if}
-          {#if formatsOf(r.device, r.model)}
+          {#if reader.limited}
             <label class="check sub"><input type="checkbox" bind:checked={r.otherReaderApps} /> <span>{t("comicAnyProgram")}<small>{t("comicAnyProgramHint")}</small></span></label>
           {/if}
           {#if r.device === "custom"}

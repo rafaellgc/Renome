@@ -885,14 +885,24 @@ fn followed(files: &mut [FileEntry], done: &[renome_core::Operation]) -> Vec<(Pa
     moved
 }
 
+/// The renames done, with what is said of them (the shared lines, as the
+/// command line says them: `flow::after::renamed`).
+#[derive(Serialize)]
+struct Applied {
+    #[serde(flatten)]
+    report: ApplyReport,
+    said: Vec<renome_services::flow::after::Line>,
+}
+
 #[tauri::command]
 async fn apply(
     app: AppHandle,
     steps: Vec<Value>,
     overrides: Overrides,
     mut view: View,
-) -> Result<ApplyReport, String> {
+) -> Result<Applied, String> {
     let steps = rule_steps(steps, &mut view)?;
+    let sent = view.send_to.as_ref().map(|s| s.copy);
     let stop = stop_signal(&app);
     let emitter = app.clone();
     in_background(app, move |state| {
@@ -942,8 +952,9 @@ async fn apply(
         refresh_renamed(&mut s.files, &mut report);
         // Earlier states point to the old names.
         s.undo.clear();
+        let said = renome_services::flow::after::renamed(&plan, &report, sent);
         *state.renamed.lock().unwrap() = Some(plan);
-        report
+        Applied { report, said }
     })
     .await
 }
@@ -1070,6 +1081,22 @@ fn series_named(
 /// Everything the window builds rules, their menus and its options from,
 /// in this language (the command line's too): see `catalog::table` and
 /// `options::table`, and the details windows' fields.
+/// The "+ Rule" menu's groups in their order, by the rules' names as
+/// the window says them (the shared order: `catalog::menu`, the command
+/// line's manual too).
+#[tauri::command]
+fn rule_menu(names: HashMap<String, String>) -> (Vec<&'static str>, Vec<&'static str>) {
+    renome_core::catalog::menu(|k| names.get(k).cloned().unwrap_or_default())
+}
+
+/// The reader a comic or book rule makes its e-book for, and the formats
+/// it does not open (the command line warns of the same:
+/// `readers::reader`).
+#[tauri::command]
+fn rule_reader(rule: Value) -> renome_core::readers::Reader {
+    renome_core::readers::reader(&rule)
+}
+
 #[tauri::command]
 fn rule_table(lang: String) -> Value {
     let mut t = renome_core::catalog::table(&lang);
@@ -1376,6 +1403,34 @@ fn after_counts(
         Some(p) => renome_services::flow::after::counts(&rules, p, &chosen),
         None => Default::default(),
     }
+}
+
+/// What the question before renaming says (the shared lines, the
+/// command line's too: `flow::after::ask`), with the work besides the
+/// renames, on the list as shown.
+#[tauri::command]
+fn rename_ask(
+    app: AppHandle,
+    rules: Vec<Value>,
+    chosen: renome_services::flow::after::Chosen,
+    send_to: Option<renome_core::plan::SendTo>,
+) -> (
+    renome_services::flow::after::Counts,
+    renome_services::flow::after::Ask,
+) {
+    use renome_services::flow::after;
+    let state = app.state::<AppState>();
+    let shown = state.shown.lock().unwrap();
+    let Some(p) = shown.as_ref() else {
+        return Default::default();
+    };
+    let counts = after::counts(&rules, p, &chosen);
+    let ask = after::ask(
+        p,
+        &counts,
+        send_to.as_ref().map(|s| (s.dir.as_path(), s.copy)),
+    );
+    (counts, ask)
 }
 
 /// Everything written once the list is renamed (see `flow::after`): on
@@ -2324,6 +2379,9 @@ pub fn run() {
             mb_search,
             mb_choose,
             after_counts,
+            rename_ask,
+            rule_menu,
+            rule_reader,
             edit_details,
             edit_dates,
             edit_start,

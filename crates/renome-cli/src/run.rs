@@ -245,6 +245,26 @@ pub fn preview_or_apply(
         .filter(|s| s.get("enabled") != Some(&Value::Bool(false)))
         .map(|s| s["rule"].clone())
         .collect();
+    // A comic's e-book or a converted book its reader does not open as it
+    // comes: said as the window's rule card says it.
+    if !out::json() {
+        for rule in &rules_on {
+            if let Some(n) = renome_core::readers::reader(rule).not_opens {
+                let name = n
+                    .name
+                    .strip_prefix('@')
+                    .map_or_else(|| n.name.to_string(), |k| t(k, &[]));
+                out::note(&out::yellow(&t(
+                    "readerNotOpens",
+                    &[
+                        ("reader", &name),
+                        ("format", &n.format.to_uppercase()),
+                        ("best", &n.best.to_uppercase()),
+                    ],
+                )));
+            }
+        }
+    }
     let missing = match &found {
         Some(f) if m.get_flag("missing") || m.contains_id("missing-csv") => {
             crate::missing::of(&rules_on, f, &preview, m.get_flag("desc"))
@@ -358,12 +378,23 @@ pub fn preview_or_apply(
         out::note(&t("strictConflicts", &[("n", &real_conflicts(&preview))]));
         return Ok(Exit::Doubts);
     }
+    // What the window's question says (the shared lines): the work besides
+    // the renames, conflicts, adverts to the trash and old folders left
+    // behind, these last told even with --yes.
+    let to = m.get_one::<PathBuf>("to");
+    let said = renome_services::flow::after::ask(
+        &preview,
+        &counts,
+        to.map(|d| (d.as_path(), m.get_flag("copy"))),
+    );
+    if !out::json() && (!m.get_flag("yes") || said.always) {
+        for line in crate::lookup::planned(&said) {
+            out::note(&line);
+        }
+    }
     if !m.get_flag("yes") {
         if !std::io::stdin().is_terminal() {
             return Err(t("needYes", &[]));
-        }
-        for line in crate::lookup::planned(&counts) {
-            out::note(&line);
         }
         if !ask(&t("askRename", &[])) {
             out::note(&t("cancelled", &[]));
@@ -374,11 +405,7 @@ pub fn preview_or_apply(
     let (exit, report) = if preview.changed == 0 {
         (Exit::Done, renome_core::ApplyReport::default())
     } else {
-        rename(
-            &preview,
-            m.get_one::<PathBuf>("to").is_some(),
-            m.get_flag("copy"),
-        )?
+        rename(&preview, to.map(|_| m.get_flag("copy")))?
     };
     if !m.get_flag("no-server") {
         for note in runtime()?.block_on(crate::servers::tell(settings, &report.done)) {
@@ -415,8 +442,7 @@ pub fn preview_or_apply(
 /// stderr; what failed is listed.
 fn rename(
     preview: &Preview,
-    sent: bool,
-    copying: bool,
+    sent: Option<bool>,
 ) -> Result<(Exit, renome_core::ApplyReport), String> {
     let _lock = renome_services::RenameLock::take(|| out::note(&t("waitingWindow", &[])))?;
     let history = renome_core::History::new(renome_services::history_dir());
@@ -462,12 +488,17 @@ fn rename(
             json!({ "renamed": report.done.len(), "historyId": report.history_id, "failed": failed })
         );
     } else {
-        let key = match sent {
-            true if copying => "copiedN",
-            true => "movedN",
-            false => "renamedN",
-        };
-        out::note(&out::green(&t(key, &[("n", &report.done.len())])));
+        // As the window says it (the shared lines).
+        let lines = crate::lookup::said(&renome_services::flow::after::renamed(
+            preview, &report, sent,
+        ));
+        for (i, line) in lines.iter().enumerate() {
+            out::note(&if i == 0 {
+                out::green(line)
+            } else {
+                line.clone()
+            });
+        }
         for e in &report.errors {
             out::error(&format!(
                 "{} → {}: {}",
@@ -575,7 +606,7 @@ fn show(p: &Preview, all: bool, missing: &[crate::missing::Missing], warn_window
             "{}",
             serde_json::to_string_pretty(&json!({
                 "items": items,
-                "totals": { "files": p.total, "changed": p.changed, "conflicts": p.conflicts },
+                "totals": { "files": p.total, "changed": p.changed, "conflicts": p.conflicts, "sameThere": p.same_there },
                 "trash": p.trash,
                 "trashFolders": p.trash_folders,
                 "missing": missing,
@@ -638,9 +669,8 @@ fn show(p: &Preview, all: bool, missing: &[crate::missing::Missing], warn_window
     if real_conflicts(p) > 0 {
         totals.push(out::red(&t("conflicts", &[("n", &real_conflicts(p))])));
     }
-    let same = p.conflicts - real_conflicts(p);
-    if same > 0 {
-        totals.push(out::dim(&t("sameThereN", &[("n", &same)])));
+    if p.same_there > 0 {
+        totals.push(out::dim(&t("sameThereN", &[("n", &p.same_there)])));
     }
     if unchanged > 0 && p.changed > 0 {
         totals.push(out::dim(&t("unchangedN", &[("n", &unchanged)])));
@@ -676,11 +706,7 @@ fn show(p: &Preview, all: bool, missing: &[crate::missing::Missing], warn_window
 /// The conflicts, without the files already where they go (the same
 /// file is there): those stay, and nothing is wrong.
 fn real_conflicts(p: &Preview) -> usize {
-    p.conflicts
-        - p.items
-            .iter()
-            .filter(|i| i.problem == Some(renome_core::Problem::SameThere))
-            .count()
+    p.conflicts - p.same_there
 }
 
 /// A problem's name as the page's texts call it (`problem.<name>`).

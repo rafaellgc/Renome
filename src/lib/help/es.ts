@@ -1026,7 +1026,7 @@ ${ex("Serie.S01E02.720p.WEB.mkv", "Serie S01E02.mkv")}
   <li><b>macOS</b>: <code>/Applications/Renome.app/Contents/MacOS/renome-cli</code>. Para llamarlo solo por el nombre: <code>sudo mkdir -p /usr/local/bin &amp;&amp; sudo ln -s /Applications/Renome.app/Contents/MacOS/renome-cli /usr/local/bin/renome-cli</code>.</li>
 </ul>
 <h4>Ver antes, renombrar después</h4>
-<p><code>renome-cli preview CARPETAS -r REGLA</code> muestra el nombre actual y el nuevo, sin cambiar nada. <code>renome-cli apply …</code>, con los mismos argumentos, muestra la lista y pregunta antes de renombrar (<code>--yes</code> no pregunta). Las reglas se aplican en el orden en que se escriben:</p>
+<p><code>renome-cli preview CARPETAS -r REGLA</code> muestra el nombre actual y el nuevo, sin cambiar nada. <code>renome-cli apply …</code>, con los mismos argumentos, muestra la lista y pregunta antes de renombrar (<code>--yes</code> no pregunta, pero avisa, como la ventana, de las carpetas antiguas que quedan con sobras y de la publicidad que va a la Papelera; también avisa cuando el lector elegido no abre el formato del e-book). Las reglas se aplican en el orden en que se escriben:</p>
 <table>
   <tr><td><code>-r 'replace:find=_,replace= '</code></td><td>una regla: el tipo, dos puntos, opciones separadas por comas</td></tr>
   <tr><td><code>-r case</code></td><td>solo el tipo: las opciones quedan con su valor por defecto</td></tr>

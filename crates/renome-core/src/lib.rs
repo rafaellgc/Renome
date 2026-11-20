@@ -61,6 +61,7 @@ pub(crate) mod pages;
 pub mod photos;
 pub mod plan;
 pub mod playlists;
+pub mod readers;
 pub mod repeated;
 pub mod rules;
 pub mod scan;

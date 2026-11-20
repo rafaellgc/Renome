@@ -205,6 +205,8 @@ export interface Preview {
   total: number;
   changed: number;
   conflicts: number;
+  /** Of the conflicts, files already where they go (the same file is there). */
+  sameThere: number;
   /** A show's old folders renamed for the files that stay in them. */
   leftFolders: { from: string; to: string; files: number }[];
   /** Advertisements sent to the trash after the moves (where they are
@@ -682,6 +684,8 @@ export interface ApplyReport {
   stopped?: boolean;
   /** Where each file of the list went (old path, new path). */
   moved?: [string, string][];
+  /** What is said of the renames (Rust's lines; from `apply` only). */
+  said?: SaidLine[];
 }
 
 /** What renaming would write besides the renames (see `flow::after`). */
@@ -702,10 +706,23 @@ export interface AfterCounts {
   lines: SaidLine[];
 }
 
-/** A line said of the work after the renames: a text's key and its count. */
+/** A line Rust says of the work: a text's key, its count and, for some,
+ *  the text's other fields (`dir`, `folders`). */
 export interface SaidLine {
   key: string;
   n: number;
+  more?: [string, string][];
+}
+
+/** What the question before renaming says (Rust's: `flow::after::ask`). */
+export interface RenameAsk {
+  /** Renaming, or moving or copying to a folder; null when nothing is renamed. */
+  question: SaidLine | null;
+  lines: SaidLine[];
+  /** Old folders left with files that do not go to the new one. */
+  left: { from: string; to: string; files: number }[];
+  /** Asked even when the options say not to. */
+  always: boolean;
 }
 
 /** What was written after the renames; `troubles`: per stage, how much it did and each file's reason. */

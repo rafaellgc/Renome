@@ -27,16 +27,7 @@ use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-include!(concat!(env!("OUT_DIR"), "/readers.rs"));
-
-/// The page size (width, height in mm) of a book printed to PDF for a
-/// reader model: its screen's; `None` (A5) for a model not in the list.
-pub fn pdf_page(model: &str) -> Option<(f64, f64)> {
-    let device = MODELS.iter().find(|(m, _)| *m == model)?.1;
-    let (_, w, h, ppi) = SCREENS.iter().find(|(d, ..)| *d == device)?;
-    let mm = |px: u32| ((f64::from(px) / f64::from(*ppi)) * 254.0).round() / 10.0;
-    Some((mm(*w), mm(*h)))
-}
+pub use renome_core::readers::pdf_page;
 
 /// A book found in a catalogue: what the file was taken for and the one
 /// chosen.
@@ -222,19 +213,118 @@ pub struct Counts {
     pub lines: Vec<Line>,
 }
 
-/// A line said of the work: a text's key and its count.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+/// A line said of the work: a text's key, its count and, for some, the
+/// text's other fields (`dir`, `folders`).
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
 pub struct Line {
     pub key: &'static str,
     pub n: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub more: Vec<(&'static str, String)>,
 }
 
 /// The lines with a count, in order.
 fn lines(all: &[(&'static str, usize)]) -> Vec<Line> {
     all.iter()
         .filter(|(_, n)| *n > 0)
-        .map(|&(key, n)| Line { key, n })
+        .map(|&(key, n)| Line {
+            key,
+            n,
+            ..Line::default()
+        })
         .collect()
+}
+
+/// What is said before the list is renamed, the same in the window's
+/// question and the command line's.
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Ask {
+    /// The question itself: renaming the files, or moving or copying them
+    /// to another folder (`dir`); none when no file is renamed.
+    pub question: Option<Line>,
+    /// What it says besides: the work besides the renames (see
+    /// [`Counts::lines`]), the conflicts, the files already where they go
+    /// and the release's adverts going to the trash.
+    pub lines: Vec<Line>,
+    /// Old folders left with files that do not go to the new one (they
+    /// are renamed beside it), listed.
+    pub left: Vec<renome_core::plan::LeftFolder>,
+    /// Asked even when the options say not to ask: old folders left
+    /// behind and adverts sent to the trash are always told.
+    pub always: bool,
+}
+
+/// What is said before renaming the list `preview`, with the work
+/// `counts` besides; `send_to`: the folder the files go to and whether
+/// they are copied there.
+pub fn ask(preview: &Preview, counts: &Counts, send_to: Option<(&Path, bool)>) -> Ask {
+    let renames = preview.changed;
+    let ads = if renames > 0 {
+        preview.items.iter().filter(|i| i.to_trash).count()
+    } else {
+        0
+    };
+    let question = (renames > 0).then(|| match send_to {
+        Some((dir, copy)) => Line {
+            key: if copy { "confirmCopy" } else { "confirmMove" },
+            n: renames,
+            more: vec![("dir", dir.display().to_string())],
+        },
+        None => Line {
+            key: "confirmText",
+            n: renames,
+            ..Line::default()
+        },
+    });
+    let mut said = counts.lines.clone();
+    said.extend(lines(&[
+        ("confirmConflicts", preview.conflicts - preview.same_there),
+        ("confirmSameThere", preview.same_there),
+    ]));
+    if ads > 0 {
+        said.push(Line {
+            key: "confirmTrashAds",
+            n: ads,
+            more: vec![("folders", preview.trash_folders.len().to_string())],
+        });
+    }
+    Ask {
+        question,
+        lines: said,
+        left: preview.left_folders.clone(),
+        always: !preview.left_folders.is_empty() || ads > 0,
+    }
+}
+
+/// What is said once the list `preview` is renamed as `report` tells
+/// (before the work besides the renames): the files renamed, moved or
+/// copied (`sent`: to another folder, copied there), the old folders
+/// renamed for their leftovers, the cue sheets and playlists updated or
+/// deleted.
+pub fn renamed(
+    preview: &Preview,
+    report: &renome_core::ApplyReport,
+    sent: Option<bool>,
+) -> Vec<Line> {
+    let left: HashSet<&PathBuf> = preview.left_folders.iter().map(|f| &f.from).collect();
+    let folders = report
+        .done
+        .iter()
+        .filter(|op| left.contains(&op.from))
+        .count();
+    let files = report.done.len() - folders;
+    let key = match sent {
+        Some(true) => "copiedN",
+        Some(false) => "movedN",
+        None => "renamedN",
+    };
+    lines(&[
+        (key, files),
+        ("leftFoldersN", folders),
+        ("listsN", report.lists),
+        ("listsRemovedN", report.lists_removed),
+    ])
 }
 
 impl Counts {
@@ -1036,17 +1126,56 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_reader_model_gives_its_screen() {
-        // Every model's screen is in the list.
-        for (model, device) in MODELS {
-            assert!(
-                SCREENS.iter().any(|(d, ..)| d == device),
-                "{model}: {device}"
-            );
-        }
-        let (w, h) = pdf_page(MODELS[0].0).unwrap();
-        assert!(w > 50.0 && h > w);
-        assert_eq!(pdf_page("no-such-reader"), None);
+    fn the_question_and_the_result_say_the_same_in_both() {
+        use renome_core::plan::LeftFolder;
+        let old = PathBuf::from("/m/Show");
+        let preview = Preview {
+            changed: 3,
+            conflicts: 2,
+            same_there: 1,
+            left_folders: vec![LeftFolder {
+                from: old.clone(),
+                to: PathBuf::from("/m/Show (extra)"),
+                files: 2,
+            }],
+            ..Preview::default()
+        };
+        let counts = Counts::default();
+        let a = ask(&preview, &counts, None);
+        assert_eq!(
+            a.question.as_ref().map(|l| (l.key, l.n)),
+            Some(("confirmText", 3))
+        );
+        let keys: Vec<(&str, usize)> = a.lines.iter().map(|l| (l.key, l.n)).collect();
+        assert_eq!(keys, [("confirmConflicts", 1), ("confirmSameThere", 1)]);
+        // Old folders left behind: asked even with the question off.
+        assert!(a.always && a.left.len() == 1);
+        let sent = ask(&preview, &counts, Some((Path::new("/out"), true)));
+        let q = sent.question.unwrap();
+        assert_eq!(
+            (q.key, q.more),
+            ("confirmCopy", vec![("dir", "/out".to_string())])
+        );
+        // After: the old folder is not counted among the files.
+        let op = |f: &str, t: &str| renome_core::Operation {
+            from: PathBuf::from(f),
+            to: PathBuf::from(t),
+            copy: false,
+            within: None,
+        };
+        let report = renome_core::ApplyReport {
+            done: vec![
+                op("/m/a.mkv", "/m/Show/a.mkv"),
+                op("/m/Show", "/m/Show (extra)"),
+            ],
+            lists: 1,
+            ..Default::default()
+        };
+        let said: Vec<(&str, usize)> = renamed(&preview, &report, None)
+            .iter()
+            .map(|l| (l.key, l.n))
+            .collect();
+        assert_eq!(said, [("renamedN", 1), ("leftFoldersN", 1), ("listsN", 1)]);
     }
 
     #[test]

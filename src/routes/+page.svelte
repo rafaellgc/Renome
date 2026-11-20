@@ -38,17 +38,14 @@
   import { TABLE, isKindRule, setRuleTable, type Blocked, newRule, newStep } from "$lib/rules";
   import { loadSecrets, refreshLangs, saveSecrets, saveSettings, secretFields, settings, tmdbLang } from "$lib/settings.svelte";
   import type {
-    AfterCounts, AfterReport, ApplyReport, SaidLine, Candidate, Copies, MovieStatus, HistoryEntry, OpError, Preview, PreviewItem, Rule, RuleType, Step, View, ViewSort,
+    AfterCounts, AfterReport, ApplyReport, RenameAsk, SaidLine, Candidate, Copies, MovieStatus, HistoryEntry, OpError, Preview, PreviewItem, Rule, RuleType, Step, View, ViewSort,
   } from "$lib/types";
   import type { DetailColumn, UpdateFound } from "$lib/types";
 
   let ready = $state(false);
   let steps = $state<Step[]>([]);
   let overrides = $state<Record<string, string>>({});
-  let preview = $state<Preview>({ items: [], ruleErrors: [], filterError: null, total: 0, changed: 0, conflicts: 0, leftFolders: [], trash: [], trashFolders: [], hints: { sample: "", files: 0, pairs: 0, names: [], pairNames: [], steps: [] } });
-  // Files that stay because the same file is already where they go
-  // (counted apart from the conflicts).
-  const sameThere = $derived(preview.items.filter((i) => i.problem === "sameThere").length);
+  let preview = $state<Preview>({ items: [], ruleErrors: [], filterError: null, total: 0, changed: 0, conflicts: 0, sameThere: 0, leftFolders: [], trash: [], trashFolders: [], hints: { sample: "", files: 0, pairs: 0, names: [], pairNames: [], steps: [] } });
   let selected = $state(new Set<string>());
   let filter = $state("");
   let sortKey = $state<ViewSort>("newName");
@@ -157,7 +154,7 @@
   }
   const NO_COUNTS: AfterCounts = { sidecars: 0, bookMeta: 0, covers: 0, playlists: 0, tags: 0, inside: 0, videoTags: 0, subTools: 0, subtitles: 0, besides: 0, lines: [] };
   /** Lines Rust says of the work besides the renames, in the texts. */
-  const said = (lines: SaidLine[]) => lines.map((l) => t(l.key as Key, { n: l.n }));
+  const said = (lines: SaidLine[]) => lines.map((l) => t(l.key as Key, { n: l.n, ...Object.fromEntries(l.more ?? []) }));
   /** What renaming would write besides the renames (asked of the shared flow whenever the list or the choices change). */
   let afterCounts = $state<AfterCounts>(NO_COUNTS);
   $effect(() => {
@@ -348,12 +345,17 @@
       sortKey = "manual";
     }
   });
-  /** The "+ Rule" menu: the groups the Rust catalog makes, each in
-   *  alphabetical order of the current language. */
-  const byName = (a: RuleType, b: RuleType) => t(`rule.${a}`).localeCompare(t(`rule.${b}`), LOCALES[settings.lang]);
+  /** The "+ Rule" menu: the groups the Rust catalog makes, in the order
+   *  it gives by the rules' names in the current language (the manual's
+   *  order, the command line's too: `catalog::menu`). */
+  let ruleOrder = $state<[RuleType[], RuleType[]]>([[], []]);
+  $effect(() => {
+    const names = Object.fromEntries([...TABLE.media, ...TABLE.text].map((k) => [k, t(`rule.${k}`)]));
+    api.ruleMenu(names).then((o) => (ruleOrder = o), () => {});
+  });
   const ruleGroups = $derived([
-    { label: "ruleGroupMedia", types: [...TABLE.media].sort(byName) },
-    { label: "ruleGroupText", types: [...TABLE.text].sort(byName) },
+    { label: "ruleGroupMedia", types: ruleOrder[0] },
+    { label: "ruleGroupText", types: ruleOrder[1] },
   ] as const);
   /** What the Rename button does: names and the files that only get data. */
   const applyCount = $derived(preview.changed + afterCounts.besides);
@@ -639,24 +641,13 @@
     // Taken now: the list changes once files are renamed.
     const rules = onRules();
     const picked = chosen();
-    const counts = await api.afterCounts(rules, picked).catch(() => afterCounts);
+    // What the question says, and whether it is asked anyway (old folders
+    // left behind, adverts to the trash): the shared flow decides.
+    const [counts, ask] = await api.renameAsk(rules, picked, $state.snapshot(sendTo)).catch((): [AfterCounts, RenameAsk] => [afterCounts, { question: null, lines: [], left: [], always: false }]);
     if (!preview.changed && !counts.besides) return;
-    // Files left behind in an old folder are always told, listed.
-    const left = preview.leftFolders.map((f) => t("confirmLeftoverItem", { n: f.files, from: basename(f.from), to: basename(f.to) }));
-    // The release's advertisements going to the trash: always told.
-    const ads = preview.changed ? preview.items.filter((i) => i.toTrash).length : 0;
-    if (settings.confirmApply || left.length || ads) {
-      const lines = [
-        preview.changed
-          ? sendTo
-            ? t(sendTo.copy ? "confirmCopy" : "confirmMove", { n: preview.changed, dir: sendTo.dir })
-            : t("confirmText", { n: preview.changed })
-          : "",
-        ...said(counts.lines),
-        preview.conflicts - sameThere ? t("confirmConflicts", { n: preview.conflicts - sameThere }) : "",
-        sameThere ? t("confirmSameThere", { n: sameThere }) : "",
-        ads ? t("confirmTrashAds", { n: ads, folders: preview.trashFolders.length }) : "",
-      ].filter(Boolean);
+    const left = ask.left.map((f) => t("confirmLeftoverItem", { n: f.files, from: basename(f.from), to: basename(f.to) }));
+    if (settings.confirmApply || ask.always) {
+      const lines = said(ask.question ? [ask.question, ...ask.lines] : ask.lines);
       const ok = await confirm({
         title: t(sendTo ? (sendTo.copy ? "confirmCopyTitle" : "confirmMoveTitle") : "confirmTitle"),
         text: left.length ? `${lines.join("\n")}\n\n${t("confirmLeftoverHead", { n: left.length, suffix: t("leftoverSuffix") })}` : `${lines.join("\n")}\n\n${t("confirmUndoHint")}`,
@@ -670,11 +661,7 @@
     busy = true;
     task = "rename";
     applyProgress = null;
-    // Where the files went, for the notice (the choice is reset below).
-    const sent = sendTo;
     try {
-      // Old folders renamed for their leftovers: not files.
-      const leftFrom = new Set(preview.leftFolders.map((f) => f.from));
       const r: ApplyReport = preview.changed
         ? await api.apply(payload(), $state.snapshot(overrides), $state.snapshot(view))
         : { done: [], errors: [], historyId: null, lists: 0, listsRemoved: 0 };
@@ -721,12 +708,11 @@
       // once more, so the files stay where they are until chosen again.
       if (preview.changed) sendTo = null;
       overrides = {};
+      // The renames, as the shared flow says them (the command line's
+      // lines too), then the work besides them.
       notice = [
-        preview.changed ? t(sent ? (sent.copy ? "copiedN" : "movedN") : "renamedN", { n: r.done.filter((op) => !leftFrom.has(op.from)).length }) : "",
+        ...said(r.said ?? []),
         r.stopped ? t("applyStopped") : "",
-        r.done.some((op) => leftFrom.has(op.from)) ? t("leftFoldersN", { n: r.done.filter((op) => leftFrom.has(op.from)).length }) : "",
-        r.lists ? t("listsN", { n: r.lists }) : "",
-        r.listsRemoved ? t("listsRemovedN", { n: r.listsRemoved }) : "",
         ...said(after?.lines ?? []),
         r.errors.length ? t("errorsN", { n: r.errors.length }) : "",
       ].filter(Boolean).join(" · ");
@@ -1517,8 +1503,8 @@
       </span>
       <span class="ok">{t("changed", { n: preview.changed })}</span>
     {/if}
-    {#if preview.conflicts - sameThere}<span class="bad">{t("conflicts", { n: preview.conflicts - sameThere })}</span>{/if}
-    {#if sameThere}<span title={t("problem.sameThere")}>{t("sameThereN", { n: sameThere })}</span>{/if}
+    {#if preview.conflicts - preview.sameThere}<span class="bad">{t("conflicts", { n: preview.conflicts - preview.sameThere })}</span>{/if}
+    {#if preview.sameThere}<span title={t("problem.sameThere")}>{t("sameThereN", { n: preview.sameThere })}</span>{/if}
     {#if preview.leftFolders.length}
       <span
         class="warn"
@@ -1759,7 +1745,7 @@
 {/if}
 
 {#if help}
-  <Help bind:tab={help} onclose={() => (help = null)} />
+  <Help bind:tab={help} order={ruleOrder} onclose={() => (help = null)} />
 {/if}
 
 {#if showOptions}

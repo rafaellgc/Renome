@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Ghost } from "./missing";
 import type { Blocked, RuleTable } from "./rules";
-import type { RuleType, AfterCounts, AfterReport, Rule, AlbumLookup, BookTarget, ComicFormat, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, MbCandidate, SongMatch, HistoryEntry, ListedTrack, EpisodeMatch, EpKey, BookFound, BookPart, MovieFound, MovieMatch, PreviewItem, SeriesOutcome, AudioBook, ServerCall, ServerLibrary, UpdateFound, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
+import type { RuleType, AfterCounts, RenameAsk, AfterReport, Rule, AlbumLookup, BookTarget, ComicFormat, ComicDevice, AlbumQuery, ApplyReport, BookCandidate, BookGuess, BookLookup, BookMatch, Candidate, Details, ComicIssue, ComicMatch, ComicSource, ComicVolume, MbCandidate, SongMatch, HistoryEntry, ListedTrack, EpisodeMatch, EpKey, BookFound, BookPart, MovieFound, MovieMatch, PreviewItem, SeriesOutcome, AudioBook, ServerCall, ServerLibrary, UpdateFound, MovieSet, Preview, ScanOptions, Show, SortKey, Step, SubCandidate, SubsAuth, View } from "./types";
 
 type Overrides = Record<string, string>;
 
@@ -44,6 +44,8 @@ export interface WorkGroup {
 export const api = {
   /** Everything rules, their menus and the options are built from (the Rust catalog's). */
   ruleTable: (lang: string) => invoke<RuleTable>("rule_table", { lang }),
+  /** The "+ Rule" menu's groups in order, by the rules' names given (the manual's order too). */
+  ruleMenu: (names: Record<string, string>) => invoke<[RuleType[], RuleType[]]>("rule_menu", { names }),
   /** The list's optional columns that make sense with these rules. */
   columnsFor: (steps: Step[]) => invoke<import("./types").DetailColumn[]>("columns_for", { steps }),
   /** Why each rule cannot join the rules there, when it cannot. */
@@ -72,6 +74,9 @@ export const api = {
   missingItems: (rules: Rule[], known: unknown, descending: boolean) => invoke<Omit<Ghost, "ghost">[]>("missing_items", { rules, known, descending }).then((l) => l.map((g): Ghost => ({ ...g, ghost: true }))),
   /** What renaming would write besides the renames (the shared flow decides). */
   afterCounts: (rules: Rule[], chosen: unknown) => invoke<AfterCounts>("after_counts", { rules, chosen }),
+  /** What the question before renaming says, with the work besides the renames (the shared flow decides). */
+  renameAsk: (rules: Rule[], chosen: unknown, sendTo: { dir: string; copy: boolean } | null) =>
+    invoke<[AfterCounts, RenameAsk]>("rename_ask", { rules, chosen, sendTo }),
   /** Everything written once the list is renamed: `done`, each renamed file's old and new path. */
   afterRename: (rules: Rule[], chosen: unknown, done: [string, string][], historyId: string | null, tmdbKey: string, tmdbLang: string, subs: SubsAuth) =>
     invoke<AfterReport>("after_rename", { rules, chosen, done, historyId, tmdbKey, tmdbLang, subs }),
@@ -112,6 +117,9 @@ export const api = {
   episodesTyped: (show: Show, text: string) => invoke<{ exact: EpKey[] | null; matches: EpKey[] }>("episodes_typed", { show, text }),
   /** Whether the GCD would be searched without an account. */
   gcdFew: (source: string, email: string, password: string) => invoke<boolean>("gcd_few", { source, email, password }),
+  /** The reader a comic or book rule is for, and the formats it does not open (the shared check). */
+  ruleReader: (rule: Rule) =>
+    invoke<{ reader: string; device: ComicDevice | null; limited: boolean; marked: string[]; notOpens: { model: string; name: string; format: string; best: string } | null }>("rule_reader", { rule }),
   /** The options that do nothing as the rule is set (hidden on its card). */
   ruleInert: (rule: Rule) => invoke<string[]>("rule_inert", { rule }),
   /** Each list of episodes as file names write it (`S01E02-E03`). */
@@ -207,7 +215,6 @@ export const api = {
   /** The rule sets with rules saved by name; refused `exists:<place>`. */
   setsSave: (sets: unknown[], name: string, steps: Step[], replace: boolean) => invoke<unknown[]>("sets_save", { sets, name, steps, replace }),
   setsRename: (sets: unknown[], at: number, name: string) => invoke<unknown[]>("sets_rename", { sets, at, name }),
-  /** For each server, how many folders it was told about, or why not. */
   /** Tells the servers in the options about the folders the files left and went to (which servers: the shared choice). */
   serverTell: (servers: unknown, keys: string, done: { from: string; to: string }[]) =>
     invoke<{ name: string; folders: { Ok: number } | { Err: string } }[]>("server_tell", { servers, keys, done }),
@@ -217,7 +224,6 @@ export const api = {
   googleBooksCheck: (key: string) => invoke<void>("google_books_check", { key }),
   mbChoose: (id: string, paths: string[], fromName: boolean) =>
     invoke<{ matches: [string, SongMatch][]; tracks: ListedTrack[]; agree: number }>("mb_choose", { id, paths, fromName }),
-  /** `names`: the name each file is read by (null: its own). */
   /** Saves rows as a CSV file, as the command line writes them. */
   saveCsv: (path: string, rows: string[][], lang: string) => invoke<void>("save_csv", { path, rows, lang }),
   /** Where TMDB images come from (`…/t/p`, sizes added). */
@@ -226,8 +232,6 @@ export const api = {
   /** Series found, those that could hold issue `highest` first. */
   comicSearch: (source: ComicSource, key: string, query: string, lang: string, year = "", publisher = "", skip = "", highest = 0) =>
     invoke<ComicVolume[]>("comic_search", { source, key, query, year, publisher, lang, skip, highest }),
-  /** The barcodes printed in the comics' first and last pages. */
-  /** The issue a barcode belongs to, on Metron. */
   /** The comic rule's search (shared with the command line); a series
    *  it is not sure of comes as a `flow-ask` question. */
   comicsSearch: (

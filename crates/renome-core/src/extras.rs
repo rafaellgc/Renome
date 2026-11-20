@@ -22,13 +22,7 @@ pub const SHORTS: &str = "shorts";
 pub const EXTRAS: &str = "extras";
 
 /// Lower case, without accents, every run of separators one space.
-fn plain(s: &str) -> String {
-    let s = crate::text::fold(s);
-    s.split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ")
-}
+use crate::text::fold_words as plain;
 
 /// The extras folder a folder of this name stands for (`Making Of`,
 /// `Bastidores`, `Trailers`, `Cenas deletadas`).

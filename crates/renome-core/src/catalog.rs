@@ -1259,7 +1259,7 @@ pub fn default_value(opt: &Opt, lang: &str) -> Value {
 }
 
 /// An option of a rule as it is set: its own value, else its default.
-fn set_value(rule: &Value, key: &str) -> Value {
+pub(crate) fn set_value(rule: &Value, key: &str) -> Value {
     if let Some(v) = rule.get(key).filter(|v| !v.is_null()) {
         return v.clone();
     }
@@ -1529,6 +1529,18 @@ pub fn groups() -> (Vec<&'static str>, Vec<&'static str>) {
         media.iter().map(|r| r.kind).collect(),
         text.iter().map(|r| r.kind).collect(),
     )
+}
+
+/// The "+ Rule" menu's groups in their order (the manual's rule pages
+/// follow it, in the window and the command line): by kind of file, then
+/// on the name's text, each by the rule's name in the language (`name`
+/// gives it), accents and case aside.
+pub fn menu(name: impl Fn(&str) -> String) -> (Vec<&'static str>, Vec<&'static str>) {
+    let (mut media, mut text) = groups();
+    for group in [&mut media, &mut text] {
+        group.sort_by_cached_key(|k| (crate::text::fold(&name(k)), *k));
+    }
+    (media, text)
 }
 
 /// A value of a step's rule as the core reads it: numbers within the
@@ -2129,7 +2141,7 @@ mod tests {
         let devices: Vec<&str> = DEVICES.iter().map(|d| d.value).collect();
         assert_eq!(devices.first(), Some(&"original"));
         assert_eq!(devices.last(), Some(&"custom"));
-        assert_eq!(devices.len(), crate::comicbook::SCREENS.len() + 2);
+        assert_eq!(devices.len(), crate::readers::SCREENS.len() + 2);
     }
 
     #[test]

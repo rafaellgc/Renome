@@ -7,14 +7,23 @@
   import { en } from "./help/en";
   import { es } from "./help/es";
   import { pt } from "./help/pt";
-  import { LOCALES, t } from "./i18n";
+  import { t } from "./i18n";
   import { settings } from "./settings.svelte";
   import { TABLE } from "./rules";
   import type { RuleType } from "./types";
   import appLicense from "../../LICENSE?raw";
 
   type Tab = "manual" | "about" | "licenses";
-  let { onclose, tab = $bindable("manual") }: { onclose: () => void; tab?: Tab } = $props();
+  let {
+    onclose,
+    tab = $bindable("manual"),
+    order,
+  }: {
+    onclose: () => void;
+    tab?: Tab;
+    /** The rules' groups in the "+ Rule" menu's order (Rust's). */
+    order: [RuleType[], RuleType[]];
+  } = $props();
 
   /** Written by scripts/licenses.js when building. */
   interface Licenses {
@@ -94,22 +103,21 @@
     const type = id.startsWith("r-") ? (id.slice(2) as RuleType) : undefined;
     return type && TABLE.defaults[type] ? type : undefined;
   };
-  /** The rules by kind of file (the Rust catalog's group). */
-  const MEDIA: RuleType[] = TABLE.media;
-  /** The rules' sections in the order of the "+ Rule" menu: those by kind
-   *  of file, then those on the name's text, each alphabetical by the
-   *  rule's name in the current language; the first of each group carries
-   *  the group's title for the index. */
+  /** The rules' sections in the order of the "+ Rule" menu (Rust's,
+   *  the command line's manual too): those by kind of file, then those on
+   *  the name's text; the first of each group carries the group's title
+   *  for the index. */
   const sections = $derived.by(() => {
     const all = { pt, en, es }[settings.lang];
-    const name = (id: string) => t(`rule.${RULE_OF(id)!}`);
-    const byName = (a: { id: string }, b: { id: string }) => name(a.id).localeCompare(name(b.id), LOCALES[settings.lang]);
-    const media = all.filter((s) => RULE_OF(s.id) && MEDIA.includes(RULE_OF(s.id)!)).sort(byName);
-    const text = all.filter((s) => RULE_OF(s.id) && !MEDIA.includes(RULE_OF(s.id)!)).sort(byName);
+    const of = (group: RuleType[]) => group.flatMap((k) => all.filter((s) => RULE_OF(s.id) === k));
+    const media = of(order[0]);
+    const text = of(order[1]);
     const rules: ((typeof all)[number] & { group?: string })[] = [
       ...media.map((s, i) => (i ? s : { ...s, group: t("ruleGroupMedia") })),
       ...text.map((s, i) => (i ? s : { ...s, group: t("ruleGroupText") })),
     ];
+    // Until the order comes, as written.
+    if (rules.length !== all.filter((s) => RULE_OF(s.id)).length) return all as typeof rules;
     let next = 0;
     return all.map((s) => (RULE_OF(s.id) ? rules[next++] : s)) as ((typeof all)[number] & { group?: string })[];
   });

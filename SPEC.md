@@ -2733,7 +2733,21 @@ and home-relative paths as shown (`text::{size, home_short}`,
 `similar::places`), and one `text::{fold, words, fold_words}`, base64
 (`b64`, on the `base64` crate) and natural order for the whole core. A
 character rule's "only if" is one character (`onlyIfOne` otherwise), and
-the command line says a rule's error as the window's card does. Plurals
+the command line says a rule's error as the window's card does. Since
+the 2026-11-20 re-audit, also: what is said before and after renaming
+(`flow::after::{ask, renamed}`: the question, the conflicts apart from
+the files already where they go (`Preview::same_there`), the adverts
+to the trash and the old folders left behind, these two asked even with
+the question turned off and told by the command line even with
+`--yes`; after it, the files renamed apart from the old folders, and
+the cue sheets and playlists updated or deleted), the "+ Rule" menu's
+order and the manual's (`catalog::menu`, by the rules' names in the
+language, accents and case aside), and the readers (`readers`: each
+model's screen and the formats it opens, read from `src/lib/readers.ts`
+by the core's build alone; the page a book is printed to PDF on, and
+the format a comic or book rule makes that its reader does not open as
+it comes, unless any reading program will do: the window marks it, the
+command line warns). Plurals
 in texts are written twice (TypeScript for the window, Rust for the
 command line); both run the cases of `src/lib/plurals.json`. And
 `crates/renome-cli` the program: every command below, the lookup rules

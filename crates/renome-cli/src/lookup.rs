@@ -1517,13 +1517,40 @@ pub async fn subtitles(
 
 /// The lines asked about before renaming, for what is written besides
 /// the renames (as the window's question says them).
-pub fn planned(c: &flow::after::Counts) -> Vec<String> {
-    said(&c.lines)
+pub fn planned(ask: &flow::after::Ask) -> Vec<String> {
+    let mut out = said(&ask.lines);
+    if !ask.left.is_empty() {
+        let suffix = t("leftoverSuffix", &[]);
+        out.push(t(
+            "confirmLeftoverHead",
+            &[("n", &ask.left.len()), ("suffix", &suffix)],
+        ));
+        for f in &ask.left {
+            out.push(format!(
+                "  {} ({}) → {}",
+                crate::out::path(&f.from),
+                t("files", &[("n", &f.files)]),
+                crate::out::path(&f.to)
+            ));
+        }
+    }
+    out
 }
 
-/// Lines said of the work (see `flow::after::{Counts, Report}::lines`).
-fn said(lines: &[flow::after::Line]) -> Vec<String> {
-    lines.iter().map(|l| t(l.key, &[("n", &l.n)])).collect()
+/// Lines said of the work (see `flow::after::{Ask, Counts, Report}`).
+pub fn said(lines: &[flow::after::Line]) -> Vec<String> {
+    lines
+        .iter()
+        .map(|l| {
+            let mut vars: Vec<(&str, &dyn std::fmt::Display)> = vec![("n", &l.n)];
+            vars.extend(
+                l.more
+                    .iter()
+                    .map(|(k, v)| (*k, v as &dyn std::fmt::Display)),
+            );
+            t(l.key, &vars)
+        })
+        .collect()
 }
 
 /// Everything written once the files are renamed, by the shared flow (as

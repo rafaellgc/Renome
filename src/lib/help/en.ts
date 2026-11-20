@@ -1026,7 +1026,7 @@ ${ex("Show.S01E02.720p.WEB.mkv", "Show S01E02.mkv")}
   <li><b>macOS</b>: <code>/Applications/Renome.app/Contents/MacOS/renome-cli</code>. To call it by name alone: <code>sudo mkdir -p /usr/local/bin &amp;&amp; sudo ln -s /Applications/Renome.app/Contents/MacOS/renome-cli /usr/local/bin/renome-cli</code>.</li>
 </ul>
 <h4>Look first, rename after</h4>
-<p><code>renome-cli preview FOLDERS -r RULE</code> shows the current and the new name, changing nothing. <code>renome-cli apply …</code>, with the same arguments, shows the list and asks before renaming (<code>--yes</code> does not ask). Rules apply in the order they are written:</p>
+<p><code>renome-cli preview FOLDERS -r RULE</code> shows the current and the new name, changing nothing. <code>renome-cli apply …</code>, with the same arguments, shows the list and asks before renaming (<code>--yes</code> does not ask, but tells, as the window does, of the old folders left with leftovers and the adverts going to the trash; it also warns when the chosen reader does not open the e-book's format). Rules apply in the order they are written:</p>
 <table>
   <tr><td><code>-r 'replace:find=_,replace= '</code></td><td>one rule: its type, a colon, options separated by commas</td></tr>
   <tr><td><code>-r case</code></td><td>the type only: options keep their defaults</td></tr>
