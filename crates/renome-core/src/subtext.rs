@@ -230,18 +230,22 @@ fn vtt_time(ms: i64) -> String {
     format!("{h:02}:{m:02}:{s:02}.{f:03}")
 }
 
-/// `1:02:03.45` (hundredths, as SubStation writes them).
-fn ass_time(ms: i64) -> String {
+/// Hours, minutes, seconds and hundredths of a time, as SubStation and
+/// SubViewer write them (`hours` digits for the hours at least).
+fn centis(ms: i64, hours: usize) -> String {
     let cs = (ms.max(0) + 5) / 10;
     let (h, m, s) = (cs / 360_000, cs / 6000 % 60, cs / 100 % 60);
-    format!("{h}:{m:02}:{s:02}.{:02}", cs % 100)
+    format!("{h:0hours$}:{m:02}:{s:02}.{:02}", cs % 100)
+}
+
+/// `1:02:03.45` (hundredths, as SubStation writes them).
+fn ass_time(ms: i64) -> String {
+    centis(ms, 1)
 }
 
 /// `01:02:03.45` (SubViewer's).
 fn sv_time(ms: i64) -> String {
-    let cs = (ms.max(0) + 5) / 10;
-    let (h, m, s) = (cs / 360_000, cs / 6000 % 60, cs / 100 % 60);
-    format!("{h:02}:{m:02}:{s:02}.{:02}", cs % 100)
+    centis(ms, 2)
 }
 
 /// A fraction of a second written with `digits` digits, in milliseconds.

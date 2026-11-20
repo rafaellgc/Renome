@@ -13,7 +13,7 @@ const API: &str = "https://www.comics.org/api";
 
 /// Tests point this at a local server with `RENOME_GCD_API`.
 fn api_base() -> String {
-    std::env::var("RENOME_GCD_API").unwrap_or_else(|_| API.into())
+    crate::env_or("RENOME_GCD_API", API)
 }
 
 pub struct Client {

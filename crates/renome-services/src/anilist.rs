@@ -15,7 +15,7 @@ const API: &str = "https://graphql.anilist.co";
 
 /// Tests point this at a local server with `RENOME_ANILIST_API`.
 fn api_base() -> String {
-    std::env::var("RENOME_ANILIST_API").unwrap_or_else(|_| API.into())
+    crate::env_or("RENOME_ANILIST_API", API)
 }
 
 pub struct Client {

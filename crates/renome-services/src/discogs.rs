@@ -13,7 +13,7 @@ const API: &str = "https://api.discogs.com";
 
 /// Tests point this at a local server with `RENOME_DISCOGS_API`.
 fn api_base() -> String {
-    std::env::var("RENOME_DISCOGS_API").unwrap_or_else(|_| API.into())
+    crate::env_or("RENOME_DISCOGS_API", API)
 }
 
 pub struct Client {

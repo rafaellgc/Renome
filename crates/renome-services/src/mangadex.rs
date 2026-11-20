@@ -13,7 +13,7 @@ const COVERS: &str = "https://uploads.mangadex.org/covers";
 
 /// Tests point this at a local server with `RENOME_MANGADEX_API`.
 fn api_base() -> String {
-    std::env::var("RENOME_MANGADEX_API").unwrap_or_else(|_| API.into())
+    crate::env_or("RENOME_MANGADEX_API", API)
 }
 
 pub struct Client {

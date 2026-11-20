@@ -20,11 +20,11 @@ const API: &str = "https://api.themoviedb.org/3";
 /// The API and image addresses; tests point them at a local server with
 /// `RENOME_TMDB_API` and `RENOME_TMDB_IMAGES`.
 fn api_base() -> String {
-    std::env::var("RENOME_TMDB_API").unwrap_or_else(|_| API.into())
+    crate::env_or("RENOME_TMDB_API", API)
 }
 
 fn image_base() -> String {
-    std::env::var("RENOME_TMDB_IMAGES").unwrap_or_else(|_| tmdb::IMAGE_BASE.into())
+    crate::env_or("RENOME_TMDB_IMAGES", tmdb::IMAGE_BASE)
 }
 
 /// Cheap to clone: the HTTP client is shared.
@@ -216,20 +216,31 @@ impl Client {
         Ok(tmdb::rank(guess, results))
     }
 
-    pub async fn details(&self, id: u64) -> Result<Details, String> {
+    /// A title's details with what is appended to them, the videos and
+    /// images in the language asked and in English.
+    async fn with_media<T: for<'de> Deserialize<'de>>(
+        &self,
+        path: &str,
+        append: &str,
+    ) -> Result<T, String> {
         self.get(
-            &format!("/movie/{id}"),
+            path,
             &[
-                (
-                    "append_to_response",
-                    "credits,release_dates,keywords,videos,images",
-                ),
+                ("append_to_response", append),
                 ("include_video_language", &format!("{},en", self.lang2())),
                 (
                     "include_image_language",
                     &format!("{},en,null", self.lang2()),
                 ),
             ],
+        )
+        .await
+    }
+
+    pub async fn details(&self, id: u64) -> Result<Details, String> {
+        self.with_media(
+            &format!("/movie/{id}"),
+            "credits,release_dates,keywords,videos,images",
         )
         .await
     }
@@ -331,19 +342,9 @@ impl Client {
 
     /// A show's details for its `.nfo`.
     pub async fn show_details(&self, id: u64) -> Result<ShowDetails, String> {
-        self.get(
+        self.with_media(
             &format!("/tv/{id}"),
-            &[
-                (
-                    "append_to_response",
-                    "aggregate_credits,content_ratings,keywords,external_ids,videos,images",
-                ),
-                ("include_video_language", &format!("{},en", self.lang2())),
-                (
-                    "include_image_language",
-                    &format!("{},en,null", self.lang2()),
-                ),
-            ],
+            "aggregate_credits,content_ratings,keywords,external_ids,videos,images",
         )
         .await
     }

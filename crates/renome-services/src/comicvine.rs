@@ -15,7 +15,7 @@ const PAGE: usize = 100;
 
 /// Tests point this at a local server with `RENOME_CV_API`.
 fn api_base() -> String {
-    std::env::var("RENOME_CV_API").unwrap_or_else(|_| API.into())
+    crate::env_or("RENOME_CV_API", API)
 }
 
 pub struct Client {

@@ -21,11 +21,11 @@ const COVERS: &str = "https://coverartarchive.org";
 /// Tests point these at a local server with `RENOME_MB_API` and
 /// `RENOME_MB_COVERS`.
 fn api_base() -> String {
-    std::env::var("RENOME_MB_API").unwrap_or_else(|_| API.into())
+    crate::env_or("RENOME_MB_API", API)
 }
 
 fn covers_base() -> String {
-    std::env::var("RENOME_MB_COVERS").unwrap_or_else(|_| COVERS.into())
+    crate::env_or("RENOME_MB_COVERS", COVERS)
 }
 
 /// Shared by all lookups, so the pace holds across them.

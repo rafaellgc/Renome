@@ -12,7 +12,7 @@ const KEY: &str = "0VgOiCZa1a";
 
 /// Tests point this at a local server with `RENOME_ACOUSTID_API`.
 fn api() -> String {
-    std::env::var("RENOME_ACOUSTID_API").unwrap_or_else(|_| API.into())
+    crate::env_or("RENOME_ACOUSTID_API", API)
 }
 
 pub struct Client {

@@ -15,7 +15,7 @@ const API: &str = "https://api.mangaupdates.com/v1";
 
 /// Tests point this at a local server with `RENOME_MANGAUPDATES_API`.
 fn api_base() -> String {
-    std::env::var("RENOME_MANGAUPDATES_API").unwrap_or_else(|_| API.into())
+    crate::env_or("RENOME_MANGAUPDATES_API", API)
 }
 
 pub struct Client {

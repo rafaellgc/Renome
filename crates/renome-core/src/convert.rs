@@ -179,11 +179,6 @@ pub(crate) fn is_page_name(name: &str) -> bool {
     is_page(name)
 }
 
-/// Names in reading order (`2` before `10`).
-pub(crate) fn natural_order(a: &str, b: &str) -> std::cmp::Ordering {
-    natural(a, b)
-}
-
 /// Folders inside a folder of pages (chapters): at most this deep.
 const FOLDER_DEPTH: usize = 3;
 

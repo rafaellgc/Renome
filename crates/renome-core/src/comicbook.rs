@@ -700,7 +700,7 @@ fn zip_pages(path: &Path) -> Result<(Vec<Vec<u8>>, String), String> {
         })
         .cloned();
     names.retain(|n| crate::convert::is_page_name(n) && !n.contains("__MACOSX"));
-    names.sort_by(|a, b| crate::convert::natural_order(a, b));
+    names.sort_by(|a, b| crate::files::natural_cmp(a, b));
     let mut pages = Vec::with_capacity(names.len());
     for n in names {
         let mut f = z.by_name(&n).map_err(|e| e.to_string())?;

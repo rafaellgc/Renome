@@ -24,13 +24,13 @@ fn os_api() -> Option<String> {
     std::env::var("RENOME_OPENSUBTITLES_API").ok()
 }
 fn subdl_api() -> String {
-    std::env::var("RENOME_SUBDL_API").unwrap_or_else(|_| SUBDL_API.into())
+    crate::env_or("RENOME_SUBDL_API", SUBDL_API)
 }
 fn subsource_api() -> String {
-    std::env::var("RENOME_SUBSOURCE_API").unwrap_or_else(|_| SUBSOURCE_API.into())
+    crate::env_or("RENOME_SUBSOURCE_API", SUBSOURCE_API)
 }
 fn subdl_dl() -> String {
-    std::env::var("RENOME_SUBDL_DL").unwrap_or_else(|_| SUBDL_DL.into())
+    crate::env_or("RENOME_SUBDL_DL", SUBDL_DL)
 }
 
 /// The keys and account from the options.

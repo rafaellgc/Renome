@@ -23,15 +23,15 @@ const BRASILAPI: &str = "https://brasilapi.com.br/api/isbn/v1";
 /// Tests point these at a local server with `RENOME_OL_API` and
 /// `RENOME_OL_COVERS`.
 fn api_base() -> String {
-    std::env::var("RENOME_OL_API").unwrap_or_else(|_| API.into())
+    crate::env_or("RENOME_OL_API", API)
 }
 
 fn brasilapi_base() -> String {
-    std::env::var("RENOME_BRASILAPI").unwrap_or_else(|_| BRASILAPI.into())
+    crate::env_or("RENOME_BRASILAPI", BRASILAPI)
 }
 
 fn covers_base() -> String {
-    std::env::var("RENOME_OL_COVERS").unwrap_or_else(|_| COVERS.into())
+    crate::env_or("RENOME_OL_COVERS", COVERS)
 }
 
 /// Shared by all lookups, so the pace holds across them. Google Books,

@@ -41,6 +41,12 @@ pub const AGENT: &str = concat!(
     " ( https://github.com/rafaellgc/Renome )"
 );
 
+/// An address the tests may point at a local server: the variable's value
+/// when it is set, else `default`.
+pub(crate) fn env_or(var: &str, default: &str) -> String {
+    std::env::var(var).unwrap_or_else(|_| default.into())
+}
+
 /// An HTTP client as the services are asked with: named `agent`, given
 /// `connect` seconds to reach the server and `total` for the whole answer.
 pub fn http(agent: &str, connect: u64, total: u64) -> reqwest::Client {
