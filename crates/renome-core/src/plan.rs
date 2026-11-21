@@ -1606,6 +1606,276 @@ fn number_shots(
     }
 }
 
+/// Where each file's folders go: the roots shared by a release, the
+/// folders of a show, a movie, an album, a book or a comic series, and
+/// what follows a work or goes with the rest.
+#[allow(clippy::too_many_arguments)]
+fn place_folders(
+    items: &mut [PreviewItem],
+    files: &[FileEntry],
+    view: &View,
+    comics: &HashMap<&Path, (ComicMatch, Option<ComicMatch>)>,
+    songs: &HashMap<&Path, AudioTags>,
+    music_folders: Option<bool>,
+    photos_named: bool,
+    photos: &HashMap<&Path, crate::photos::Named>,
+    photo_groups: &HashMap<&Path, (usize, String)>,
+) {
+    // Sent elsewhere, the destination is the library: no root is looked
+    // for around the files, nor old folders taken for new ones.
+    let in_place = view.send_to.is_none();
+    if in_place {
+        climb_shared_roots(items);
+    }
+    unify_folders(items);
+    if in_place {
+        place_show_folders(items, view);
+        place_movie_folders(items, view);
+    }
+    let series: HashMap<&Path, String> = comics
+        .iter()
+        .map(|(p, (m, folder))| (*p, folder.as_ref().unwrap_or(m).series.to_lowercase()))
+        .filter(|(_, s)| !s.is_empty())
+        .collect();
+    if in_place {
+        place_own_folders(items, &series, comics::is_comic, |_| false, view);
+    }
+    let books: HashMap<&Path, String> = view
+        .books
+        .iter()
+        .map(|(p, m)| (p.as_path(), book_key(m)))
+        .collect();
+    if in_place {
+        // With audiobooks, their audio files are the books, and their disc
+        // folders (`CD1`) are inside their own.
+        let audio = view.books.keys().any(|p| is_audio_path(p));
+        if audio {
+            place_own_folders(
+                items,
+                &books,
+                |e| crate::ebook::is_book(e) || crate::music::is_audio(e),
+                |n| crate::music::disc_folder(n).is_some(),
+                view,
+            );
+        } else {
+            place_own_folders(items, &books, crate::ebook::is_book, |_| false, view);
+        }
+    }
+    if let Some(folders) = music_folders {
+        if folders && in_place {
+            keep_collections(items, songs);
+            skip_artist_level(items, songs);
+            let albums: HashMap<&Path, String> = songs
+                .iter()
+                .filter(|(_, t)| !t.album.is_empty())
+                .map(|(p, t)| {
+                    (
+                        *p,
+                        format!("{}\0{}", t.album_artist(), t.album).to_lowercase(),
+                    )
+                })
+                .collect();
+            place_own_folders(
+                items,
+                &albums,
+                music::is_audio,
+                |n| music::disc_folder(n).is_some(),
+                view,
+            );
+        }
+        follow_songs(items, folders, &view.identical);
+    }
+    follow_works(items, files, view);
+    if let Some(s) = &view.send_to {
+        send_rest(items, files, s);
+    }
+    if photos_named {
+        number_shots(items, photos, photo_groups, &view.identical);
+    }
+}
+
+/// Files of one batch that land on the same name: all but the first are
+/// in conflict.
+fn flag_repeated_targets(items: &mut [PreviewItem], keys: &mut PathKeys, view: &View) {
+    // Repeated targets within the batch. A file that keeps its name is not
+    // flagged: the one moving onto it is, as "exists", below.
+    let mut targets: HashMap<PathBuf, Vec<usize>> = HashMap::new();
+    for (i, item) in items.iter().enumerate() {
+        if item.status == Status::Ok {
+            targets.entry(keys.key(&item.target())).or_default().push(i);
+        }
+    }
+    for idx in targets.values().filter(|v| v.len() > 1) {
+        // Identical copies (found in the background): the first goes
+        // ahead, the others stay where they are.
+        let first = view.identical.get(&items[idx[0]].path);
+        let copies = first.is_some()
+            && idx
+                .iter()
+                .all(|&i| view.identical.get(&items[i].path) == first);
+        for &i in idx.iter().skip(usize::from(copies)) {
+            let own = view.identical.get(&items[i].path);
+            let twin = own.is_some()
+                && idx
+                    .iter()
+                    .any(|&j| j != i && view.identical.get(&items[j].path) == own);
+            items[i].status = Status::Conflict;
+            items[i].problem = Some(if copies {
+                Problem::Copy
+            } else if twin {
+                Problem::DuplicateIdentical
+            } else {
+                Problem::Duplicate
+            });
+        }
+    }
+}
+
+/// On Linux, a disk formatted for Windows refuses the names Windows refuses.
+fn flag_windows_disks(items: &mut [PreviewItem], keys: &mut PathKeys) {
+    // On Linux, disks formatted for Windows (FAT, exFAT: found by their
+    // ignoring case) refuse what Windows refuses, so it is an error there.
+    if cfg!(target_os = "linux") {
+        for item in items.iter_mut().filter(|i| i.status == Status::Ok) {
+            let bad = item.windows_unsafe
+                || item
+                    .folder
+                    .as_deref()
+                    .is_some_and(|f| f.split('/').any(windows_bad));
+            let target = item.target();
+            if bad && keys.ignores_case(target.parent().unwrap_or(&target)) {
+                item.status = Status::Conflict;
+                item.problem = Some(Problem::DiskChars);
+            }
+        }
+    }
+}
+
+/// Files whose target is already on the disk (and not moving away) are in
+/// conflict.
+fn flag_existing_targets(items: &mut [PreviewItem], keys: &mut PathKeys, copying: bool) {
+    // Target already exists on disk and is not moving away (copies leave
+    // nothing). Repeat until stable, since a conflict keeps that file from
+    // being moved.
+    loop {
+        let moving: HashSet<PathBuf> = items
+            .iter()
+            .filter(|i| i.status == Status::Ok && !copying)
+            .map(|i| keys.key(&i.path))
+            .collect();
+        let mut blocked = Vec::new();
+        for (i, item) in items
+            .iter()
+            .enumerate()
+            .filter(|(_, i)| i.status == Status::Ok)
+        {
+            let target = item.target();
+            let exists = std::fs::symlink_metadata(&target).is_ok();
+            // Case-only change on a case-insensitive file system:
+            // the "target" is the file itself.
+            if exists && !moving.contains(&keys.key(&target)) && !same_file(&target, &item.path) {
+                blocked.push(i);
+            }
+        }
+        if blocked.is_empty() {
+            break;
+        }
+        for i in blocked {
+            items[i].status = Status::Conflict;
+            items[i].problem = Some(
+                if crate::identical::same_content(&items[i].path, &items[i].target()) {
+                    Problem::SameThere
+                } else {
+                    Problem::Exists
+                },
+            );
+        }
+    }
+}
+
+/// What goes with a work that stays, or with a folder where nothing moves,
+/// stays as it is.
+fn keep_followers(items: &mut [PreviewItem], view: &View) {
+    // What goes with a work that stays (in conflict, or the same file
+    // already there) stays with it, as it is.
+    let staying: HashSet<PathBuf> = items
+        .iter()
+        .filter(|i| i.status == Status::Conflict)
+        .map(|i| i.path.clone())
+        .collect();
+    // Folders where some work still moves.
+    let moving_from: HashSet<PathBuf> = items
+        .iter()
+        .filter(|i| i.status == Status::Ok && i.follows.is_none() && i.with_folder.is_none())
+        .filter(|i| {
+            view.movies.contains_key(&i.path)
+                || view.episodes.contains_key(&i.path)
+                || view.books.contains_key(&i.path)
+                || view.comics.contains_key(&i.path)
+        })
+        .flat_map(|i| {
+            i.path
+                .ancestors()
+                .skip(1)
+                .take(3)
+                .map(Path::to_path_buf)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    for i in items.iter_mut() {
+        if i.follows.as_ref().is_some_and(|w| staying.contains(w))
+            || i.with_folder
+                .as_ref()
+                .is_some_and(|d| !moving_from.contains(d))
+        {
+            i.new_name = i.original.clone();
+            i.dest = None;
+            i.folder = None;
+            i.status = Status::Unchanged;
+            i.problem = None;
+            i.windows_unsafe = false;
+        }
+    }
+}
+
+/// The list in the order the view asks for.
+fn sort_items(items: &mut [PreviewItem], view: &View) {
+    if view.sort_by_new_name {
+        items.sort_by(|a, b| {
+            let ord = natural_cmp(&a.new_name, &b.new_name);
+            if view.descending { ord.reverse() } else { ord }
+        });
+    }
+    if view.identical_only {
+        // Copies side by side; the order above holds within each group.
+        items.sort_by_key(|i| view.identical.get(&i.path).copied());
+    }
+    if view.alike_only {
+        items.sort_by_key(|i| view.alike.get(&i.path).copied());
+    }
+    if view.similar_only {
+        items.sort_by_key(|i| view.similar.get(&i.path).copied());
+    }
+}
+
+/// Marks the files the lookup rule leaves alone (renamed by another rule,
+/// or an advert or extra with its own tag: nothing to tell).
+fn mark_outside(items: &mut [PreviewItem], pipeline: &Pipeline) {
+    // Files the lookup rule on leaves alone (renamed by another rule, or
+    // an advert or extra with its own tag: nothing to tell).
+    if let Some((kind, audiobooks)) = pipeline.lookup_kind() {
+        for i in items.iter_mut() {
+            let told = (i.status == Status::Ok && !i.manual)
+                || i.release_junk
+                || i.extra.is_some()
+                || rule_takes(kind, audiobooks, i);
+            if !told {
+                i.outside = Some(kind);
+            }
+        }
+    }
+}
+
 /// Computes the preview. `overrides` maps path → hand-edited name.
 /// Files hidden by the filter are left out (and will not be renamed);
 /// numbering only counts the visible ones.
@@ -2058,242 +2328,29 @@ pub fn preview(
             }
         })
         .collect();
-    // Sent elsewhere, the destination is the library: no root is looked
-    // for around the files, nor old folders taken for new ones.
-    let in_place = view.send_to.is_none();
-    if in_place {
-        climb_shared_roots(&mut items);
-    }
-    unify_folders(&mut items);
-    if in_place {
-        place_show_folders(&mut items, view);
-        place_movie_folders(&mut items, view);
-    }
-    let series: HashMap<&Path, String> = comics
-        .iter()
-        .map(|(p, (m, folder))| (*p, folder.as_ref().unwrap_or(m).series.to_lowercase()))
-        .filter(|(_, s)| !s.is_empty())
-        .collect();
-    if in_place {
-        place_own_folders(&mut items, &series, comics::is_comic, |_| false, view);
-    }
-    let books: HashMap<&Path, String> = view
-        .books
-        .iter()
-        .map(|(p, m)| (p.as_path(), book_key(m)))
-        .collect();
-    if in_place {
-        // With audiobooks, their audio files are the books, and their disc
-        // folders (`CD1`) are inside their own.
-        let audio = view.books.keys().any(|p| is_audio_path(p));
-        if audio {
-            place_own_folders(
-                &mut items,
-                &books,
-                |e| crate::ebook::is_book(e) || crate::music::is_audio(e),
-                |n| crate::music::disc_folder(n).is_some(),
-                view,
-            );
-        } else {
-            place_own_folders(&mut items, &books, crate::ebook::is_book, |_| false, view);
-        }
-    }
-    if let Some((_, folders)) = music {
-        if folders && in_place {
-            keep_collections(&mut items, &songs);
-            skip_artist_level(&mut items, &songs);
-            let albums: HashMap<&Path, String> = songs
-                .iter()
-                .filter(|(_, t)| !t.album.is_empty())
-                .map(|(p, t)| {
-                    (
-                        *p,
-                        format!("{}\0{}", t.album_artist(), t.album).to_lowercase(),
-                    )
-                })
-                .collect();
-            place_own_folders(
-                &mut items,
-                &albums,
-                music::is_audio,
-                |n| music::disc_folder(n).is_some(),
-                view,
-            );
-        }
-        follow_songs(&mut items, folders, &view.identical);
-    }
-    follow_works(&mut items, files, view);
-    if let Some(s) = &view.send_to {
-        send_rest(&mut items, files, s);
-    }
-    if photo_rule.is_some() {
-        number_shots(&mut items, &photos, &photo_groups, &view.identical);
-    }
-
+    place_folders(
+        &mut items,
+        files,
+        view,
+        &comics,
+        &songs,
+        music.map(|(_, folders)| folders),
+        photo_rule.is_some(),
+        &photos,
+        &photo_groups,
+    );
     let mut keys = PathKeys::default();
     if view.number_clashes {
         number_clashes(&mut items, &mut keys, view);
     }
 
-    // Repeated targets within the batch. A file that keeps its name is not
-    // flagged: the one moving onto it is, as "exists", below.
-    let mut targets: HashMap<PathBuf, Vec<usize>> = HashMap::new();
-    for (i, item) in items.iter().enumerate() {
-        if item.status == Status::Ok {
-            targets.entry(keys.key(&item.target())).or_default().push(i);
-        }
-    }
-    for idx in targets.values().filter(|v| v.len() > 1) {
-        // Identical copies (found in the background): the first goes
-        // ahead, the others stay where they are.
-        let first = view.identical.get(&items[idx[0]].path);
-        let copies = first.is_some()
-            && idx
-                .iter()
-                .all(|&i| view.identical.get(&items[i].path) == first);
-        for &i in idx.iter().skip(usize::from(copies)) {
-            let own = view.identical.get(&items[i].path);
-            let twin = own.is_some()
-                && idx
-                    .iter()
-                    .any(|&j| j != i && view.identical.get(&items[j].path) == own);
-            items[i].status = Status::Conflict;
-            items[i].problem = Some(if copies {
-                Problem::Copy
-            } else if twin {
-                Problem::DuplicateIdentical
-            } else {
-                Problem::Duplicate
-            });
-        }
-    }
-
-    // On Linux, disks formatted for Windows (FAT, exFAT: found by their
-    // ignoring case) refuse what Windows refuses, so it is an error there.
-    if cfg!(target_os = "linux") {
-        for item in items.iter_mut().filter(|i| i.status == Status::Ok) {
-            let bad = item.windows_unsafe
-                || item
-                    .folder
-                    .as_deref()
-                    .is_some_and(|f| f.split('/').any(windows_bad));
-            let target = item.target();
-            if bad && keys.ignores_case(target.parent().unwrap_or(&target)) {
-                item.status = Status::Conflict;
-                item.problem = Some(Problem::DiskChars);
-            }
-        }
-    }
-
-    // Target already exists on disk and is not moving away (copies leave
-    // nothing). Repeat until stable, since a conflict keeps that file from
-    // being moved.
+    flag_repeated_targets(&mut items, &mut keys, view);
+    flag_windows_disks(&mut items, &mut keys);
     let copying = view.send_to.as_ref().is_some_and(|s| s.copy);
-    loop {
-        let moving: HashSet<PathBuf> = items
-            .iter()
-            .filter(|i| i.status == Status::Ok && !copying)
-            .map(|i| keys.key(&i.path))
-            .collect();
-        let mut blocked = Vec::new();
-        for (i, item) in items
-            .iter()
-            .enumerate()
-            .filter(|(_, i)| i.status == Status::Ok)
-        {
-            let target = item.target();
-            let exists = std::fs::symlink_metadata(&target).is_ok();
-            // Case-only change on a case-insensitive file system:
-            // the "target" is the file itself.
-            if exists && !moving.contains(&keys.key(&target)) && !same_file(&target, &item.path) {
-                blocked.push(i);
-            }
-        }
-        if blocked.is_empty() {
-            break;
-        }
-        for i in blocked {
-            items[i].status = Status::Conflict;
-            items[i].problem = Some(
-                if crate::identical::same_content(&items[i].path, &items[i].target()) {
-                    Problem::SameThere
-                } else {
-                    Problem::Exists
-                },
-            );
-        }
-    }
-    // What goes with a work that stays (in conflict, or the same file
-    // already there) stays with it, as it is.
-    let staying: HashSet<PathBuf> = items
-        .iter()
-        .filter(|i| i.status == Status::Conflict)
-        .map(|i| i.path.clone())
-        .collect();
-    // Folders where some work still moves.
-    let moving_from: HashSet<PathBuf> = items
-        .iter()
-        .filter(|i| i.status == Status::Ok && i.follows.is_none() && i.with_folder.is_none())
-        .filter(|i| {
-            view.movies.contains_key(&i.path)
-                || view.episodes.contains_key(&i.path)
-                || view.books.contains_key(&i.path)
-                || view.comics.contains_key(&i.path)
-        })
-        .flat_map(|i| {
-            i.path
-                .ancestors()
-                .skip(1)
-                .take(3)
-                .map(Path::to_path_buf)
-                .collect::<Vec<_>>()
-        })
-        .collect();
-    for i in items.iter_mut() {
-        if i.follows.as_ref().is_some_and(|w| staying.contains(w))
-            || i.with_folder
-                .as_ref()
-                .is_some_and(|d| !moving_from.contains(d))
-        {
-            i.new_name = i.original.clone();
-            i.dest = None;
-            i.folder = None;
-            i.status = Status::Unchanged;
-            i.problem = None;
-            i.windows_unsafe = false;
-        }
-    }
-
-    if view.sort_by_new_name {
-        items.sort_by(|a, b| {
-            let ord = natural_cmp(&a.new_name, &b.new_name);
-            if view.descending { ord.reverse() } else { ord }
-        });
-    }
-    if view.identical_only {
-        // Copies side by side; the order above holds within each group.
-        items.sort_by_key(|i| view.identical.get(&i.path).copied());
-    }
-    if view.alike_only {
-        items.sort_by_key(|i| view.alike.get(&i.path).copied());
-    }
-    if view.similar_only {
-        items.sort_by_key(|i| view.similar.get(&i.path).copied());
-    }
-
-    // Files the lookup rule on leaves alone (renamed by another rule, or
-    // an advert or extra with its own tag: nothing to tell).
-    if let Some((kind, audiobooks)) = pipeline.lookup_kind() {
-        for i in &mut items {
-            let told = (i.status == Status::Ok && !i.manual)
-                || i.release_junk
-                || i.extra.is_some()
-                || rule_takes(kind, audiobooks, i);
-            if !told {
-                i.outside = Some(kind);
-            }
-        }
-    }
+    flag_existing_targets(&mut items, &mut keys, copying);
+    keep_followers(&mut items, view);
+    sort_items(&mut items, view);
+    mark_outside(&mut items, &pipeline);
     let changed = items.iter().filter(|i| i.status == Status::Ok).count();
     let conflicts = items
         .iter()
