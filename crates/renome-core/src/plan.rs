@@ -2008,6 +2008,186 @@ fn photo_touch(
         })
 }
 
+/// The songs' tags, with the album-wide fields agreed across each album.
+fn song_tags_of<'a>(
+    files: &'a [FileEntry],
+    filter: &Filter,
+    view: &View,
+    from_name: bool,
+) -> HashMap<&'a Path, AudioTags> {
+    let visible: Vec<&FileEntry> = files.iter().filter(|f| filter.takes(f)).collect();
+    let mut tags: Vec<(PathBuf, AudioTags)> = Vec::new();
+    let mut paths: Vec<&Path> = Vec::new();
+    for f in visible {
+        // A song without a title is named from its release, when it
+        // was identified by its sound.
+        let t = song_tags(f, from_name)
+            .or_else(|| view.songs.get(&f.path).and_then(|_| any_song_tags(f)));
+        if let Some(mut t) = t {
+            if let Some(m) = view.songs.get(&f.path) {
+                m.apply(&mut t);
+            }
+            tags.push((f.dir.clone(), t));
+            paths.push(&f.path);
+        }
+    }
+    music::fill_albums(&mut tags);
+    paths
+        .into_iter()
+        .zip(tags.into_iter().map(|(_, t)| t))
+        .collect()
+}
+
+/// The files shown, with their place in the list and in their folder.
+fn list_shown<'a>(
+    files: &'a [FileEntry],
+    filter: &Filter,
+    view: &View,
+) -> Vec<(usize, usize, &'a FileEntry)> {
+    // The files shown, with their place in the list and in their folder.
+    let mut per_folder: HashMap<&Path, usize> = HashMap::new();
+    files
+        .iter()
+        .filter(|f| filter.takes(f))
+        .filter(|f| !view.identical_only || view.identical.contains_key(&f.path))
+        .filter(|f| !view.alike_only || view.alike.contains_key(&f.path))
+        .filter(|f| !view.similar_only || view.similar.contains_key(&f.path))
+        .enumerate()
+        .map(|(index, file)| {
+            let n = per_folder.entry(&file.dir).or_default();
+            *n += 1;
+            (index, *n - 1, file)
+        })
+        .collect()
+}
+
+/// Each photo's date (the lead's of its group) and the name it keeps.
+fn photo_names<'a>(
+    shown: &[(usize, usize, &'a FileEntry)],
+    photo_groups: &HashMap<&'a Path, (usize, String)>,
+    opts: &crate::photos::Options,
+    view: &View,
+) -> HashMap<&'a Path, crate::photos::Named> {
+    let todo: Vec<&FileEntry> = shown
+        .iter()
+        .map(|&(_, _, f)| f)
+        .filter(|f| photo_groups.contains_key(f.path.as_path()))
+        .collect();
+    crate::photos::read_all(&todo, &|_, _| {});
+    let mut lead: HashMap<usize, (&FileEntry, crate::photos::Shot)> = HashMap::new();
+    for &(_, _, f) in shown {
+        let Some(&(group, _)) = photo_groups.get(f.path.as_path()) else {
+            continue;
+        };
+        let own = crate::photos::shot(f, opts);
+        // A date typed in counts over the file's.
+        let s = match view.dates.get(&f.path) {
+            Some(d) => crate::photos::typed(f, own, d),
+            None => own,
+        };
+        let Some(s) = s else {
+            continue;
+        };
+        let better = match lead.get(&group) {
+            None => true,
+            Some((g, gs)) => {
+                (crate::photos::lead_rank(f, &s), f.file_name())
+                    < (crate::photos::lead_rank(g, gs), g.file_name())
+            }
+        };
+        if better {
+            lead.insert(group, (f, s));
+        }
+    }
+    photo_groups
+        .iter()
+        .filter_map(|(path, (group, kept))| {
+            let (_, s) = lead.get(group)?;
+            Some((
+                *path,
+                crate::photos::Named {
+                    shot: s.clone(),
+                    kept: kept.clone(),
+                },
+            ))
+        })
+        .collect()
+}
+
+/// The video each subtitle goes with, whose picture names it too: the one
+/// with the same movie or episode in its folder, the one with its name
+/// first.
+fn subtitle_videos<'a>(files: &'a [FileEntry], view: &View) -> HashMap<&'a Path, &'a FileEntry> {
+    // The video each subtitle goes with, whose picture names it too: the
+    // one with the same movie or episode in its folder, the one with its
+    // name first.
+    let same_lookup = |a: &FileEntry, b: &FileEntry| {
+        if let (Some(x), Some(y)) = (view.movies.get(&a.path), view.movies.get(&b.path)) {
+            return x.id == y.id;
+        }
+        matches!(
+            (view.episodes.get(&a.path), view.episodes.get(&b.path)),
+            (Some(x), Some(y)) if x.id == y.id && x.season == y.season && x.episodes == y.episodes
+        )
+    };
+    files
+        .iter()
+        .filter(|f| !f.is_dir && tmdb::is_subtitle(&f.ext))
+        .filter_map(|sub| {
+            let base =
+                &sub.stem[..sub.stem.len() - tmdb::subtitle_suffix(&sub.stem, &sub.ext).len()];
+            let mine: Vec<&FileEntry> = files
+                .iter()
+                .filter(|v| {
+                    !v.is_dir && tmdb::is_video(&v.ext) && v.dir == sub.dir && same_lookup(sub, v)
+                })
+                .collect();
+            let video = mine
+                .iter()
+                .find(|v| v.stem == base)
+                .or_else(|| (mine.len() == 1).then(|| &mine[0]))?;
+            Some((sub.path.as_path(), *video))
+        })
+        .collect()
+}
+
+/// The comic rule names the batch's comics together (see `comics::arrange`):
+/// what each is, and the series of its folder.
+fn comic_matches<'a>(
+    shown: &[(usize, usize, &'a FileEntry)],
+    view: &View,
+    lookup: &HashMap<&Path, (String, String)>,
+    converts: Option<bool>,
+    by_folder: bool,
+) -> HashMap<&'a Path, (ComicMatch, Option<ComicMatch>)> {
+    let (paths, mut found): (Vec<&Path>, Vec<ComicMatch>) = shown
+        .iter()
+        .map(|&(_, _, f)| f)
+        .filter(|f| {
+            if f.is_dir {
+                // A folder of pictures, when it becomes a CBZ.
+                converts.is_some_and(|draw| crate::rules::converts(f, draw))
+            } else {
+                comics::is_comic(&f.ext)
+            }
+        })
+        .filter_map(|f| {
+            let stem = lookup.get(f.path.as_path()).map_or(&f.stem, |(s, _)| s);
+            let m = view
+                .comics
+                .get(&f.path)
+                .cloned()
+                .or_else(|| comics::from_name(f, stem, by_folder))?;
+            Some((f.path.as_path(), m))
+        })
+        .unzip();
+    let folders = comics::arrange(&mut found);
+    paths
+        .into_iter()
+        .zip(found.into_iter().zip(folders))
+        .collect()
+}
+
 /// Computes the preview. `overrides` maps path → hand-edited name.
 /// Files hidden by the filter are left out (and will not be renamed);
 /// numbering only counts the visible ones.
@@ -2035,45 +2215,9 @@ pub fn preview(
     // Songs' tags, with the album-wide fields agreed across each album.
     let songs: HashMap<&Path, AudioTags> = match music {
         None => HashMap::new(),
-        Some((from_name, _)) => {
-            let visible: Vec<&FileEntry> = files.iter().filter(|f| filter.takes(f)).collect();
-            let mut tags: Vec<(PathBuf, AudioTags)> = Vec::new();
-            let mut paths: Vec<&Path> = Vec::new();
-            for f in visible {
-                // A song without a title is named from its release, when it
-                // was identified by its sound.
-                let t = song_tags(f, from_name)
-                    .or_else(|| view.songs.get(&f.path).and_then(|_| any_song_tags(f)));
-                if let Some(mut t) = t {
-                    if let Some(m) = view.songs.get(&f.path) {
-                        m.apply(&mut t);
-                    }
-                    tags.push((f.dir.clone(), t));
-                    paths.push(&f.path);
-                }
-            }
-            music::fill_albums(&mut tags);
-            paths
-                .into_iter()
-                .zip(tags.into_iter().map(|(_, t)| t))
-                .collect()
-        }
+        Some((from_name, _)) => song_tags_of(files, &filter, view, from_name),
     };
-    // The files shown, with their place in the list and in their folder.
-    let mut per_folder: HashMap<&Path, usize> = HashMap::new();
-    let shown: Vec<(usize, usize, &FileEntry)> = files
-        .iter()
-        .filter(|f| filter.takes(f))
-        .filter(|f| !view.identical_only || view.identical.contains_key(&f.path))
-        .filter(|f| !view.alike_only || view.alike.contains_key(&f.path))
-        .filter(|f| !view.similar_only || view.similar.contains_key(&f.path))
-        .enumerate()
-        .map(|(index, file)| {
-            let n = per_folder.entry(&file.dir).or_default();
-            *n += 1;
-            (index, *n - 1, file)
-        })
-        .collect();
+    let shown = list_shown(files, &filter, view);
     // The photo rule names a photo's files (raw, edits, a Live Photo's
     // video) by the date of the one that has it (see `photos::lead_rank`).
     let photo_rule = pipeline.photos().map(|(mut o, set)| {
@@ -2094,84 +2238,9 @@ pub fn preview(
     };
     let photos: HashMap<&Path, crate::photos::Named> = match photo_rule {
         None => HashMap::new(),
-        Some((opts, _)) => {
-            let todo: Vec<&FileEntry> = shown
-                .iter()
-                .map(|&(_, _, f)| f)
-                .filter(|f| photo_groups.contains_key(f.path.as_path()))
-                .collect();
-            crate::photos::read_all(&todo, &|_, _| {});
-            let mut lead: HashMap<usize, (&FileEntry, crate::photos::Shot)> = HashMap::new();
-            for &(_, _, f) in &shown {
-                let Some(&(group, _)) = photo_groups.get(f.path.as_path()) else {
-                    continue;
-                };
-                let own = crate::photos::shot(f, &opts);
-                // A date typed in counts over the file's.
-                let s = match view.dates.get(&f.path) {
-                    Some(d) => crate::photos::typed(f, own, d),
-                    None => own,
-                };
-                let Some(s) = s else {
-                    continue;
-                };
-                let better = match lead.get(&group) {
-                    None => true,
-                    Some((g, gs)) => {
-                        (crate::photos::lead_rank(f, &s), f.file_name())
-                            < (crate::photos::lead_rank(g, gs), g.file_name())
-                    }
-                };
-                if better {
-                    lead.insert(group, (f, s));
-                }
-            }
-            photo_groups
-                .iter()
-                .filter_map(|(path, (group, kept))| {
-                    let (_, s) = lead.get(group)?;
-                    Some((
-                        *path,
-                        crate::photos::Named {
-                            shot: s.clone(),
-                            kept: kept.clone(),
-                        },
-                    ))
-                })
-                .collect()
-        }
+        Some((opts, _)) => photo_names(&shown, &photo_groups, &opts, view),
     };
-    // The video each subtitle goes with, whose picture names it too: the
-    // one with the same movie or episode in its folder, the one with its
-    // name first.
-    let same_lookup = |a: &FileEntry, b: &FileEntry| {
-        if let (Some(x), Some(y)) = (view.movies.get(&a.path), view.movies.get(&b.path)) {
-            return x.id == y.id;
-        }
-        matches!(
-            (view.episodes.get(&a.path), view.episodes.get(&b.path)),
-            (Some(x), Some(y)) if x.id == y.id && x.season == y.season && x.episodes == y.episodes
-        )
-    };
-    let subtitle_video: HashMap<&Path, &FileEntry> = files
-        .iter()
-        .filter(|f| !f.is_dir && tmdb::is_subtitle(&f.ext))
-        .filter_map(|sub| {
-            let base =
-                &sub.stem[..sub.stem.len() - tmdb::subtitle_suffix(&sub.stem, &sub.ext).len()];
-            let mine: Vec<&FileEntry> = files
-                .iter()
-                .filter(|v| {
-                    !v.is_dir && tmdb::is_video(&v.ext) && v.dir == sub.dir && same_lookup(sub, v)
-                })
-                .collect();
-            let video = mine
-                .iter()
-                .find(|v| v.stem == base)
-                .or_else(|| (mine.len() == 1).then(|| &mine[0]))?;
-            Some((sub.path.as_path(), *video))
-        })
-        .collect();
+    let subtitle_video = subtitle_videos(files, view);
     // The same, files of one name with other extensions counting as one.
     let pairs = crate::rules::Places::of(shown.iter().map(|&(_, _, f)| f));
     // A rule for some files only counts among them.
@@ -2231,34 +2300,7 @@ pub fn preview(
     });
     let comics: HashMap<&Path, (ComicMatch, Option<ComicMatch>)> = match by_folder {
         None => HashMap::new(),
-        Some(by_folder) => {
-            let (paths, mut found): (Vec<&Path>, Vec<ComicMatch>) = shown
-                .iter()
-                .map(|&(_, _, f)| f)
-                .filter(|f| {
-                    if f.is_dir {
-                        // A folder of pictures, when it becomes a CBZ.
-                        converts.is_some_and(|draw| crate::rules::converts(f, draw))
-                    } else {
-                        comics::is_comic(&f.ext)
-                    }
-                })
-                .filter_map(|f| {
-                    let stem = lookup.get(f.path.as_path()).map_or(&f.stem, |(s, _)| s);
-                    let m = view
-                        .comics
-                        .get(&f.path)
-                        .cloned()
-                        .or_else(|| comics::from_name(f, stem, by_folder))?;
-                    Some((f.path.as_path(), m))
-                })
-                .unzip();
-            let folders = comics::arrange(&mut found);
-            paths
-                .into_iter()
-                .zip(found.into_iter().zip(folders))
-                .collect()
-        }
+        Some(by_folder) => comic_matches(&shown, view, &lookup, converts, by_folder),
     };
     let photo_set = photo_rule.is_some_and(|(_, set)| set);
     let mut items: Vec<PreviewItem> = shown
