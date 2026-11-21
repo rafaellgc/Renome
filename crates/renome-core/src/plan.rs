@@ -1061,6 +1061,157 @@ fn is_audio_path(p: &Path) -> bool {
         .is_some_and(|e| crate::music::is_audio(&e.to_string_lossy()))
 }
 
+/// A movie's, episode's or audiobook's place: where its folder's files
+/// go (none: nowhere) and the folder shown.
+type WorkPlace = (Option<PathBuf>, Option<String>);
+
+/// What `follow_works` reads of the works of each folder.
+struct Works {
+    /// Each work folder's place (none: not all its works go to one new
+    /// folder, or it is not their own).
+    places: HashMap<PathBuf, Option<WorkPlace>>,
+    /// The movies of each folder.
+    ids: HashMap<PathBuf, HashSet<u64>>,
+    /// Audiobooks' folders (above disc folders) and their books.
+    audiobooks: HashMap<PathBuf, HashSet<String>>,
+    /// Episodes' folders (a season's) and their shows.
+    shows: HashMap<PathBuf, HashSet<(String, u64)>>,
+    /// Each folder's works' names: old stem, new stem, where it goes and
+    /// the work.
+    stems: HashMap<PathBuf, Vec<(String, String, WorkPlace, PathBuf)>>,
+}
+
+/// Whether the file is a movie, episode, book or comic found in a catalogue.
+fn is_work(i: &PreviewItem, view: &View) -> bool {
+    !i.is_dir
+        && i.extra.is_none()
+        && (view.movies.contains_key(&i.path)
+            || view.episodes.contains_key(&i.path)
+            || view.books.contains_key(&i.path)
+            || view.comics.contains_key(&i.path))
+}
+
+/// Notes where one work of `dir` goes: a folder keeps a place only while
+/// all its works go to the same one.
+fn note_place(
+    places: &mut HashMap<PathBuf, Option<WorkPlace>>,
+    dir: PathBuf,
+    moving: Option<WorkPlace>,
+) {
+    match places.get_mut(&dir) {
+        Some(p) if *p != moving => *p = None,
+        Some(_) => {}
+        None => {
+            places.insert(dir, moving);
+        }
+    }
+}
+
+/// The works of each folder and where they go.
+fn collect_works(items: &[PreviewItem], view: &View) -> Works {
+    let mut places: HashMap<PathBuf, Option<WorkPlace>> = HashMap::new();
+    let mut ids: HashMap<PathBuf, HashSet<u64>> = HashMap::new();
+    let mut audiobooks: HashMap<PathBuf, HashSet<String>> = HashMap::new();
+    let mut shows: HashMap<PathBuf, HashSet<(String, u64)>> = HashMap::new();
+    let mut stems: HashMap<PathBuf, Vec<(String, String, WorkPlace, PathBuf)>> = HashMap::new();
+    for i in items
+        .iter()
+        .filter(|i| is_work(i, view) && i.status != Status::Conflict)
+    {
+        let here = (i.dest.clone(), i.folder.clone());
+        if let Some(m) = view.movies.get(&i.path) {
+            ids.entry(i.dir.clone()).or_default().insert(m.id);
+            note_place(
+                &mut places,
+                i.dir.clone(),
+                i.dest.is_some().then(|| here.clone()),
+            );
+        } else if let Some(e) = view.episodes.get(&i.path) {
+            shows
+                .entry(i.dir.clone())
+                .or_default()
+                .insert((e.source.clone(), e.id));
+            note_place(
+                &mut places,
+                i.dir.clone(),
+                i.dest.is_some().then(|| here.clone()),
+            );
+        } else if is_audio_path(&i.path)
+            && let Some(m) = view.books.get(&i.path)
+        {
+            let dir = crate::audiobook::book_dir(&i.dir);
+            audiobooks
+                .entry(dir.clone())
+                .or_default()
+                .insert(book_key(m));
+            note_place(&mut places, dir, i.dest.is_some().then(|| here.clone()));
+        }
+        let (old, new) = (split_name(&i.original).0, split_name(&i.new_name).0);
+        stems.entry(i.dir.clone()).or_default().push((
+            old.to_string(),
+            new.to_string(),
+            here,
+            i.path.clone(),
+        ));
+    }
+    Works {
+        places,
+        ids,
+        audiobooks,
+        shows,
+        stems,
+    }
+}
+
+/// Only a movie's own folder, an audiobook's or a season's keeps its
+/// place: every audio file in an audiobook's folder (and its disc
+/// folders) is that book, a season's folder holds one show's episodes.
+fn keep_own_folders(w: &mut Works, items: &[PreviewItem], view: &View) {
+    // Only a movie's own folder, or an audiobook's: every audio file in
+    // it (and in its disc folders) is that book.
+    for (dir, place) in w.places.iter_mut() {
+        if let Some(books) = w.audiobooks.get(dir) {
+            let own = books.len() == 1
+                && walkdir::WalkDir::new(dir)
+                    .max_depth(2)
+                    .into_iter()
+                    .filter_map(Result::ok)
+                    .filter(|e| !e.file_type().is_dir() && is_audio_path(e.path()))
+                    .all(|e| {
+                        view.books.get(e.path()).map(book_key).as_ref() == books.iter().next()
+                    });
+            if !own {
+                *place = None;
+            }
+            continue;
+        }
+        // A season's folder: only episodes of one show and what goes with
+        // them.
+        if let Some(show) = w.shows.get(dir) {
+            let own = show.len() == 1
+                && !w.ids.contains_key(dir)
+                && items
+                    .iter()
+                    .filter(|i| &i.dir == dir)
+                    .find_map(|i| view.episodes.get(&i.path))
+                    .is_some_and(|e| own_episode_folder(dir, e, view));
+            if !own {
+                *place = None;
+            }
+            continue;
+        }
+        let own = w.ids.get(dir).is_some_and(|s| s.len() == 1)
+            && items
+                .iter()
+                .filter(|i| &i.dir == dir && i.extra.is_none())
+                .find_map(|i| Some((i, view.movies.get(&i.path)?)))
+                .is_some_and(|(i, m)| own_movie_folder(dir, &i.path, m, view));
+        if !own {
+            *place = None;
+        }
+    }
+}
+
 /// Files that go with a movie, an episode, a book or a comic found in a
 /// catalogue, when no rule changed them (artwork and `.nfo` a media server
 /// left, extras):
@@ -1078,78 +1229,7 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
         .iter()
         .map(|f| (f.path.as_path(), f.base.as_path()))
         .collect();
-    let is_work = |i: &PreviewItem| {
-        !i.is_dir
-            && i.extra.is_none()
-            && (view.movies.contains_key(&i.path)
-                || view.episodes.contains_key(&i.path)
-                || view.books.contains_key(&i.path)
-                || view.comics.contains_key(&i.path))
-    };
-    type Place = (Option<PathBuf>, Option<String>);
-    // Each movie folder's place (None: not all its movie's files go to one
-    // new folder, or it is not the movie's own), and each folder's works'
-    // names: old stem, new stem and where it goes.
-    let mut places: HashMap<PathBuf, Option<Place>> = HashMap::new();
-    let mut ids: HashMap<PathBuf, HashSet<u64>> = HashMap::new();
-    // Audiobooks' folders (above disc folders) and their books.
-    let mut audiobooks: HashMap<PathBuf, HashSet<String>> = HashMap::new();
-    // Episodes' folders (a season's) and their shows.
-    let mut shows: HashMap<PathBuf, HashSet<(String, u64)>> = HashMap::new();
-    let mut stems: HashMap<PathBuf, Vec<(String, String, Place, PathBuf)>> = HashMap::new();
-    for i in items
-        .iter()
-        .filter(|i| is_work(i) && i.status != Status::Conflict)
-    {
-        let here = (i.dest.clone(), i.folder.clone());
-        if let Some(m) = view.movies.get(&i.path) {
-            ids.entry(i.dir.clone()).or_default().insert(m.id);
-            let moving = i.dest.is_some().then(|| here.clone());
-            match places.get_mut(&i.dir) {
-                Some(p) if *p != moving => *p = None,
-                Some(_) => {}
-                None => {
-                    places.insert(i.dir.clone(), moving);
-                }
-            }
-        } else if let Some(e) = view.episodes.get(&i.path) {
-            shows
-                .entry(i.dir.clone())
-                .or_default()
-                .insert((e.source.clone(), e.id));
-            let moving = i.dest.is_some().then(|| here.clone());
-            match places.get_mut(&i.dir) {
-                Some(p) if *p != moving => *p = None,
-                Some(_) => {}
-                None => {
-                    places.insert(i.dir.clone(), moving);
-                }
-            }
-        } else if is_audio_path(&i.path)
-            && let Some(m) = view.books.get(&i.path)
-        {
-            let dir = crate::audiobook::book_dir(&i.dir);
-            audiobooks
-                .entry(dir.clone())
-                .or_default()
-                .insert(book_key(m));
-            let moving = i.dest.is_some().then(|| here.clone());
-            match places.get_mut(&dir) {
-                Some(p) if *p != moving => *p = None,
-                Some(_) => {}
-                None => {
-                    places.insert(dir, moving);
-                }
-            }
-        }
-        let (old, new) = (split_name(&i.original).0, split_name(&i.new_name).0);
-        stems.entry(i.dir.clone()).or_default().push((
-            old.to_string(),
-            new.to_string(),
-            here,
-            i.path.clone(),
-        ));
-    }
+    let mut works = collect_works(items, view);
     // Each movie folder's files were added with: the movie's.
     let mut added: HashMap<PathBuf, &Path> = items
         .iter()
@@ -1169,49 +1249,14 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
             added.insert(i.dir.clone(), b);
         }
     }
-    // Only a movie's own folder, or an audiobook's: every audio file in
-    // it (and in its disc folders) is that book.
-    for (dir, place) in places.iter_mut() {
-        if let Some(books) = audiobooks.get(dir) {
-            let own = books.len() == 1
-                && walkdir::WalkDir::new(dir)
-                    .max_depth(2)
-                    .into_iter()
-                    .filter_map(Result::ok)
-                    .filter(|e| !e.file_type().is_dir() && is_audio_path(e.path()))
-                    .all(|e| {
-                        view.books.get(e.path()).map(book_key).as_ref() == books.iter().next()
-                    });
-            if !own {
-                *place = None;
-            }
-            continue;
-        }
-        // A season's folder: only episodes of one show and what goes with
-        // them.
-        if let Some(show) = shows.get(dir) {
-            let own = show.len() == 1
-                && !ids.contains_key(dir)
-                && items
-                    .iter()
-                    .filter(|i| &i.dir == dir)
-                    .find_map(|i| view.episodes.get(&i.path))
-                    .is_some_and(|e| own_episode_folder(dir, e, view));
-            if !own {
-                *place = None;
-            }
-            continue;
-        }
-        let own = ids.get(dir).is_some_and(|s| s.len() == 1)
-            && items
-                .iter()
-                .filter(|i| &i.dir == dir && i.extra.is_none())
-                .find_map(|i| Some((i, view.movies.get(&i.path)?)))
-                .is_some_and(|(i, m)| own_movie_folder(dir, &i.path, m, view));
-        if !own {
-            *place = None;
-        }
-    }
+    keep_own_folders(&mut works, items, view);
+    let Works {
+        places,
+        audiobooks,
+        shows,
+        stems,
+        ..
+    } = works;
     // The movie folder a folder is in (two levels at most), where its movie
     // goes, and the folder shown.
     let home =
@@ -1242,7 +1287,7 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
         Some((dest.join(rel), Some(folder)))
     };
     for i in items.iter_mut() {
-        if i.is_dir || i.manual || is_work(i) || i.dest.is_some() {
+        if i.is_dir || i.manual || is_work(i, view) || i.dest.is_some() {
             continue;
         }
         // Named after a work of its folder: the longest stem it starts with.
