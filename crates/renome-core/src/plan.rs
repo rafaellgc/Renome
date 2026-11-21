@@ -1876,6 +1876,138 @@ fn mark_outside(items: &mut [PreviewItem], pipeline: &Pipeline) {
     }
 }
 
+/// The folders a file's rules move it into, and where that is: none when
+/// it is already there.
+fn move_target(
+    file: &FileEntry,
+    view: &View,
+    moved: Option<Move>,
+    folder: String,
+) -> (Vec<String>, Option<PathBuf>) {
+    // A movie already in a folder with its name stays there.
+    let inside = file
+        .dir
+        .file_name()
+        .is_some_and(|d| d.to_string_lossy() == folder);
+    let (root, names) = match (&view.send_to, moved) {
+        // The rules' folders go into the destination (the
+        // other files get theirs at the end, see `send_rest`).
+        (Some(s), Some(Move::OwnFolder)) => (s.dir.clone(), vec![folder]),
+        (Some(s), Some(Move::Into { folders, .. })) => (s.dir.clone(), folders),
+        (None, Some(Move::OwnFolder)) if !inside => (file.dir.clone(), vec![folder]),
+        (None, Some(Move::Into { root, folders })) => (root, folders),
+        _ => (file.dir.clone(), Vec::new()),
+    };
+    let to = names.iter().fold(root, |p, n| p.join(n));
+    // Already in that folder: stay there.
+    if to != file.dir {
+        (names, Some(to))
+    } else {
+        (Vec::new(), None)
+    }
+}
+
+/// Whether the file's tags (or a comic's `ComicInfo.xml`) change, and
+/// whether the comic rule clears the `ComicInfo.xml`.
+fn tag_state(file: &FileEntry, view: &View, cleans: bool) -> (bool, bool) {
+    let own = file.audio_tags().cloned().unwrap_or_default();
+    let matched = view.songs.get(&file.path);
+    let retag = matched.is_some_and(|m| m.differs(&own))
+        || view.comics.get(&file.path).is_some_and(|m| {
+            file.ext.eq_ignore_ascii_case("cbz")
+                && crate::inside::comic_differs(m, file.comic_info())
+        });
+    // A CBZ whose `ComicInfo.xml` the comic rule clears.
+    let junk = (matched.is_some() && own.junk)
+        || (cleans && file.ext.eq_ignore_ascii_case("cbz") && file.comic_info().is_some());
+    (retag, junk)
+}
+
+/// What the book and comic rules do with the file besides renaming it:
+/// converts it (to CBZ, to a book format), finds it locked, counts its pictures.
+fn convert_state(
+    file: &FileEntry,
+    converts: Option<bool>,
+    book_to: Option<crate::bookconv::Target>,
+) -> (bool, Option<crate::bookconv::Target>, bool, Option<usize>) {
+    let convert = converts.is_some_and(|draw| crate::rules::converts(file, draw));
+    let to_book = book_to.filter(|t| crate::rules::converts_book(file, *t));
+    let drm = book_to.is_some()
+        && !file.is_dir
+        && (crate::ebook::is_book(&file.ext) || crate::bookconv::is_document(&file.ext))
+        && file.book_source().is_some_and(|(_, locked)| locked);
+    let drawn = convert
+        .then(|| file.convert_check())
+        .flatten()
+        .filter(|n| *n > 0 && file.ext.eq_ignore_ascii_case("pdf"));
+    (convert, to_book, drm, drawn)
+}
+
+/// What the subtitle tools do with the file: the fix, the tracks to
+/// extract and the picture tracks that cannot be.
+fn subtitle_state(
+    file: &FileEntry,
+    new_name: &str,
+    sub_tools: &Option<(crate::subtext::Tools, Option<String>)>,
+    sub_langs: &Option<Vec<crate::subtitles::Lang>>,
+) -> (Option<crate::subtext::Fix>, usize, usize) {
+    let sub_fix = sub_tools.as_ref().and_then(|(t, _)| {
+        let ext = new_name.rsplit_once('.').map_or("", |(_, e)| e);
+        file.subtitle()
+            .and_then(|s| crate::subtext::plan(s, t, ext))
+    });
+    let (sub_extract, sub_pictures) = match (&sub_tools, &sub_langs) {
+        (Some((t, _)), Some(langs)) if !file.is_dir => {
+            let tracks = file.sub_tracks();
+            (
+                crate::mkvsubs::targets(&file.path, tracks, langs, t.to_srt).len(),
+                tracks.iter().filter(|t| !t.readable()).count(),
+            )
+        }
+        _ => (0, 0),
+    };
+    (sub_fix, sub_extract, sub_pictures)
+}
+
+/// A movie's extra, and whether the file is a release's advert.
+fn extra_state(
+    file: &FileEntry,
+    view: &View,
+    movie_rule: bool,
+    video_rule: bool,
+) -> (Option<String>, bool) {
+    let extra = movie_rule
+        .then(|| crate::extras::extra_kind(&file.path))
+        .flatten()
+        .map(str::to_string);
+    let release_junk = video_rule
+        && !file.is_dir
+        && extra.is_none()
+        && !view.movies.contains_key(&file.path)
+        && !view.episodes.contains_key(&file.path)
+        && crate::extras::release_junk(&file.path, file.size);
+    (extra, release_junk)
+}
+
+/// The time a photo's file is set to, when the photo rule sets times.
+fn photo_touch(
+    file: &FileEntry,
+    set_times: bool,
+    photos: &HashMap<&Path, crate::photos::Named>,
+) -> Option<i64> {
+    use chrono::TimeZone;
+    set_times
+        .then_some(())
+        .and_then(|()| photos.get(file.path.as_path()))
+        .filter(|n| n.shot.from != crate::photos::DateFrom::Modified)
+        .and_then(|n| {
+            Local
+                .from_local_datetime(&n.shot.taken)
+                .earliest()
+                .map(|t| t.timestamp())
+        })
+}
+
 /// Computes the preview. `overrides` maps path → hand-edited name.
 /// Files hidden by the filter are left out (and will not be renamed);
 /// numbering only counts the visible ones.
@@ -2128,6 +2260,7 @@ pub fn preview(
                 .collect()
         }
     };
+    let photo_set = photo_rule.is_some_and(|(_, set)| set);
     let mut items: Vec<PreviewItem> = shown
         .iter()
         .map(|&(index, folder_index, file)| {
@@ -2139,8 +2272,8 @@ pub fn preview(
             // The rules emptied the name but left the extension: `.txt` would
             // be a hidden file with no name.
             let empty_stem;
-            let mut folders: Vec<String> = Vec::new();
-            let mut dest = None;
+            let folders: Vec<String>;
+            let dest: Option<PathBuf>;
             // A name typed by hand replaces the rules' name, not the folder
             // they move the file into.
             let (new_name, manual) = {
@@ -2170,26 +2303,7 @@ pub fn preview(
                     }
                     _ => String::new(),
                 };
-                // A movie already in a folder with its name stays there.
-                let inside = file
-                    .dir
-                    .file_name()
-                    .is_some_and(|d| d.to_string_lossy() == folder);
-                let (root, names) = match (&view.send_to, moved) {
-                    // The rules' folders go into the destination (the
-                    // other files get theirs at the end, see `send_rest`).
-                    (Some(s), Some(Move::OwnFolder)) => (s.dir.clone(), vec![folder]),
-                    (Some(s), Some(Move::Into { folders, .. })) => (s.dir.clone(), folders),
-                    (None, Some(Move::OwnFolder)) if !inside => (file.dir.clone(), vec![folder]),
-                    (None, Some(Move::Into { root, folders })) => (root, folders),
-                    _ => (file.dir.clone(), Vec::new()),
-                };
-                let to = names.iter().fold(root, |p, n| p.join(n));
-                // Already in that folder: stay there.
-                if to != file.dir {
-                    folders = names;
-                    dest = Some(to);
-                }
+                (folders, dest) = move_target(file, view, moved, folder);
                 match overrides.get(&file.path) {
                     Some(name) => (name.clone(), true),
                     None => (join_name(&stem, &ext), false),
@@ -2214,54 +2328,14 @@ pub fn preview(
                     && music::is_audio(&file.ext)
                     && !songs.contains_key(file.path.as_path())
             });
-            let own = file.audio_tags().cloned().unwrap_or_default();
-            let matched = view.songs.get(&file.path);
-            let retag = matched.is_some_and(|m| m.differs(&own))
-                || view.comics.get(&file.path).is_some_and(|m| {
-                    file.ext.eq_ignore_ascii_case("cbz")
-                        && crate::inside::comic_differs(m, file.comic_info())
-                });
-            // A CBZ whose `ComicInfo.xml` the comic rule clears.
-            let junk = (matched.is_some() && own.junk)
-                || (cleans && file.ext.eq_ignore_ascii_case("cbz") && file.comic_info().is_some());
-            let convert = converts.is_some_and(|draw| crate::rules::converts(file, draw));
-            let to_book = book_to.filter(|t| crate::rules::converts_book(file, *t));
-            let drm = book_to.is_some()
-                && !file.is_dir
-                && (crate::ebook::is_book(&file.ext) || crate::bookconv::is_document(&file.ext))
-                && file.book_source().is_some_and(|(_, locked)| locked);
-            let drawn = convert
-                .then(|| file.convert_check())
-                .flatten()
-                .filter(|n| *n > 0 && file.ext.eq_ignore_ascii_case("pdf"));
-            let sub_fix = sub_tools.as_ref().and_then(|(t, _)| {
-                let ext = new_name.rsplit_once('.').map_or("", |(_, e)| e);
-                file.subtitle()
-                    .and_then(|s| crate::subtext::plan(s, t, ext))
-            });
-            let (sub_extract, sub_pictures) = match (&sub_tools, &sub_langs) {
-                (Some((t, _)), Some(langs)) if !file.is_dir => {
-                    let tracks = file.sub_tracks();
-                    (
-                        crate::mkvsubs::targets(&file.path, tracks, langs, t.to_srt).len(),
-                        tracks.iter().filter(|t| !t.readable()).count(),
-                    )
-                }
-                _ => (0, 0),
-            };
+            let (retag, junk) = tag_state(file, view, cleans);
+            let (convert, to_book, drm, drawn) = convert_state(file, converts, book_to);
+            let (sub_fix, sub_extract, sub_pictures) =
+                subtitle_state(file, &new_name, &sub_tools, &sub_langs);
             let comic_to = comic_ebook
                 .filter(|(_, draw)| crate::rules::to_ebook(file, *draw))
                 .map(|(t, _)| t);
-            let extra = movie_rule
-                .then(|| crate::extras::extra_kind(&file.path))
-                .flatten()
-                .map(str::to_string);
-            let release_junk = video_rule
-                && !file.is_dir
-                && extra.is_none()
-                && !view.movies.contains_key(&file.path)
-                && !view.episodes.contains_key(&file.path)
-                && crate::extras::release_junk(&file.path, file.size);
+            let (extra, release_junk) = extra_state(file, view, movie_rule, video_rule);
             PreviewItem {
                 kinds: kinds_of(file),
                 editable: false,
@@ -2314,17 +2388,7 @@ pub fn preview(
                         .get(file.path.as_path())
                         .map_or(crate::photos::DateFrom::None, |n| n.shot.from)
                 }),
-                touch: photo_rule
-                    .filter(|(_, set)| *set)
-                    .and_then(|_| photos.get(file.path.as_path()))
-                    .filter(|n| n.shot.from != crate::photos::DateFrom::Modified)
-                    .and_then(|n| {
-                        use chrono::TimeZone;
-                        Local
-                            .from_local_datetime(&n.shot.taken)
-                            .earliest()
-                            .map(|t| t.timestamp())
-                    }),
+                touch: photo_touch(file, photo_set, &photos),
             }
         })
         .collect();
