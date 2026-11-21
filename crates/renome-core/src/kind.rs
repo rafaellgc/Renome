@@ -165,12 +165,10 @@ fn archive(names: &'static [&'static str], comic: &'static str) -> Option<Kind> 
     })
 }
 
-fn of_head(h: &[u8], f: &mut File, path: &Path) -> Option<Kind> {
+/// Images.
+fn image_head(h: &[u8], f: &mut File) -> Option<Kind> {
     let starts = |sig: &[u8]| h.starts_with(sig);
-    let at4 = |sig: &[u8]| h.len() >= 4 + sig.len() && &h[4..4 + sig.len()] == sig;
     let at8 = |sig: &[u8]| h.len() >= 8 + sig.len() && &h[8..8 + sig.len()] == sig;
-
-    // Images.
     if starts(&[0xff, 0xd8, 0xff]) {
         return kind(&["jpg", "jpeg", "jpe", "jfif", "jif", "mpo", "thm"]);
     }
@@ -214,13 +212,21 @@ fn of_head(h: &[u8], f: &mut File, path: &Path) -> Option<Kind> {
             kind(&["cur"])
         };
     }
+    None
+}
 
-    // ISO base media (MP4, MOV, HEIF, AVIF, CR3).
+/// ISO base media (MP4, MOV, HEIF, AVIF, CR3).
+fn iso_media_head(h: &[u8], path: &Path) -> Option<Kind> {
+    let at4 = |sig: &[u8]| h.len() >= 4 + sig.len() && &h[4..4 + sig.len()] == sig;
     if at4(b"ftyp") {
         return ftyp(h, path);
     }
+    None
+}
 
-    // Matroska.
+/// Matroska.
+fn matroska_head(h: &[u8], path: &Path) -> Option<Kind> {
+    let starts = |sig: &[u8]| h.starts_with(sig);
     if starts(&[0x1a, 0x45, 0xdf, 0xa3]) {
         return if contains(&h[..h.len().min(64)], b"webm") {
             kind(&["webm", "mkv"])
@@ -230,8 +236,13 @@ fn of_head(h: &[u8], f: &mut File, path: &Path) -> Option<Kind> {
             kind(&["mka", "mkv", "mks"])
         };
     }
+    None
+}
 
-    // Other audio and video.
+/// Other audio and video.
+fn audio_video_head(h: &[u8], f: &mut File) -> Option<Kind> {
+    let starts = |sig: &[u8]| h.starts_with(sig);
+    let at8 = |sig: &[u8]| h.len() >= 8 + sig.len() && &h[8..8 + sig.len()] == sig;
     if starts(b"RIFF") && at8(b"WAVE") {
         return kind(&["wav", "wave", "bwf"]);
     }
@@ -291,8 +302,12 @@ fn of_head(h: &[u8], f: &mut File, path: &Path) -> Option<Kind> {
     if let Some(k) = mpeg_audio(h, 0) {
         return Some(k);
     }
+    None
+}
 
-    // Documents and books.
+/// Documents and books.
+fn document_head(h: &[u8]) -> Option<Kind> {
+    let starts = |sig: &[u8]| h.starts_with(sig);
     if contains(&h[..h.len().min(1024)], b"%PDF-") {
         return kind(&["pdf", "ai"]);
     }
@@ -314,8 +329,12 @@ fn of_head(h: &[u8], f: &mut File, path: &Path) -> Option<Kind> {
     if fiction_book(h) {
         return kind(&["fb2"]);
     }
+    None
+}
 
-    // Fonts.
+/// Fonts.
+fn font_head(h: &[u8]) -> Option<Kind> {
+    let starts = |sig: &[u8]| h.starts_with(sig);
     if starts(b"OTTO") {
         return kind(&["otf"]);
     }
@@ -331,8 +350,12 @@ fn of_head(h: &[u8], f: &mut File, path: &Path) -> Option<Kind> {
     if starts(&[0, 1, 0, 0]) && h.len() >= 12 && true_type(h) {
         return kind(&["ttf", "otf"]);
     }
+    None
+}
 
-    // Archives.
+/// Archives.
+fn archive_head(h: &[u8], f: &mut File, path: &Path) -> Option<Kind> {
+    let starts = |sig: &[u8]| h.starts_with(sig);
     if starts(b"PK\x03\x04") || starts(b"PK\x05\x06") {
         return zip(path);
     }
@@ -375,7 +398,18 @@ fn of_head(h: &[u8], f: &mut File, path: &Path) -> Option<Kind> {
     if at(f, 0x8001, 5) == b"CD001" {
         return kind(&["iso", "img", "udf"]);
     }
-    text(h, f)
+    None
+}
+
+fn of_head(h: &[u8], f: &mut File, path: &Path) -> Option<Kind> {
+    image_head(h, f)
+        .or_else(|| iso_media_head(h, path))
+        .or_else(|| matroska_head(h, path))
+        .or_else(|| audio_video_head(h, f))
+        .or_else(|| document_head(h))
+        .or_else(|| font_head(h))
+        .or_else(|| archive_head(h, f, path))
+        .or_else(|| text(h, f))
 }
 
 /// Extensions of formats that are not text: a text file named so gets a
