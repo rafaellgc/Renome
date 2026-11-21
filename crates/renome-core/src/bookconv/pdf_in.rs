@@ -1048,28 +1048,10 @@ fn push_line(p: &mut Para, next: &[Run], words: &Vocab, lined: bool) {
     }
 }
 
-/// Reads the PDF at `path`.
-pub fn read(path: &Path) -> Result<Book, String> {
-    let data = Arc::new(std::fs::read(path).map_err(|e| e.to_string())?);
-    let mut book = Book::new();
-    book.css.push_str(PDF_CSS);
-    let own = crate::ebook::read_as(path, "pdf");
-    book.meta.title = own.title.clone();
-    book.meta.authors = own.authors.clone();
-    book.meta.language = own.language.clone();
-    book.meta.publisher = own.publisher.clone();
-    book.meta.isbn = own.isbns.first().cloned().unwrap_or_default();
-    book.meta.date = own.year.map(|y| y.to_string()).unwrap_or_default();
-    book.meta.series = own.series.clone();
-    book.meta.series_index = own.series_index;
-
-    let pages = collect(&data, &mut book)?;
-    if pages.is_empty() {
-        return Err("bookBroken".into());
-    }
-    // Text drawn invisibly (the text layer of a scanned book) counts only
-    // on pages with no visible text.
-    let pages: Vec<PageData> = pages
+/// Text drawn invisibly (the text layer of a scanned book) counts only on
+/// pages with no visible text.
+fn hide_invisible_text(pages: Vec<PageData>) -> Vec<PageData> {
+    pages
         .into_iter()
         .map(|mut p| {
             let visible = p
@@ -1080,16 +1062,18 @@ pub fn read(path: &Path) -> Result<Book, String> {
             if visible > 20 {
                 p.glyphs.retain(|g| !g.invisible);
             } else if p.glyphs.iter().any(|g| g.invisible) {
-                // A scanned page with its text: the text, not the picture.
                 p.pics
                     .retain(|pic| (pic.r.width() * pic.r.height()) < (p.w * p.h) as f64 * 0.5);
             }
             p
         })
-        .collect();
-    // Text whose fonts do not say which letters they draw comes out as
-    // symbols: such a page is shown as its picture.
-    let mut pages = pages;
+        .collect()
+}
+
+/// Text whose fonts do not say which letters they draw comes out as
+/// symbols: such a page is emptied, and its number returned (it is shown as
+/// its picture).
+fn blank_garbled(pages: &mut [PageData]) -> Vec<usize> {
     let mut garbled = Vec::new();
     for (i, p) in pages.iter_mut().enumerate() {
         if garbage(&p.glyphs) {
@@ -1098,12 +1082,18 @@ pub fn read(path: &Path) -> Result<Book, String> {
             garbled.push(i);
         }
     }
-    let letters: usize = pages.iter().map(|p| p.glyphs.len()).sum();
-    if letters < pages.len() * 30 {
-        return scanned(path, book);
-    }
-    for i in &garbled {
-        if let Some((img, ext)) = crate::convert::draw_page(&data, *i, 1600.0)
+    garbled
+}
+
+/// The pages `blank_garbled` emptied, as the picture of the page.
+fn draw_garbled_pages(
+    pages: &mut [PageData],
+    garbled: &[usize],
+    data: &Arc<Vec<u8>>,
+    book: &mut Book,
+) {
+    for i in garbled {
+        if let Some((img, ext)) = crate::convert::draw_page(data, *i, 1600.0)
             && let Some(name) = book.add_file(img, &format!("p.{ext}"))
         {
             let (w, h) = (pages[*i].w as f64, pages[*i].h as f64);
@@ -1113,8 +1103,11 @@ pub fn read(path: &Path) -> Result<Book, String> {
             });
         }
     }
-    // Where (nearly) everything is bold or italic, that is the font, not
-    // emphasis.
+}
+
+/// Where (nearly) everything is bold or italic, that is the font, not
+/// emphasis.
+fn drop_font_emphasis(pages: &mut [PageData]) {
     let total: usize = pages.iter().map(|p| p.glyphs.len()).sum();
     let bold = pages
         .iter()
@@ -1139,23 +1132,27 @@ pub fn read(path: &Path) -> Result<Book, String> {
             }
         }
     }
+}
 
-    // The size of the body text: the one most letters have.
+/// The size of the body text: the one most letters have.
+fn body_size(pages: &[PageData]) -> f32 {
     let mut sizes: HashMap<i32, usize> = HashMap::new();
-    for p in &pages {
+    for p in pages {
         for g in &p.glyphs {
             *sizes.entry((g.size * 2.0).round() as i32).or_default() += 1;
         }
     }
-    let body = sizes
+    sizes
         .iter()
         .max_by_key(|(_, n)| **n)
         .map(|(s, _)| *s as f32 / 2.0)
-        .unwrap_or(10.0);
+        .unwrap_or(10.0)
+}
 
-    // Blocks per page, in reading order.
+/// The blocks of each page, in reading order.
+fn blocks_per_page(pages: &[PageData], body: f32) -> Vec<Vec<Block>> {
     let mut page_blocks: Vec<Vec<Block>> = Vec::new();
-    for p in &pages {
+    for p in pages {
         let mut ch = chunks_of(&p.glyphs);
         join_drop_caps(&mut ch, body);
         let bl = blocks_of(ch, &p.pics, body);
@@ -1171,9 +1168,12 @@ pub fn read(path: &Path) -> Result<Book, String> {
             }
         }
     }
+    page_blocks
+}
 
-    // Headers, footers and page numbers: small blocks near the top or
-    // bottom whose text (digits aside) repeats, or that are a number.
+/// Headers, footers and page numbers: small blocks near the top or bottom
+/// whose text (digits aside) repeats, or that are a number, are dropped.
+fn drop_furniture(page_blocks: &mut [Vec<Block>], pages: &[PageData]) {
     let n_pages = pages.len();
     let mut counts: HashMap<String, usize> = HashMap::new();
     for (pi, bl) in page_blocks.iter().enumerate() {
@@ -1200,23 +1200,25 @@ pub fn read(path: &Path) -> Result<Book, String> {
             !(is_page_number(&t) || repeated(&furniture_key(&t)))
         });
     }
+}
 
-    // The width of a full line of text (of a column, in two columns).
-    let col_width = {
-        let mut w: Vec<f32> = page_blocks
-            .iter()
-            .flatten()
-            .flat_map(|b| b.lines.iter())
-            .filter(|l| (l.size - body).abs() < body * 0.1)
-            .map(|l| l.x1 - l.x0)
-            .collect();
-        w.sort_by(f32::total_cmp);
-        w.get(w.len() * 9 / 10).copied().unwrap_or(400.0)
-    };
+/// The width of a full line of text (of a column, in two columns).
+fn column_width(page_blocks: &[Vec<Block>], body: f32) -> f32 {
+    let mut w: Vec<f32> = page_blocks
+        .iter()
+        .flatten()
+        .flat_map(|b| b.lines.iter())
+        .filter(|l| (l.size - body).abs() < body * 0.1)
+        .map(|l| l.x1 - l.x0)
+        .collect();
+    w.sort_by(f32::total_cmp);
+    w.get(w.len() * 9 / 10).copied().unwrap_or(400.0)
+}
 
-    // Words of the book, for hyphens at line ends.
+/// The words of the book, for hyphens at line ends.
+fn vocabulary(page_blocks: &[Vec<Block>]) -> Vocab {
     let mut words = Vocab::default();
-    for bl in &page_blocks {
+    for bl in page_blocks {
         for b in bl {
             for l in &b.lines {
                 for w in l.text().split_whitespace() {
@@ -1225,10 +1227,13 @@ pub fn read(path: &Path) -> Result<Book, String> {
             }
         }
     }
+    words
+}
 
-    // Heading sizes: bigger than the body, from the biggest down.
+/// Heading sizes: bigger than the body, from the biggest down.
+fn heading_sizes(page_blocks: &[Vec<Block>], body: f32) -> Vec<f32> {
     let mut hsizes: Vec<f32> = Vec::new();
-    for bl in &page_blocks {
+    for bl in page_blocks {
         for b in bl {
             let s = b.size();
             if b.pic.is_none()
@@ -1243,6 +1248,78 @@ pub fn read(path: &Path) -> Result<Book, String> {
     hsizes.sort_by(|a, b| b.total_cmp(a));
     hsizes.dedup_by(|a, b| (*a - *b).abs() < body * 0.08);
     hsizes.truncate(3);
+    hsizes
+}
+
+/// The note marks each page raises (small, above the line).
+fn note_marks(page_blocks: &[Vec<Block>]) -> Vec<HashSet<String>> {
+    page_blocks
+        .iter()
+        .map(|bl| {
+            bl.iter()
+                .flat_map(|b| b.lines.iter())
+                .flat_map(|l| l.runs.iter())
+                .filter(|r| r.sup)
+                .map(|r| r.text.trim().to_string())
+                .filter(|t| !t.is_empty() && t.len() <= 3)
+                .collect()
+        })
+        .collect()
+}
+
+/// Whether the book starts its paragraphs indented: many lines inside
+/// blocks start further in than the block.
+fn starts_indented(page_blocks: &[Vec<Block>]) -> bool {
+    let (mut ind, mut all) = (0usize, 0usize);
+    for bl in page_blocks {
+        for b in bl.iter().filter(|b| b.pic.is_none() && b.lines.len() >= 3) {
+            let size = b.size();
+            for l in &b.lines[1..] {
+                all += 1;
+                if l.x0 > b.x0 + size * 0.6 && l.x0 < b.x0 + size * 4.0 {
+                    ind += 1;
+                }
+            }
+        }
+    }
+    all >= 50 && ind * 20 >= all
+}
+
+/// Reads the PDF at `path`.
+pub fn read(path: &Path) -> Result<Book, String> {
+    let data = Arc::new(std::fs::read(path).map_err(|e| e.to_string())?);
+    let mut book = Book::new();
+    book.css.push_str(PDF_CSS);
+    let own = crate::ebook::read_as(path, "pdf");
+    book.meta.title = own.title.clone();
+    book.meta.authors = own.authors.clone();
+    book.meta.language = own.language.clone();
+    book.meta.publisher = own.publisher.clone();
+    book.meta.isbn = own.isbns.first().cloned().unwrap_or_default();
+    book.meta.date = own.year.map(|y| y.to_string()).unwrap_or_default();
+    book.meta.series = own.series.clone();
+    book.meta.series_index = own.series_index;
+
+    let pages = collect(&data, &mut book)?;
+    if pages.is_empty() {
+        return Err("bookBroken".into());
+    }
+    // Text drawn invisibly (the text layer of a scanned book) counts only
+    // on pages with no visible text.
+    let mut pages = hide_invisible_text(pages);
+    let garbled = blank_garbled(&mut pages);
+    let letters: usize = pages.iter().map(|p| p.glyphs.len()).sum();
+    if letters < pages.len() * 30 {
+        return scanned(path, book);
+    }
+    draw_garbled_pages(&mut pages, &garbled, &data, &mut book);
+    drop_font_emphasis(&mut pages);
+    let body = body_size(&pages);
+    let mut page_blocks = blocks_per_page(&pages, body);
+    drop_furniture(&mut page_blocks, &pages);
+    let col_width = column_width(&page_blocks, body);
+    let words = vocabulary(&page_blocks);
+    let hsizes = heading_sizes(&page_blocks, body);
     let level_of = |s: f32| -> Option<usize> {
         if s < body * 1.15 {
             return None;
@@ -1256,37 +1333,8 @@ pub fn read(path: &Path) -> Result<Book, String> {
     // Bookmarks: chapter titles and where they start.
     let outline = outline_of(&data);
 
-    // The note marks each page raises (small, above the line).
-    let marks: Vec<HashSet<String>> = page_blocks
-        .iter()
-        .map(|bl| {
-            bl.iter()
-                .flat_map(|b| b.lines.iter())
-                .flat_map(|l| l.runs.iter())
-                .filter(|r| r.sup)
-                .map(|r| r.text.trim().to_string())
-                .filter(|t| !t.is_empty() && t.len() <= 3)
-                .collect()
-        })
-        .collect();
-
-    // Whether the book starts its paragraphs indented: many lines inside
-    // blocks start further in than the block.
-    let indents = {
-        let (mut ind, mut all) = (0usize, 0usize);
-        for bl in &page_blocks {
-            for b in bl.iter().filter(|b| b.pic.is_none() && b.lines.len() >= 3) {
-                let size = b.size();
-                for l in &b.lines[1..] {
-                    all += 1;
-                    if l.x0 > b.x0 + size * 0.6 && l.x0 < b.x0 + size * 4.0 {
-                        ind += 1;
-                    }
-                }
-            }
-        }
-        all >= 50 && ind * 20 >= all
-    };
+    let marks = note_marks(&page_blocks);
+    let indents = starts_indented(&page_blocks);
 
     // Paragraphs.
     let mut paras: Vec<(usize, Para)> = Vec::new();
