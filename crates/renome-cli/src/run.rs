@@ -294,22 +294,17 @@ fn search(
 
 /// How many files the search left without an answer (said, in yellow).
 fn count_doubtful(found: &Option<crate::lookup::Found>, preview: &Preview) -> usize {
-    let mut doubtful = 0;
-    if let Some(found) = &found {
-        doubtful = preview
-            .items
-            .iter()
-            .filter(|i| {
-                let ext = Path::new(&i.original)
-                    .extension()
-                    .map(|e| e.to_string_lossy().to_lowercase())
-                    .unwrap_or_default();
-                found.wanted(&ext) && i.extra.is_none() && !i.release_junk && !found.has(&i.path)
-            })
-            .count();
-        if doubtful > 0 {
-            out::note(&out::yellow(&t("leftDoubtful", &[("n", &doubtful)])));
-        }
+    let Some(found) = found else {
+        return 0;
+    };
+    let items: Vec<renome_services::flow::Item> = preview
+        .items
+        .iter()
+        .map(renome_services::flow::Item::from)
+        .collect();
+    let doubtful = renome_services::flow::left_unanswered(found.rule(), &items, &|p| found.has(p));
+    if doubtful > 0 {
+        out::note(&out::yellow(&t("leftDoubtful", &[("n", &doubtful)])));
     }
     doubtful
 }

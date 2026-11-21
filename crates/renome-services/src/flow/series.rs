@@ -76,13 +76,18 @@ pub struct Outcome {
 pub fn targets(items: &[Item]) -> Vec<TvItem> {
     items
         .iter()
-        .filter(|i| !i.is_dir && renome_core::tmdb::is_screen(&i.ext()))
+        .filter(|i| is_target(i))
         .map(|i| TvItem {
             path: i.path.clone(),
             name: i.read_name(),
             is_dir: false,
         })
         .collect()
+}
+
+/// Whether the series rule looks this file up.
+pub fn is_target(i: &Item) -> bool {
+    !i.is_dir && renome_core::tmdb::is_screen(&i.ext())
 }
 
 /// Progress, for the page: finding the show, or loading one's episodes.

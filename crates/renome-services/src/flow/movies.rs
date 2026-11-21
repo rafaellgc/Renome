@@ -52,14 +52,12 @@ pub fn named(
 /// The files the movie rule looks up: videos, subtitles and folders, not
 /// a movie's extras or a release's adverts.
 pub fn targets(items: &[Item]) -> Vec<&Item> {
-    items
-        .iter()
-        .filter(|i| {
-            (i.is_dir || renome_core::tmdb::is_screen(&i.ext()))
-                && i.extra.is_none()
-                && !i.release_junk
-        })
-        .collect()
+    items.iter().filter(|i| is_target(i)).collect()
+}
+
+/// Whether the movie rule looks this file up.
+pub fn is_target(i: &Item) -> bool {
+    (i.is_dir || renome_core::tmdb::is_screen(&i.ext())) && i.extra.is_none() && !i.release_junk
 }
 
 /// The name a file is looked up by: without its extension and, for a

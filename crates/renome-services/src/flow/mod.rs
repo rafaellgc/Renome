@@ -135,6 +135,31 @@ impl Item {
     }
 }
 
+/// How many files the lookup rule `rule` (`movie`, `series`, `music`,
+/// `book` or `comic`) looks up and has no answer for (`answered` tells), not
+/// counting a movie's extras and a release's adverts: the files left for
+/// the person to settle.
+pub fn left_unanswered(rule: &str, items: &[Item], answered: &dyn Fn(&Path) -> bool) -> usize {
+    items
+        .iter()
+        .filter(|i| i.extra.is_none() && !i.release_junk)
+        .filter(|i| looked_up(rule, i))
+        .filter(|i| !answered(&i.path))
+        .count()
+}
+
+/// Whether the lookup rule `rule` looks this file up.
+fn looked_up(rule: &str, i: &Item) -> bool {
+    let ext = i.ext();
+    match rule {
+        "music" => renome_core::music::is_audio(&ext),
+        "book" => renome_core::ebook::is_book(&ext),
+        "comic" => renome_core::comics::is_comic(&ext),
+        "movie" => movies::is_target(i),
+        _ => series::is_target(i),
+    }
+}
+
 /// What a flow asks the person in the middle of its work (see
 /// [`crate::Host::ask`]).
 #[derive(Clone, Debug, Serialize)]
@@ -160,4 +185,50 @@ pub enum Question {
         path: Option<PathBuf>,
         comic: Option<Box<renome_core::comics::ComicMatch>>,
     },
+}
+
+#[cfg(test)]
+mod left_tests {
+    use super::*;
+
+    fn item(name: &str) -> Item {
+        Item {
+            path: PathBuf::from(name),
+            original: name.to_string(),
+            lookup_name: None,
+            is_dir: false,
+            extra: None,
+            release_junk: false,
+            untagged: false,
+            convert: false,
+        }
+    }
+
+    #[test]
+    fn counts_only_what_the_rule_looks_up_and_has_no_answer() {
+        let mut extra = item("making of.mkv");
+        extra.extra = Some("making-of".into());
+        let items = vec![
+            item("a.mkv"),
+            item("a.srt"),
+            item("b.mkv"),
+            item("notes.txt"),
+            extra,
+        ];
+        let answered = |p: &Path| p == Path::new("a.mkv");
+        // The subtitle and the second video have no answer; the text file
+        // and the extra are not looked up.
+        assert_eq!(left_unanswered("movie", &items, &answered), 2);
+        assert_eq!(left_unanswered("series", &items, &answered), 2);
+        assert_eq!(left_unanswered("music", &items, &answered), 0);
+        assert_eq!(left_unanswered("movie", &items, &|_| true), 0);
+    }
+
+    #[test]
+    fn a_folder_is_a_movie_but_not_an_episode() {
+        let mut dir = item("Some Movie");
+        dir.is_dir = true;
+        assert_eq!(left_unanswered("movie", &[dir.clone()], &|_| false), 1);
+        assert_eq!(left_unanswered("series", &[dir], &|_| false), 0);
+    }
 }

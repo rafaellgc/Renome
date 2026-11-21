@@ -642,13 +642,15 @@ impl Found {
         }
     }
 
-    /// Whether a file of this extension is one the rule looks up.
-    pub fn wanted(&self, ext: &str) -> bool {
+    /// The lookup rule this is the result of (`movie`, `series`, `music`,
+    /// `book` or `comic`).
+    pub fn rule(&self) -> &'static str {
         match self {
-            Found::Music(_) => renome_core::music::is_audio(ext),
-            Found::Books(_) => renome_core::ebook::is_book(ext),
-            Found::Comics(_) => renome_core::comics::is_comic(ext),
-            _ => renome_core::tmdb::is_video(ext),
+            Found::Movies(_) => "movie",
+            Found::Series(_) => "series",
+            Found::Music(_) => "music",
+            Found::Books(_) => "book",
+            Found::Comics(_) => "comic",
         }
     }
 }
