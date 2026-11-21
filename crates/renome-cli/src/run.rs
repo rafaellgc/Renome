@@ -15,36 +15,89 @@ use crate::out;
 use crate::rulespec;
 use crate::text::{lang, t};
 
-/// Rule types that need a catalogue lookup not in the command line yet.
-const LOOKUPS: [&str; 0] = [];
-
 pub fn preview_or_apply(
     m: &ArgMatches,
     settings: Option<&Value>,
     apply: bool,
 ) -> Result<Exit, String> {
-    // The rules.
+    let (steps_json, steps) = build_steps(m, settings)?;
+    let Some(mut files) = scan_list(m, settings) else {
+        return Ok(Exit::Done);
+    };
+    let mut view = build_view(m, settings, &mut files);
+    let overrides = names_by_hand(m)?;
+    read_photo_dates(&steps, &files);
+    let lookup_rule = lookup_rule_of(&steps_json);
+    let edits = parse_edits(m, &steps, lookup_rule.as_ref(), &mut view)?;
+    view.trash_ads = renome_core::catalog::trash_ads(&steps_json);
+    let found = match &lookup_rule {
+        Some(rule) => Some(search(
+            rule, m, settings, &files, &steps, &overrides, &edits, &mut view,
+        )?),
+        None => None,
+    };
+    // Stopped during the searches: on with what was found, if wanted.
+    if crate::stop::requested() {
+        if !(std::io::stdin().is_terminal() && ask(&format!("{} [s/N] ", t("goOnAfterStop", &[]))))
+        {
+            return Ok(Exit::Stopped);
+        }
+        crate::stop::reset();
+    }
+    let mut preview = renome_core::preview(&files, &steps, &overrides, &view);
+    // Identical copies heading for one name: the first goes, the others
+    // stay where they are (the window finds them in the background).
+    let copies = renome_core::identical::copies_among(&files, &preview);
+    if !copies.is_empty() {
+        view.identical = copies;
+        preview = renome_core::preview(&files, &steps, &overrides, &view);
+    }
+    let doubtful = count_doubtful(&found, &preview);
+    // The rules that are on, as saved: what is missing and what is written
+    // after the renames read their options from them.
+    let rules_on: Vec<Value> = steps_json
+        .iter()
+        .filter(|s| s.get("enabled") != Some(&Value::Bool(false)))
+        .map(|s| s["rule"].clone())
+        .collect();
+    if !out::json() {
+        warn_reader_limits(&rules_on);
+    }
+    let missing = match &found {
+        Some(f) if m.get_flag("missing") || m.contains_id("missing-csv") => {
+            crate::missing::of(&rules_on, f, &preview, m.get_flag("desc"))
+        }
+        _ => Vec::new(),
+    };
+    check_errors(&preview, &steps_json)?;
+    export_csvs(m, settings, &files, &preview, &steps_json, &missing)?;
+    finish(
+        m, settings, apply, &steps, &preview, &rules_on, &found, &edits, &missing, doubtful,
+    )
+}
+
+/// The rules of the command line and the settings, checked, as the plain
+/// JSON of each and as the steps the core runs.
+fn build_steps(
+    m: &ArgMatches,
+    settings: Option<&Value>,
+) -> Result<(Vec<Value>, Vec<Step>), String> {
     let sources = crate::sources(m);
     if sources.is_empty() {
         return Err(t("noRules", &[]));
     }
     let steps_json = rulespec::steps(&sources, settings)?;
     rulespec::check_together(&steps_json)?;
-    for step in &steps_json {
-        let kind = rulespec::kind_of(step);
-        if step.get("enabled") != Some(&Value::Bool(false)) && LOOKUPS.contains(&kind) {
-            return Err(t(
-                "lookupLater",
-                &[("rule", &t(&format!("rule.{kind}"), &[]))],
-            ));
-        }
-    }
     let steps: Vec<Step> = steps_json
         .iter()
         .map(|s| serde_json::from_value(s.clone()).map_err(|e| e.to_string()))
         .collect::<Result<_, _>>()?;
 
-    // The list.
+    Ok((steps_json, steps))
+}
+
+/// The files under the paths; `None` (said) when there are none.
+fn scan_list(m: &ArgMatches, settings: Option<&Value>) -> Option<Vec<FileEntry>> {
     let paths: Vec<PathBuf> = m
         .get_many::<PathBuf>("paths")
         .unwrap()
@@ -56,14 +109,20 @@ pub fn preview_or_apply(
         folders_as_items: m.get_flag("folders"),
     };
     let found = renome_core::scan(&paths, &opts, &HashSet::new());
-    let mut files = found.files;
+    let files = found.files;
     for s in &found.skipped {
         out::note(&format!("{}: {}", out::path(&s.path), s.reason));
     }
     if files.is_empty() {
         out::note(&t("noFiles", &[]));
-        return Ok(Exit::Done);
+        return None;
     }
+    Some(files)
+}
+
+/// What the list is seen with (filter, language, destination, sort order);
+/// sorts `files` as asked.
+fn build_view(m: &ArgMatches, settings: Option<&Value>, files: &mut [FileEntry]) -> View {
     let mut view = View {
         filter: m.get_one::<String>("filter").cloned().unwrap_or_default(),
         lang: lang().into(),
@@ -89,11 +148,15 @@ pub fn preview_or_apply(
                 "modified" => renome_core::SortKey::Modified,
                 _ => renome_core::SortKey::Name,
             };
-            renome_core::sort_files(&mut files, key, view.descending);
+            renome_core::sort_files(files, key, view.descending);
         }
         None => {}
     }
-    let overrides = names_by_hand(m)?;
+    view
+}
+
+/// The photos' dates read from the files, when a photo rule is on.
+fn read_photo_dates(steps: &[Step], files: &[FileEntry]) {
     if steps
         .iter()
         .any(|s| s.enabled && matches!(s.rule, renome_core::Rule::Photo { .. }))
@@ -101,18 +164,27 @@ pub fn preview_or_apply(
         let list: Vec<&FileEntry> = files.iter().collect();
         renome_core::photos::read_all(&list, &|_, _| {});
     }
+}
 
-    // The lookup rule: searched on the list as the rules above it name it,
-    // then the list made again with what was chosen.
-    let lookup_rule = steps_json
+/// The first rule that is on and needs a catalogue lookup, as saved.
+fn lookup_rule_of(steps_json: &[Value]) -> Option<Value> {
+    steps_json
         .iter()
         .find(|s| {
             renome_core::catalog::LOOKUPS.contains(&rulespec::kind_of(s))
                 && s.get("enabled") != Some(&Value::Bool(false))
         })
-        .map(|s| s["rule"].clone());
-    // The details typed by hand (--edit), for the lookup rule's editor or
-    // the photo rule's dates.
+        .map(|s| s["rule"].clone())
+}
+
+/// The details typed by hand (`--edit`), for the lookup rule's editor or the
+/// photo rule's dates.
+fn parse_edits(
+    m: &ArgMatches,
+    steps: &[Step],
+    lookup_rule: Option<&Value>,
+    view: &mut View,
+) -> Result<crate::edit::Edits, String> {
     let edit_specs: Vec<String> = m
         .get_many::<String>("edit")
         .map(|v| v.cloned().collect())
@@ -120,7 +192,7 @@ pub fn preview_or_apply(
     let has_photo = steps
         .iter()
         .any(|s| s.enabled && matches!(s.rule, renome_core::Rule::Photo { .. }));
-    let edit_kind = match lookup_rule.as_ref().and_then(|r| r["type"].as_str()) {
+    let edit_kind = match lookup_rule.and_then(|r| r["type"].as_str()) {
         Some(k @ ("music" | "book" | "comic")) => k,
         _ if has_photo => "photo",
         _ => "",
@@ -132,96 +204,96 @@ pub fn preview_or_apply(
     if edit_kind == "photo" {
         crate::edit::photo_dates(&edits, &mut view.dates)?;
     }
-    let mut found = None;
-    view.trash_ads = renome_core::catalog::trash_ads(&steps_json);
-    if let Some(rule) = &lookup_rule {
-        let first = renome_core::preview(&files, &steps, &overrides, &view);
-        let names: HashMap<&PathBuf, String> = first
-            .items
-            .iter()
-            .map(|i| {
-                (
-                    &i.path,
-                    i.lookup_name.clone().unwrap_or_else(|| {
-                        i.path
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .into_owned()
-                    }),
-                )
-            })
-            .collect();
-        let by_path: HashMap<&PathBuf, &FileEntry> = files.iter().map(|f| (&f.path, f)).collect();
-        let ask = ask_of(m)?;
-        let rt = runtime()?;
-        found = Some(match rule["type"].as_str() {
-            Some("movie") => {
-                let f = rt.block_on(crate::lookup::movies(&first, settings, &ask))?;
-                view.movies = f.chosen.clone();
-                crate::lookup::Found::Movies(f)
-            }
-            Some("comic") => {
-                let mut f = rt.block_on(crate::lookup::comics(&first, rule, settings, &ask))?;
-                crate::edit::comics(
-                    &edits,
-                    &mut f,
-                    &first.items,
-                    &names,
-                    rule.get("seriesByFolder")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false),
-                );
-                view.comics = f.chosen.clone();
-                crate::lookup::Found::Comics(Box::new(f))
-            }
-            Some("book") => {
-                let mut f = rt.block_on(crate::lookup::books(&first, rule, settings, &ask))?;
-                let audiobooks = rule.get("audiobooks").and_then(Value::as_bool) != Some(false);
-                crate::edit::books(&edits, &mut f, &first.items, &names, audiobooks);
-                view.books = f.chosen.clone();
-                crate::lookup::Found::Books(Box::new(f))
-            }
-            Some("music") => {
-                let mut f = rt.block_on(crate::lookup::music(&files, &first, rule, &ask))?;
-                crate::edit::songs(
-                    &edits,
-                    &mut f.chosen,
-                    &by_path,
-                    &first.items,
-                    rule.get("fromName")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false),
-                );
-                view.songs = f.chosen.clone();
-                crate::lookup::Found::Music(Box::new(f))
-            }
-            _ => {
-                let f = rt.block_on(crate::lookup::series(&first, rule, settings, &ask))?;
-                view.episodes = f.chosen.clone();
-                if f.loose > 0 {
-                    out::note(&t("tvLoose", &[("n", &f.loose)]));
-                }
-                crate::lookup::Found::Series(f)
-            }
-        });
-    }
-    // Stopped during the searches: on with what was found, if wanted.
-    if crate::stop::requested() {
-        if !(std::io::stdin().is_terminal() && ask(&format!("{} [s/N] ", t("goOnAfterStop", &[]))))
-        {
-            return Ok(Exit::Stopped);
+    Ok(edits)
+}
+
+/// Searches the catalogue for what the lookup rule needs, on the list as
+/// the rules above it name it, and puts what was chosen in the view.
+#[allow(clippy::too_many_arguments)]
+fn search(
+    rule: &Value,
+    m: &ArgMatches,
+    settings: Option<&Value>,
+    files: &[FileEntry],
+    steps: &[Step],
+    overrides: &HashMap<PathBuf, String>,
+    edits: &crate::edit::Edits,
+    view: &mut View,
+) -> Result<crate::lookup::Found, String> {
+    let first = renome_core::preview(files, steps, overrides, view);
+    let names: HashMap<&PathBuf, String> = first
+        .items
+        .iter()
+        .map(|i| {
+            (
+                &i.path,
+                i.lookup_name.clone().unwrap_or_else(|| {
+                    i.path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned()
+                }),
+            )
+        })
+        .collect();
+    let by_path: HashMap<&PathBuf, &FileEntry> = files.iter().map(|f| (&f.path, f)).collect();
+    let ask = ask_of(m)?;
+    let rt = runtime()?;
+    Ok(match rule["type"].as_str() {
+        Some("movie") => {
+            let f = rt.block_on(crate::lookup::movies(&first, settings, &ask))?;
+            view.movies = f.chosen.clone();
+            crate::lookup::Found::Movies(f)
         }
-        crate::stop::reset();
-    }
-    let mut preview = renome_core::preview(&files, &steps, &overrides, &view);
-    // Identical copies heading for one name: the first goes, the others
-    // stay where they are (the window finds them in the background).
-    let copies = renome_core::identical::copies_among(&files, &preview);
-    if !copies.is_empty() {
-        view.identical = copies;
-        preview = renome_core::preview(&files, &steps, &overrides, &view);
-    }
+        Some("comic") => {
+            let mut f = rt.block_on(crate::lookup::comics(&first, rule, settings, &ask))?;
+            crate::edit::comics(
+                edits,
+                &mut f,
+                &first.items,
+                &names,
+                rule.get("seriesByFolder")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            );
+            view.comics = f.chosen.clone();
+            crate::lookup::Found::Comics(Box::new(f))
+        }
+        Some("book") => {
+            let mut f = rt.block_on(crate::lookup::books(&first, rule, settings, &ask))?;
+            let audiobooks = rule.get("audiobooks").and_then(Value::as_bool) != Some(false);
+            crate::edit::books(edits, &mut f, &first.items, &names, audiobooks);
+            view.books = f.chosen.clone();
+            crate::lookup::Found::Books(Box::new(f))
+        }
+        Some("music") => {
+            let mut f = rt.block_on(crate::lookup::music(files, &first, rule, &ask))?;
+            crate::edit::songs(
+                edits,
+                &mut f.chosen,
+                &by_path,
+                &first.items,
+                rule.get("fromName")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            );
+            view.songs = f.chosen.clone();
+            crate::lookup::Found::Music(Box::new(f))
+        }
+        _ => {
+            let f = rt.block_on(crate::lookup::series(&first, rule, settings, &ask))?;
+            view.episodes = f.chosen.clone();
+            if f.loose > 0 {
+                out::note(&t("tvLoose", &[("n", &f.loose)]));
+            }
+            crate::lookup::Found::Series(f)
+        }
+    })
+}
+
+/// How many files the search left without an answer (said, in yellow).
+fn count_doubtful(found: &Option<crate::lookup::Found>, preview: &Preview) -> usize {
     let mut doubtful = 0;
     if let Some(found) = &found {
         doubtful = preview
@@ -239,17 +311,14 @@ pub fn preview_or_apply(
             out::note(&out::yellow(&t("leftDoubtful", &[("n", &doubtful)])));
         }
     }
-    // The rules that are on, as saved: what is missing and what is written
-    // after the renames read their options from them.
-    let rules_on: Vec<Value> = steps_json
-        .iter()
-        .filter(|s| s.get("enabled") != Some(&Value::Bool(false)))
-        .map(|s| s["rule"].clone())
-        .collect();
-    // A comic's e-book or a converted book its reader does not open as it
-    // comes: said as the window's rule card says it.
+    doubtful
+}
+
+/// A comic's e-book or a converted book its reader does not open as it
+/// comes: said as the window's rule card says it.
+fn warn_reader_limits(rules_on: &[Value]) {
     if !out::json() {
-        for rule in &rules_on {
+        for rule in rules_on {
             if let Some(n) = renome_core::readers::reader(rule).not_opens {
                 let name = n
                     .name
@@ -266,16 +335,14 @@ pub fn preview_or_apply(
             }
         }
     }
-    let missing = match &found {
-        Some(f) if m.get_flag("missing") || m.contains_id("missing-csv") => {
-            crate::missing::of(&rules_on, f, &preview, m.get_flag("desc"))
-        }
-        _ => Vec::new(),
-    };
+}
+
+/// The filter or a rule that does not work, said as the window's rule card
+/// says it: the rule, what is wrong, why.
+fn check_errors(preview: &Preview, steps_json: &[Value]) -> Result<(), String> {
     if let Some(e) = &preview.filter_error {
         return Err(format!("{}: {e}", t("invalidFilter", &[])));
     }
-    // As the window's rule card says it: the rule, what is wrong, why.
     if let Some(e) = preview.rule_errors.first() {
         let rule = steps_json
             .get(e.index)
@@ -290,6 +357,19 @@ pub fn preview_or_apply(
             format!("{rule}: {what}: {}", e.detail)
         });
     }
+    Ok(())
+}
+
+/// `--csv` and `--missing-csv`: the list and what is missing, as the
+/// window's list has them.
+fn export_csvs(
+    m: &ArgMatches,
+    settings: Option<&Value>,
+    files: &[FileEntry],
+    preview: &Preview,
+    steps_json: &[Value],
+    missing: &[crate::missing::Missing],
+) -> Result<(), String> {
     if let Some(path) = m.get_one::<PathBuf>("csv") {
         // The optional columns chosen in the options that make sense with
         // these rules, as the window's list has them.
@@ -299,7 +379,7 @@ pub fn preview_or_apply(
             .iter()
             .filter_map(|v| v.as_str().map(str::to_string))
             .collect();
-        let available = renome_core::catalog::columns_for(&steps_json);
+        let available = renome_core::catalog::columns_for(steps_json);
         let columns: Vec<&str> = renome_core::catalog::COLUMNS
             .iter()
             .copied()
@@ -313,41 +393,69 @@ pub fn preview_or_apply(
                 .map(|f| (f.path.clone(), renome_core::details::of(f)))
                 .collect()
         };
-        let rows = renome_services::flow::export::list(&preview, &details, &columns, lang());
+        let rows = renome_services::flow::export::list(preview, &details, &columns, lang());
         write_cells(path, &rows)?;
         out::note(&t("csvSaved", &[]));
     }
     if let Some(path) = m.get_one::<PathBuf>("missing-csv") {
         let dirs: HashMap<&PathBuf, &PathBuf> =
             preview.items.iter().map(|i| (&i.path, &i.dir)).collect();
-        let csv = renome_services::flow::export::missing(&missing, &|p| {
+        let csv = renome_services::flow::export::missing(missing, &|p| {
             dirs.get(&p.to_path_buf()).map(|d| (*d).clone())
         });
         write_cells(path, &csv.rows)?;
         out::note(&t("missingSaved", &[]));
     }
+    Ok(())
+}
+
+/// The list as the terminal shows it, with the options of the command line.
+fn show_list(
+    m: &ArgMatches,
+    settings: Option<&Value>,
+    steps: &[Step],
+    preview: &Preview,
+    missing: &[crate::missing::Missing],
+) {
+    show(
+        preview,
+        steps,
+        m.get_flag("all"),
+        missing,
+        setting_bool(settings, "warnWindows"),
+    );
+}
+
+/// The exit when nothing is wrong, or when conflicts or doubts are left.
+fn doubts_or_done(preview: &Preview, doubtful: usize) -> Exit {
+    if preview.real_conflicts() > 0 || doubtful > 0 {
+        Exit::Doubts
+    } else {
+        Exit::Done
+    }
+}
+
+/// The preview ends here, or the renames are asked for, done, and what is
+/// written besides them (the shared flow of the window) follows.
+#[allow(clippy::too_many_arguments)]
+fn finish(
+    m: &ArgMatches,
+    settings: Option<&Value>,
+    apply: bool,
+    steps: &[Step],
+    preview: &Preview,
+    rules_on: &[Value],
+    found: &Option<crate::lookup::Found>,
+    edits: &crate::edit::Edits,
+    missing: &[crate::missing::Missing],
+    doubtful: usize,
+) -> Result<Exit, String> {
     if !apply {
-        show(
-            &preview,
-            &steps,
-            m.get_flag("all"),
-            &missing,
-            setting_bool(settings, "warnWindows"),
-        );
-        return Ok(if preview.real_conflicts() > 0 || doubtful > 0 {
-            Exit::Doubts
-        } else {
-            Exit::Done
-        });
+        show_list(m, settings, steps, preview, missing);
+        return Ok(doubts_or_done(preview, doubtful));
     }
     if !out::json() {
-        show(
-            &preview,
-            &steps,
-            m.get_flag("all"),
-            &missing,
-            setting_bool(settings, "warnWindows"),
-        );
+        show_list(m, settings, steps, preview, missing);
     }
     // What is written besides the renames is decided by the shared flow,
     // as in the window: from the rules that are on and what was chosen
@@ -357,13 +465,13 @@ pub fn preview_or_apply(
     let auth = crate::lookup::subs_auth(settings);
     if let Some(crate::lookup::Found::Movies(_) | crate::lookup::Found::Series(_)) = &found {
         runtime()?.block_on(crate::lookup::subtitles(
-            &rules_on,
-            &preview,
+            rules_on,
+            preview,
             &auth,
             &mut chosen,
         ));
     }
-    let counts = renome_services::flow::after::counts(&rules_on, &preview, &chosen);
+    let counts = renome_services::flow::after::counts(rules_on, preview, &chosen);
     if preview.changed == 0 && counts.besides == 0 {
         if out::json() {
             println!(
@@ -371,11 +479,7 @@ pub fn preview_or_apply(
                 json!({ "renamed": 0, "historyId": null, "failed": [] })
             );
         }
-        return Ok(if preview.real_conflicts() > 0 || doubtful > 0 {
-            Exit::Doubts
-        } else {
-            Exit::Done
-        });
+        return Ok(doubts_or_done(preview, doubtful));
     }
     if preview.real_conflicts() > 0 && m.get_flag("strict") {
         out::note(&t("strictConflicts", &[("n", &preview.real_conflicts())]));
@@ -386,7 +490,7 @@ pub fn preview_or_apply(
     // behind, these last told even with --yes.
     let to = m.get_one::<PathBuf>("to");
     let said = renome_services::flow::after::ask(
-        &preview,
+        preview,
         &counts,
         to.map(|d| (d.as_path(), m.get_flag("copy"))),
     );
@@ -408,7 +512,7 @@ pub fn preview_or_apply(
     let (exit, report) = if preview.changed == 0 {
         (Exit::Done, renome_core::ApplyReport::default())
     } else {
-        rename(&preview, to.map(|_| m.get_flag("copy")))?
+        rename(preview, to.map(|_| m.get_flag("copy")))?
     };
     if !m.get_flag("no-server") {
         for note in runtime()?.block_on(crate::servers::tell(settings, &report.done)) {
@@ -423,9 +527,9 @@ pub fn preview_or_apply(
     }
     let history = renome_core::History::new(renome_services::history_dir());
     for note in runtime()?.block_on(crate::lookup::after(
-        &rules_on,
+        rules_on,
         found.as_ref(),
-        &preview,
+        preview,
         &chosen,
         &report,
         &history,

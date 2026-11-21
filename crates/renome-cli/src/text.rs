@@ -551,14 +551,6 @@ const CLI: &[(&str, [&str; 3])] = &[
         ],
     ),
     (
-        "lookupLater",
-        [
-            "A regra {rule} busca em catálogos online, o que a linha de comando ainda não faz.",
-            "The {rule} rule looks things up in online catalogues, which the command line does not do yet.",
-            "La regla {rule} busca en catálogos en línea, lo que la línea de comandos aún no hace.",
-        ],
-    ),
-    (
         "twoWhole",
         [
             "Só uma regra que faz o nome inteiro por vez: {a} e {b}.",
