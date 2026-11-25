@@ -1080,131 +1080,10 @@ impl Odt<'_> {
         for n in nodes {
             let Node::Elem(e) = n else { continue };
             match e.name.as_str() {
-                "h" => {
-                    let level = e
-                        .attr("text:outline-level")
-                        .and_then(|v| v.parse::<usize>().ok())
-                        .unwrap_or(1)
-                        .clamp(1, 6);
-                    let st = self.style(e.attr("text:style-name").unwrap_or(""));
-                    if st.break_before {
-                        out.push(Node::Elem(
-                            el("div").with("style", "page-break-before: always"),
-                        ));
-                    }
-                    let mut h = el(&format!("h{level}"));
-                    h.kids = self.inline(&e.kids);
-                    out.push(Node::Elem(h));
-                }
-                "p" => {
-                    let sname = e.attr("text:style-name").unwrap_or("");
-                    let st = self.style(sname);
-                    if st.break_before {
-                        out.push(Node::Elem(
-                            el("div").with("style", "page-break-before: always"),
-                        ));
-                    }
-                    let display = st.display.to_lowercase();
-                    let level = st.outline.or_else(|| {
-                        ["heading ", "título ", "titulo "].iter().find_map(|p| {
-                            display.strip_prefix(p).and_then(|n| n.trim().parse().ok())
-                        })
-                    });
-                    let mut kids = self.inline(&e.kids);
-                    let mut after = Vec::new();
-                    // Frames with text boxes or pictures as blocks.
-                    let mut boxes = Vec::new();
-                    xhtml::find_all(&e.kids, "text-box", &mut boxes);
-                    for b in boxes.into_iter().cloned().collect::<Vec<_>>() {
-                        after.extend(self.blocks(&b.kids, None, depth));
-                    }
-                    if display == "title" || display == "título" {
-                        let mut h = el("h1");
-                        h.kids = std::mem::take(&mut kids);
-                        out.push(Node::Elem(h));
-                    } else if let Some(l) = level.filter(|l| *l >= 1 && *l <= 6) {
-                        let mut h = el(&format!("h{l}"));
-                        h.kids = kids;
-                        out.push(Node::Elem(h));
-                    } else {
-                        let mut p = el("p");
-                        p.kids = kids;
-                        match st.align.as_deref() {
-                            Some("center") => p.set("class", "center"),
-                            Some("end" | "right") => p.set("class", "right"),
-                            _ => {}
-                        }
-                        if display.contains("subtitle") || display.contains("subtítulo") {
-                            p.set("class", "center");
-                        }
-                        if display.contains("quotation")
-                            || display.contains("citaç")
-                            || display.contains("cita")
-                        {
-                            let mut q = el("blockquote");
-                            q.push(Node::Elem(p));
-                            out.push(Node::Elem(q));
-                        } else {
-                            out.push(Node::Elem(p));
-                        }
-                    }
-                    out.extend(after);
-                }
-                "list" => {
-                    let style = e.attr("text:style-name").or(list_style);
-                    let ordered = style
-                        .and_then(|s| self.lists.get(s))
-                        .and_then(|l| l.get(&(depth + 1)))
-                        .copied()
-                        .unwrap_or(false);
-                    let mut list = el(if ordered { "ol" } else { "ul" });
-                    for item in kids(e, "list-item").chain(kids(e, "list-header")) {
-                        let mut li = el("li");
-                        let inner = self.blocks(&item.kids, style, depth + 1);
-                        // A single paragraph: its content in the item.
-                        if inner.len() == 1
-                            && let Some(Node::Elem(p)) = inner.first()
-                            && p.name == "p"
-                        {
-                            li.kids = p.kids.clone();
-                        } else {
-                            li.kids = inner;
-                        }
-                        list.push(Node::Elem(li));
-                    }
-                    out.push(Node::Elem(list));
-                }
-                "table" => {
-                    let mut t = el("table");
-                    let mut body = el("tbody");
-                    let mut rows = Vec::new();
-                    find_rows(&e.kids, &mut rows);
-                    for r in rows {
-                        let mut row = el("tr");
-                        for c in kids(r, "table-cell") {
-                            let mut cell = el("td");
-                            if let Some(s) = c.attr("table:number-columns-spanned") {
-                                cell.set("colspan", s);
-                            }
-                            if let Some(s) = c.attr("table:number-rows-spanned") {
-                                cell.set("rowspan", s);
-                            }
-                            let inner = self.blocks(&c.kids, None, depth);
-                            if inner.len() == 1
-                                && let Some(Node::Elem(p)) = inner.first()
-                                && p.name == "p"
-                            {
-                                cell.kids = p.kids.clone();
-                            } else {
-                                cell.kids = inner;
-                            }
-                            row.push(Node::Elem(cell));
-                        }
-                        body.push(Node::Elem(row));
-                    }
-                    t.push(Node::Elem(body));
-                    out.push(Node::Elem(t));
-                }
+                "h" => self.heading(e, &mut out),
+                "p" => self.paragraph(e, depth, &mut out),
+                "list" => out.push(Node::Elem(self.list(e, list_style, depth))),
+                "table" => out.push(Node::Elem(self.table(e, depth))),
                 "section" | "index-body" | "illustration-index" => {
                     out.extend(self.blocks(&e.kids, None, depth))
                 }
@@ -1214,6 +1093,139 @@ impl Odt<'_> {
             }
         }
         out
+    }
+
+    /// A heading (`text:h`).
+    fn heading(&mut self, e: &Elem, out: &mut Vec<Node>) {
+        let level = e
+            .attr("text:outline-level")
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(1)
+            .clamp(1, 6);
+        let st = self.style(e.attr("text:style-name").unwrap_or(""));
+        if st.break_before {
+            out.push(Node::Elem(
+                el("div").with("style", "page-break-before: always"),
+            ));
+        }
+        let mut h = el(&format!("h{level}"));
+        h.kids = self.inline(&e.kids);
+        out.push(Node::Elem(h));
+    }
+
+    /// A paragraph: a heading when its style says so, a quotation, a
+    /// centered or right-aligned one; text boxes in it come after it.
+    fn paragraph(&mut self, e: &Elem, depth: usize, out: &mut Vec<Node>) {
+        let sname = e.attr("text:style-name").unwrap_or("");
+        let st = self.style(sname);
+        if st.break_before {
+            out.push(Node::Elem(
+                el("div").with("style", "page-break-before: always"),
+            ));
+        }
+        let display = st.display.to_lowercase();
+        let level = st.outline.or_else(|| {
+            ["heading ", "título ", "titulo "]
+                .iter()
+                .find_map(|p| display.strip_prefix(p).and_then(|n| n.trim().parse().ok()))
+        });
+        let mut kids = self.inline(&e.kids);
+        let mut after = Vec::new();
+        // Frames with text boxes or pictures as blocks.
+        let mut boxes = Vec::new();
+        xhtml::find_all(&e.kids, "text-box", &mut boxes);
+        for b in boxes.into_iter().cloned().collect::<Vec<_>>() {
+            after.extend(self.blocks(&b.kids, None, depth));
+        }
+        if display == "title" || display == "título" {
+            let mut h = el("h1");
+            h.kids = std::mem::take(&mut kids);
+            out.push(Node::Elem(h));
+        } else if let Some(l) = level.filter(|l| *l >= 1 && *l <= 6) {
+            let mut h = el(&format!("h{l}"));
+            h.kids = kids;
+            out.push(Node::Elem(h));
+        } else {
+            let mut p = el("p");
+            p.kids = kids;
+            match st.align.as_deref() {
+                Some("center") => p.set("class", "center"),
+                Some("end" | "right") => p.set("class", "right"),
+                _ => {}
+            }
+            if display.contains("subtitle") || display.contains("subtítulo") {
+                p.set("class", "center");
+            }
+            if display.contains("quotation")
+                || display.contains("citaç")
+                || display.contains("cita")
+            {
+                let mut q = el("blockquote");
+                q.push(Node::Elem(p));
+                out.push(Node::Elem(q));
+            } else {
+                out.push(Node::Elem(p));
+            }
+        }
+        out.extend(after);
+    }
+
+    /// A list, numbered when its style numbers that level.
+    fn list(&mut self, e: &Elem, list_style: Option<&str>, depth: usize) -> Elem {
+        let style = e.attr("text:style-name").or(list_style);
+        let ordered = style
+            .and_then(|s| self.lists.get(s))
+            .and_then(|l| l.get(&(depth + 1)))
+            .copied()
+            .unwrap_or(false);
+        let mut list = el(if ordered { "ol" } else { "ul" });
+        for item in kids(e, "list-item").chain(kids(e, "list-header")) {
+            let mut li = el("li");
+            let inner = self.blocks(&item.kids, style, depth + 1);
+            // A single paragraph: its content in the item.
+            if inner.len() == 1
+                && let Some(Node::Elem(p)) = inner.first()
+                && p.name == "p"
+            {
+                li.kids = p.kids.clone();
+            } else {
+                li.kids = inner;
+            }
+            list.push(Node::Elem(li));
+        }
+        list
+    }
+
+    fn table(&mut self, e: &Elem, depth: usize) -> Elem {
+        let mut t = el("table");
+        let mut body = el("tbody");
+        let mut rows = Vec::new();
+        find_rows(&e.kids, &mut rows);
+        for r in rows {
+            let mut row = el("tr");
+            for c in kids(r, "table-cell") {
+                let mut cell = el("td");
+                if let Some(s) = c.attr("table:number-columns-spanned") {
+                    cell.set("colspan", s);
+                }
+                if let Some(s) = c.attr("table:number-rows-spanned") {
+                    cell.set("rowspan", s);
+                }
+                let inner = self.blocks(&c.kids, None, depth);
+                if inner.len() == 1
+                    && let Some(Node::Elem(p)) = inner.first()
+                    && p.name == "p"
+                {
+                    cell.kids = p.kids.clone();
+                } else {
+                    cell.kids = inner;
+                }
+                row.push(Node::Elem(cell));
+            }
+            body.push(Node::Elem(row));
+        }
+        t.push(Node::Elem(body));
+        t
     }
 
     fn inline(&mut self, nodes: &[Node]) -> Vec<Node> {
@@ -1227,47 +1239,7 @@ impl Odt<'_> {
                         .pipe_keep_edges(t),
                 )),
                 Node::Elem(e) => match e.name.as_str() {
-                    "span" => {
-                        let st = self.style(e.attr("text:style-name").unwrap_or(""));
-                        let mut content = self.inline(&e.kids);
-                        let mut wrap = |tag: &str, style: Option<&str>| {
-                            let mut x = el(tag);
-                            if let Some(s) = style {
-                                x.set("style", s);
-                            }
-                            x.kids = std::mem::take(&mut content);
-                            content = vec![Node::Elem(x)];
-                        };
-                        if st.small_caps == Some(true) {
-                            wrap("span", Some("font-variant: small-caps"));
-                        }
-                        if let Some(p) = &st.position {
-                            if p.starts_with("super")
-                                || p.trim_start_matches('+')
-                                    .split_whitespace()
-                                    .next()
-                                    .and_then(|v| v.trim_end_matches('%').parse::<f32>().ok())
-                                    .is_some_and(|v| v > 0.0)
-                            {
-                                wrap("sup", None);
-                            } else if p.starts_with("sub") || p.starts_with('-') {
-                                wrap("sub", None);
-                            }
-                        }
-                        if st.strike == Some(true) {
-                            wrap("s", None);
-                        }
-                        if st.underline == Some(true) {
-                            wrap("u", None);
-                        }
-                        if st.italic == Some(true) {
-                            wrap("em", None);
-                        }
-                        if st.bold == Some(true) {
-                            wrap("strong", None);
-                        }
-                        out.extend(content);
-                    }
+                    "span" => out.extend(self.span(e)),
                     "a" => {
                         let mut a = el("a");
                         if let Some(h) = e.attr("xlink:href") {
@@ -1293,36 +1265,7 @@ impl Odt<'_> {
                             out.push(Node::Elem(el("span").with("id", n)));
                         }
                     }
-                    "note" => {
-                        self.note_n += 1;
-                        let n = self.note_n;
-                        let nid = format!("note{n}");
-                        let mut a = el("a")
-                            .with("href", format!("#{nid}"))
-                            .with("id", format!("ref{n}"))
-                            .with("class", "noteref")
-                            .with("epub:type", "noteref");
-                        let cit = kid(e, "note-citation")
-                            .map(|c| c.plain())
-                            .filter(|c| !c.trim().is_empty())
-                            .unwrap_or_else(|| n.to_string());
-                        a.text(cit.clone());
-                        out.push(Node::Elem(a));
-                        let mut body = kid(e, "note-body")
-                            .map(|b| self.blocks(&b.kids, None, 0))
-                            .unwrap_or_default();
-                        let mut back = el("a")
-                            .with("href", format!("#ref{n}"))
-                            .with("class", "back");
-                        back.text(format!("{cit}."));
-                        if let Some(Node::Elem(first)) = body.first_mut() {
-                            first.kids.insert(0, Node::Text(" ".into()));
-                            first.kids.insert(0, Node::Elem(back));
-                        }
-                        let mut aside = el("aside");
-                        aside.kids = body;
-                        self.notes.push((nid, aside));
-                    }
+                    "note" => out.push(self.note(e)),
                     "frame" => {
                         for i in kids(e, "image") {
                             if let Some(name) = i.attr("xlink:href").and_then(|h| self.pics.get(h))
@@ -1340,6 +1283,75 @@ impl Odt<'_> {
             }
         }
         merge_text(out)
+    }
+
+    /// A span: its text in the marks its style gives.
+    fn span(&mut self, e: &Elem) -> Vec<Node> {
+        let st = self.style(e.attr("text:style-name").unwrap_or(""));
+        let content = self.inline(&e.kids);
+        let mut marks: Vec<(&str, Option<&str>)> = Vec::new();
+        if st.small_caps == Some(true) {
+            marks.push(("span", Some("font-variant: small-caps")));
+        }
+        if let Some(p) = &st.position {
+            if p.starts_with("super")
+                || p.trim_start_matches('+')
+                    .split_whitespace()
+                    .next()
+                    .and_then(|v| v.trim_end_matches('%').parse::<f32>().ok())
+                    .is_some_and(|v| v > 0.0)
+            {
+                marks.push(("sup", None));
+            } else if p.starts_with("sub") || p.starts_with('-') {
+                marks.push(("sub", None));
+            }
+        }
+        if st.strike == Some(true) {
+            marks.push(("s", None));
+        }
+        if st.underline == Some(true) {
+            marks.push(("u", None));
+        }
+        if st.italic == Some(true) {
+            marks.push(("em", None));
+        }
+        if st.bold == Some(true) {
+            marks.push(("strong", None));
+        }
+        wrap_marks(content, &marks)
+    }
+
+    /// A note: the link in the text; the note (with a link back) is kept
+    /// for the end of the book.
+    fn note(&mut self, e: &Elem) -> Node {
+        self.note_n += 1;
+        let n = self.note_n;
+        let nid = format!("note{n}");
+        let mut a = el("a")
+            .with("href", format!("#{nid}"))
+            .with("id", format!("ref{n}"))
+            .with("class", "noteref")
+            .with("epub:type", "noteref");
+        let cit = kid(e, "note-citation")
+            .map(|c| c.plain())
+            .filter(|c| !c.trim().is_empty())
+            .unwrap_or_else(|| n.to_string());
+        a.text(cit.clone());
+        let mut body = kid(e, "note-body")
+            .map(|b| self.blocks(&b.kids, None, 0))
+            .unwrap_or_default();
+        let mut back = el("a")
+            .with("href", format!("#ref{n}"))
+            .with("class", "back");
+        back.text(format!("{cit}."));
+        if let Some(Node::Elem(first)) = body.first_mut() {
+            first.kids.insert(0, Node::Text(" ".into()));
+            first.kids.insert(0, Node::Elem(back));
+        }
+        let mut aside = el("aside");
+        aside.kids = body;
+        self.notes.push((nid, aside));
+        Node::Elem(a)
     }
 }
 
