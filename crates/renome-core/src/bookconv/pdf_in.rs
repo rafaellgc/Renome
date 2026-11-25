@@ -2540,4 +2540,189 @@ mod tests {
         ];
         assert_eq!(got, want);
     }
+
+    /// Glyphs for a line of text laid out as a PDF does: each letter on its
+    /// own, the spaces only a gap (`size * 0.5` wide letters).
+    fn glyphs_of(x: f32, base: f32, size: f32, bold: bool, italic: bool, text: &str) -> Vec<Glyph> {
+        let mut out = Vec::new();
+        let mut at = x;
+        for c in text.chars() {
+            let w = size * if c == ' ' { 0.3 } else { 0.5 };
+            if c != ' ' {
+                out.push(Glyph {
+                    text: c.to_string(),
+                    x0: at,
+                    x1: at + w,
+                    base,
+                    size,
+                    bold,
+                    italic,
+                    invisible: false,
+                });
+            }
+            at += w;
+        }
+        out
+    }
+
+    /// The pages `chunks_of` is given: lines with bold and italic, a word
+    /// space drawn as a letter, small marks above a line and after one, a
+    /// spacing accent beside its letter, a letter drawn twice, columns far
+    /// apart, a justified line, and the empty page.
+    fn golden_glyph_pages() -> Vec<(&'static str, Vec<Glyph>)> {
+        let mut plain = Vec::new();
+        plain.extend(glyphs_of(
+            72.0,
+            100.0,
+            11.0,
+            false,
+            false,
+            "Era uma vez uma casa muito antiga",
+        ));
+        plain.extend(glyphs_of(
+            72.0,
+            114.0,
+            11.0,
+            false,
+            false,
+            "que ficava no alto de uma colina.",
+        ));
+        plain.extend(glyphs_of(72.0, 128.0, 11.0, true, false, "Negrito"));
+        plain.extend(glyphs_of(130.0, 128.0, 11.0, false, true, "itálico depois"));
+        let mut marks = Vec::new();
+        marks.extend(glyphs_of(
+            72.0,
+            100.0,
+            11.0,
+            false,
+            false,
+            "Texto com nota aqui",
+        ));
+        marks.extend(glyphs_of(170.0, 96.0, 7.0, false, false, "1"));
+        marks.extend(glyphs_of(
+            72.0,
+            114.0,
+            11.0,
+            false,
+            false,
+            "e outra linha com marca",
+        ));
+        marks.extend(glyphs_of(190.0, 110.0, 7.0, false, false, "23"));
+        // Marks drawn above, before the line that has them.
+        marks.extend(glyphs_of(100.0, 140.0, 7.0, false, false, "*"));
+        marks.extend(glyphs_of(
+            72.0,
+            146.0,
+            11.0,
+            false,
+            false,
+            "linha com asterisco",
+        ));
+        let mut accents = Vec::new();
+        accents.extend(glyphs_of(72.0, 100.0, 11.0, false, false, "Cafe"));
+        accents.extend(glyphs_of(95.5, 100.0, 11.0, false, false, "´"));
+        accents.extend(glyphs_of(104.0, 100.0, 11.0, false, false, "e a"));
+        accents.extend(glyphs_of(72.0, 114.0, 11.0, false, false, "coracao"));
+        accents.extend(glyphs_of(104.0, 114.0, 11.0, false, false, "~"));
+        let mut twice = glyphs_of(72.0, 100.0, 11.0, true, false, "Fake bold");
+        twice.extend(glyphs_of(72.0, 100.0, 11.0, true, false, "Fake bold"));
+        let mut columns = Vec::new();
+        columns.extend(glyphs_of(
+            72.0,
+            100.0,
+            11.0,
+            false,
+            false,
+            "coluna da esquerda",
+        ));
+        columns.extend(glyphs_of(
+            320.0,
+            100.0,
+            11.0,
+            false,
+            false,
+            "coluna da direita",
+        ));
+        columns.extend(glyphs_of(
+            72.0,
+            114.0,
+            11.0,
+            false,
+            false,
+            "segunda linha esquerda",
+        ));
+        columns.extend(glyphs_of(
+            320.0,
+            114.0,
+            11.0,
+            false,
+            false,
+            "segunda direita",
+        ));
+        let mut justified = Vec::new();
+        for (k, w) in ["Quando", "a", "tarde", "caía", "sobre", "os", "telhados"]
+            .iter()
+            .enumerate()
+        {
+            justified.extend(glyphs_of(
+                72.0 + 60.0 * k as f32,
+                100.0,
+                11.0,
+                false,
+                false,
+                w,
+            ));
+        }
+        let mut spaced = glyphs_of(72.0, 100.0, 11.0, false, false, "a");
+        spaced.push(Glyph {
+            text: " ".into(),
+            x0: 80.0,
+            x1: 83.0,
+            base: 100.0,
+            size: 11.0,
+            bold: false,
+            italic: false,
+            invisible: false,
+        });
+        spaced.extend(glyphs_of(83.0, 100.0, 11.0, true, false, "b"));
+        spaced.extend(glyphs_of(150.0, 100.0, 11.0, false, false, "far"));
+        vec![
+            ("plain", plain),
+            ("marks", marks),
+            ("accents", accents),
+            ("twice", twice),
+            ("columns", columns),
+            ("justified", justified),
+            ("spaced", spaced),
+            ("empty", Vec::new()),
+        ]
+    }
+
+    /// What `chunks_of` makes of each golden page. A change here is a
+    /// change in how PDF lines are read: update these only when that is the
+    /// point, never for a refactor.
+    #[test]
+    fn chunks_do_not_change() {
+        let got: Vec<(&str, u64)> = golden_glyph_pages()
+            .into_iter()
+            .map(|(n, g)| {
+                let out = format!("{:?}", chunks_of(&g));
+                if std::env::var_os("GOLDEN_SHOW").is_some() {
+                    eprintln!("#### {n}\n{out}");
+                }
+                (n, xxhash_rust::xxh3::xxh3_64(out.as_bytes()))
+            })
+            .collect();
+        let want: Vec<(&str, u64)> = vec![
+            ("plain", 1559716644816910676),
+            ("marks", 4606464871441694741),
+            ("accents", 11728018753201555414),
+            ("twice", 80046386751269699),
+            ("columns", 15541442409286485763),
+            ("justified", 13057273170310045592),
+            ("spaced", 14241676462592926870),
+            ("empty", 9444422325801888874),
+        ];
+        assert_eq!(got, want);
+    }
 }
