@@ -887,6 +887,49 @@ enum Source {
     Image(String),
 }
 
+/// Every key's answer, fetched four at a time.
+async fn fetch_each<K, V, F, Fut>(keys: Vec<K>, f: F) -> HashMap<K, V>
+where
+    K: std::hash::Hash + Eq + Copy,
+    F: Fn(K) -> Fut,
+    Fut: std::future::Future<Output = V>,
+{
+    stream::iter(keys)
+        .map(|k| {
+            let one = f(k);
+            async move { (k, one.await) }
+        })
+        .buffer_unordered(4)
+        .collect()
+        .await
+}
+
+/// The files to make, each once and never over an existing one.
+#[derive(Default)]
+struct Pending(Vec<(PathBuf, Source)>);
+
+impl Pending {
+    fn add(&mut self, path: PathBuf, source: Source) {
+        if std::fs::symlink_metadata(&path).is_err() && !self.0.iter().any(|(p, _)| *p == path) {
+            self.0.push((path, source));
+        }
+    }
+}
+
+fn file_name_of(p: &Path) -> String {
+    p.file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// The ids in order, each once.
+fn unique<T: Ord>(mut v: Vec<T>) -> Vec<T> {
+    v.sort_unstable();
+    v.dedup();
+    v
+}
+
 /// Writes, for each renamed episode, its `.nfo` and thumbnail; and in the
 /// show's folder (when there is one), `tvshow.nfo`, poster, the season's
 /// poster and optionally backdrop and logo; `season.nfo` in a season
@@ -900,20 +943,9 @@ pub async fn tv_sidecars(
     folders: bool,
 ) -> SidecarReport {
     let mut report = SidecarReport::default();
-    let name = |p: &Path| {
-        p.file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned()
-    };
-
     // Everything to fetch, once.
-    let mut ids: Vec<u64> = items.iter().map(|i| i.id).collect();
-    ids.sort_unstable();
-    ids.dedup();
-    let mut seasons: Vec<(u64, u16)> = items.iter().map(|i| (i.id, i.season)).collect();
-    seasons.sort_unstable();
-    seasons.dedup();
+    let ids = unique(items.iter().map(|i| i.id).collect());
+    let seasons = unique(items.iter().map(|i| (i.id, i.season)).collect());
     crate::report(
         host,
         "tmdb-progress",
@@ -922,28 +954,15 @@ pub async fn tv_sidecars(
             total: items.len(),
         },
     );
-    let shows: HashMap<u64, Result<ShowDetails, String>> = stream::iter(ids)
-        .map(|id| async move { (id, client.show_details(id).await) })
-        .buffer_unordered(4)
-        .collect()
-        .await;
-    let fetched: HashMap<(u64, u16), Result<SeasonFull, String>> = stream::iter(seasons)
-        .map(|(id, n)| async move { ((id, n), client.season(id, n).await) })
-        .buffer_unordered(4)
-        .collect()
-        .await;
+    let shows = fetch_each(ids, |id| client.show_details(id)).await;
+    let fetched = fetch_each(seasons, |(id, n)| client.season(id, n)).await;
 
-    let mut jobs: Vec<(PathBuf, Source)> = Vec::new();
-    let mut add = |path: PathBuf, source: Source| {
-        if std::fs::symlink_metadata(&path).is_err() && !jobs.iter().any(|(p, _)| *p == path) {
-            jobs.push((path, source));
-        }
-    };
+    let mut pending = Pending::default();
     for item in &items {
         let show = match shows.get(&item.id) {
             Some(Ok(d)) => d,
             Some(Err(e)) => {
-                report.errors.push((name(&item.path), e.clone()));
+                report.errors.push((file_name_of(&item.path), e.clone()));
                 continue;
             }
             None => continue,
@@ -951,81 +970,114 @@ pub async fn tv_sidecars(
         let season = match fetched.get(&(item.id, item.season)) {
             Some(Ok(s)) => s,
             Some(Err(e)) => {
-                report.errors.push((name(&item.path), e.clone()));
+                report.errors.push((file_name_of(&item.path), e.clone()));
                 continue;
             }
             None => continue,
         };
-        let episodes: Vec<&EpisodeDetails> = item
-            .episodes
-            .iter()
-            .filter_map(|&n| season.episodes.iter().find(|e| e.episode_number == n))
-            .collect();
-        if !episodes.is_empty() {
-            add(
-                sibling(&item.path, ".nfo"),
-                Source::Text(tv::episode_nfo(&show.name, &episodes, &item.titles)),
-            );
-            if let Some(p) = &episodes[0].still_path {
-                add(sibling(&item.path, "-thumb.jpg"), Source::Image(p.clone()));
-            }
-        }
+        episode_files(&mut pending, item, show, season);
+        show_files(&mut pending, client, item, show, season, fanart, folders);
+    }
+    write_pending(host, client, pending, &mut report).await;
+    report
+}
 
-        let dir = item.path.parent().unwrap_or(Path::new(""));
-        let in_season = tv::folder_season(&name(dir)) == Some(item.season);
-        let m = EpisodeMatch {
-            source: String::new(),
-            id: show.id,
-            show: show.name.clone(),
-            original_show: show.original_name.clone(),
-            year: None,
-            season: item.season,
-            episodes: item.episodes.clone(),
-            titles: Vec::new(),
-            extra: Default::default(),
-        };
-        // Moved into `Show/Season NN`: the show's folder is the one above.
-        // A file that stayed out of one (hand-named, or already in place)
-        // only uses a folder named after the show, never whatever holds it.
-        let show_dir = if folders && in_season {
-            dir.parent().map(Path::to_path_buf)
-        } else {
-            tv::show_dir(dir, &m)
-        };
-        let summary = show.seasons.iter().find(|s| s.season_number == item.season);
-        if in_season && let Some(s) = summary {
-            add(dir.join("season.nfo"), Source::Text(tv::season_nfo(s)));
-        }
-        let Some(show_dir) = show_dir else { continue };
-        add(
-            show_dir.join("tvshow.nfo"),
-            Source::Text(tv::show_nfo(show, &client.lang)),
+/// An episode's `.nfo` and thumbnail.
+fn episode_files(
+    pending: &mut Pending,
+    item: &TvSidecarItem,
+    show: &ShowDetails,
+    season: &SeasonFull,
+) {
+    let episodes: Vec<&EpisodeDetails> = item
+        .episodes
+        .iter()
+        .filter_map(|&n| season.episodes.iter().find(|e| e.episode_number == n))
+        .collect();
+    if episodes.is_empty() {
+        return;
+    }
+    pending.add(
+        sibling(&item.path, ".nfo"),
+        Source::Text(tv::episode_nfo(&show.name, &episodes, &item.titles)),
+    );
+    if let Some(p) = &episodes[0].still_path {
+        pending.add(sibling(&item.path, "-thumb.jpg"), Source::Image(p.clone()));
+    }
+}
+
+/// What goes in the season's and the show's folders.
+fn show_files(
+    pending: &mut Pending,
+    client: &Client,
+    item: &TvSidecarItem,
+    show: &ShowDetails,
+    season: &SeasonFull,
+    fanart: bool,
+    folders: bool,
+) {
+    let dir = item.path.parent().unwrap_or(Path::new(""));
+    let in_season = tv::folder_season(&file_name_of(dir)) == Some(item.season);
+    let m = EpisodeMatch {
+        source: String::new(),
+        id: show.id,
+        show: show.name.clone(),
+        original_show: show.original_name.clone(),
+        year: None,
+        season: item.season,
+        episodes: item.episodes.clone(),
+        titles: Vec::new(),
+        extra: Default::default(),
+    };
+    // Moved into `Show/Season NN`: the show's folder is the one above. A
+    // file that stayed out of one (hand-named, or already in place) only
+    // uses a folder named after the show, never whatever holds it.
+    let show_dir = if folders && in_season {
+        dir.parent().map(Path::to_path_buf)
+    } else {
+        tv::show_dir(dir, &m)
+    };
+    let summary = show.seasons.iter().find(|s| s.season_number == item.season);
+    if in_season && let Some(s) = summary {
+        pending.add(dir.join("season.nfo"), Source::Text(tv::season_nfo(s)));
+    }
+    let Some(show_dir) = show_dir else { return };
+    pending.add(
+        show_dir.join("tvshow.nfo"),
+        Source::Text(tv::show_nfo(show, &client.lang)),
+    );
+    if let Some(p) = &show.poster_path {
+        pending.add(show_dir.join("poster.jpg"), Source::Image(p.clone()));
+    }
+    if let Some(p) = summary
+        .and_then(|s| s.poster_path.clone())
+        .or(season.poster_path.clone())
+    {
+        pending.add(
+            show_dir.join(tv::season_poster(item.season)),
+            Source::Image(p),
         );
-        if let Some(p) = &show.poster_path {
-            add(show_dir.join("poster.jpg"), Source::Image(p.clone()));
+    }
+    if fanart {
+        if let Some(p) = &show.backdrop_path {
+            pending.add(show_dir.join("fanart.jpg"), Source::Image(p.clone()));
         }
-        if let Some(p) = summary
-            .and_then(|s| s.poster_path.clone())
-            .or(season.poster_path.clone())
-        {
-            add(
-                show_dir.join(tv::season_poster(item.season)),
-                Source::Image(p),
-            );
-        }
-        if fanart {
-            if let Some(p) = &show.backdrop_path {
-                add(show_dir.join("fanart.jpg"), Source::Image(p.clone()));
-            }
-            if let Some(p) = show.images.logo(client.lang2()) {
-                add(show_dir.join("logo.png"), Source::Image(p.to_string()));
-            }
+        if let Some(p) = show.images.logo(client.lang2()) {
+            pending.add(show_dir.join("logo.png"), Source::Image(p.to_string()));
         }
     }
+}
 
-    let total = jobs.len();
+/// Makes the files, four at a time (pictures fetched on the way).
+async fn write_pending(
+    host: &dyn Host,
+    client: &Client,
+    pending: Pending,
+    report: &mut SidecarReport,
+) {
+    let total = pending.0.len();
     crate::report(host, "tmdb-progress", Progress { done: 0, total });
-    let mut tasks = stream::iter(jobs)
+    let mut tasks = stream::iter(pending.0)
         .map(|(path, source)| async move {
             let data = match source {
                 Source::Text(t) => Ok(t.into_bytes()),
@@ -1039,12 +1091,11 @@ pub async fn tv_sidecars(
     while let Some((path, r)) = tasks.next().await {
         match r {
             Ok(()) => report.created.push(path),
-            Err(e) => report.errors.push((name(&path), e)),
+            Err(e) => report.errors.push((file_name_of(&path), e)),
         }
         done += 1;
         crate::report(host, "tmdb-progress", Progress { done, total });
     }
-    report
 }
 
 /// A renamed video whose details go inside it: a movie, or a show's
@@ -1082,50 +1133,116 @@ impl Client {
     }
 }
 
-/// The details of each video, from TMDB (each movie, show, season and
-/// collection fetched once; the poster and the background too, when
-/// `cover`).
-pub async fn video_meta(
+/// What TMDB said of the movies, shows, seasons and collections the videos
+/// are, and the pictures fetched for them.
+struct Fetched {
+    movies: HashMap<u64, Result<Details, String>>,
+    shows: HashMap<u64, Result<ShowDetails, String>>,
+    seasons: HashMap<(u64, u16), Result<SeasonFull, String>>,
+    /// Each collection's movies: their ids and release dates.
+    sets: HashMap<u64, Vec<(u64, String)>>,
+    images: HashMap<String, Vec<u8>>,
+}
+
+impl Fetched {
+    async fn of(client: &Client, items: &[VideoTagItem], cover: bool) -> Self {
+        let movies = unique(items.iter().filter_map(|i| i.movie).collect());
+        let shows = unique(items.iter().filter_map(|i| i.show).collect());
+        let seasons = unique(
+            items
+                .iter()
+                .filter_map(|i| i.show.map(|s| (s, i.season)))
+                .collect(),
+        );
+        let movies = fetch_each(movies, |id| client.details(id)).await;
+        let shows = fetch_each(shows, |id| client.show_details(id)).await;
+        let seasons = fetch_each(seasons, |(id, n)| client.season(id, n)).await;
+        let sets = collection_parts(client, &movies).await;
+        let images = if cover {
+            pictures(client, &movies, &shows, &seasons).await
+        } else {
+            HashMap::new()
+        };
+        Self {
+            movies,
+            shows,
+            seasons,
+            sets,
+            images,
+        }
+    }
+
+    fn picture(&self, p: &Option<String>) -> Option<Vec<u8>> {
+        p.as_ref().and_then(|p| self.images.get(p).cloned())
+    }
+
+    /// One video's details.
+    fn meta(
+        &self,
+        item: &VideoTagItem,
+        lang: &str,
+    ) -> Result<renome_core::videotags::VideoMeta, String> {
+        if let Some(id) = item.movie {
+            let d = self
+                .movies
+                .get(&id)
+                .ok_or("tmdbNotFound")?
+                .as_ref()
+                .map_err(Clone::clone)?;
+            let mut m = tmdb::video_meta(d, lang);
+            m.collection_part = d
+                .belongs_to_collection
+                .as_ref()
+                .and_then(|c| self.sets.get(&c.id))
+                .and_then(|parts| tmdb::collection_part(d.id, parts));
+            m.cover = self.picture(&d.poster_path);
+            m.backdrop = self.picture(&d.backdrop_path);
+            return Ok(m);
+        }
+        let id = item.show.ok_or("tmdbNotFound")?;
+        let show = self
+            .shows
+            .get(&id)
+            .ok_or("tmdbNotFound")?
+            .as_ref()
+            .map_err(Clone::clone)?;
+        let season = self
+            .seasons
+            .get(&(id, item.season))
+            .ok_or("tmdbNotFound")?
+            .as_ref()
+            .map_err(Clone::clone)?;
+        let eps: Vec<&EpisodeDetails> = item
+            .episodes
+            .iter()
+            .filter_map(|&n| season.episodes.iter().find(|e| e.episode_number == n))
+            .collect();
+        let mut m =
+            renome_core::tv::video_meta(show, item.season, &eps, lang).ok_or("tmdbNotFound")?;
+        m.cover = self.picture(
+            &season
+                .poster_path
+                .clone()
+                .or_else(|| show.poster_path.clone()),
+        );
+        m.backdrop = self.picture(&show.backdrop_path);
+        Ok(m)
+    }
+}
+
+/// The collections the movies belong to, for each movie's place in its own.
+async fn collection_parts(
     client: &Client,
-    items: &[VideoTagItem],
-    cover: bool,
-) -> Vec<Result<renome_core::videotags::VideoMeta, String>> {
-    let mut movies: Vec<u64> = items.iter().filter_map(|i| i.movie).collect();
-    movies.sort_unstable();
-    movies.dedup();
-    let mut shows: Vec<u64> = items.iter().filter_map(|i| i.show).collect();
-    shows.sort_unstable();
-    shows.dedup();
-    let mut seasons: Vec<(u64, u16)> = items
-        .iter()
-        .filter_map(|i| i.show.map(|s| (s, i.season)))
-        .collect();
-    seasons.sort_unstable();
-    seasons.dedup();
-    let movies: HashMap<u64, Result<Details, String>> = stream::iter(movies)
-        .map(|id| async move { (id, client.details(id).await) })
-        .buffer_unordered(4)
-        .collect()
-        .await;
-    let shows: HashMap<u64, Result<ShowDetails, String>> = stream::iter(shows)
-        .map(|id| async move { (id, client.show_details(id).await) })
-        .buffer_unordered(4)
-        .collect()
-        .await;
-    let seasons: HashMap<(u64, u16), Result<SeasonFull, String>> = stream::iter(seasons)
-        .map(|(id, n)| async move { ((id, n), client.season(id, n).await) })
-        .buffer_unordered(4)
-        .collect()
-        .await;
-    // The collections, for each movie's place in its own.
-    let mut sets: Vec<u64> = movies
-        .values()
-        .flatten()
-        .filter_map(|d| d.belongs_to_collection.as_ref().map(|c| c.id))
-        .collect();
-    sets.sort_unstable();
-    sets.dedup();
-    let sets: HashMap<u64, Vec<(u64, String)>> = stream::iter(sets)
+    movies: &HashMap<u64, Result<Details, String>>,
+) -> HashMap<u64, Vec<(u64, String)>> {
+    let sets = unique(
+        movies
+            .values()
+            .flatten()
+            .filter_map(|d| d.belongs_to_collection.as_ref().map(|c| c.id))
+            .collect(),
+    );
+    stream::iter(sets)
         .map(|id| async move {
             let r: Result<RawSet, String> = client.get(&format!("/collection/{id}"), &[]).await;
             r.ok().map(|s| {
@@ -1140,32 +1257,38 @@ pub async fn video_meta(
         .buffer_unordered(4)
         .filter_map(|x| async move { x })
         .collect()
-        .await;
-    // Pictures: a movie's poster, a season's (else the show's), and the
-    // movie's or show's background.
+        .await
+}
+
+/// Pictures: a movie's poster, a season's (else the show's), and the
+/// movie's or show's background.
+async fn pictures(
+    client: &Client,
+    movies: &HashMap<u64, Result<Details, String>>,
+    shows: &HashMap<u64, Result<ShowDetails, String>>,
+    seasons: &HashMap<(u64, u16), Result<SeasonFull, String>>,
+) -> HashMap<String, Vec<u8>> {
     let mut wanted: Vec<(String, u32)> = Vec::new();
-    if cover {
-        for d in movies.values().flatten() {
-            wanted.extend(d.poster_path.clone().map(|p| (p, 780)));
-            wanted.extend(d.backdrop_path.clone().map(|p| (p, 1280)));
-        }
-        for ((id, _), s) in &seasons {
-            let show = shows.get(id).and_then(|d| d.as_ref().ok());
-            let p = s
-                .as_ref()
-                .ok()
-                .and_then(|s| s.poster_path.clone())
-                .or_else(|| show?.poster_path.clone());
-            wanted.extend(p.map(|p| (p, 780)));
-            wanted.extend(
-                show.and_then(|d| d.backdrop_path.clone())
-                    .map(|p| (p, 1280)),
-            );
-        }
-        wanted.sort();
-        wanted.dedup();
+    for d in movies.values().flatten() {
+        wanted.extend(d.poster_path.clone().map(|p| (p, 780)));
+        wanted.extend(d.backdrop_path.clone().map(|p| (p, 1280)));
     }
-    let images: HashMap<String, Vec<u8>> = stream::iter(wanted)
+    for ((id, _), s) in seasons {
+        let show = shows.get(id).and_then(|d| d.as_ref().ok());
+        let p = s
+            .as_ref()
+            .ok()
+            .and_then(|s| s.poster_path.clone())
+            .or_else(|| show?.poster_path.clone());
+        wanted.extend(p.map(|p| (p, 780)));
+        wanted.extend(
+            show.and_then(|d| d.backdrop_path.clone())
+                .map(|p| (p, 1280)),
+        );
+    }
+    wanted.sort();
+    wanted.dedup();
+    stream::iter(wanted)
         .map(|(p, w)| async move {
             let b = client.picture(&p, w).await;
             (p, b)
@@ -1173,54 +1296,21 @@ pub async fn video_meta(
         .buffer_unordered(4)
         .filter_map(|(p, b)| async move { b.ok().map(|b| (p, b)) })
         .collect()
-        .await;
-    let picture = |p: &Option<String>| p.as_ref().and_then(|p| images.get(p).cloned());
+        .await
+}
+
+/// The details of each video, from TMDB (each movie, show, season and
+/// collection fetched once; the poster and the background too, when
+/// `cover`).
+pub async fn video_meta(
+    client: &Client,
+    items: &[VideoTagItem],
+    cover: bool,
+) -> Vec<Result<renome_core::videotags::VideoMeta, String>> {
+    let fetched = Fetched::of(client, items, cover).await;
     items
         .iter()
-        .map(|item| {
-            if let Some(id) = item.movie {
-                let d = movies
-                    .get(&id)
-                    .ok_or("tmdbNotFound")?
-                    .as_ref()
-                    .map_err(Clone::clone)?;
-                let mut m = tmdb::video_meta(d, &client.lang);
-                m.collection_part = d
-                    .belongs_to_collection
-                    .as_ref()
-                    .and_then(|c| sets.get(&c.id))
-                    .and_then(|parts| tmdb::collection_part(d.id, parts));
-                m.cover = picture(&d.poster_path);
-                m.backdrop = picture(&d.backdrop_path);
-                return Ok(m);
-            }
-            let id = item.show.ok_or("tmdbNotFound")?;
-            let show = shows
-                .get(&id)
-                .ok_or("tmdbNotFound")?
-                .as_ref()
-                .map_err(Clone::clone)?;
-            let season = seasons
-                .get(&(id, item.season))
-                .ok_or("tmdbNotFound")?
-                .as_ref()
-                .map_err(Clone::clone)?;
-            let eps: Vec<&EpisodeDetails> = item
-                .episodes
-                .iter()
-                .filter_map(|&n| season.episodes.iter().find(|e| e.episode_number == n))
-                .collect();
-            let mut m = renome_core::tv::video_meta(show, item.season, &eps, &client.lang)
-                .ok_or("tmdbNotFound")?;
-            m.cover = picture(
-                &season
-                    .poster_path
-                    .clone()
-                    .or_else(|| show.poster_path.clone()),
-            );
-            m.backdrop = picture(&show.backdrop_path);
-            Ok(m)
-        })
+        .map(|item| fetched.meta(item, &client.lang))
         .collect()
 }
 
