@@ -635,83 +635,97 @@ fn same_language(a: &str, b: &str) -> bool {
     main(a) == main(b)
 }
 
-/// The EPUB's OPF with `v` in its details: elements that already say the
-/// same are left alone, others get the new text, missing ones are added.
-/// `None` when nothing changes, or the OPF cannot be read.
-pub fn book_opf(old: &str, v: &BookValues) -> Option<String> {
-    let bom = old.len() - old.trim_start_matches('\u{feff}').len();
-    let src = &old[bom..];
-    let doc = roxmltree::Document::parse_with_options(
-        src,
-        roxmltree::ParsingOptions {
-            allow_dtd: true,
-            ..Default::default()
-        },
-    )
-    .ok()?;
-    let package = doc.root_element();
-    let epub3 = package
-        .attribute("version")
-        .is_some_and(|v| v.trim().starts_with('3'));
-    let uid = package.attribute("unique-identifier");
-    let meta = package
-        .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "metadata")?;
-    let raw_meta = &src[meta.range()];
-    if raw_meta.ends_with("/>") {
-        return None;
+fn is_dc(n: &roxmltree::Node, name: &str) -> bool {
+    n.tag_name().name() == name && n.tag_name().namespace() == Some(DC)
+}
+
+/// What an edit of the details gives: changes in place, and new elements
+/// to add before the end of the details.
+#[derive(Default)]
+struct Changes {
+    edits: Edits,
+    added: Vec<String>,
+}
+
+/// The OPF being edited: where its details are and how they are written.
+struct Opf<'a> {
+    src: &'a str,
+    doc: &'a roxmltree::Document<'a>,
+    epub3: bool,
+    uid: Option<&'a str>,
+    /// The details' elements (the children of `metadata`).
+    elements: Vec<roxmltree::Node<'a, 'a>>,
+    /// The prefix the details' elements are written with (`dc:`, or none)
+    /// and the namespace declaration they need when it is not declared.
+    dc: String,
+    declare: String,
+}
+
+impl<'a> Opf<'a> {
+    /// A new details element, written as the others are.
+    fn el(&self, name: &str, value: &str) -> String {
+        format!(
+            "<{dc}{name}{declare}>{}</{dc}{name}>",
+            esc(value),
+            dc = self.dc,
+            declare = self.declare
+        )
     }
-    let close = meta.range().start + raw_meta.rfind("</")?;
-    // How the details' elements are written here.
-    let (dc, declare) = match meta.lookup_prefix(DC) {
-        Some("") => (String::new(), String::new()),
-        Some(p) => (format!("{p}:"), String::new()),
-        None => ("dc:".to_string(), format!(" xmlns:dc=\"{DC}\"")),
-    };
-    // The indentation of the details' children.
-    let indent = meta
-        .children()
-        .find(|n| n.is_element())
-        .map(|n| {
-            let before = &src[..n.range().start];
-            let line = &before[before.rfind('\n').map_or(0, |i| i + 1)..];
-            match line.trim().is_empty() {
-                true => line.to_string(),
-                false => "    ".to_string(),
-            }
-        })
-        .unwrap_or_else(|| "    ".to_string());
-    let elements: Vec<roxmltree::Node> = meta.children().filter(|n| n.is_element()).collect();
-    let is_dc = |n: &roxmltree::Node, name: &str| {
-        n.tag_name().name() == name && n.tag_name().namespace() == Some(DC)
-    };
-    let refining = |id: Option<&str>, property: &str| {
+
+    /// The first details element called `name`.
+    fn first(&self, name: &str) -> Option<roxmltree::Node<'a, 'a>> {
+        self.elements.iter().find(|n| is_dc(n, name)).copied()
+    }
+
+    /// The `meta` that gives `property` to the element with this id.
+    fn refining(&self, id: Option<&str>, property: &str) -> Option<&roxmltree::Node<'a, 'a>> {
         id.and_then(|id| {
-            elements.iter().find(|m| {
+            self.elements.iter().find(|m| {
                 m.tag_name().name() == "meta"
                     && m.attribute("refines").map(|r| r.trim_start_matches('#')) == Some(id)
                     && m.attribute("property") == Some(property)
             })
         })
-    };
-    let mut e = Edits::default();
-    let mut added: Vec<String> = Vec::new();
-    let el = |name: &str, value: &str| format!("<{dc}{name}{declare}>{}</{dc}{name}>", esc(value));
+    }
 
-    if !v.title.is_empty() {
-        let main = elements.iter().find(|n| {
+    /// The places of every `meta` that refines the element `n`.
+    fn refines_of(&self, n: &roxmltree::Node) -> Vec<std::ops::Range<usize>> {
+        let Some(id) = n.attribute("id") else {
+            return Vec::new();
+        };
+        self.elements
+            .iter()
+            .filter(|m| {
+                m.tag_name().name() == "meta"
+                    && m.attribute("refines").map(|r| r.trim_start_matches('#')) == Some(id)
+            })
+            .map(|m| m.range())
+            .collect()
+    }
+
+    fn title(&self, v: &BookValues, c: &mut Changes) {
+        if v.title.is_empty() {
+            return;
+        }
+        let main = self.elements.iter().find(|n| {
             is_dc(n, "title")
-                && refining(n.attribute("id"), "title-type").is_none_or(|t| node_text(*t) == "main")
+                && self
+                    .refining(n.attribute("id"), "title-type")
+                    .is_none_or(|t| node_text(*t) == "main")
         });
         match main {
             Some(n) if node_text(*n) == v.title => {}
-            Some(n) => set_text(&mut e, src, *n, &v.title),
-            None => added.push(el("title", &v.title)),
+            Some(n) => set_text(&mut c.edits, self.src, *n, &v.title),
+            None => c.added.push(self.el("title", &v.title)),
         }
     }
 
-    if !v.authors.is_empty() {
-        let authors: Vec<&roxmltree::Node> = elements
+    fn authors(&self, v: &BookValues, c: &mut Changes) {
+        if v.authors.is_empty() {
+            return;
+        }
+        let authors: Vec<&roxmltree::Node> = self
+            .elements
             .iter()
             .filter(|n| {
                 is_dc(n, "creator") && {
@@ -719,67 +733,60 @@ pub fn book_opf(old: &str, v: &BookValues) -> Option<String> {
                         .attributes()
                         .find(|a| a.name() == "role")
                         .map(|a| a.value().to_string())
-                        .or_else(|| refining(n.attribute("id"), "role").map(|r| node_text(*r)));
+                        .or_else(|| {
+                            self.refining(n.attribute("id"), "role")
+                                .map(|r| node_text(*r))
+                        });
                     role.as_deref().is_none_or(|r| r == "aut")
                 }
             })
             .collect();
         let have: Vec<String> = authors.iter().map(|n| node_text(**n)).collect();
-        if have != v.authors {
-            for (i, n) in authors.iter().enumerate() {
-                let refines_of = |n: &roxmltree::Node| -> Vec<std::ops::Range<usize>> {
-                    let Some(id) = n.attribute("id") else {
-                        return Vec::new();
-                    };
-                    elements
-                        .iter()
-                        .filter(|m| {
-                            m.tag_name().name() == "meta"
-                                && m.attribute("refines").map(|r| r.trim_start_matches('#'))
-                                    == Some(id)
-                        })
-                        .map(|m| m.range())
-                        .collect()
-                };
-                match v.authors.get(i) {
-                    Some(a) if *a == have[i] => {}
-                    Some(a) => {
-                        set_text(&mut e, src, **n, a);
-                        // The old name's sort form and the like.
-                        for r in refines_of(n) {
-                            let m = elements
-                                .iter()
-                                .find(|m| m.range() == r)
-                                .expect("a refined element is one of the metadata");
-                            if m.attribute("property") != Some("role") {
-                                e.put(whole_line(src, r), "");
-                            }
-                        }
-                        // EPUB 2 keeps the sort form in an attribute.
-                        if let Some(a) = n.attributes().find(|a| a.name() == "file-as") {
-                            let r = a.range();
-                            let start = src[..r.start].trim_end_matches([' ', '\t', '\n']).len();
-                            e.put(start..r.end, "");
+        if have == v.authors {
+            return;
+        }
+        let src = self.src;
+        for (i, n) in authors.iter().enumerate() {
+            match v.authors.get(i) {
+                Some(a) if *a == have[i] => {}
+                Some(a) => {
+                    set_text(&mut c.edits, src, **n, a);
+                    // The old name's sort form and the like.
+                    for r in self.refines_of(n) {
+                        let m = self
+                            .elements
+                            .iter()
+                            .find(|m| m.range() == r)
+                            .expect("a refined element is one of the metadata");
+                        if m.attribute("property") != Some("role") {
+                            c.edits.put(whole_line(src, r), "");
                         }
                     }
-                    None => {
-                        e.put(whole_line(src, n.range()), "");
-                        for r in refines_of(n) {
-                            e.put(whole_line(src, r), "");
-                        }
+                    // EPUB 2 keeps the sort form in an attribute.
+                    if let Some(a) = n.attributes().find(|a| a.name() == "file-as") {
+                        let r = a.range();
+                        let start = src[..r.start].trim_end_matches([' ', '\t', '\n']).len();
+                        c.edits.put(start..r.end, "");
+                    }
+                }
+                None => {
+                    c.edits.put(whole_line(src, n.range()), "");
+                    for r in self.refines_of(n) {
+                        c.edits.put(whole_line(src, r), "");
                     }
                 }
             }
-            for a in v.authors.iter().skip(authors.len()) {
-                added.push(el("creator", a));
-            }
+        }
+        for a in v.authors.iter().skip(authors.len()) {
+            c.added.push(self.el("creator", a));
         }
     }
 
-    let first = |name: &str| elements.iter().find(|n| is_dc(n, name)).copied();
-
-    if !v.year.is_empty() {
-        let date = elements.iter().find(|n| {
+    fn date(&self, v: &BookValues, c: &mut Changes) {
+        if v.year.is_empty() {
+            return;
+        }
+        let date = self.elements.iter().find(|n| {
             is_dc(n, "date")
                 && !n
                     .attributes()
@@ -787,29 +794,39 @@ pub fn book_opf(old: &str, v: &BookValues) -> Option<String> {
         });
         match date {
             Some(n) if node_text(*n).starts_with(&v.year) => {}
-            Some(n) => set_text(&mut e, src, *n, &v.year),
-            None => added.push(el("date", &v.year)),
+            Some(n) => set_text(&mut c.edits, self.src, *n, &v.year),
+            None => c.added.push(self.el("date", &v.year)),
         }
     }
 
-    if !v.publisher.is_empty() {
-        match first("publisher") {
+    fn publisher(&self, v: &BookValues, c: &mut Changes) {
+        if v.publisher.is_empty() {
+            return;
+        }
+        match self.first("publisher") {
             Some(n) if node_text(n) == v.publisher => {}
-            Some(n) => set_text(&mut e, src, n, &v.publisher),
-            None => added.push(el("publisher", &v.publisher)),
+            Some(n) => set_text(&mut c.edits, self.src, n, &v.publisher),
+            None => c.added.push(self.el("publisher", &v.publisher)),
         }
     }
 
-    if !v.language.is_empty() {
-        match first("language") {
+    fn language(&self, v: &BookValues, c: &mut Changes) {
+        if v.language.is_empty() {
+            return;
+        }
+        match self.first("language") {
             Some(n) if same_language(&node_text(n), &v.language) => {}
-            Some(n) => set_text(&mut e, src, n, &v.language),
-            None => added.push(el("language", &v.language)),
+            Some(n) => set_text(&mut c.edits, self.src, n, &v.language),
+            None => c.added.push(self.el("language", &v.language)),
         }
     }
 
-    if !v.isbn.is_empty() {
-        let isbns: Vec<&roxmltree::Node> = elements
+    fn isbn(&self, v: &BookValues, c: &mut Changes) {
+        if v.isbn.is_empty() {
+            return;
+        }
+        let isbns: Vec<&roxmltree::Node> = self
+            .elements
             .iter()
             .filter(|n| {
                 is_dc(n, "identifier") && {
@@ -831,141 +848,242 @@ pub fn book_opf(old: &str, v: &BookValues) -> Option<String> {
             .as_deref()
                 == Some(v.isbn.as_str())
         });
-        if !has {
-            // The book's own identifier stays: readers know it by it.
-            match isbns
-                .iter()
-                .find(|n| n.attribute("id") != uid || uid.is_none())
-            {
-                Some(n) => {
-                    let urn = node_text(**n).to_lowercase().starts_with("urn:isbn:");
-                    let value = match urn {
-                        true => format!("urn:isbn:{}", v.isbn),
-                        false => v.isbn.clone(),
-                    };
-                    set_text(&mut e, src, **n, &value);
-                }
-                None => added.push(el("identifier", &format!("urn:isbn:{}", v.isbn))),
+        if has {
+            return;
+        }
+        // The book's own identifier stays: readers know it by it.
+        match isbns
+            .iter()
+            .find(|n| n.attribute("id") != self.uid || self.uid.is_none())
+        {
+            Some(n) => {
+                let urn = node_text(**n).to_lowercase().starts_with("urn:isbn:");
+                let value = match urn {
+                    true => format!("urn:isbn:{}", v.isbn),
+                    false => v.isbn.clone(),
+                };
+                set_text(&mut c.edits, self.src, **n, &value);
             }
+            None => c
+                .added
+                .push(self.el("identifier", &format!("urn:isbn:{}", v.isbn))),
         }
     }
 
-    if !v.series.is_empty() {
-        let named = |name: &str| {
-            elements
-                .iter()
-                .find(|n| n.tag_name().name() == "meta" && n.attribute("name") == Some(name))
-                .copied()
-        };
-        let collection = elements
+    /// A `meta` of the old (Calibre) kind, by its name.
+    fn named(&self, name: &str) -> Option<roxmltree::Node<'a, 'a>> {
+        self.elements
             .iter()
-            .find(|n| {
-                n.tag_name().name() == "meta"
-                    && n.attribute("property") == Some("belongs-to-collection")
-            })
-            .copied();
+            .find(|n| n.tag_name().name() == "meta" && n.attribute("name") == Some(name))
+            .copied()
+    }
+
+    /// The series in the old kind of `meta`, when the OPF has it: says
+    /// whether it did.
+    fn calibre_series(&self, v: &BookValues, c: &mut Changes) -> bool {
+        let Some(n) = self.named("calibre:series") else {
+            return false;
+        };
         let set_content = |e: &mut Edits, n: roxmltree::Node, value: &str| {
             if let Some(a) = n.attributes().find(|a| a.name() == "content") {
                 e.put(a.range_value(), esc(value));
             }
         };
-        let series = named("calibre:series");
-        let index = named("calibre:series_index");
-        let mut any = false;
-        if let Some(n) = series {
-            any = true;
-            if n.attribute("content").map(|c| c.trim()) != Some(v.series.as_str()) {
-                set_content(&mut e, n, &v.series);
-            }
-            if !v.series_index.is_empty() {
-                match index {
-                    Some(i) if i.attribute("content").map(str::trim) == Some(&v.series_index) => {}
-                    Some(i) => set_content(&mut e, i, &v.series_index),
-                    None => added.push(format!(
-                        "<meta name=\"calibre:series_index\" content=\"{}\"/>",
-                        esc(&v.series_index)
-                    )),
-                }
-            }
+        if n.attribute("content").map(|c| c.trim()) != Some(v.series.as_str()) {
+            set_content(&mut c.edits, n, &v.series);
         }
-        if let Some(n) = collection {
-            any = true;
-            if node_text(n) != v.series {
-                set_text(&mut e, src, n, &v.series);
-            }
-            if !v.series_index.is_empty() {
-                match refining(n.attribute("id"), "group-position") {
-                    Some(p) if node_text(*p) == v.series_index => {}
-                    Some(p) => set_text(&mut e, src, *p, &v.series_index),
-                    None if n.attribute("id").is_some() => added.push(format!(
-                        "<meta refines=\"#{}\" property=\"group-position\">{}</meta>",
-                        esc(n.attribute("id").expect("the arm checks the id")),
-                        esc(&v.series_index)
-                    )),
-                    None => {}
-                }
-            }
-        }
-        if !any {
-            added.push(format!(
-                "<meta name=\"calibre:series\" content=\"{}\"/>",
-                esc(&v.series)
-            ));
-            if !v.series_index.is_empty() {
-                added.push(format!(
+        if !v.series_index.is_empty() {
+            match self.named("calibre:series_index") {
+                Some(i) if i.attribute("content").map(str::trim) == Some(&v.series_index) => {}
+                Some(i) => set_content(&mut c.edits, i, &v.series_index),
+                None => c.added.push(format!(
                     "<meta name=\"calibre:series_index\" content=\"{}\"/>",
                     esc(&v.series_index)
-                ));
+                )),
             }
-            if epub3 {
-                let taken = |id: &str| doc.descendants().any(|n| n.attribute("id") == Some(id));
-                let id = (0..)
-                    .map(|i| match i {
-                        0 => "renome-series".to_string(),
-                        i => format!("renome-series-{i}"),
-                    })
-                    .find(|id| !taken(id))
-                    .expect("the numbers never run out");
-                added.push(format!(
-                    "<meta property=\"belongs-to-collection\" id=\"{id}\">{}</meta>",
-                    esc(&v.series)
-                ));
-                added.push(format!(
-                    "<meta refines=\"#{id}\" property=\"collection-type\">series</meta>"
-                ));
-                if !v.series_index.is_empty() {
-                    added.push(format!(
-                        "<meta refines=\"#{id}\" property=\"group-position\">{}</meta>",
-                        esc(&v.series_index)
-                    ));
-                }
+        }
+        true
+    }
+
+    /// The series as an EPUB 3 collection, when the OPF has one: says
+    /// whether it did.
+    fn collection_series(&self, v: &BookValues, c: &mut Changes) -> bool {
+        let Some(n) = self
+            .elements
+            .iter()
+            .find(|n| {
+                n.tag_name().name() == "meta"
+                    && n.attribute("property") == Some("belongs-to-collection")
+            })
+            .copied()
+        else {
+            return false;
+        };
+        if node_text(n) != v.series {
+            set_text(&mut c.edits, self.src, n, &v.series);
+        }
+        if !v.series_index.is_empty() {
+            match self.refining(n.attribute("id"), "group-position") {
+                Some(p) if node_text(*p) == v.series_index => {}
+                Some(p) => set_text(&mut c.edits, self.src, *p, &v.series_index),
+                None if n.attribute("id").is_some() => c.added.push(format!(
+                    "<meta refines=\"#{}\" property=\"group-position\">{}</meta>",
+                    esc(n.attribute("id").expect("the arm checks the id")),
+                    esc(&v.series_index)
+                )),
+                None => {}
             }
+        }
+        true
+    }
+
+    /// A series the OPF had no place for: both kinds are added (the
+    /// collection only to an EPUB 3).
+    fn new_series(&self, v: &BookValues, c: &mut Changes) {
+        c.added.push(format!(
+            "<meta name=\"calibre:series\" content=\"{}\"/>",
+            esc(&v.series)
+        ));
+        if !v.series_index.is_empty() {
+            c.added.push(format!(
+                "<meta name=\"calibre:series_index\" content=\"{}\"/>",
+                esc(&v.series_index)
+            ));
+        }
+        if !self.epub3 {
+            return;
+        }
+        let taken = |id: &str| {
+            self.doc
+                .descendants()
+                .any(|n| n.attribute("id") == Some(id))
+        };
+        let id = (0..)
+            .map(|i| match i {
+                0 => "renome-series".to_string(),
+                i => format!("renome-series-{i}"),
+            })
+            .find(|id| !taken(id))
+            .expect("the numbers never run out");
+        c.added.push(format!(
+            "<meta property=\"belongs-to-collection\" id=\"{id}\">{}</meta>",
+            esc(&v.series)
+        ));
+        c.added.push(format!(
+            "<meta refines=\"#{id}\" property=\"collection-type\">series</meta>"
+        ));
+        if !v.series_index.is_empty() {
+            c.added.push(format!(
+                "<meta refines=\"#{id}\" property=\"group-position\">{}</meta>",
+                esc(&v.series_index)
+            ));
         }
     }
 
-    if e.0.is_empty() && added.is_empty() {
+    fn series(&self, v: &BookValues, c: &mut Changes) {
+        if v.series.is_empty() {
+            return;
+        }
+        let calibre = self.calibre_series(v, c);
+        let collection = self.collection_series(v, c);
+        if !(calibre || collection) {
+            self.new_series(v, c);
+        }
+    }
+}
+
+/// The indentation of the details' children.
+fn details_indent(src: &str, meta: roxmltree::Node) -> String {
+    meta.children()
+        .find(|n| n.is_element())
+        .map(|n| {
+            let before = &src[..n.range().start];
+            let line = &before[before.rfind('\n').map_or(0, |i| i + 1)..];
+            match line.trim().is_empty() {
+                true => line.to_string(),
+                false => "    ".to_string(),
+            }
+        })
+        .unwrap_or_else(|| "    ".to_string())
+}
+
+/// The new elements, before the closing tag, on lines of their own.
+fn put_added(e: &mut Edits, added: &[String], src: &str, close: usize, indent: &str) {
+    let before = &src[..close];
+    let trimmed = before.trim_end_matches([' ', '\t']).len();
+    let ends_line = before[..trimmed].ends_with('\n');
+    let closing_indent = &before[trimmed..];
+    let mut s = String::new();
+    if !ends_line {
+        s.push('\n');
+    }
+    for a in added {
+        s.push_str(indent);
+        s.push_str(a);
+        s.push('\n');
+    }
+    s.push_str(closing_indent);
+    let at = if ends_line { trimmed } else { close };
+    e.put(at..close, s);
+}
+
+/// The EPUB's OPF with `v` in its details: elements that already say the
+/// same are left alone, others get the new text, missing ones are added.
+/// `None` when nothing changes, or the OPF cannot be read.
+pub fn book_opf(old: &str, v: &BookValues) -> Option<String> {
+    let bom = old.len() - old.trim_start_matches('\u{feff}').len();
+    let src = &old[bom..];
+    let doc = roxmltree::Document::parse_with_options(
+        src,
+        roxmltree::ParsingOptions {
+            allow_dtd: true,
+            ..Default::default()
+        },
+    )
+    .ok()?;
+    let package = doc.root_element();
+    let meta = package
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "metadata")?;
+    let raw_meta = &src[meta.range()];
+    if raw_meta.ends_with("/>") {
         return None;
     }
-    if !added.is_empty() {
-        // Before the closing tag, on lines of their own.
-        let before = &src[..close];
-        let trimmed = before.trim_end_matches([' ', '\t']).len();
-        let ends_line = before[..trimmed].ends_with('\n');
-        let closing_indent = &before[trimmed..];
-        let mut s = String::new();
-        if !ends_line {
-            s.push('\n');
-        }
-        for a in &added {
-            s.push_str(&indent);
-            s.push_str(a);
-            s.push('\n');
-        }
-        s.push_str(closing_indent);
-        let at = if ends_line { trimmed } else { close };
-        e.put(at..close, s);
+    let close = meta.range().start + raw_meta.rfind("</")?;
+    // How the details' elements are written here.
+    let (dc, declare) = match meta.lookup_prefix(DC) {
+        Some("") => (String::new(), String::new()),
+        Some(p) => (format!("{p}:"), String::new()),
+        None => ("dc:".to_string(), format!(" xmlns:dc=\"{DC}\"")),
+    };
+    let indent = details_indent(src, meta);
+    let opf = Opf {
+        src,
+        doc: &doc,
+        epub3: package
+            .attribute("version")
+            .is_some_and(|v| v.trim().starts_with('3')),
+        uid: package.attribute("unique-identifier"),
+        elements: meta.children().filter(|n| n.is_element()).collect(),
+        dc,
+        declare,
+    };
+    let mut c = Changes::default();
+    opf.title(v, &mut c);
+    opf.authors(v, &mut c);
+    opf.date(v, &mut c);
+    opf.publisher(v, &mut c);
+    opf.language(v, &mut c);
+    opf.isbn(v, &mut c);
+    opf.series(v, &mut c);
+
+    if c.edits.0.is_empty() && c.added.is_empty() {
+        return None;
     }
-    Some(format!("{}{}", &old[..bom], e.apply(src)))
+    if !c.added.is_empty() {
+        put_added(&mut c.edits, &c.added, src, close, &indent);
+    }
+    Some(format!("{}{}", &old[..bom], c.edits.apply(src)))
 }
 
 /// Whether an EPUB is locked to a reader (DRM): its rights file, or
