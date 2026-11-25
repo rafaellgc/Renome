@@ -580,6 +580,195 @@ fn vorbis(tag: Tag, raw: Vec<(String, String)>) -> VorbisComments {
     vc
 }
 
+fn parse_err(e: lofty::error::FileParseError) -> String {
+    e.to_string()
+}
+
+/// What an edit of one kind of file gives: `Some` when it was written.
+type Edited = Result<Option<()>, String>;
+
+/// An MP3: the ID3v2 tag (with the user texts the fields need), the
+/// ID3v1 and APE tags too when `rebuild`.
+fn edit_mp3(
+    file: &mut File,
+    rebuild: bool,
+    rest: &mut Rest,
+    edit: impl FnOnce(&mut Tag, &mut Rest) -> bool,
+) -> Edited {
+    let mut a = MpegFile::read_from(file, ParseOptions::new()).map_err(parse_err)?;
+    let mut id3 = a.remove_id3v2().unwrap_or_default();
+    let own: Vec<(ItemKey, String)> = ID3_TEXTS
+        .iter()
+        .filter_map(|&(k, d)| match id3.remove_user_text(d)? {
+            Frame::UserText(t) => Some((k, t.content.to_string())),
+            _ => None,
+        })
+        .collect();
+    let (r, mut tag) = id3.split_tag();
+    as_items(&mut tag, own);
+    if rebuild {
+        rest.more = !r.is_empty() || a.id3v1().is_some() || a.ape().is_some();
+        rest.dropped_text = (&*r)
+            .into_iter()
+            .filter_map(|f| match f {
+                Frame::UserText(t) => Some((t.description.to_string(), t.content.to_string())),
+                _ => None,
+            })
+            .collect();
+    }
+    let changed = edit(&mut tag, rest);
+    one_value_each(&mut tag);
+    let texts = out_of_items(&mut tag, ID3_TEXTS);
+    let mut id3 = if rebuild {
+        a.remove_id3v1();
+        a.remove_ape();
+        Id3v2Tag::from(tag)
+    } else {
+        r.merge_tag(tag)
+    };
+    for (description, content) in std::mem::take(&mut rest.add_text).into_iter().chain(texts) {
+        id3.insert_user_text(description, content);
+    }
+    a.set_id3v2(id3);
+    // ID3v2.3: what Windows and older players read.
+    let write = WriteOptions::new().use_id3v23(true);
+    changed.then(|| save(&a, file, write)).transpose()
+}
+
+/// A FLAC: the Vorbis comments, and the pictures in their own blocks.
+fn edit_flac(
+    file: &mut File,
+    rebuild: bool,
+    rest: &mut Rest,
+    edit: impl FnOnce(&mut Tag, &mut Rest) -> bool,
+) -> Edited {
+    let mut a = FlacFile::read_from(file, ParseOptions::new()).map_err(parse_err)?;
+    let vc = a.remove_vorbis_comments().unwrap_or_default();
+    let enc = encoders(&vc);
+    let (r, mut tag) = vc.split_tag();
+    // FLAC keeps pictures in blocks of their own.
+    for (p, _) in a.remove_pictures() {
+        tag.push_picture(p);
+    }
+    if rebuild {
+        rest.raw = r
+            .items()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+    }
+    let changed = edit(&mut tag, rest);
+    let pictures: Vec<Picture> = (0..tag.picture_count())
+        .map(|_| tag.remove_picture(0))
+        .collect();
+    let vc = if rebuild {
+        vorbis(tag, std::mem::take(&mut rest.raw))
+    } else {
+        r.merge_tag(tag)
+    };
+    a.set_vorbis_comments(with_encoders(vc, enc));
+    for p in pictures {
+        a.insert_picture(p, None).map_err(|e| e.to_string())?;
+    }
+    changed
+        .then(|| save(&a, file, WriteOptions::new()))
+        .transpose()
+}
+
+/// An Ogg or Opus file: both keep the comments (and pictures) in one tag.
+fn edit_ogg(
+    file: &mut File,
+    ext: &str,
+    rebuild: bool,
+    rest: &mut Rest,
+    edit: impl FnOnce(&mut Tag, &mut Rest) -> bool,
+) -> Edited {
+    let parse = ParseOptions::new();
+    let (r, mut tag, enc, mut vorbis_file, mut opus_file) = if ext == "opus" {
+        let mut a = OpusFile::read_from(file, parse).map_err(parse_err)?;
+        let vc = std::mem::take(a.vorbis_comments_mut());
+        let enc = encoders(&vc);
+        let (r, t) = vc.split_tag();
+        (r, t, enc, None, Some(a))
+    } else {
+        let mut a = VorbisFile::read_from(file, parse).map_err(parse_err)?;
+        let vc = std::mem::take(a.vorbis_comments_mut());
+        let enc = encoders(&vc);
+        let (r, t) = vc.split_tag();
+        (r, t, enc, Some(a), None)
+    };
+    if rebuild {
+        rest.raw = r
+            .items()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+    }
+    let changed = edit(&mut tag, rest);
+    let vc = with_encoders(
+        if rebuild {
+            vorbis(tag, std::mem::take(&mut rest.raw))
+        } else {
+            r.merge_tag(tag)
+        },
+        enc,
+    );
+    let write = WriteOptions::new();
+    match (&mut vorbis_file, &mut opus_file) {
+        (Some(a), _) => {
+            a.set_vorbis_comments(vc);
+            changed.then(|| save(a, file, write)).transpose()
+        }
+        (_, Some(a)) => {
+            a.set_vorbis_comments(vc);
+            changed.then(|| save(a, file, write)).transpose()
+        }
+        _ => Ok(None),
+    }
+}
+
+/// An MP4 or M4A: the `ilst` atoms (with the user texts the fields need).
+fn edit_mp4(
+    file: &mut File,
+    rebuild: bool,
+    rest: &mut Rest,
+    edit: impl FnOnce(&mut Tag, &mut Rest) -> bool,
+) -> Edited {
+    let mut a = Mp4File::read_from(file, ParseOptions::new()).map_err(parse_err)?;
+    let mut ilst = a.remove_ilst().unwrap_or_default();
+    let own: Vec<(ItemKey, String)> = MP4_TEXTS
+        .iter()
+        .filter_map(|&(k, name)| {
+            let atom = ilst.remove(&mp4_ident(name)?).next()?;
+            let text = atom.data().find_map(|d| match d {
+                AtomData::UTF8(t) | AtomData::UTF16(t) => Some(t.clone()),
+                _ => None,
+            })?;
+            Some((k, text))
+        })
+        .collect();
+    let (r, mut tag) = ilst.split_tag();
+    as_items(&mut tag, own);
+    if rebuild {
+        rest.more = !r.is_empty();
+        rest.dropped_text = mp4_texts(&r);
+    }
+    let changed = edit(&mut tag, rest);
+    let texts = out_of_items(&mut tag, MP4_TEXTS);
+    let mut ilst = if rebuild {
+        Ilst::from(tag)
+    } else {
+        r.merge_tag(tag)
+    };
+    for (ident, text) in std::mem::take(&mut rest.add_text).into_iter().chain(texts) {
+        if let Some(ident) = mp4_ident(&ident) {
+            ilst.insert(Atom::new(ident, AtomData::UTF8(text)));
+        }
+    }
+    a.set_ilst(ilst);
+    changed
+        .then(|| save(&a, file, WriteOptions::new()))
+        .transpose()
+}
+
 /// Gives `edit` the file's main tag as a generic [`Tag`], with all its
 /// pictures, and writes it back when `edit` says it changed something:
 /// merged into what the generic tag does not hold, or, with `rebuild`, in
@@ -602,162 +791,12 @@ fn edit(
             .write(true)
             .open(&tmp)
             .map_err(|e| e.to_string())?;
-        let parse = ParseOptions::new();
-        let mut write = WriteOptions::new();
-        let err = |e: lofty::error::FileParseError| e.to_string();
         let mut rest = Rest::default();
         let changed = match ext.as_str() {
-            "mp3" => {
-                let mut a = MpegFile::read_from(&mut file, parse).map_err(err)?;
-                let mut id3 = a.remove_id3v2().unwrap_or_default();
-                let own: Vec<(ItemKey, String)> = ID3_TEXTS
-                    .iter()
-                    .filter_map(|&(k, d)| match id3.remove_user_text(d)? {
-                        Frame::UserText(t) => Some((k, t.content.to_string())),
-                        _ => None,
-                    })
-                    .collect();
-                let (r, mut tag) = id3.split_tag();
-                as_items(&mut tag, own);
-                if rebuild {
-                    rest.more = !r.is_empty() || a.id3v1().is_some() || a.ape().is_some();
-                    rest.dropped_text = (&*r)
-                        .into_iter()
-                        .filter_map(|f| match f {
-                            Frame::UserText(t) => {
-                                Some((t.description.to_string(), t.content.to_string()))
-                            }
-                            _ => None,
-                        })
-                        .collect();
-                }
-                let changed = edit(&mut tag, &mut rest);
-                one_value_each(&mut tag);
-                let texts = out_of_items(&mut tag, ID3_TEXTS);
-                let mut id3 = if rebuild {
-                    a.remove_id3v1();
-                    a.remove_ape();
-                    Id3v2Tag::from(tag)
-                } else {
-                    r.merge_tag(tag)
-                };
-                for (description, content) in
-                    std::mem::take(&mut rest.add_text).into_iter().chain(texts)
-                {
-                    id3.insert_user_text(description, content);
-                }
-                a.set_id3v2(id3);
-                // ID3v2.3: what Windows and older players read.
-                write = write.use_id3v23(true);
-                changed.then(|| save(&a, &mut file, write)).transpose()?
-            }
-            "flac" => {
-                let mut a = FlacFile::read_from(&mut file, parse).map_err(err)?;
-                let vc = a.remove_vorbis_comments().unwrap_or_default();
-                let enc = encoders(&vc);
-                let (r, mut tag) = vc.split_tag();
-                // FLAC keeps pictures in blocks of their own.
-                for (p, _) in a.remove_pictures() {
-                    tag.push_picture(p);
-                }
-                if rebuild {
-                    rest.raw = r
-                        .items()
-                        .map(|(k, v)| (k.to_string(), v.to_string()))
-                        .collect();
-                }
-                let changed = edit(&mut tag, &mut rest);
-                let pictures: Vec<Picture> = (0..tag.picture_count())
-                    .map(|_| tag.remove_picture(0))
-                    .collect();
-                let vc = if rebuild {
-                    vorbis(tag, std::mem::take(&mut rest.raw))
-                } else {
-                    r.merge_tag(tag)
-                };
-                a.set_vorbis_comments(with_encoders(vc, enc));
-                for p in pictures {
-                    a.insert_picture(p, None).map_err(|e| e.to_string())?;
-                }
-                changed.then(|| save(&a, &mut file, write)).transpose()?
-            }
-            "ogg" | "oga" | "opus" => {
-                // Both keep the comments (and pictures) in one tag.
-                let (r, mut tag, enc, mut vorbis_file, mut opus_file) = if ext == "opus" {
-                    let mut a = OpusFile::read_from(&mut file, parse).map_err(err)?;
-                    let vc = std::mem::take(a.vorbis_comments_mut());
-                    let enc = encoders(&vc);
-                    let (r, t) = vc.split_tag();
-                    (r, t, enc, None, Some(a))
-                } else {
-                    let mut a = VorbisFile::read_from(&mut file, parse).map_err(err)?;
-                    let vc = std::mem::take(a.vorbis_comments_mut());
-                    let enc = encoders(&vc);
-                    let (r, t) = vc.split_tag();
-                    (r, t, enc, Some(a), None)
-                };
-                if rebuild {
-                    rest.raw = r
-                        .items()
-                        .map(|(k, v)| (k.to_string(), v.to_string()))
-                        .collect();
-                }
-                let changed = edit(&mut tag, &mut rest);
-                let vc = with_encoders(
-                    if rebuild {
-                        vorbis(tag, std::mem::take(&mut rest.raw))
-                    } else {
-                        r.merge_tag(tag)
-                    },
-                    enc,
-                );
-                match (&mut vorbis_file, &mut opus_file) {
-                    (Some(a), _) => {
-                        a.set_vorbis_comments(vc);
-                        changed.then(|| save(a, &mut file, write)).transpose()?
-                    }
-                    (_, Some(a)) => {
-                        a.set_vorbis_comments(vc);
-                        changed.then(|| save(a, &mut file, write)).transpose()?
-                    }
-                    _ => None,
-                }
-            }
-            _ => {
-                let mut a = Mp4File::read_from(&mut file, parse).map_err(err)?;
-                let mut ilst = a.remove_ilst().unwrap_or_default();
-                let own: Vec<(ItemKey, String)> = MP4_TEXTS
-                    .iter()
-                    .filter_map(|&(k, name)| {
-                        let atom = ilst.remove(&mp4_ident(name)?).next()?;
-                        let text = atom.data().find_map(|d| match d {
-                            AtomData::UTF8(t) | AtomData::UTF16(t) => Some(t.clone()),
-                            _ => None,
-                        })?;
-                        Some((k, text))
-                    })
-                    .collect();
-                let (r, mut tag) = ilst.split_tag();
-                as_items(&mut tag, own);
-                if rebuild {
-                    rest.more = !r.is_empty();
-                    rest.dropped_text = mp4_texts(&r);
-                }
-                let changed = edit(&mut tag, &mut rest);
-                let texts = out_of_items(&mut tag, MP4_TEXTS);
-                let mut ilst = if rebuild {
-                    Ilst::from(tag)
-                } else {
-                    r.merge_tag(tag)
-                };
-                for (ident, text) in std::mem::take(&mut rest.add_text).into_iter().chain(texts) {
-                    if let Some(ident) = mp4_ident(&ident) {
-                        ilst.insert(Atom::new(ident, AtomData::UTF8(text)));
-                    }
-                }
-                a.set_ilst(ilst);
-                changed.then(|| save(&a, &mut file, write)).transpose()?
-            }
+            "mp3" => edit_mp3(&mut file, rebuild, &mut rest, edit)?,
+            "flac" => edit_flac(&mut file, rebuild, &mut rest, edit)?,
+            "ogg" | "oga" | "opus" => edit_ogg(&mut file, &ext, rebuild, &mut rest, edit)?,
+            _ => edit_mp4(&mut file, rebuild, &mut rest, edit)?,
         };
         if changed.is_some() {
             file.sync_all().map_err(|e| e.to_string())?;
