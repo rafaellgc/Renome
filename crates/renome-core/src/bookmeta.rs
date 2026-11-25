@@ -754,66 +754,7 @@ fn to_epub3(
     let ncx_href = ncx.attribute("href")?;
     let ncx_bytes = read(ncx_href)?;
     let ncx_text = String::from_utf8_lossy(&ncx_bytes).into_owned();
-    let ncx_doc = roxmltree::Document::parse(ncx_text.trim_start_matches('\u{feff}')).ok()?;
-    let title = ncx_doc
-        .descendants()
-        .find(|n| n.has_tag_name("docTitle"))
-        .and_then(|n| n.descendants().find(|t| t.has_tag_name("text")))
-        .and_then(|t| t.text())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    // Links in the NCX are relative to it; the page sits beside the OPF.
-    let ncx_dir = ncx_href.rsplit_once('/').map_or("", |(d, _)| d);
-    fn points(n: roxmltree::Node, dir: &str, depth: usize, out: &mut String) {
-        let kids: Vec<roxmltree::Node> = n
-            .children()
-            .filter(|c| c.has_tag_name("navPoint"))
-            .collect();
-        if kids.is_empty() || depth > 8 {
-            return;
-        }
-        out.push_str("<ol>");
-        for p in kids {
-            let label = p
-                .children()
-                .find(|c| c.has_tag_name("navLabel"))
-                .and_then(|l| l.descendants().find(|t| t.has_tag_name("text")))
-                .and_then(|t| t.text())
-                .unwrap_or("")
-                .trim();
-            let src = p
-                .children()
-                .find(|c| c.has_tag_name("content"))
-                .and_then(|c| c.attribute("src"))
-                .unwrap_or("");
-            let href = if dir.is_empty() || src.is_empty() {
-                src.to_string()
-            } else {
-                format!("{dir}/{src}")
-            };
-            let label = if label.is_empty() { "—" } else { label };
-            out.push_str(&format!(
-                "<li><a href=\"{}\">{}</a>",
-                esc(&href),
-                esc(label)
-            ));
-            points(p, dir, depth + 1, out);
-            out.push_str("</li>");
-        }
-        out.push_str("</ol>");
-    }
-    let map = ncx_doc.descendants().find(|n| n.has_tag_name("navMap"))?;
-    let mut list = String::new();
-    points(map, ncx_dir, 0, &mut list);
-    if list.is_empty() {
-        list.push_str("<ol><li><a href=\"\">—</a></li></ol>");
-    }
-    let page = format!(
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!DOCTYPE html>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\">\n<head><meta charset=\"utf-8\"/><title>{}</title></head>\n<body><nav epub:type=\"toc\" id=\"toc\"><h1>{}</h1>{list}</nav></body>\n</html>\n",
-        esc(&title),
-        esc(&title)
-    );
+    let page = nav_page(&ncx_text, ncx_href)?;
     // A name not taken, an id not taken.
     let mut href = "nav.xhtml".to_string();
     let mut k = 1;
@@ -828,6 +769,91 @@ fn to_epub3(
         id = format!("nav{k}");
         k += 1;
     }
+    let edits = epub3_edits(opf, pkg, manifest, metadata, &items, &id, &href)?;
+    let out = apply_edits(opf, edits);
+    roxmltree::Document::parse(out.trim_start_matches('\u{feff}')).ok()?;
+    Some((out, (joined(&href), page.into_bytes())))
+}
+
+/// The navigation page made from an NCX: its title, and its points as
+/// nested lists. Links in the NCX are relative to it; the page sits beside
+/// the OPF.
+fn nav_page(ncx_text: &str, ncx_href: &str) -> Option<String> {
+    let ncx_doc = roxmltree::Document::parse(ncx_text.trim_start_matches('\u{feff}')).ok()?;
+    let title = ncx_doc
+        .descendants()
+        .find(|n| n.has_tag_name("docTitle"))
+        .and_then(|n| n.descendants().find(|t| t.has_tag_name("text")))
+        .and_then(|t| t.text())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let ncx_dir = ncx_href.rsplit_once('/').map_or("", |(d, _)| d);
+    let map = ncx_doc.descendants().find(|n| n.has_tag_name("navMap"))?;
+    let mut list = String::new();
+    nav_points(map, ncx_dir, 0, &mut list);
+    if list.is_empty() {
+        list.push_str("<ol><li><a href=\"\">—</a></li></ol>");
+    }
+    Some(format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!DOCTYPE html>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\">\n<head><meta charset=\"utf-8\"/><title>{}</title></head>\n<body><nav epub:type=\"toc\" id=\"toc\"><h1>{}</h1>{list}</nav></body>\n</html>\n",
+        esc(&title),
+        esc(&title)
+    ))
+}
+
+/// The points under a node as a list, each with its own below it.
+fn nav_points(n: roxmltree::Node, dir: &str, depth: usize, out: &mut String) {
+    let kids: Vec<roxmltree::Node> = n
+        .children()
+        .filter(|c| c.has_tag_name("navPoint"))
+        .collect();
+    if kids.is_empty() || depth > 8 {
+        return;
+    }
+    out.push_str("<ol>");
+    for p in kids {
+        let label = p
+            .children()
+            .find(|c| c.has_tag_name("navLabel"))
+            .and_then(|l| l.descendants().find(|t| t.has_tag_name("text")))
+            .and_then(|t| t.text())
+            .unwrap_or("")
+            .trim();
+        let src = p
+            .children()
+            .find(|c| c.has_tag_name("content"))
+            .and_then(|c| c.attribute("src"))
+            .unwrap_or("");
+        let href = if dir.is_empty() || src.is_empty() {
+            src.to_string()
+        } else {
+            format!("{dir}/{src}")
+        };
+        let label = if label.is_empty() { "—" } else { label };
+        out.push_str(&format!(
+            "<li><a href=\"{}\">{}</a>",
+            esc(&href),
+            esc(label)
+        ));
+        nav_points(p, dir, depth + 1, out);
+        out.push_str("</li>");
+    }
+    out.push_str("</ol>");
+}
+
+/// The changes to the OPF text (a range and what replaces it): version
+/// 3.0, the navigation page in the manifest, the cover marked, and a
+/// modification date.
+fn epub3_edits(
+    opf: &str,
+    pkg: roxmltree::Node,
+    manifest: roxmltree::Node,
+    metadata: roxmltree::Node,
+    items: &[roxmltree::Node],
+    id: &str,
+    href: &str,
+) -> Option<Vec<(std::ops::Range<usize>, String)>> {
     let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
     let base = opf.len() - opf.trim_start_matches('\u{feff}').len();
     let at = |r: std::ops::Range<usize>| (r.start + base)..(r.end + base);
@@ -851,7 +877,7 @@ fn to_epub3(
         close..close,
         format!(
             "  <item id=\"{id}\" href=\"{}\" media-type=\"application/xhtml+xml\" properties=\"nav\"/>\n  ",
-            esc(&href)
+            esc(href)
         ),
     ));
     // The cover picture, as EPUB 3 marks it.
@@ -885,22 +911,66 @@ fn to_epub3(
             format!("  <meta property=\"dcterms:modified\">{now}</meta>\n  "),
         ));
     }
+    Some(edits)
+}
+
+/// The text with each range replaced, in order.
+fn apply_edits(text: &str, mut edits: Vec<(std::ops::Range<usize>, String)>) -> String {
     edits.sort_by_key(|e| e.0.start);
-    let mut out = String::with_capacity(opf.len() + 512);
+    let mut out = String::with_capacity(text.len() + 512);
     let mut pos = 0;
     for (r, s) in &edits {
-        out.push_str(&opf[pos..r.start]);
+        out.push_str(&text[pos..r.start]);
         out.push_str(s);
         pos = r.end;
     }
-    out.push_str(&opf[pos..]);
-    roxmltree::Document::parse(out.trim_start_matches('\u{feff}')).ok()?;
-    Some((out, (joined(&href), page.into_bytes())))
+    out.push_str(&text[pos..]);
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Pins what an EPUB 2 package becomes as EPUB 3, so `to_epub3` can be
+    /// taken apart.
+    #[test]
+    fn epub3_does_not_change() {
+        let opfs = [
+            r#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf"><dc:title>T</dc:title><dc:identifier id="id">x</dc:identifier><meta name="cover" content="cov"/></metadata><manifest><item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/><item id="cov" href="c.jpg" media-type="image/jpeg"/><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml"/></manifest><spine toc="ncx"/></package>"#,
+            "\u{feff}<package xmlns='http://www.idpf.org/2007/opf' version='2.0'><metadata><meta property=\"dcterms:modified\">2020-01-01T00:00:00Z</meta></metadata><manifest><item id='n' href='t/toc.ncx' media-type='application/x-dtbncx+xml'/></manifest></package>",
+            r#"<package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata/><manifest/></package>"#,
+        ];
+        let ncxs = [
+            r#"<ncx><docTitle><text>Título &amp; Co</text></docTitle><navMap><navPoint><navLabel><text>Um</text></navLabel><content src="a.xhtml"/><navPoint><navLabel><text></text></navLabel><content src="a.xhtml#x"/></navPoint></navPoint><navPoint><navLabel><text>Dois</text></navLabel><content src="b.xhtml"/></navPoint></navMap></ncx>"#,
+            r#"<ncx><docTitle><text>X</text></docTitle><navMap></navMap></ncx>"#,
+        ];
+        let mut all = Vec::new();
+        for opf in opfs {
+            for ncx in ncxs {
+                let mut read = |_: &str| Some(ncx.as_bytes().to_vec());
+                let names = vec!["nav.xhtml".to_string(), "nav1.xhtml".to_string()];
+                let joined = |h: &str| format!("OEBPS/{h}");
+                let r = to_epub3(opf, &mut read, &names, &joined);
+                // The modification date is today's: left out.
+                let r = r.map(|(o, (n, b))| {
+                    let o = match o.find("dcterms:modified\">") {
+                        Some(i) if !opf.contains("2020-01-01") => {
+                            let j = i + "dcterms:modified\">".len();
+                            let k = o[j..].find('<').unwrap() + j;
+                            format!("{}DATE{}", &o[..j], &o[k..])
+                        }
+                        _ => o,
+                    };
+                    (o, n, String::from_utf8(b).unwrap())
+                });
+                all.push(format!("{r:?}"));
+            }
+        }
+        let sum = xxhash_rust::xxh3::xxh3_64(all.join("\n").as_bytes());
+        println!("hash {sum:016x}\n{}", all.join("\n"));
+        assert_eq!(sum, 0xb3d9bb99c22a065c, "the EPUB 3 changed");
+    }
 
     fn values() -> BookValues {
         BookValues {
