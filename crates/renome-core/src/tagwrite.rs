@@ -307,28 +307,37 @@ pub fn details(r: &Release, track_id: &str) -> Fields {
     };
     let group = r.release_group.clone().unwrap_or_default();
     let recording = track.recording.clone().unwrap_or_default();
-    let one = |s: Option<&str>| s.filter(|s| !s.is_empty()).map(|s| vec![s.to_string()]);
-    let people = |rels: &[crate::musicbrainz::Relation], kinds: &[&str]| {
-        unique(
-            rels.iter()
-                .filter(|x| kinds.contains(&x.kind.as_str()))
-                .filter_map(|x| x.artist.as_ref().map(|a| plain(&a.name))),
-        )
-    };
-    let works: Vec<&crate::musicbrainz::Work> = recording
-        .relations
-        .iter()
-        .filter(|x| x.kind == "performance")
-        .filter_map(|x| x.work.as_ref())
-        .collect();
-    let in_works = |kinds: &[&str]| unique(works.iter().flat_map(|w| people(&w.relations, kinds)));
-    // The recording's own genres, else the release's, else the album's.
-    let mut genres = [&recording.genres, &r.genres, &group.genres]
+    let mut fields = release_fields(r, &group, medium);
+    fields.extend(recording_fields(r, &group, &recording));
+    fields.extend(credit_fields(r, track, &recording));
+    fields
         .into_iter()
-        .find(|g| !g.is_empty())
-        .cloned()
-        .unwrap_or_default();
-    genres.sort_by_key(|g| std::cmp::Reverse(g.count));
+        .filter_map(|(f, v)| Some((f, v?)).filter(|(_, v)| !v.is_empty()))
+        .collect()
+}
+
+type Maybe = Vec<(Field, Option<Vec<String>>)>;
+
+/// A single value, when there is one.
+fn one(s: Option<&str>) -> Option<Vec<String>> {
+    s.filter(|s| !s.is_empty()).map(|s| vec![s.to_string()])
+}
+
+/// The artists with a part (`producer`, `mix`…) in the relations.
+fn people(rels: &[crate::musicbrainz::Relation], kinds: &[&str]) -> Vec<String> {
+    unique(
+        rels.iter()
+            .filter(|x| kinds.contains(&x.kind.as_str()))
+            .filter_map(|x| x.artist.as_ref().map(|a| plain(&a.name))),
+    )
+}
+
+/// What the release and its disc say: dates, label, barcode, type, media.
+fn release_fields(
+    r: &Release,
+    group: &crate::musicbrainz::ReleaseGroup,
+    medium: &crate::musicbrainz::Medium,
+) -> Maybe {
     let release_type = unique(
         group
             .primary_type
@@ -336,8 +345,7 @@ pub fn details(r: &Release, track_id: &str) -> Fields {
             .chain(&group.secondary_types)
             .map(|t| t.to_lowercase()),
     );
-    let text = r.text_representation.clone().unwrap_or_default();
-    let fields = [
+    vec![
         (
             Field::OriginalDate,
             one(group.first_release_date.as_deref()),
@@ -364,6 +372,24 @@ pub fn details(r: &Release, track_id: &str) -> Fields {
         (Field::ReleaseType, Some(release_type)),
         (Field::Media, one(medium.format.as_deref())),
         (Field::DiscSubtitle, one(Some(medium.title.as_str()))),
+    ]
+}
+
+/// What the recording says: ISRC, genres, language and script.
+fn recording_fields(
+    r: &Release,
+    group: &crate::musicbrainz::ReleaseGroup,
+    recording: &crate::musicbrainz::Recording,
+) -> Maybe {
+    // The recording's own genres, else the release's, else the album's.
+    let mut genres = [&recording.genres, &r.genres, &group.genres]
+        .into_iter()
+        .find(|g| !g.is_empty())
+        .cloned()
+        .unwrap_or_default();
+    genres.sort_by_key(|g| std::cmp::Reverse(g.count));
+    let text = r.text_representation.clone().unwrap_or_default();
+    vec![
         (Field::Isrc, Some(unique(recording.isrcs.clone()))),
         (
             Field::Genre,
@@ -375,6 +401,29 @@ pub fn details(r: &Release, track_id: &str) -> Fields {
             one(text.language.as_deref().filter(|l| *l != "zxx")),
         ),
         (Field::Script, one(text.script.as_deref())),
+    ]
+}
+
+/// Who made the song: the work's writers, the recording's producers and
+/// engineers, and the artists as credited.
+fn credit_fields(
+    r: &Release,
+    track: &crate::musicbrainz::Track,
+    recording: &crate::musicbrainz::Recording,
+) -> Maybe {
+    let works: Vec<&crate::musicbrainz::Work> = recording
+        .relations
+        .iter()
+        .filter(|x| x.kind == "performance")
+        .filter_map(|x| x.work.as_ref())
+        .collect();
+    let in_works = |kinds: &[&str]| unique(works.iter().flat_map(|w| people(&w.relations, kinds)));
+    let credit = if track.artist_credit.is_empty() {
+        &r.artist_credit
+    } else {
+        &track.artist_credit
+    };
+    vec![
         (Field::Composer, Some(in_works(&["composer"]))),
         (Field::Lyricist, Some(in_works(&["lyricist"]))),
         (Field::Writer, Some(in_works(&["writer"]))),
@@ -393,14 +442,7 @@ pub fn details(r: &Release, track_id: &str) -> Fields {
         ),
         (
             Field::ArtistSort,
-            one(Some(
-                plain(&sort_names(if track.artist_credit.is_empty() {
-                    &r.artist_credit
-                } else {
-                    &track.artist_credit
-                }))
-                .as_str(),
-            )),
+            one(Some(plain(&sort_names(credit)).as_str())),
         ),
         (
             Field::AlbumArtistSort,
@@ -412,25 +454,13 @@ pub fn details(r: &Release, track_id: &str) -> Fields {
         ),
         (
             Field::Artists,
-            Some(unique(
-                (if track.artist_credit.is_empty() {
-                    &r.artist_credit
-                } else {
-                    &track.artist_credit
-                })
-                .iter()
-                .map(|a| plain(&a.name)),
-            )),
+            Some(unique(credit.iter().map(|a| plain(&a.name)))),
         ),
         (
             Field::AlbumArtists,
             Some(unique(r.artist_credit.iter().map(|a| plain(&a.name)))),
         ),
-    ];
-    fields
-        .into_iter()
-        .filter_map(|(f, v)| Some((f, v?)).filter(|(_, v)| !v.is_empty()))
-        .collect()
+    ]
 }
 
 /// A picture taken out of a file, kept in the history's folder.
