@@ -1415,7 +1415,6 @@ mod tests {
                 bitrate: Some(900),
                 sample_rate: Some(44100),
                 bits: Some(16),
-                ..Default::default()
             },
             ..Default::default()
         };

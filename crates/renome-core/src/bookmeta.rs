@@ -566,12 +566,7 @@ pub fn polish(
     if crate::bookconv::drm::epub_locked(path) {
         return Err("epubDrm".into());
     }
-    let read = |zip: &mut zip::ZipArchive<File>, name: &str| -> Result<Vec<u8>, String> {
-        let mut f = zip.by_name(name).map_err(|e| e.to_string())?;
-        let mut b = Vec::new();
-        f.read_to_end(&mut b).map_err(|e| e.to_string())?;
-        Ok(b)
-    };
+    let read = zip_entry;
     let container = String::from_utf8(read(&mut zip, "META-INF/container.xml")?)
         .map_err(|_| "notUtf8".to_string())?;
     let opf_name = {
@@ -614,23 +609,7 @@ pub fn polish(
     }
     let mut saved_bytes = 0u64;
     if p.shrink {
-        let doc = roxmltree::Document::parse(opf.trim_start_matches('\u{feff}'))
-            .map_err(|e| e.to_string())?;
-        let pictures: Vec<String> = doc
-            .descendants()
-            .filter(|n| n.has_tag_name("item"))
-            .filter(|n| matches!(n.attribute("media-type"), Some("image/jpeg" | "image/png")))
-            .filter_map(|n| n.attribute("href").map(&joined))
-            .collect();
-        for name in pictures {
-            let Ok(old) = read(&mut zip, &name) else {
-                continue;
-            };
-            if let Some(new) = smaller(&old) {
-                saved_bytes += (old.len() - new.len()) as u64;
-                replaced.insert(name, new);
-            }
-        }
+        (replaced, saved_bytes) = shrunk_pictures(&mut zip, &opf, &joined)?;
     }
     if opf == old_opf && added.is_empty() && replaced.is_empty() {
         return Ok(Polished::default());
@@ -638,38 +617,7 @@ pub fn polish(
     // The book written again: the same entries in the same order (the
     // `mimetype` first, stored), the changed ones replaced.
     let tmp = temp_of(path);
-    let written = (|| -> Result<(), String> {
-        let out = File::create(&tmp).map_err(|e| e.to_string())?;
-        let mut zout = zip::ZipWriter::new(BufWriter::new(out));
-        let deflated = zip::write::SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated);
-        let stored = zip::write::SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Stored);
-        for i in 0..zip.len() {
-            let f = zip.by_index_raw(i).map_err(|e| e.to_string())?;
-            let name = f.name().map_err(|e| e.to_string())?.into_owned();
-            if name == opf_name {
-                drop(f);
-                zout.start_file(&name, deflated)
-                    .map_err(|e| e.to_string())?;
-                zout.write_all(opf.as_bytes()).map_err(|e| e.to_string())?;
-            } else if let Some(b) = replaced.get(&name) {
-                drop(f);
-                // Pictures are compressed already.
-                zout.start_file(&name, stored).map_err(|e| e.to_string())?;
-                zout.write_all(b).map_err(|e| e.to_string())?;
-            } else {
-                zout.raw_copy_file(f).map_err(|e| e.to_string())?;
-            }
-        }
-        for (name, b) in &added {
-            zout.start_file(name, deflated).map_err(|e| e.to_string())?;
-            zout.write_all(b).map_err(|e| e.to_string())?;
-        }
-        let w = zout.finish().map_err(|e| e.to_string())?;
-        let file = w.into_inner().map_err(|e| e.error().to_string())?;
-        file.sync_all().map_err(|e| e.to_string())
-    })();
+    let written = rewrite_zip(&mut zip, &tmp, &opf_name, &opf, &replaced, &added);
     if let Err(e) = written {
         let _ = fs::remove_file(&tmp);
         return Err(e);
@@ -684,6 +632,86 @@ pub fn polish(
         backup: Some(backup),
         saved_bytes,
     })
+}
+
+/// A file of the zip, whole.
+fn zip_entry(zip: &mut zip::ZipArchive<File>, name: &str) -> Result<Vec<u8>, String> {
+    let mut f = zip.by_name(name).map_err(|e| e.to_string())?;
+    let mut b = Vec::new();
+    f.read_to_end(&mut b).map_err(|e| e.to_string())?;
+    Ok(b)
+}
+
+/// The book's pictures made smaller where that pays (by name), and the
+/// bytes it saves.
+fn shrunk_pictures(
+    zip: &mut zip::ZipArchive<File>,
+    opf: &str,
+    joined: &dyn Fn(&str) -> String,
+) -> Result<(HashMap<String, Vec<u8>>, u64), String> {
+    let mut replaced = HashMap::new();
+    let mut saved_bytes = 0u64;
+    let doc = roxmltree::Document::parse(opf.trim_start_matches('\u{feff}'))
+        .map_err(|e| e.to_string())?;
+    let pictures: Vec<String> = doc
+        .descendants()
+        .filter(|n| n.has_tag_name("item"))
+        .filter(|n| matches!(n.attribute("media-type"), Some("image/jpeg" | "image/png")))
+        .filter_map(|n| n.attribute("href").map(joined))
+        .collect();
+    for name in pictures {
+        let Ok(old) = zip_entry(zip, &name) else {
+            continue;
+        };
+        if let Some(new) = smaller(&old) {
+            saved_bytes += (old.len() - new.len()) as u64;
+            replaced.insert(name, new);
+        }
+    }
+    Ok((replaced, saved_bytes))
+}
+
+/// The book written again at `tmp`: the same entries in the same order
+/// (the `mimetype` first, stored), the OPF and the changed ones replaced,
+/// the added ones last.
+fn rewrite_zip(
+    zip: &mut zip::ZipArchive<File>,
+    tmp: &Path,
+    opf_name: &str,
+    opf: &str,
+    replaced: &HashMap<String, Vec<u8>>,
+    added: &[(String, Vec<u8>)],
+) -> Result<(), String> {
+    let out = File::create(tmp).map_err(|e| e.to_string())?;
+    let mut zout = zip::ZipWriter::new(BufWriter::new(out));
+    let deflated = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    let stored =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    for i in 0..zip.len() {
+        let f = zip.by_index_raw(i).map_err(|e| e.to_string())?;
+        let name = f.name().map_err(|e| e.to_string())?.into_owned();
+        if name == opf_name {
+            drop(f);
+            zout.start_file(&name, deflated)
+                .map_err(|e| e.to_string())?;
+            zout.write_all(opf.as_bytes()).map_err(|e| e.to_string())?;
+        } else if let Some(b) = replaced.get(&name) {
+            drop(f);
+            // Pictures are compressed already.
+            zout.start_file(&name, stored).map_err(|e| e.to_string())?;
+            zout.write_all(b).map_err(|e| e.to_string())?;
+        } else {
+            zout.raw_copy_file(f).map_err(|e| e.to_string())?;
+        }
+    }
+    for (name, b) in added {
+        zout.start_file(name, deflated).map_err(|e| e.to_string())?;
+        zout.write_all(b).map_err(|e| e.to_string())?;
+    }
+    let w = zout.finish().map_err(|e| e.to_string())?;
+    let file = w.into_inner().map_err(|e| e.error().to_string())?;
+    file.sync_all().map_err(|e| e.to_string())
 }
 
 /// A picture made smaller: at most `MAX_SIDE` on its longest side; a
