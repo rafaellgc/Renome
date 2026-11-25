@@ -671,6 +671,22 @@ impl Reader<'_> {
     }
 }
 
+/// An element's content in lines parted by `<br>`.
+fn parted_lines(e: &Elem) -> Vec<Vec<Node>> {
+    let mut lines: Vec<Vec<Node>> = vec![Vec::new()];
+    for k in &e.kids {
+        if matches!(k, Node::Elem(x) if x.name == "br") {
+            lines.push(Vec::new());
+        } else {
+            lines
+                .last_mut()
+                .expect("the list is never empty here")
+                .push(k.clone());
+        }
+    }
+    lines
+}
+
 /// A title's lines: its `<p>`s (or itself).
 fn lines(title: &Elem) -> Vec<Elem> {
     let ps: Vec<Elem> = title
@@ -1428,89 +1444,12 @@ impl Writer<'_> {
 
     fn block(&mut self, e: &Elem, base: &mut Option<usize>, has_content: &mut bool) {
         if let Some(level) = heading(&e.name) {
-            let b = *base.get_or_insert(level);
-            let want = 1 + level.saturating_sub(b);
-            if *has_content || want > 1 {
-                // A new section at the heading's depth.
-                if want <= self.depth {
-                    self.close_to(want - 1);
-                }
-                while self.depth < want {
-                    self.out.push_str("<section>");
-                    self.depth += 1;
-                }
-                *has_content = false;
-            }
-            let mut lines: Vec<Vec<Node>> = vec![Vec::new()];
-            for k in &e.kids {
-                if matches!(k, Node::Elem(x) if x.name == "br") {
-                    lines.push(Vec::new());
-                } else {
-                    lines
-                        .last_mut()
-                        .expect("the list is never empty here")
-                        .push(k.clone());
-                }
-            }
-            self.out.push_str("<title>");
-            let mut any = false;
-            for l in &lines {
-                let t = self.inline_of(l);
-                if !t.trim().is_empty() {
-                    self.out.push_str(&format!("<p>{}</p>", t.trim()));
-                    any = true;
-                }
-            }
-            if !any {
-                self.out.push_str("<p/>");
-            }
-            self.out.push_str("</title>");
+            self.heading(e, level, base, has_content);
             return;
         }
         *has_content = true;
         match e.name.as_str() {
-            "p" | "dt" | "dd" | "li" | "address" | "figcaption" | "caption" => {
-                // Lines parted by `<br>` are paragraphs of their own.
-                let mut lines: Vec<Vec<Node>> = vec![Vec::new()];
-                for k in &e.kids {
-                    if matches!(k, Node::Elem(x) if x.name == "br") {
-                        lines.push(Vec::new());
-                    } else {
-                        lines
-                            .last_mut()
-                            .expect("the list is never empty here")
-                            .push(k.clone());
-                    }
-                }
-                let center = e.attr("class").is_some_and(|c| c.contains("center"));
-                let mut any = false;
-                for l in &lines {
-                    let t = self.inline_of(l);
-                    let t = t.trim();
-                    if t.is_empty() || t == "\u{a0}" {
-                        continue;
-                    }
-                    any = true;
-                    if center && e.name == "p" && lines.len() == 1 && t.len() < 80 {
-                        self.out.push_str(&format!("<subtitle>{t}</subtitle>"));
-                    } else {
-                        self.out.push_str(&format!("<p>{t}</p>"));
-                    }
-                }
-                if !any
-                    && !e
-                        .kids
-                        .iter()
-                        .any(|k| matches!(k, Node::Elem(x) if x.name == "img"))
-                {
-                    self.out.push_str("<empty-line/>");
-                }
-                let mut imgs = Vec::new();
-                xhtml::find_all(&e.kids, "img", &mut imgs);
-                for x in imgs {
-                    self.image(x);
-                }
-            }
+            "p" | "dt" | "dd" | "li" | "address" | "figcaption" | "caption" => self.paragraphs(e),
             "img" => self.image(e),
             "hr" => self.out.push_str("<empty-line/>"),
             "br" => {}
@@ -1520,48 +1459,122 @@ impl Writer<'_> {
                         .push_str(&format!("<p><code>{}</code></p>", esc(line)));
                 }
             }
-            "blockquote" => {
-                self.out.push_str("<cite>");
-                let mut inner = String::new();
-                std::mem::swap(&mut inner, &mut self.out);
-                let mut hc = false;
-                let mut nb = None;
-                self.flat(&e.kids, &mut nb, &mut hc);
-                std::mem::swap(&mut inner, &mut self.out);
-                self.out
-                    .push_str(if inner.is_empty() { "<p/>" } else { &inner });
-                self.out.push_str("</cite>");
-            }
-            "table" => {
-                self.out.push_str("<table>");
-                let mut rows = Vec::new();
-                xhtml::find_all(&e.kids, "tr", &mut rows);
-                for r in rows {
-                    self.out.push_str("<tr>");
-                    for c in &r.kids {
-                        if let Node::Elem(td) = c
-                            && (td.name == "td" || td.name == "th")
-                        {
-                            let mut a = String::new();
-                            for k in ["colspan", "rowspan"] {
-                                if let Some(v) = td.attr(k) {
-                                    a.push_str(&format!(" {k}=\"{}\"", esc_attr(v)));
-                                }
-                            }
-                            let t = self.inline_of(&td.kids);
-                            self.out
-                                .push_str(&format!("<{n}{a}>{}</{n}>", t.trim(), n = td.name));
-                        }
-                    }
-                    self.out.push_str("</tr>");
-                }
-                self.out.push_str("</table>");
-            }
+            "blockquote" => self.quote(e),
+            "table" => self.table(e),
             _ => {
                 // A block holding others: what it holds.
                 self.blocks(&e.kids, base, has_content);
             }
         }
+    }
+
+    /// A heading: a new section at its depth, and its title.
+    fn heading(
+        &mut self,
+        e: &Elem,
+        level: usize,
+        base: &mut Option<usize>,
+        has_content: &mut bool,
+    ) {
+        let b = *base.get_or_insert(level);
+        let want = 1 + level.saturating_sub(b);
+        if *has_content || want > 1 {
+            // A new section at the heading's depth.
+            if want <= self.depth {
+                self.close_to(want - 1);
+            }
+            while self.depth < want {
+                self.out.push_str("<section>");
+                self.depth += 1;
+            }
+            *has_content = false;
+        }
+        self.out.push_str("<title>");
+        let mut any = false;
+        for l in &parted_lines(e) {
+            let t = self.inline_of(l);
+            if !t.trim().is_empty() {
+                self.out.push_str(&format!("<p>{}</p>", t.trim()));
+                any = true;
+            }
+        }
+        if !any {
+            self.out.push_str("<p/>");
+        }
+        self.out.push_str("</title>");
+    }
+
+    /// A paragraph: each of its lines parted by `<br>` is one of its own;
+    /// pictures in it follow.
+    fn paragraphs(&mut self, e: &Elem) {
+        let lines = parted_lines(e);
+        let center = e.attr("class").is_some_and(|c| c.contains("center"));
+        let mut any = false;
+        for l in &lines {
+            let t = self.inline_of(l);
+            let t = t.trim();
+            if t.is_empty() || t == "\u{a0}" {
+                continue;
+            }
+            any = true;
+            if center && e.name == "p" && lines.len() == 1 && t.len() < 80 {
+                self.out.push_str(&format!("<subtitle>{t}</subtitle>"));
+            } else {
+                self.out.push_str(&format!("<p>{t}</p>"));
+            }
+        }
+        if !any
+            && !e
+                .kids
+                .iter()
+                .any(|k| matches!(k, Node::Elem(x) if x.name == "img"))
+        {
+            self.out.push_str("<empty-line/>");
+        }
+        let mut imgs = Vec::new();
+        xhtml::find_all(&e.kids, "img", &mut imgs);
+        for x in imgs {
+            self.image(x);
+        }
+    }
+
+    fn quote(&mut self, e: &Elem) {
+        self.out.push_str("<cite>");
+        let mut inner = String::new();
+        std::mem::swap(&mut inner, &mut self.out);
+        let mut hc = false;
+        let mut nb = None;
+        self.flat(&e.kids, &mut nb, &mut hc);
+        std::mem::swap(&mut inner, &mut self.out);
+        self.out
+            .push_str(if inner.is_empty() { "<p/>" } else { &inner });
+        self.out.push_str("</cite>");
+    }
+
+    fn table(&mut self, e: &Elem) {
+        self.out.push_str("<table>");
+        let mut rows = Vec::new();
+        xhtml::find_all(&e.kids, "tr", &mut rows);
+        for r in rows {
+            self.out.push_str("<tr>");
+            for c in &r.kids {
+                if let Node::Elem(td) = c
+                    && (td.name == "td" || td.name == "th")
+                {
+                    let mut a = String::new();
+                    for k in ["colspan", "rowspan"] {
+                        if let Some(v) = td.attr(k) {
+                            a.push_str(&format!(" {k}=\"{}\"", esc_attr(v)));
+                        }
+                    }
+                    let t = self.inline_of(&td.kids);
+                    self.out
+                        .push_str(&format!("<{n}{a}>{}</{n}>", t.trim(), n = td.name));
+                }
+            }
+            self.out.push_str("</tr>");
+        }
+        self.out.push_str("</table>");
     }
 
     /// Blocks inside a `<cite>`: no sections, headings as subtitles.
@@ -1800,7 +1813,16 @@ mod tests {
     #[test]
     fn fb2_does_not_change() {
         let mut all = Vec::new();
-        for (name, book) in super::super::azw3_out::tests::golden_books() {
+        let mut rich = super::super::epub_out::tests::sample();
+        rich.chapters.push(Chapter {
+            name: "c0009.xhtml".into(),
+            title: "Rico".into(),
+            body: "<h1>Um<br/>Título</h1><p>Texto com <b>negrito</b> e <i>itálico</i>.<br/>Outra linha.</p><p class=\"center\">Centro</p><h2>Sub</h2><p>&#160;</p><blockquote><p>Citação</p><h3>dentro</h3></blockquote><pre>linha 1\nlinha 2</pre><table><tr><th colspan=\"2\">A</th></tr><tr><td>1</td><td rowspan=\"2\">2</td></tr></table><hr/><div><p>em div</p></div><ul><li>um</li><li>dois</li></ul><h1></h1><p>fim</p>".into(),
+            ..Default::default()
+        });
+        let mut books = super::super::azw3_out::tests::golden_books();
+        books.push(("rich", rich));
+        for (name, book) in books {
             // The document's own date is today's: left out.
             let xml = to_fb2(&book);
             let (head, rest) = xml.split_once("<document-info>").unwrap();
@@ -1813,6 +1835,6 @@ mod tests {
         }
         let sum = xxhash_rust::xxh3::xxh3_64(all.join("\n").as_bytes());
         println!("hash {sum:016x}");
-        assert_eq!(sum, 0x80329ba493ff22a7, "FB2 changed");
+        assert_eq!(sum, 0x1c767322318d6cfe, "FB2 changed");
     }
 }
