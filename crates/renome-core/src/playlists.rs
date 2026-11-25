@@ -398,7 +398,7 @@ pub fn playlist_dir(dir: &Path) -> Option<PathBuf> {
     album_songs(dir).map(|(d, _)| d.to_path_buf())
 }
 
-/// A playlist for the album in `dir` (see [`album_songs`]): its songs in
+/// A playlist for the album in `dir` (see `album_songs`): its songs in
 /// disc and track order, with their lengths and titles. Written as
 /// `<folder name>.m3u8`, with relative paths.
 pub fn album_playlist(dir: &Path) -> Option<(PathBuf, String)> {

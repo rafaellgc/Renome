@@ -1423,7 +1423,7 @@ impl History {
     }
 
     /// Runs and records in the history. What is about to happen is written
-    /// first (see [`Pending`]), so a stop halfway can be recovered.
+    /// first (see `Pending`), so a stop halfway can be recovered.
     pub fn apply(&self, ops: &[Operation]) -> ApplyReport {
         self.apply_with(ops, &Hooks::none())
     }

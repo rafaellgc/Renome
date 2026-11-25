@@ -287,7 +287,7 @@ pub struct PreviewItem {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub to_trash: bool,
     /// The work (movie, episode, book, comic) this file is named after and
-    /// goes with (see [`follow_works`]): when the work stays, so does it.
+    /// goes with (see `follow_works`): when the work stays, so does it.
     #[serde(skip)]
     pub follows: Option<PathBuf>,
     /// Goes with a work (named after it, or from its own folder): never

@@ -285,7 +285,7 @@ static NAME_DATE: LazyLock<Regex> = LazyLock::new(|| {
     .expect("valid regex")
 });
 
-/// See [`NAME_DATE`]; `None` when the name has no date (or an impossible
+/// See `NAME_DATE`; `None` when the name has no date (or an impossible
 /// one), and for years before 1970.
 pub fn date_in_name(stem: &str) -> Option<(NaiveDateTime, bool)> {
     let c = NAME_DATE.captures(stem)?;

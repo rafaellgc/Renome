@@ -297,7 +297,7 @@ fn put_back(f: &mut File, edit: &VideoEdit, old: &[u8]) -> std::io::Result<()> {
     f.sync_all()
 }
 
-/// Puts back what [`write`] changed. The file must still be as it was
+/// Puts back what [`write()`](fn@write) changed. The file must still be as it was
 /// left (its length and the bytes written), or it is not touched.
 pub fn restore(path: &Path, edit: &VideoEdit, store: &Path) -> Result<(), String> {
     let old = fs::read(store.join(&edit.store)).map_err(|e| e.to_string())?;

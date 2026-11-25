@@ -74,7 +74,7 @@ pub enum Field {
     MovementNumber,
 }
 
-/// What audiobooks get beyond a song's fields. Not among [`ALL`]: cleaning
+/// What audiobooks get beyond a song's fields. Not among `ALL`: cleaning
 /// a song still takes its comments away.
 pub const AUDIOBOOK: &[Field] = &[Field::Comment, Field::Movement, Field::MovementNumber];
 
@@ -122,7 +122,7 @@ const ALL: &[Field] = &[
 ];
 
 /// A tag item cleaning would keep: one this module writes, or one of
-/// [`KEEP`]. Anything else in a song is what cleaning takes away.
+/// `KEEP`. Anything else in a song is what cleaning takes away.
 pub fn kept(key: ItemKey) -> bool {
     KEEP.contains(&key) || ALL.iter().any(|f| f.key() == key)
 }
@@ -989,7 +989,7 @@ fn keep(data: &[u8], store: &Path) -> Result<String, String> {
 
 /// Writes the fields (and, with `cover`, the front cover in place of the
 /// pictures the file has) into the song at `path`; with `clean`, the other
-/// tags go away (but for [`KEEP`]). What is taken out is saved, pictures
+/// tags go away (but for `KEEP`). What is taken out is saved, pictures
 /// in `store`. Returns what to put back, or `None` when the file already
 /// had all that (it is then not written).
 pub fn write(
@@ -1110,7 +1110,7 @@ pub fn write(
     Ok(changed.then_some(backup))
 }
 
-/// Puts back what [`write`] changed (pictures and data from `store`).
+/// Puts back what [`write()`](fn@write) changed (pictures and data from `store`).
 pub fn restore(b: &Backup, store: &Path) -> Result<(), String> {
     if let Some(c) = &b.converted {
         return crate::convert::restore(&b.path, c);

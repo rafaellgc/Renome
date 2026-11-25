@@ -2,9 +2,9 @@
 //! name says, is written again as a zip with the same pages, in the same
 //! order, and the details of [`crate::inside`] when asked. So is a PDF,
 //! page by page: each page's picture taken out as it is when it can be,
-//! else the page drawn (see [`pdf_pages`]). And an EPUB or a Kindle book
+//! else the page drawn (see `pdf_pages`). And an EPUB or a Kindle book
 //! (MOBI, AZW3) whose every page is one picture, its pictures taken as
-//! they are (see [`crate::pages`]). And a folder of pictures (see
+//! they are (see `crate::pages`). And a folder of pictures (see
 //! [`folder_pages`]). Pictures are
 //! stored as they are (they do not get smaller compressed); other files
 //! are compressed. RAR archives are read with libarchive (see

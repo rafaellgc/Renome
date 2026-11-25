@@ -1,6 +1,6 @@
 //! Renome core.
 //!
-//! - [`scan`]: collects files from paths (files or folders).
+//! - [`scan`](mod@scan): collects files from paths (files or folders).
 //! - [`filter`]: list filter (which files are shown and will be renamed).
 //! - [`rules`]: name transformation rules, applied in sequence.
 //! - [`playlists`]: cue sheets and playlists follow renamed files.
