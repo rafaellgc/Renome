@@ -1287,270 +1287,331 @@ fn starts_indented(page_blocks: &[Vec<Block>]) -> bool {
     all >= 50 && ind * 20 >= all
 }
 
-/// Reads the PDF at `path`.
-pub fn read(path: &Path) -> Result<Book, String> {
-    let data = Arc::new(std::fs::read(path).map_err(|e| e.to_string())?);
-    let mut book = Book::new();
-    book.css.push_str(PDF_CSS);
-    let own = crate::ebook::read_as(path, "pdf");
-    book.meta.title = own.title.clone();
-    book.meta.authors = own.authors.clone();
-    book.meta.language = own.language.clone();
-    book.meta.publisher = own.publisher.clone();
-    book.meta.isbn = own.isbns.first().cloned().unwrap_or_default();
-    book.meta.date = own.year.map(|y| y.to_string()).unwrap_or_default();
-    book.meta.series = own.series.clone();
-    book.meta.series_index = own.series_index;
+/// What the paragraph pass knows about the whole book.
+struct Reading {
+    body: f32,
+    col_width: f32,
+    words: Vocab,
+    hsizes: Vec<f32>,
+    /// The note marks each page's text raises.
+    marks: Vec<HashSet<String>>,
+    /// Paragraphs start indented in this book.
+    indents: bool,
+}
 
-    let pages = collect(&data, &mut book)?;
-    if pages.is_empty() {
-        return Err("bookBroken".into());
+impl Reading {
+    fn of(page_blocks: &[Vec<Block>], body: f32) -> Self {
+        Reading {
+            body,
+            col_width: column_width(page_blocks, body),
+            words: vocabulary(page_blocks),
+            hsizes: heading_sizes(page_blocks, body),
+            marks: note_marks(page_blocks),
+            indents: starts_indented(page_blocks),
+        }
     }
-    // Text drawn invisibly (the text layer of a scanned book) counts only
-    // on pages with no visible text.
-    let mut pages = hide_invisible_text(pages);
-    let garbled = blank_garbled(&mut pages);
-    let letters: usize = pages.iter().map(|p| p.glyphs.len()).sum();
-    if letters < pages.len() * 30 {
-        return scanned(path, book);
-    }
-    draw_garbled_pages(&mut pages, &garbled, &data, &mut book);
-    drop_font_emphasis(&mut pages);
-    let body = body_size(&pages);
-    let mut page_blocks = blocks_per_page(&pages, body);
-    drop_furniture(&mut page_blocks, &pages);
-    let col_width = column_width(&page_blocks, body);
-    let words = vocabulary(&page_blocks);
-    let hsizes = heading_sizes(&page_blocks, body);
-    let level_of = |s: f32| -> Option<usize> {
-        if s < body * 1.15 {
+
+    /// The heading level letters of size `s` have, if they are a heading's.
+    fn level_of(&self, s: f32) -> Option<usize> {
+        if s < self.body * 1.15 {
             return None;
         }
-        hsizes
+        self.hsizes
             .iter()
-            .position(|h| (s - h).abs() < body * 0.08 || s > *h)
+            .position(|h| (s - h).abs() < self.body * 0.08 || s > *h)
             .map(|i| i + 1)
-    };
+    }
+}
 
-    // Bookmarks: chapter titles and where they start.
-    let outline = outline_of(&data);
+/// The paragraphs found so far, with the notes and pictures between them.
+#[derive(Default)]
+struct Paras {
+    /// Each paragraph and the page it ends on.
+    paras: Vec<(usize, Para)>,
+    /// Notes at the foot of a page: page, mark, text.
+    notes: Vec<(usize, String, Vec<Run>)>,
+    /// The paragraph still open (the next line may go on it).
+    pending: Option<Para>,
+    /// Pictures: how many paragraphs come before, page, name.
+    pics_at: Vec<(usize, usize, String)>,
+}
 
-    let marks = note_marks(&page_blocks);
-    let indents = starts_indented(&page_blocks);
+impl Paras {
+    /// Closes the open paragraph, on page `pi`.
+    fn close(&mut self, pi: usize) {
+        if let Some(p) = self.pending.take() {
+            self.paras.push((pi, p));
+        }
+    }
+}
 
-    // Paragraphs.
-    let mut paras: Vec<(usize, Para)> = Vec::new();
-    let mut notes: Vec<(usize, String, Vec<Run>)> = Vec::new();
-    let mut pending: Option<Para> = None;
-    let mut pics_at: Vec<(usize, usize, String)> = Vec::new();
+/// The number or mark a note starts with.
+fn mark_of(t: &str) -> String {
+    t.chars()
+        .take_while(|c| c.is_ascii_digit() || matches!(c, '*' | '†' | '‡'))
+        .collect()
+}
+
+/// A block of notes at the foot of a page: smaller letters, low on the
+/// page, starting with a number or mark that the page's text has raised.
+/// Takes them (one per line starting with a mark the page raised) and
+/// says whether it was one.
+fn take_notes(st: &mut Paras, pi: usize, b: &Block, bsize: f32, ph: f32, rd: &Reading) -> bool {
+    let mark = mark_of(&b.lines[0].text());
+    if !(bsize < rd.body * 0.92
+        && b.top > ph * 0.55
+        && !mark.is_empty()
+        && mark.len() <= 3
+        && rd.marks[pi].contains(&mark))
+    {
+        return false;
+    }
+    let mut cur: Option<(String, Para)> = None;
+    for l in &b.lines {
+        let m = mark_of(&l.text());
+        if !m.is_empty() && rd.marks[pi].contains(&m) {
+            if let Some((m, p)) = cur.take() {
+                st.notes.push((pi, m, p.runs));
+            }
+            let mut p = Para {
+                runs: l.runs.clone(),
+                ..Default::default()
+            };
+            if let Some(f) = p.runs.first_mut() {
+                f.text = f.text[m.len()..]
+                    .trim_start_matches(['.', ')', ' '])
+                    .to_string();
+            }
+            cur = Some((m, p));
+        } else if let Some((_, p)) = cur.as_mut() {
+            push_line(p, &l.runs, &rd.words, false);
+        }
+    }
+    if let Some((m, p)) = cur.take() {
+        st.notes.push((pi, m, p.runs));
+    }
+    true
+}
+
+/// What the lines of one block say about how to cut it into paragraphs.
+struct BlockView<'a> {
+    b: &'a Block,
+    bsize: f32,
+    /// Its heading level, when the block is a heading.
+    level: Option<usize>,
+    justified: bool,
+    /// Lines kept as they are (a list, a poem, an address): most of them
+    /// well short of a full line, and not justified.
+    lined: bool,
+    /// The usual distance between two lines.
+    typical: f32,
+    /// The text area: where most lines start and end.
+    left: f32,
+    right: f32,
+}
+
+impl<'a> BlockView<'a> {
+    fn of(b: &'a Block, bsize: f32, left: f32, right: f32, rd: &Reading) -> Self {
+        let level = rd
+            .level_of(bsize)
+            .filter(|_| b.lines.len() <= 4 && b.text().chars().count() < 200);
+        let justified = b.lines.len() >= 3 && {
+            let full = b.lines.iter().filter(|l| l.x1 > b.x1 - bsize * 1.2).count();
+            full * 2 >= b.lines.len()
+        };
+        let lined = !justified
+            && b.lines.len() >= 2
+            && b.lines
+                .iter()
+                .filter(|l| l.x1 - l.x0 < rd.col_width * 0.72)
+                .count()
+                * 10
+                >= b.lines.len() * 7;
+        let typical = {
+            let gaps: Vec<f32> = b.lines.windows(2).map(|w| w[1].base - w[0].base).collect();
+            median(gaps.into_iter())
+        };
+        BlockView {
+            b,
+            bsize,
+            level,
+            justified,
+            lined,
+            typical,
+            left,
+            right,
+        }
+    }
+
+    /// A line bigger than the next, or bold over plain lines, that does not
+    /// end a sentence, after one that does (or first): a heading over its
+    /// paragraph.
+    fn heading_line(&self, li: usize) -> bool {
+        let b = self.b;
+        let l0 = &b.lines[li];
+        let Some(next) = b.lines.get(li + 1) else {
+            return false;
+        };
+        let t0 = l0.text();
+        let bold = |l: &Chunk| l.runs.iter().all(|r| r.bold || r.text.trim().is_empty());
+        self.level.is_none()
+            && (li == 0 || ends_sentence(&b.lines[li - 1].text()))
+            && !ends_strongly(&t0)
+            && !t0.trim_end().ends_with([',', ';', '-'])
+            && t0.chars().count() < 150
+            && !starts_lower(&next.text())
+            && (l0.size > next.size * 1.045 || (bold(l0) && !bold(next)))
+    }
+
+    /// Whether line `li` (its text `t`) starts a paragraph of its own.
+    fn starts_paragraph(
+        &self,
+        li: usize,
+        t: &str,
+        centered: bool,
+        indented: bool,
+        pending: &Option<Para>,
+        rd: &Reading,
+    ) -> bool {
+        let (b, bsize, level) = (self.b, self.bsize, self.level);
+        let l = &b.lines[li];
+        if li == 0 {
+            // A block's start: a new paragraph, unless the last one goes on
+            // (cut by a page or column).
+            // In a book whose paragraphs start indented, a block starting at
+            // the margin goes on the paragraph before.
+            let at_margin = (l.x0 - self.left).abs() < bsize * 0.6;
+            return !matches!(pending, Some(p) if level.is_none()
+                && p.heading.is_none()
+                && !p.center
+                && !indented
+                && !centered
+                // Same letter size, or stopped right in a word's
+                // place (small capitals go on in smaller letters).
+                && ((p.size - bsize).abs() < rd.body * 0.15
+                    || p.runs.last().is_some_and(|r| r.text.trim_end().chars().last().is_some_and(|c| c.is_alphanumeric())))
+                && ((rd.indents && at_margin && !p.runs.is_empty())
+                    || !p.runs.last().is_some_and(|r| ends_strongly(&r.text))
+                        && (starts_lower(t)
+                            || p.runs.last().is_some_and(|r| r.text.trim_end().ends_with('-'))
+                            // A long paragraph stopped without any
+                            // mark (by the page's end): it goes on.
+                            || open_end(p))));
+        }
+        let prev = &b.lines[li - 1];
+        let gap = l.base - prev.base;
+        let short = self.justified && prev.x1 < b.x1 - bsize * 1.5;
+        // A line that does not end a sentence, followed by one starting in
+        // lower case: the same paragraph.
+        let pt = prev.text();
+        let goes_on = !ends_strongly(&pt)
+            && (starts_lower(t)
+                // Stopped on a word or a comma: the sentence goes on (a
+                // name in capitals, a year).
+                || (prev.x1 > b.x1 - bsize * 1.5
+                    && pt.trim_end().chars().last().is_some_and(|c| c.is_alphabetic() || c == ',')));
+        level.is_none()
+            && !goes_on
+            && (indented && !b.lines[li - 1..].iter().all(|x| x.x0 > b.x0 + bsize * 0.6)
+                || short && ends_sentence(&prev.text())
+                || gap > self.typical * 1.45 && self.typical > 0.0
+                || centered)
+    }
+}
+
+/// Cuts the lines of a block into paragraphs, headings first.
+fn block_paragraphs(st: &mut Paras, pi: usize, v: &BlockView, rd: &Reading) {
+    let (b, bsize) = (v.b, v.bsize);
+    let mut after_heading = false;
+    for (li, l) in b.lines.iter().enumerate() {
+        let t = l.text();
+        if v.heading_line(li) {
+            st.close(pi);
+            st.paras.push((
+                pi,
+                Para {
+                    runs: l.runs.clone(),
+                    size: l.size,
+                    heading: Some(rd.level_of(l.size).unwrap_or(LOWEST)),
+                    ..Default::default()
+                },
+            ));
+            after_heading = true;
+            continue;
+        }
+        if after_heading {
+            after_heading = false;
+            st.pending = Some(Para {
+                size: bsize,
+                ..Default::default()
+            });
+            let p = st.pending.as_mut().expect("set just above");
+            p.runs = l.runs.clone();
+            p.ends = ends_sentence(&t);
+            continue;
+        }
+        let centered = (l.x0 - v.left) > bsize * 2.0
+            && ((l.x0 - v.left) - (v.right - l.x1)).abs() < bsize * 1.5
+            && (l.x1 - l.x0) < (v.right - v.left) * 0.8;
+        let indented = l.x0 > b.x0 + bsize * 0.6;
+        if v.starts_paragraph(li, &t, centered, indented, &st.pending, rd) {
+            st.close(pi);
+            st.pending = Some(Para {
+                size: bsize,
+                center: centered && v.level.is_none(),
+                heading: v.level,
+                ..Default::default()
+            });
+        }
+        let p = st.pending.as_mut().expect("set when it was none");
+        if p.runs.is_empty() {
+            p.runs = l.runs.clone();
+        } else {
+            push_line(p, &l.runs, &rd.words, v.lined);
+        }
+        p.ends = ends_sentence(&t);
+    }
+    // A heading or a centred line ends with its block.
+    if st
+        .pending
+        .as_ref()
+        .is_some_and(|p| p.heading.is_some() || p.center)
+    {
+        st.close(pi);
+    }
+}
+
+/// The paragraphs of the book, page by page, and the notes and pictures.
+fn read_paragraphs(pages: &[PageData], page_blocks: &[Vec<Block>], rd: &Reading) -> Paras {
+    let mut st = Paras::default();
     for (pi, bl) in page_blocks.iter().enumerate() {
-        let (pw, ph) = (pages[pi].w, pages[pi].h);
+        let ph = pages[pi].h;
         // The text area: where most lines start and end.
         let left = median(bl.iter().filter(|b| b.pic.is_none()).map(|b| b.x0));
         let right = median(bl.iter().filter(|b| b.pic.is_none()).map(|b| b.x1));
         for b in bl {
             if let Some(name) = &b.pic {
-                if let Some(p) = pending.take() {
-                    paras.push((pi, p));
-                }
-                pics_at.push((paras.len(), pi, name.clone()));
+                st.close(pi);
+                st.pics_at.push((st.paras.len(), pi, name.clone()));
                 continue;
             }
             let bsize = b.size();
-            // Notes at the foot: smaller letters, low on the page, starting
-            // with a number or mark that the page's text has raised.
-            let first = b.lines[0].text();
-            let mark_of = |t: &str| -> String {
-                t.chars()
-                    .take_while(|c| c.is_ascii_digit() || matches!(c, '*' | '†' | '‡'))
-                    .collect()
-            };
-            let mark = mark_of(&first);
-            if bsize < body * 0.92
-                && b.top > ph * 0.55
-                && !mark.is_empty()
-                && mark.len() <= 3
-                && marks[pi].contains(&mark)
-            {
-                // One note per line starting with a mark the page raised.
-                let mut cur: Option<(String, Para)> = None;
-                for l in &b.lines {
-                    let m = mark_of(&l.text());
-                    if !m.is_empty() && marks[pi].contains(&m) {
-                        if let Some((m, p)) = cur.take() {
-                            notes.push((pi, m, p.runs));
-                        }
-                        let mut p = Para {
-                            runs: l.runs.clone(),
-                            ..Default::default()
-                        };
-                        if let Some(f) = p.runs.first_mut() {
-                            f.text = f.text[m.len()..]
-                                .trim_start_matches(['.', ')', ' '])
-                                .to_string();
-                        }
-                        cur = Some((m, p));
-                    } else if let Some((_, p)) = cur.as_mut() {
-                        push_line(p, &l.runs, &words, false);
-                    }
-                }
-                if let Some((m, p)) = cur.take() {
-                    notes.push((pi, m, p.runs));
-                }
+            if take_notes(&mut st, pi, b, bsize, ph, rd) {
                 continue;
             }
-            let level =
-                level_of(bsize).filter(|_| b.lines.len() <= 4 && b.text().chars().count() < 200);
-            let justified = b.lines.len() >= 3 && {
-                let full = b.lines.iter().filter(|l| l.x1 > b.x1 - bsize * 1.2).count();
-                full * 2 >= b.lines.len()
-            };
-            // Lines kept as they are (a list, a poem, an address): most of
-            // them well short of a full line, and not justified.
-            let lined = !justified
-                && b.lines.len() >= 2
-                && b.lines
-                    .iter()
-                    .filter(|l| l.x1 - l.x0 < col_width * 0.72)
-                    .count()
-                    * 10
-                    >= b.lines.len() * 7;
-            let typical = {
-                let gaps: Vec<f32> = b.lines.windows(2).map(|w| w[1].base - w[0].base).collect();
-                median(gaps.into_iter())
-            };
-            // A line bigger than the next, or bold over plain lines, that
-            // does not end a sentence, after one that does (or first): a
-            // heading over its paragraph.
-            let heading_line = |li: usize| -> bool {
-                let l0 = &b.lines[li];
-                let Some(next) = b.lines.get(li + 1) else {
-                    return false;
-                };
-                let t0 = l0.text();
-                let bold = |l: &Chunk| l.runs.iter().all(|r| r.bold || r.text.trim().is_empty());
-                level.is_none()
-                    && (li == 0 || ends_sentence(&b.lines[li - 1].text()))
-                    && !ends_strongly(&t0)
-                    && !t0.trim_end().ends_with([',', ';', '-'])
-                    && t0.chars().count() < 150
-                    && !starts_lower(&next.text())
-                    && (l0.size > next.size * 1.045 || (bold(l0) && !bold(next)))
-            };
-            let mut after_heading = false;
-            for (li, l) in b.lines.iter().enumerate() {
-                let t = l.text();
-                if heading_line(li) {
-                    if let Some(p) = pending.take() {
-                        paras.push((pi, p));
-                    }
-                    paras.push((
-                        pi,
-                        Para {
-                            runs: l.runs.clone(),
-                            size: l.size,
-                            heading: Some(level_of(l.size).unwrap_or(LOWEST)),
-                            ..Default::default()
-                        },
-                    ));
-                    after_heading = true;
-                    continue;
-                }
-                if after_heading {
-                    after_heading = false;
-                    pending = Some(Para {
-                        size: bsize,
-                        ..Default::default()
-                    });
-                    let p = pending.as_mut().expect("set just above");
-                    p.runs = l.runs.clone();
-                    p.ends = ends_sentence(&t);
-                    continue;
-                }
-                let centered = (l.x0 - left) > bsize * 2.0
-                    && ((l.x0 - left) - (right - l.x1)).abs() < bsize * 1.5
-                    && (l.x1 - l.x0) < (right - left) * 0.8;
-                let indented = l.x0 > b.x0 + bsize * 0.6;
-                let new_para = if li == 0 {
-                    // A block's start: a new paragraph, unless the last one
-                    // goes on (cut by a page or column).
-                    // In a book whose paragraphs start indented, a block
-                    // starting at the margin goes on the paragraph before.
-                    let at_margin = (l.x0 - left).abs() < bsize * 0.6;
-                    !matches!(&pending, Some(p) if level.is_none()
-                        && p.heading.is_none()
-                        && !p.center
-                        && !indented
-                        && !centered
-                        // Same letter size, or stopped right in a word's
-                        // place (small capitals go on in smaller letters).
-                        && ((p.size - bsize).abs() < body * 0.15
-                            || p.runs.last().is_some_and(|r| r.text.trim_end().chars().last().is_some_and(|c| c.is_alphanumeric())))
-                        && ((indents && at_margin && !p.runs.is_empty())
-                            || !p.runs.last().is_some_and(|r| ends_strongly(&r.text))
-                                && (starts_lower(&t)
-                                    || p.runs.last().is_some_and(|r| r.text.trim_end().ends_with('-'))
-                                    // A long paragraph stopped without any
-                                    // mark (by the page's end): it goes on.
-                                    || open_end(p))))
-                } else {
-                    let prev = &b.lines[li - 1];
-                    let gap = l.base - prev.base;
-                    let short = justified && prev.x1 < b.x1 - bsize * 1.5;
-                    // A line that does not end a sentence, followed by one
-                    // starting in lower case: the same paragraph.
-                    let pt = prev.text();
-                    let goes_on = !ends_strongly(&pt)
-                        && (starts_lower(&t)
-                            // Stopped on a word or a comma: the sentence
-                            // goes on (a name in capitals, a year).
-                            || (prev.x1 > b.x1 - bsize * 1.5
-                                && pt.trim_end().chars().last().is_some_and(|c| c.is_alphabetic() || c == ',')));
-                    level.is_none()
-                        && !goes_on
-                        && (indented
-                            && !b.lines[li - 1..].iter().all(|x| x.x0 > b.x0 + bsize * 0.6)
-                            || short && ends_sentence(&prev.text())
-                            || gap > typical * 1.45 && typical > 0.0
-                            || centered)
-                };
-                if new_para {
-                    if let Some(p) = pending.take() {
-                        paras.push((pi, p));
-                    }
-                    pending = Some(Para {
-                        size: bsize,
-                        center: centered && level.is_none(),
-                        heading: level,
-                        ..Default::default()
-                    });
-                }
-                let p = pending.as_mut().expect("set when it was none");
-                if p.runs.is_empty() {
-                    p.runs = l.runs.clone();
-                } else {
-                    push_line(p, &l.runs, &words, lined);
-                }
-                p.ends = ends_sentence(&t);
-            }
-            // A heading or a centred line ends with its block.
-            if pending
-                .as_ref()
-                .is_some_and(|p| p.heading.is_some() || p.center)
-                && let Some(p) = pending.take()
-            {
-                paras.push((pi, p));
-            }
-            let _ = pw;
+            block_paragraphs(&mut st, pi, &BlockView::of(b, bsize, left, right, rd), rd);
         }
     }
-    if let Some(p) = pending.take() {
-        paras.push((page_blocks.len().saturating_sub(1), p));
+    if let Some(p) = st.pending.take() {
+        st.paras.push((page_blocks.len().saturating_sub(1), p));
     }
+    st
+}
 
-    // A bold short line alone, at the body's size, after bigger headings
-    // exist: the lowest heading level.
-    let bold_level = hsizes.len() + 1;
+/// A bold short line alone, at the body's size, after bigger headings
+/// exist: the lowest heading level.
+fn bold_headings(paras: &mut [(usize, Para)], sizes: usize) {
+    let bold_level = sizes + 1;
     for (_, p) in paras.iter_mut() {
         if p.heading == Some(LOWEST) {
             p.heading = Some(bold_level.min(6));
@@ -1567,107 +1628,175 @@ pub fn read(path: &Path) -> Result<Book, String> {
             p.heading = Some(bold_level.min(6));
         }
     }
+}
 
-    // Bookmarks pick the chapter headings: on its page, the first
-    // paragraph whose text is the bookmark's.
+/// Bookmarks pick the chapter headings: on its page, the first paragraph
+/// whose text is the bookmark's. The bookmarks that match none: (page,
+/// level, title).
+fn apply_outline(
+    paras: &mut Vec<(usize, Para)>,
+    outline: &[(usize, String, usize)],
+) -> Vec<(usize, usize, String)> {
     let mut toc_marks: Vec<(usize, usize, String)> = Vec::new();
-    if outline.len() >= 2 {
-        let norm = |s: &str| -> String {
-            s.chars()
-                .filter(|c| c.is_alphanumeric())
-                .flat_map(|c| c.to_lowercase())
-                .collect()
-        };
-        // The bookmarks' levels become the headings' levels.
-        for (level, title, page) in &outline {
-            let want = norm(title);
-            if want.is_empty() {
-                continue;
-            }
-            let hit = paras.iter().position(|(pi, p)| {
-                *pi + 1 >= *page && *pi <= *page + 1 && {
-                    let t: String = p.runs.iter().map(|r| r.text.as_str()).collect();
-                    let n = norm(&t);
-                    !n.is_empty()
-                        && n.len() < want.len() * 2 + 10
-                        && (n.contains(&want) || want.contains(&n))
-                }
-            });
-            if let Some(i) = hit {
-                // The title starts a longer paragraph (no break after it
-                // in the PDF): the title alone is the heading.
-                let p = &paras[i].1;
+    if outline.len() < 2 {
+        return toc_marks;
+    }
+    let norm = |s: &str| -> String {
+        s.chars()
+            .filter(|c| c.is_alphanumeric())
+            .flat_map(|c| c.to_lowercase())
+            .collect()
+    };
+    // The bookmarks' levels become the headings' levels.
+    for (level, title, page) in outline {
+        let want = norm(title);
+        if want.is_empty() {
+            continue;
+        }
+        let hit = paras.iter().position(|(pi, p)| {
+            *pi + 1 >= *page && *pi <= *page + 1 && {
                 let t: String = p.runs.iter().map(|r| r.text.as_str()).collect();
                 let n = norm(&t);
-                if n.starts_with(&want) && n.len() > want.len() + 12 {
-                    let (head, rest) = split_runs(&p.runs, want.chars().count());
-                    let pi = paras[i].0;
-                    let size = p.size;
-                    paras[i].1.runs = rest;
-                    paras.insert(
-                        i,
-                        (
-                            pi,
-                            Para {
-                                runs: head,
-                                size,
-                                heading: Some((*level).clamp(1, 6)),
-                                ..Default::default()
-                            },
-                        ),
-                    );
-                } else {
-                    paras[i].1.heading = Some((*level).clamp(1, 6));
-                }
-            } else {
-                toc_marks.push((*page, *level, title.clone()));
+                !n.is_empty()
+                    && n.len() < want.len() * 2 + 10
+                    && (n.contains(&want) || want.contains(&n))
             }
+        });
+        let Some(i) = hit else {
+            toc_marks.push((*page, *level, title.clone()));
+            continue;
+        };
+        // The title starts a longer paragraph (no break after it in the
+        // PDF): the title alone is the heading.
+        let p = &paras[i].1;
+        let t: String = p.runs.iter().map(|r| r.text.as_str()).collect();
+        let n = norm(&t);
+        if n.starts_with(&want) && n.len() > want.len() + 12 {
+            let (head, rest) = split_runs(&p.runs, want.chars().count());
+            let pi = paras[i].0;
+            let size = p.size;
+            paras[i].1.runs = rest;
+            paras.insert(
+                i,
+                (
+                    pi,
+                    Para {
+                        runs: head,
+                        size,
+                        heading: Some((*level).clamp(1, 6)),
+                        ..Default::default()
+                    },
+                ),
+            );
+        } else {
+            paras[i].1.heading = Some((*level).clamp(1, 6));
         }
     }
+    toc_marks
+}
 
-    // Write the paragraphs as nodes; notes of each page after its text
-    // (collected at the end of each chapter).
+fn note_key(pi: usize, m: &str) -> String {
+    format!("fn{}_{}", pi + 1, m.replace(['*', '†', '‡'], "x"))
+}
+
+/// A picture on a line of its own.
+fn picture_node(name: &str) -> Node {
+    let mut d = Elem::new("div");
+    d.set("class", "center");
+    d.push(Node::Elem(
+        Elem::new("img")
+            .with("src", name.to_string())
+            .with("alt", ""),
+    ));
+    Node::Elem(d)
+}
+
+/// A paragraph or heading as an element; a note mark that has its note
+/// becomes a link to it.
+fn paragraph_element(p: &Para, note_ids: &HashSet<String>) -> Elem {
+    let tag = match p.heading {
+        Some(l) => format!("h{}", l.clamp(1, 6)),
+        None => "p".into(),
+    };
+    let mut e = Elem::new(&tag);
+    if p.center && p.heading.is_none() {
+        e.set("class", "center");
+    }
+    for r in &p.runs {
+        if r.sup {
+            let m = r.text.trim();
+            let id = note_key(r.page, m);
+            if note_ids.contains(&id) {
+                let mut a = Elem::new("a")
+                    .with("href", format!("#{id}"))
+                    .with("id", format!("r{id}"))
+                    .with("class", "noteref")
+                    .with("epub:type", "noteref");
+                a.text(m.to_string());
+                if r.text.starts_with(' ') {
+                    e.text(" ");
+                }
+                e.push(Node::Elem(a));
+                if r.text.ends_with(' ') {
+                    e.text(" ");
+                }
+                continue;
+            }
+        }
+        push_run(&mut e, r);
+    }
+    e
+}
+
+/// Puts the notes collected for a chapter in a section after its text.
+fn flush_notes(nodes: &mut Vec<Node>, chapter_notes: &mut Vec<Node>) {
+    if !chapter_notes.is_empty() {
+        let mut sec = Elem::new("section");
+        sec.set("class", "notes");
+        sec.set("epub:type", "footnotes");
+        sec.kids = std::mem::take(chapter_notes);
+        nodes.push(Node::Elem(sec));
+    }
+}
+
+/// Writes the paragraphs as nodes; notes of each page after its text
+/// (collected at the end of each chapter).
+fn write_nodes(
+    paras: Vec<(usize, Para)>,
+    notes: Vec<(usize, String, Vec<Run>)>,
+    pics_at: &[(usize, usize, String)],
+    mut toc_marks: Vec<(usize, usize, String)>,
+) -> Vec<Node> {
     let mut nodes: Vec<Node> = Vec::new();
-    let note_key = |pi: usize, m: &str| format!("fn{}_{}", pi + 1, m.replace(['*', '†', '‡'], "x"));
     let note_ids: HashSet<String> = notes.iter().map(|(pi, m, _)| note_key(*pi, m)).collect();
     let split_level = paras.iter().filter_map(|(_, p)| p.heading).min();
     let mut chapter_notes: Vec<Node> = Vec::new();
-    let flush_notes = |nodes: &mut Vec<Node>, chapter_notes: &mut Vec<Node>| {
-        if !chapter_notes.is_empty() {
-            let mut sec = Elem::new("section");
-            sec.set("class", "notes");
-            sec.set("epub:type", "footnotes");
-            sec.kids = std::mem::take(chapter_notes);
-            nodes.push(Node::Elem(sec));
-        }
-    };
     let mut notes_by_page: HashMap<usize, Vec<(String, Vec<Run>)>> = HashMap::new();
     for (pi, m, runs) in notes {
         notes_by_page.entry(pi).or_default().push((m, runs));
     }
+    let take_page_notes =
+        |page: usize,
+         chapter_notes: &mut Vec<Node>,
+         by_page: &mut HashMap<usize, Vec<(String, Vec<Run>)>>| {
+            if let Some(ns) = by_page.remove(&page) {
+                for (m, runs) in ns {
+                    chapter_notes.push(Node::Elem(note_node(&note_key(page, &m), &m, &runs)));
+                }
+            }
+        };
     let mut last_page = usize::MAX;
     let mut pic_i = 0;
     let mut mark_i = 0;
     toc_marks.sort_by_key(|m| m.0);
     for (idx, (pi, p)) in paras.into_iter().enumerate() {
         while pic_i < pics_at.len() && pics_at[pic_i].0 <= idx {
-            let mut d = Elem::new("div");
-            d.set("class", "center");
-            d.push(Node::Elem(
-                Elem::new("img")
-                    .with("src", pics_at[pic_i].2.clone())
-                    .with("alt", ""),
-            ));
-            nodes.push(Node::Elem(d));
+            nodes.push(picture_node(&pics_at[pic_i].2));
             pic_i += 1;
         }
         if pi != last_page {
-            if last_page != usize::MAX
-                && let Some(ns) = notes_by_page.remove(&last_page)
-            {
-                for (m, runs) in ns {
-                    chapter_notes.push(Node::Elem(note_node(&note_key(last_page, &m), &m, &runs)));
-                }
+            if last_page != usize::MAX {
+                take_page_notes(last_page, &mut chapter_notes, &mut notes_by_page);
             }
             // Bookmarks that matched no heading: a heading of their own.
             while mark_i < toc_marks.len() && toc_marks[mark_i].0 <= pi + 1 {
@@ -1686,61 +1815,23 @@ pub fn read(path: &Path) -> Result<Book, String> {
         if p.heading.is_some_and(|l| Some(l) <= split_level) {
             flush_notes(&mut nodes, &mut chapter_notes);
         }
-        let tag = match p.heading {
-            Some(l) => format!("h{}", l.clamp(1, 6)),
-            None => "p".into(),
-        };
-        let mut e = Elem::new(&tag);
-        if p.center && p.heading.is_none() {
-            e.set("class", "center");
-        }
-        for r in &p.runs {
-            if r.sup {
-                let m = r.text.trim();
-                let id = note_key(r.page, m);
-                if note_ids.contains(&id) {
-                    let mut a = Elem::new("a")
-                        .with("href", format!("#{id}"))
-                        .with("id", format!("r{id}"))
-                        .with("class", "noteref")
-                        .with("epub:type", "noteref");
-                    a.text(m.to_string());
-                    if r.text.starts_with(' ') {
-                        e.text(" ");
-                    }
-                    e.push(Node::Elem(a));
-                    if r.text.ends_with(' ') {
-                        e.text(" ");
-                    }
-                    continue;
-                }
-            }
-            push_run(&mut e, r);
-        }
+        let e = paragraph_element(&p, &note_ids);
         if !e.plain().trim().is_empty() || p.heading.is_none() && !e.kids.is_empty() {
             nodes.push(Node::Elem(e));
         }
     }
-    while pic_i < pics_at.len() {
-        let mut d = Elem::new("div");
-        d.set("class", "center");
-        d.push(Node::Elem(
-            Elem::new("img")
-                .with("src", pics_at[pic_i].2.clone())
-                .with("alt", ""),
-        ));
-        nodes.push(Node::Elem(d));
-        pic_i += 1;
+    for pic in &pics_at[pic_i..] {
+        nodes.push(picture_node(&pic.2));
     }
-    if let Some(ns) = notes_by_page.remove(&last_page) {
-        for (m, runs) in ns {
-            chapter_notes.push(Node::Elem(note_node(&note_key(last_page, &m), &m, &runs)));
-        }
-    }
+    take_page_notes(last_page, &mut chapter_notes, &mut notes_by_page);
     flush_notes(&mut nodes, &mut chapter_notes);
+    drop_stray_marks(&mut nodes);
+    nodes
+}
 
-    // A bookmark's heading put in where its title was not found, with a
-    // heading right after it: that one is the chapter's.
+/// A bookmark's heading put in where its title was not found, with a
+/// heading right after it: that one is the chapter's.
+fn drop_stray_marks(nodes: &mut Vec<Node>) {
     let is_heading =
         |n: &Node| matches!(n, Node::Elem(e) if e.name.len() == 2 && e.name.starts_with('h'));
     let mut i = 0;
@@ -1757,6 +1848,54 @@ pub fn read(path: &Path) -> Result<Book, String> {
         }
         i += 1;
     }
+}
+
+/// The book's details as the PDF itself gives them.
+fn own_details(book: &mut Book, path: &Path) {
+    let own = crate::ebook::read_as(path, "pdf");
+    book.meta.title = own.title.clone();
+    book.meta.authors = own.authors.clone();
+    book.meta.language = own.language.clone();
+    book.meta.publisher = own.publisher.clone();
+    book.meta.isbn = own.isbns.first().cloned().unwrap_or_default();
+    book.meta.date = own.year.map(|y| y.to_string()).unwrap_or_default();
+    book.meta.series = own.series.clone();
+    book.meta.series_index = own.series_index;
+}
+
+/// Reads the PDF at `path`.
+pub fn read(path: &Path) -> Result<Book, String> {
+    let data = Arc::new(std::fs::read(path).map_err(|e| e.to_string())?);
+    let mut book = Book::new();
+    book.css.push_str(PDF_CSS);
+    own_details(&mut book, path);
+
+    let pages = collect(&data, &mut book)?;
+    if pages.is_empty() {
+        return Err("bookBroken".into());
+    }
+    // Text drawn invisibly (the text layer of a scanned book) counts only
+    // on pages with no visible text.
+    let mut pages = hide_invisible_text(pages);
+    let garbled = blank_garbled(&mut pages);
+    let letters: usize = pages.iter().map(|p| p.glyphs.len()).sum();
+    if letters < pages.len() * 30 {
+        return scanned(path, book);
+    }
+    draw_garbled_pages(&mut pages, &garbled, &data, &mut book);
+    drop_font_emphasis(&mut pages);
+    let body = body_size(&pages);
+    let mut page_blocks = blocks_per_page(&pages, body);
+    drop_furniture(&mut page_blocks, &pages);
+    let rd = Reading::of(&page_blocks, body);
+
+    // Bookmarks: chapter titles and where they start.
+    let outline = outline_of(&data);
+
+    let mut found = read_paragraphs(&pages, &page_blocks, &rd);
+    bold_headings(&mut found.paras, rd.hsizes.len());
+    let toc_marks = apply_outline(&mut found.paras, &outline);
+    let nodes = write_nodes(found.paras, found.notes, &found.pics_at, toc_marks);
     if nodes.is_empty() {
         return scanned(path, book);
     }
