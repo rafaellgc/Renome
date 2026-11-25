@@ -841,162 +841,165 @@ pub fn to_fb2(book: &Book) -> String {
     )
 }
 
+/// FB2 genres and the words (folded) that mean them in subjects, the more
+/// specific first.
+const GENRES: &[(&str, &[&str])] = &[
+    (
+        "nonfiction",
+        &[
+            "nao-ficcao",
+            "nao ficcao",
+            "non-fiction",
+            "nonfiction",
+            "no ficcion",
+            "no-ficcion",
+        ],
+    ),
+    (
+        "prose_history",
+        &[
+            "ficcao historica",
+            "romance historico",
+            "historical fiction",
+            "novela historica",
+        ],
+    ),
+    ("sf_cyberpunk", &["cyberpunk"]),
+    ("sf_space", &["space opera", "opera espacial"]),
+    ("sf_horror", &["horror", "terror"]),
+    (
+        "sf",
+        &[
+            "ficcao cientifica",
+            "science fiction",
+            "ciencia ficcion",
+            "ficcion cientifica",
+            "sci-fi",
+            "scifi",
+        ],
+    ),
+    ("sf_fantasy", &["fantasia", "fantasy"]),
+    (
+        "detective",
+        &[
+            "detective",
+            "detetive",
+            "policial",
+            "mystery",
+            "misterio",
+            "crime",
+            "noir",
+        ],
+    ),
+    ("thriller", &["thriller", "suspense"]),
+    (
+        "love_contemporary",
+        &[
+            "romantic",
+            "romantico",
+            "romantica",
+            "love stor",
+            "historia de amor",
+        ],
+    ),
+    ("adventure", &["aventura", "adventure"]),
+    ("humor", &["humor", "comedia", "comedy"]),
+    ("poetry", &["poesia", "poetry", "poema", "poem"]),
+    (
+        "dramaturgy",
+        &["teatro", "theatre", "theater", "dramaturgia"],
+    ),
+    (
+        "children",
+        &["infantil", "children", "juvenil", "kids", "young adult"],
+    ),
+    (
+        "nonf_biography",
+        &["biografia", "biography", "memoir", "memoria", "autobiograf"],
+    ),
+    (
+        "religion_self",
+        &[
+            "autoajuda",
+            "auto-ajuda",
+            "autoayuda",
+            "self-help",
+            "self help",
+            "desenvolvimento pessoal",
+            "personal development",
+        ],
+    ),
+    (
+        "religion",
+        &[
+            "religiao",
+            "religion",
+            "teologia",
+            "theology",
+            "cristianismo",
+            "christian",
+            "espiritualidade",
+            "spiritual",
+            "biblia",
+            "bible",
+        ],
+    ),
+    ("sci_philosophy", &["filosofia", "philosophy"]),
+    ("psy_generic", &["psicologia", "psychology"]),
+    ("sci_politics", &["politica", "politics"]),
+    ("sci_history", &["historia", "history"]),
+    ("antique_myths", &["mitologia", "mythology"]),
+    (
+        "home_cooking",
+        &["culinaria", "cooking", "receita", "cookbook", "cocina"],
+    ),
+    (
+        "computers",
+        &[
+            "computacao",
+            "informatica",
+            "programacao",
+            "programming",
+            "computer",
+        ],
+    ),
+    (
+        "personal_finance",
+        &[
+            "financas pessoais",
+            "personal finance",
+            "finanzas personales",
+        ],
+    ),
+    (
+        "popular_business",
+        &[
+            "negocio",
+            "business",
+            "empreendedor",
+            "administracao",
+            "management",
+            "empresa",
+        ],
+    ),
+    ("economics", &["economia", "economics"]),
+    ("ref_dict", &["dicionario", "dictionary", "diccionario"]),
+    (
+        "reference",
+        &["referencia", "reference", "guia", "guide", "manual"],
+    ),
+    ("essays", &["ensaio", "essay", "ensayo"]),
+    (
+        "short_story",
+        &["contos", "short stor", "cuentos", "relatos"],
+    ),
+    ("prose_classic", &["classico", "classic", "clasico"]),
+    ("science", &["ciencia", "science"]),
+];
+
 /// The genre of the format's list a subject stands for (in English,
 /// Portuguese or Spanish words), if any.
 fn genre_of(subject: &str) -> Option<&'static str> {
-    const GENRES: &[(&str, &[&str])] = &[
-        (
-            "nonfiction",
-            &[
-                "nao-ficcao",
-                "nao ficcao",
-                "non-fiction",
-                "nonfiction",
-                "no ficcion",
-                "no-ficcion",
-            ],
-        ),
-        (
-            "prose_history",
-            &[
-                "ficcao historica",
-                "romance historico",
-                "historical fiction",
-                "novela historica",
-            ],
-        ),
-        ("sf_cyberpunk", &["cyberpunk"]),
-        ("sf_space", &["space opera", "opera espacial"]),
-        ("sf_horror", &["horror", "terror"]),
-        (
-            "sf",
-            &[
-                "ficcao cientifica",
-                "science fiction",
-                "ciencia ficcion",
-                "ficcion cientifica",
-                "sci-fi",
-                "scifi",
-            ],
-        ),
-        ("sf_fantasy", &["fantasia", "fantasy"]),
-        (
-            "detective",
-            &[
-                "detective",
-                "detetive",
-                "policial",
-                "mystery",
-                "misterio",
-                "crime",
-                "noir",
-            ],
-        ),
-        ("thriller", &["thriller", "suspense"]),
-        (
-            "love_contemporary",
-            &[
-                "romantic",
-                "romantico",
-                "romantica",
-                "love stor",
-                "historia de amor",
-            ],
-        ),
-        ("adventure", &["aventura", "adventure"]),
-        ("humor", &["humor", "comedia", "comedy"]),
-        ("poetry", &["poesia", "poetry", "poema", "poem"]),
-        (
-            "dramaturgy",
-            &["teatro", "theatre", "theater", "dramaturgia"],
-        ),
-        (
-            "children",
-            &["infantil", "children", "juvenil", "kids", "young adult"],
-        ),
-        (
-            "nonf_biography",
-            &["biografia", "biography", "memoir", "memoria", "autobiograf"],
-        ),
-        (
-            "religion_self",
-            &[
-                "autoajuda",
-                "auto-ajuda",
-                "autoayuda",
-                "self-help",
-                "self help",
-                "desenvolvimento pessoal",
-                "personal development",
-            ],
-        ),
-        (
-            "religion",
-            &[
-                "religiao",
-                "religion",
-                "teologia",
-                "theology",
-                "cristianismo",
-                "christian",
-                "espiritualidade",
-                "spiritual",
-                "biblia",
-                "bible",
-            ],
-        ),
-        ("sci_philosophy", &["filosofia", "philosophy"]),
-        ("psy_generic", &["psicologia", "psychology"]),
-        ("sci_politics", &["politica", "politics"]),
-        ("sci_history", &["historia", "history"]),
-        ("antique_myths", &["mitologia", "mythology"]),
-        (
-            "home_cooking",
-            &["culinaria", "cooking", "receita", "cookbook", "cocina"],
-        ),
-        (
-            "computers",
-            &[
-                "computacao",
-                "informatica",
-                "programacao",
-                "programming",
-                "computer",
-            ],
-        ),
-        (
-            "personal_finance",
-            &[
-                "financas pessoais",
-                "personal finance",
-                "finanzas personales",
-            ],
-        ),
-        (
-            "popular_business",
-            &[
-                "negocio",
-                "business",
-                "empreendedor",
-                "administracao",
-                "management",
-                "empresa",
-            ],
-        ),
-        ("economics", &["economia", "economics"]),
-        ("ref_dict", &["dicionario", "dictionary", "diccionario"]),
-        (
-            "reference",
-            &["referencia", "reference", "guia", "guide", "manual"],
-        ),
-        ("essays", &["ensaio", "essay", "ensayo"]),
-        (
-            "short_story",
-            &["contos", "short stor", "cuentos", "relatos"],
-        ),
-        ("prose_classic", &["classico", "classic", "clasico"]),
-        ("science", &["ciencia", "science"]),
-    ];
     let s = crate::text::fold(subject);
     if s.chars().all(|c| c.is_ascii_lowercase() || c == '_') && GENRES.iter().any(|(g, _)| *g == s)
     {
