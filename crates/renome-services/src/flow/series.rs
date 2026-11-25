@@ -127,9 +127,66 @@ pub async fn search(
         return Ok(out);
     }
     let stop = host.stop_signal();
-    let mut groups = vec![all.clone()];
+    let groups = group_files(&all, typed, &mut out);
+    let several = groups.len() > 1;
+    for group in groups {
+        if stop() {
+            break;
+        }
+        progress(host, "finding", None);
+        let res = match &source {
+            Source::Tmdb(c) => tmdb::search_show(c, typed, &group).await,
+            Source::Anilist(c) => c.anime_search(typed, &group).await,
+        };
+        let res = match res {
+            Ok(r) => r,
+            // A group whose show cannot be told is skipped, not the others.
+            Err(e) if several && e == "tvNoShow" => continue,
+            Err(e) => return Err(e),
+        };
+        if stop() {
+            break;
+        }
+        let Some(show) = pick_show(host, &source, &res, &mut out).await else {
+            continue;
+        };
+        if !out.found.iter().any(|c| c.id == show.id) {
+            out.found.push(show.clone());
+        }
+        // Files already settled for this show keep their episode.
+        let group: Vec<TvItem> = group
+            .into_iter()
+            .filter(|i| !settled.contains(&(i.path.clone(), show.id)))
+            .collect();
+        if group.is_empty() || stop() {
+            continue;
+        }
+        out.searched = true;
+        progress(host, "loading", Some(&show.title));
+        let typed_or = if typed.is_empty() {
+            res.query.as_str()
+        } else {
+            typed
+        };
+        let look = match &source {
+            Source::Tmdb(c) => tmdb::lookup_episodes(c, show.id, group, typed_or).await,
+            Source::Anilist(c) => c.anime_lookup(show.id, &group, typed_or).await,
+        }?;
+        add_found(look, &mut out);
+    }
+    Ok(out)
+}
+
+fn progress(host: &dyn Host, stage: &'static str, show: Option<&str>) {
+    crate::report(host, "tv-progress", Progress { stage, show });
+}
+
+/// The files by the show they say: one group with all of them when a show
+/// is typed (or none can be told), else a group per show.
+fn group_files(all: &[TvItem], typed: &str, out: &mut Outcome) -> Vec<Vec<TvItem>> {
+    let mut groups = vec![all.to_vec()];
     if typed.is_empty() {
-        let g = tmdb::group_shows(&all);
+        let g = tmdb::group_shows(all);
         out.loose = g.loose.len();
         let by_path: HashMap<&PathBuf, &TvItem> = all.iter().map(|i| (&i.path, i)).collect();
         if !g.groups.is_empty() {
@@ -144,108 +201,63 @@ pub async fn search(
                 .collect();
         }
     }
-    let several = groups.len() > 1;
-    for group in groups {
-        if stop() {
-            break;
-        }
-        crate::report(
-            host,
-            "tv-progress",
-            Progress {
-                stage: "finding",
-                show: None,
-            },
-        );
-        let res = match &source {
-            Source::Tmdb(c) => tmdb::search_show(c, typed, &group).await,
-            Source::Anilist(c) => c.anime_search(typed, &group).await,
-        };
-        let res = match res {
-            Ok(r) => r,
-            // A group whose show cannot be told is skipped, not the others.
-            Err(e) if several && e == "tvNoShow" => continue,
-            Err(e) => return Err(e),
-        };
-        if stop() {
-            break;
-        }
-        let key = format!("{}:{}", source.name(), res.query);
-        let show = match out.picked.get(&key) {
-            Some(c) => c.clone(),
-            None => {
-                let c = if res.auto {
-                    res.candidates.first().cloned()
-                } else {
-                    let q = Question::Show {
-                        source: source.name().into(),
-                        query: res.query.clone(),
-                        candidates: res.candidates.clone(),
-                    };
-                    host.ask(q)
-                        .await
-                        .and_then(|v| serde_json::from_value(v).ok())
-                };
-                let Some(c) = c else { continue };
-                out.picked.insert(key, c.clone());
-                c
-            }
-        };
-        if !out.found.iter().any(|c| c.id == show.id) {
-            out.found.push(show.clone());
-        }
-        // Files already settled for this show keep their episode.
-        let group: Vec<TvItem> = group
-            .into_iter()
-            .filter(|i| !settled.contains(&(i.path.clone(), show.id)))
-            .collect();
-        if group.is_empty() || stop() {
-            continue;
-        }
-        out.searched = true;
-        crate::report(
-            host,
-            "tv-progress",
-            Progress {
-                stage: "loading",
-                show: Some(&show.title),
-            },
-        );
-        let typed_or = if typed.is_empty() {
-            res.query.as_str()
-        } else {
-            typed
-        };
-        let look = match &source {
-            Source::Tmdb(c) => tmdb::lookup_episodes(c, show.id, group, typed_or).await,
-            Source::Anilist(c) => c.anime_lookup(show.id, &group, typed_or).await,
-        }?;
-        for f in look.files {
-            let found = f.found;
-            out.files.push(Found {
-                group: format!(
-                    "{}\u{1f}{}",
-                    look.show.id,
-                    serde_json::to_string(&found.guess).unwrap_or_default()
-                ),
-                status: super::Status::of(!found.choice.is_empty(), !found.alternatives.is_empty()),
-                read: read(&found.guess),
-                path: f.path,
-                show_id: look.show.id,
-                guess: found.guess,
-                alternatives: found.alternatives,
-                conflict: found.conflict,
-                doubled: found.doubled,
-                choice: found.choice,
-            });
-        }
-        if let Some(i) = out.shows.iter().position(|s| s.id == look.show.id) {
-            out.shows[i] = look.show;
-        } else {
-            out.shows.push(look.show);
-        }
+    groups
+}
+
+/// The show a search settles on: the one picked before for this query, the
+/// first when it is sure, else the one the person picks.
+async fn pick_show(
+    host: &dyn Host,
+    source: &Source<'_>,
+    res: &tmdb::ShowSearch,
+    out: &mut Outcome,
+) -> Option<Candidate> {
+    let key = format!("{}:{}", source.name(), res.query);
+    if let Some(c) = out.picked.get(&key) {
+        return Some(c.clone());
     }
-    Ok(out)
+    let c = if res.auto {
+        res.candidates.first().cloned()
+    } else {
+        let q = Question::Show {
+            source: source.name().into(),
+            query: res.query.clone(),
+            candidates: res.candidates.clone(),
+        };
+        host.ask(q)
+            .await
+            .and_then(|v| serde_json::from_value(v).ok())
+    }?;
+    out.picked.insert(key, c.clone());
+    Some(c)
+}
+
+/// What was found for a show's files, and the show itself.
+fn add_found(look: tmdb::TvLookup, out: &mut Outcome) {
+    for f in look.files {
+        let found = f.found;
+        out.files.push(Found {
+            group: format!(
+                "{}\u{1f}{}",
+                look.show.id,
+                serde_json::to_string(&found.guess).unwrap_or_default()
+            ),
+            status: super::Status::of(!found.choice.is_empty(), !found.alternatives.is_empty()),
+            read: read(&found.guess),
+            path: f.path,
+            show_id: look.show.id,
+            guess: found.guess,
+            alternatives: found.alternatives,
+            conflict: found.conflict,
+            doubled: found.doubled,
+            choice: found.choice,
+        });
+    }
+    if let Some(i) = out.shows.iter().position(|s| s.id == look.show.id) {
+        out.shows[i] = look.show;
+    } else {
+        out.shows.push(look.show);
+    }
 }
 
 /// An episode's template fields: the show's, its air date and its number
