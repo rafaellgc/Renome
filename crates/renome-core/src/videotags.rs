@@ -460,62 +460,108 @@ fn header_at(f: &mut File, at: u64) -> Option<(u64, Option<u64>, u64)> {
     Some((id, (size != u64::MAX).then_some(size), (a + s) as u64))
 }
 
-/// The Matroska changes: new Tags (and Attachments with the cover) at
-/// the end, the old ones made Void, the SeekHead pointing to the new
-/// ones, the segment's size, and the title in Info when it fits.
-fn mkv_plan(
-    f: &mut File,
-    len: u64,
-    meta: &VideoMeta,
-    opt: &Options,
-) -> Result<Option<Plan>, String> {
-    let bad = || "videoUnsupported".to_string();
-    let (id, size, h) = header_at(f, 0).ok_or_else(bad)?;
-    if id != 0x1a45_dfa3 {
-        return Err(bad());
-    }
-    let seg_at = h + size.ok_or_else(bad)?;
-    let (id, seg_size, seg_head) = header_at(f, seg_at).ok_or_else(bad)?;
-    if id != SEGMENT {
-        return Err(bad());
-    }
-    // A live recording's unknown size: its end is not known.
-    let seg_size = seg_size.ok_or_else(bad)?;
-    let data = seg_at + seg_head;
-    let seg_end = data + seg_size;
-    // Something after the segment: appending would not be inside it.
-    if seg_end != len {
-        return Err(bad());
-    }
-    let mut tops: Vec<Top> = Vec::new();
-    let mut at = data;
-    while at < seg_end {
-        let (id, size, head) = header_at(f, at).ok_or_else(bad)?;
-        let size = size.ok_or_else(bad)?;
-        let t = Top { id, at, head, size };
-        if t.end() > seg_end {
+/// Where a Matroska file's segment is and what is in it, element by
+/// element.
+struct MkvLayout {
+    seg_at: u64,
+    /// The segment's header length.
+    seg_head: u64,
+    seg_size: u64,
+    /// Where the segment's content starts.
+    data: u64,
+    seg_end: u64,
+    tops: Vec<Top>,
+}
+
+impl MkvLayout {
+    fn read(f: &mut File, len: u64) -> Result<Self, String> {
+        let bad = || "videoUnsupported".to_string();
+        let (id, size, h) = header_at(f, 0).ok_or_else(bad)?;
+        if id != 0x1a45_dfa3 {
             return Err(bad());
         }
-        tops.push(t);
-        at = t.end();
+        let seg_at = h + size.ok_or_else(bad)?;
+        let (id, seg_size, seg_head) = header_at(f, seg_at).ok_or_else(bad)?;
+        if id != SEGMENT {
+            return Err(bad());
+        }
+        // A live recording's unknown size: its end is not known.
+        let seg_size = seg_size.ok_or_else(bad)?;
+        let data = seg_at + seg_head;
+        let seg_end = data + seg_size;
+        // Something after the segment: appending would not be inside it.
+        if seg_end != len {
+            return Err(bad());
+        }
+        let mut tops: Vec<Top> = Vec::new();
+        let mut at = data;
+        while at < seg_end {
+            let (id, size, head) = header_at(f, at).ok_or_else(bad)?;
+            let size = size.ok_or_else(bad)?;
+            let t = Top { id, at, head, size };
+            if t.end() > seg_end {
+                return Err(bad());
+            }
+            tops.push(t);
+            at = t.end();
+        }
+        Ok(MkvLayout {
+            seg_at,
+            seg_head,
+            seg_size,
+            data,
+            seg_end,
+            tops,
+        })
     }
-    let find = |id: u64| tops.iter().filter(move |t| t.id == id).copied();
-    let body = |f: &mut File, t: &Top| read_at(f, t.at + t.head, t.size as usize);
 
-    let mut patches: Vec<(u64, Vec<u8>)> = Vec::new();
-    let mut tail: Vec<u8> = Vec::new();
-    let mut moved: Vec<(u64, u64)> = Vec::new();
-    // Elements no longer there, whose SeekHead entries go.
-    let mut gone: Vec<u64> = Vec::new();
-    // Old elements made empty space (where they start).
-    let mut freed: Vec<u64> = Vec::new();
+    /// The elements with this id, in file order.
+    fn all(&self, id: u64) -> Vec<Top> {
+        self.tops.iter().filter(|t| t.id == id).copied().collect()
+    }
 
-    // Tags: the old ones' tags of tracks and the like kept, ours added
-    // (cleaning: only those of tracks, chapters and attachments).
-    let old_tags = find(TAGS).next();
+    fn first(&self, id: u64) -> Option<Top> {
+        self.tops.iter().find(|t| t.id == id).copied()
+    }
+
+    /// The element's content.
+    fn body(&self, f: &mut File, t: &Top) -> Result<Vec<u8>, String> {
+        read_at(f, t.at + t.head, t.size as usize)
+    }
+
+    /// Where the end of the segment is, plus what is to be added: the
+    /// place the next appended element will have, in the segment.
+    fn next_place(&self, tail: &[u8]) -> u64 {
+        self.seg_end + tail.len() as u64 - self.data
+    }
+}
+
+/// What the plan has gathered so far.
+#[derive(Default)]
+struct Work {
+    patches: Vec<(u64, Vec<u8>)>,
+    /// New elements for the end of the segment.
+    tail: Vec<u8>,
+    /// Elements that moved: id and place in the segment.
+    moved: Vec<(u64, u64)>,
+    /// Elements no longer there, whose SeekHead entries go.
+    gone: Vec<u64>,
+    /// Old elements made empty space (where they start).
+    freed: Vec<u64>,
+}
+
+/// Tags: the old ones' tags of tracks and the like kept, ours added
+/// (cleaning: only those of tracks, chapters and attachments).
+fn plan_tags(
+    f: &mut File,
+    lay: &MkvLayout,
+    meta: &VideoMeta,
+    opt: &Options,
+    w: &mut Work,
+) -> Result<(), String> {
     let mut tags = Vec::new();
-    if let Some(t) = old_tags {
-        let b = body(f, &t)?;
+    if let Some(t) = lay.first(TAGS) {
+        let b = lay.body(f, &t)?;
         for (id, tag) in ebml(&b) {
             if id == 0x7373
                 && let Some(kept) = keep_tag(tag, meta, opt.clean)
@@ -523,19 +569,28 @@ fn mkv_plan(
                 tags.extend(kept);
             }
         }
-        freed.push(t.at);
+        w.freed.push(t.at);
     }
     tags.extend(our_tags(meta));
     let tags_el = el(TAGS, &tags);
-    moved.push((TAGS, seg_end + tail.len() as u64 - data));
-    tail.extend(&tags_el);
+    w.moved.push((TAGS, lay.next_place(&w.tail)));
+    w.tail.extend(&tags_el);
+    Ok(())
+}
 
-    // Attachments: the covers (`cover.jpg`, `cover_land.jpg`, as players
-    // look for them) in place of older ones; the other files (fonts)
-    // kept, and when cleaning only the fonts.
-    let old_att = find(ATTACHMENTS).next();
+/// Attachments: the covers (`cover.jpg`, `cover_land.jpg`, as players look
+/// for them) in place of older ones; the other files (fonts) kept, and
+/// when cleaning only the fonts.
+fn plan_attachments(
+    f: &mut File,
+    lay: &MkvLayout,
+    meta: &VideoMeta,
+    opt: &Options,
+    w: &mut Work,
+) -> Result<(), String> {
+    let old_att = lay.first(ATTACHMENTS);
     let old_files: Vec<Vec<u8>> = match old_att {
-        Some(t) if t.size <= MAX_ATTACHMENTS => ebml(&body(f, &t)?)
+        Some(t) if t.size <= MAX_ATTACHMENTS => ebml(&lay.body(f, &t)?)
             .filter(|(id, _)| *id == 0x61a7)
             .map(|(_, v)| v.to_vec())
             .collect(),
@@ -568,21 +623,33 @@ fn mkv_plan(
             files.extend(el(0x61a7, &file));
         }
         if files.is_empty() {
-            gone.push(ATTACHMENTS);
+            w.gone.push(ATTACHMENTS);
         } else {
-            moved.push((ATTACHMENTS, seg_end + tail.len() as u64 - data));
-            tail.extend(el(ATTACHMENTS, &files));
+            w.moved.push((ATTACHMENTS, lay.next_place(&w.tail)));
+            w.tail.extend(el(ATTACHMENTS, &files));
         }
         if let Some(t) = old_att {
-            freed.push(t.at);
+            w.freed.push(t.at);
         }
     }
+    Ok(())
+}
 
-    // Info (with the title) and Tracks (with the tracks' names) rewritten
-    // where they are, in the room up to the next element kept: each with
-    // its choices, the best first.
-    let mut choices: Vec<(Top, Vec<Vec<u8>>)> = Vec::new();
-    if let Some(info) = find(INFO).next()
+/// An element to rewrite where it is, with its choices of content, the
+/// best first and the last the element as it was.
+type Choices = Vec<(Top, Vec<Vec<u8>>)>;
+
+/// Info (with the title) and Tracks (with the tracks' names), to be
+/// rewritten where they are: each with its choices, the best first, the
+/// last the element as it was.
+fn rewrite_choices(
+    f: &mut File,
+    lay: &MkvLayout,
+    meta: &VideoMeta,
+    opt: &Options,
+) -> Result<Choices, String> {
+    let mut choices: Choices = Vec::new();
+    if let Some(info) = lay.first(INFO)
         && !meta.title.is_empty()
     {
         let title = if meta.is_episode() {
@@ -590,7 +657,7 @@ fn mkv_plan(
         } else {
             meta.title.clone()
         };
-        let b = body(f, &info)?;
+        let b = lay.body(f, &info)?;
         let had_title = ebml(&b).any(|(id, _)| id == 0x7ba9);
         let mut rest: Vec<u8> = Vec::new();
         for (id, v) in ebml(&b) {
@@ -610,26 +677,44 @@ fn mkv_plan(
         choices.push((info, opts));
     }
     if opt.tracks
-        && let Some(tr) = find(TRACKS).next()
+        && let Some(tr) = lay.first(TRACKS)
     {
-        let b = body(f, &tr)?;
+        let b = lay.body(f, &tr)?;
         if let Some(named) = named_tracks(&b) {
             choices.push((tr, vec![named, b]));
         }
     }
     choices.sort_by_key(|c| c.0.at);
-    let free_at = |t: &Top| t.id == VOID || freed.contains(&t.at);
+    Ok(choices)
+}
+
+/// Writes the choices in the room up to the next element kept: the best
+/// choice of each run of elements that fits. The places of the elements
+/// that moved go in `w`; the starts of the runs rewritten are returned.
+fn rewrite_in_place(
+    lay: &MkvLayout,
+    choices: &[(Top, Vec<Vec<u8>>)],
+    w: &mut Work,
+) -> Result<Vec<u64>, String> {
+    let bad = || "videoUnsupported".to_string();
+    let free_at = |t: &Top| t.id == VOID || w.freed.contains(&t.at);
     let mut covered: Vec<u64> = Vec::new();
+    let mut moved: Vec<(u64, u64)> = Vec::new();
+    let mut patches: Vec<(u64, Vec<u8>)> = Vec::new();
     let mut i = 0;
     while i < choices.len() {
         // The run: from this element on, while the next ones are this
         // list's, Voids or old elements made empty.
         let start = choices[i].0;
-        let first = tops.iter().position(|t| t.at == start.at).ok_or_else(bad)?;
+        let first = lay
+            .tops
+            .iter()
+            .position(|t| t.at == start.at)
+            .ok_or_else(bad)?;
         let mut members: Vec<usize> = Vec::new();
         let mut end = start.at;
         let mut run: Vec<u64> = Vec::new();
-        for t in tops.iter().skip(first) {
+        for t in lay.tops.iter().skip(first) {
             let chosen = choices.iter().position(|c| c.0.at == t.at);
             if chosen.is_none() && !free_at(t) {
                 break;
@@ -674,28 +759,59 @@ fn mkv_plan(
         let mut at = start.at;
         for (&m, (id, kids)) in members.iter().zip(&parts) {
             if at != choices[m].0.at {
-                moved.push((*id, at - data));
+                moved.push((*id, at - lay.data));
             }
             at += el(*id, kids).len() as u64;
         }
         patches.push((start.at, bytes));
     }
+    w.moved.extend(moved);
+    w.patches.extend(patches);
+    Ok(covered)
+}
 
-    // The old ones become empty space (unless inside a run rewritten).
-    for at in &freed {
+/// The old elements become empty space (unless inside a run rewritten).
+fn free_old(lay: &MkvLayout, covered: &[u64], w: &mut Work) -> Result<(), String> {
+    let bad = || "videoUnsupported".to_string();
+    for at in &w.freed {
         if covered.contains(at) {
             continue;
         }
-        let t = tops.iter().find(|t| t.at == *at).ok_or_else(bad)?;
+        let t = lay.tops.iter().find(|t| t.at == *at).ok_or_else(bad)?;
         // Only the header changes: the rest is ignored as a Void's.
-        patches.push((t.at, void_head(t.end() - t.at).ok_or_else(bad)?));
+        w.patches
+            .push((t.at, void_head(t.end() - t.at).ok_or_else(bad)?));
     }
+    Ok(())
+}
 
+/// The entries of a SeekHead's body: element id and place.
+fn seek_entries(b: &[u8]) -> Vec<(Vec<u8>, u64)> {
+    ebml(b)
+        .filter(|(id, _)| *id == 0x4dbb)
+        .filter_map(|(_, e)| {
+            let mut sid = None;
+            let mut pos = None;
+            for (id, v) in ebml(e) {
+                match id {
+                    0x53ab => sid = Some(v.to_vec()),
+                    0x53ac => pos = Some(ebml_uint(v)),
+                    _ => {}
+                }
+            }
+            Some((sid?, pos?))
+        })
+        .collect()
+}
+
+/// The SeekHeads: the entries of the moved elements changed (those gone
+/// left out), or added to the first one.
+fn plan_seekheads(f: &mut File, lay: &MkvLayout, w: &mut Work) -> Result<(), String> {
     // Room after an element: the Voids right after it.
     let room_after = |t: &Top| -> u64 {
         let mut end = t.end();
         // The elements are in file order: the ones after it, while Void.
-        for v in tops.iter().skip_while(|v| v.at < t.end()) {
+        for v in lay.tops.iter().skip_while(|v| v.at < t.end()) {
             if v.at == end && v.id == VOID {
                 end = v.end();
             } else {
@@ -704,36 +820,16 @@ fn mkv_plan(
         }
         end - t.at
     };
-
-    // The SeekHeads: the entries of the moved elements changed (those
-    // gone left out), or added to the first one.
-    let heads: Vec<Top> = find(SEEKHEAD).collect();
+    let heads = lay.all(SEEKHEAD);
     let first = heads.first().copied().ok_or("videoNoRoom")?;
-    let entries_of = |b: &[u8]| -> Vec<(Vec<u8>, u64)> {
-        ebml(b)
-            .filter(|(id, _)| *id == 0x4dbb)
-            .filter_map(|(_, e)| {
-                let mut sid = None;
-                let mut pos = None;
-                for (id, v) in ebml(e) {
-                    match id {
-                        0x53ab => sid = Some(v.to_vec()),
-                        0x53ac => pos = Some(ebml_uint(v)),
-                        _ => {}
-                    }
-                }
-                Some((sid?, pos?))
-            })
-            .collect()
-    };
     let mut done: Vec<u64> = Vec::new();
     // The SeekHeads to write again, with their entries.
     let mut rebuilt: Vec<(Top, Vec<SeekEntry>)> = Vec::new();
     for sh in &heads {
-        let b = body(f, sh)?;
-        let mut entries = entries_of(&b);
+        let b = lay.body(f, sh)?;
+        let mut entries = seek_entries(&b);
         let mut changed = false;
-        for (id, pos) in &moved {
+        for (id, pos) in &w.moved {
             let want = id_bytes(*id);
             for e in entries.iter_mut().filter(|e| e.0 == want) {
                 e.1 = *pos;
@@ -742,7 +838,7 @@ fn mkv_plan(
             }
         }
         let before = entries.len();
-        entries.retain(|e| !gone.iter().any(|g| id_bytes(*g) == e.0));
+        entries.retain(|e| !w.gone.iter().any(|g| id_bytes(*g) == e.0));
         changed |= entries.len() != before;
         if !changed {
             continue;
@@ -750,7 +846,8 @@ fn mkv_plan(
         entries.dedup();
         rebuilt.push((*sh, entries));
     }
-    let missing: Vec<(u64, u64)> = moved
+    let missing: Vec<(u64, u64)> = w
+        .moved
         .iter()
         .filter(|(id, _)| !done.contains(id))
         .copied()
@@ -758,10 +855,10 @@ fn mkv_plan(
     if !missing.is_empty() {
         // Rebuilt from the first SeekHead's entries (changed already if
         // it held some), plus the missing ones.
-        let b = body(f, &first)?;
-        let mut entries = entries_of(&b);
-        entries.retain(|e| !gone.iter().any(|g| id_bytes(*g) == e.0));
-        for (id, pos) in &moved {
+        let b = lay.body(f, &first)?;
+        let mut entries = seek_entries(&b);
+        entries.retain(|e| !w.gone.iter().any(|g| id_bytes(*g) == e.0));
+        for (id, pos) in &w.moved {
             let want = id_bytes(*id);
             match entries.iter_mut().find(|e| e.0 == want) {
                 Some(e) => e.1 = *pos,
@@ -772,24 +869,45 @@ fn mkv_plan(
         rebuilt.push((first, entries));
     }
     for (sh, entries) in &rebuilt {
-        patches.push(seekhead_or_moved(
+        let patch = seekhead_or_moved(
             sh,
             entries,
             room_after(sh),
-            &mut tail,
-            seg_end - data,
-        )?);
+            &mut w.tail,
+            lay.seg_end - lay.data,
+        )?;
+        w.patches.push(patch);
     }
+    Ok(())
+}
+
+/// The Matroska changes: new Tags (and Attachments with the cover) at
+/// the end, the old ones made Void, the SeekHead pointing to the new
+/// ones, the segment's size, and the title in Info when it fits.
+fn mkv_plan(
+    f: &mut File,
+    len: u64,
+    meta: &VideoMeta,
+    opt: &Options,
+) -> Result<Option<Plan>, String> {
+    let lay = MkvLayout::read(f, len)?;
+    let mut w = Work::default();
+    plan_tags(f, &lay, meta, opt, &mut w)?;
+    plan_attachments(f, &lay, meta, opt, &mut w)?;
+    let choices = rewrite_choices(f, &lay, meta, opt)?;
+    let covered = rewrite_in_place(&lay, &choices, &mut w)?;
+    free_old(&lay, &covered, &mut w)?;
+    plan_seekheads(f, &lay, &mut w)?;
 
     // The segment's size, in as many bytes as it has.
-    let new_size = seg_size + tail.len() as u64;
-    let size_len = (seg_head - 4) as usize;
+    let new_size = lay.seg_size + w.tail.len() as u64;
+    let size_len = (lay.seg_head - 4) as usize;
     let size = size_vint(new_size, size_len).ok_or("videoNoRoom")?;
-    patches.push((seg_at + 4, size));
+    w.patches.push((lay.seg_at + 4, size));
     Ok(Some(Plan {
-        patches,
+        patches: w.patches,
         cut: len,
-        tail,
+        tail: w.tail,
     }))
 }
 
