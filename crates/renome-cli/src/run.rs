@@ -712,26 +712,49 @@ fn show(
             .collect::<Vec<_>>(),
     );
     if out::json() {
-        let items: Vec<Value> = p
-            .items
-            .iter()
-            .filter(|i| all || i.status != Status::Unchanged)
-            .map(|i| item_json(i, warn_windows))
-            .collect();
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&json!({
-                "items": items,
-                "totals": { "files": p.total, "changed": p.changed, "conflicts": p.real_conflicts(), "sameThere": p.same_there, "leftFolders": p.left_folders.len() },
-                "trash": p.trash,
-                "trashFolders": p.trash_folders,
-                "notes": notes,
-                "missing": missing,
-            }))
-            .unwrap_or_default()
-        );
+        show_json(p, all, missing, warn_windows, &notes);
         return;
     }
+    let unchanged = show_items(p, all, warn_windows);
+    show_totals(p, unchanged);
+    for l in &notes {
+        out::note(&out::dim(l));
+    }
+    show_missing(missing);
+}
+
+/// The list as JSON: items, totals, what goes to the trash, the notes and
+/// what is missing.
+fn show_json(
+    p: &Preview,
+    all: bool,
+    missing: &[crate::missing::Missing],
+    warn_windows: bool,
+    notes: &[String],
+) {
+    let items: Vec<Value> = p
+        .items
+        .iter()
+        .filter(|i| all || i.status != Status::Unchanged)
+        .map(|i| item_json(i, warn_windows))
+        .collect();
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "items": items,
+            "totals": { "files": p.total, "changed": p.changed, "conflicts": p.real_conflicts(), "sameThere": p.same_there, "leftFolders": p.left_folders.len() },
+            "trash": p.trash,
+            "trashFolders": p.trash_folders,
+            "notes": notes,
+            "missing": missing,
+        }))
+        .unwrap_or_default()
+    );
+}
+
+/// One line per file that changes (all with `all`), grouped by folder.
+/// How many were left out as unchanged.
+fn show_items(p: &Preview, all: bool, warn_windows: bool) -> usize {
     let mut last_dir: Option<&Path> = None;
     let mut unchanged = 0;
     for i in &p.items {
@@ -775,7 +798,11 @@ fn show(
             }
         }
     }
-    // The list's totals, as under the window's list (`said::totals`).
+    unchanged
+}
+
+/// The list's totals, as under the window's list (`said::totals`).
+fn show_totals(p: &Preview, unchanged: usize) {
     let mut totals: Vec<String> = renome_services::flow::said::totals(p)
         .iter()
         .map(|l| {
@@ -792,33 +819,35 @@ fn show(
         totals.push(out::dim(&t("unchangedN", &[("n", &unchanged)])));
     }
     out::note(&totals.join(" · "));
-    for l in &notes {
-        out::note(&out::dim(l));
+}
+
+/// What the catalogue has that the files lack, by group.
+fn show_missing(missing: &[crate::missing::Missing]) {
+    if missing.is_empty() {
+        return;
     }
-    if !missing.is_empty() {
-        println!();
-        println!(
-            "{}",
-            out::bold(&format!("{} ({})", t("missingTitle", &[]), missing.len()))
-        );
-        let mut group = "";
-        for x in missing {
-            if x.group != group {
-                println!("  {}", out::bold(&x.group));
-                group = &x.group;
-            }
-            let title = if x.title.is_empty() {
-                String::new()
-            } else {
-                format!(" · {}", x.title)
-            };
-            let date = if x.date.is_empty() {
-                String::new()
-            } else {
-                out::dim(&format!(" ({})", x.date))
-            };
-            println!("    {}{title}{date}", out::yellow(&x.code));
+    println!();
+    println!(
+        "{}",
+        out::bold(&format!("{} ({})", t("missingTitle", &[]), missing.len()))
+    );
+    let mut group = "";
+    for x in missing {
+        if x.group != group {
+            println!("  {}", out::bold(&x.group));
+            group = &x.group;
         }
+        let title = if x.title.is_empty() {
+            String::new()
+        } else {
+            format!(" · {}", x.title)
+        };
+        let date = if x.date.is_empty() {
+            String::new()
+        } else {
+            out::dim(&format!(" ({})", x.date))
+        };
+        println!("    {}{title}{date}", out::yellow(&x.code));
     }
 }
 

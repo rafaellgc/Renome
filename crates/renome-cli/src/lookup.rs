@@ -1087,23 +1087,7 @@ pub async fn comics(
         al: &al,
         mu: &mu,
     };
-    let params = flow::comics::Params {
-        source,
-        key,
-        series: typed,
-        skip: rule
-            .get("skipPublishers")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
-        lang: renome_services::options::comic_lang(lang()),
-        ui_lang: lang().to_string(),
-        by_folder,
-        barcode: rule
-            .get("barcode")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-    };
+    let params = comic_params(rule, source, key, typed, by_folder);
     let items: Vec<flow::Item> = preview.items.iter().map(flow::Item::from).collect();
     let picked = forced_series(&sources, &params, &items, ask).await?;
     let tv = tmdb::Client::new("", "");
@@ -1141,6 +1125,33 @@ pub async fn comics(
         out_comics.chosen.insert(p, n.comic);
     }
     Ok(out_comics)
+}
+
+/// What the comic rule asks of the search.
+fn comic_params(
+    rule: &Value,
+    source: String,
+    key: String,
+    series: String,
+    by_folder: bool,
+) -> flow::comics::Params {
+    flow::comics::Params {
+        source,
+        key,
+        series,
+        skip: rule
+            .get("skipPublishers")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        lang: renome_services::options::comic_lang(lang()),
+        ui_lang: lang().to_string(),
+        by_folder,
+        barcode: rule
+            .get("barcode")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    }
 }
 
 /// The series forced with `--pick` for a file: its group's.
