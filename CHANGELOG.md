@@ -29,9 +29,17 @@ changed in the code between releases and is kept for the unreleased work.
   block (a panic in debug builds, garbage in release) now saturates.
 
 ### Code
-- 34 functions of over 100 lines (up to 572) were split into steps, each
-  with a golden test of its output written first: AZW3 and PDF writing and
-  reading, EPUB, OPF, Matroska, comic names, tags, undo, and the preview.
+- All 92 functions of over 100 lines (up to 572) were split into steps, each
+  with a golden test of its output written first (or the scenario tests
+  that already pinned it): book writing and reading (AZW3, MOBI, PDF, EPUB,
+  FB2, Word, OpenDocument), tags, names, comics, subtitles, the rename plan,
+  undo, the lookups of every catalogue and the command line. The only long
+  function left is the list of the window's commands (one macro, which
+  cannot be cut), and 15 test scenarios that read from top to bottom.
+- The lookups' network flows are pinned by tests that start a small fake
+  catalogue in the test itself.
+- The dependencies are optimised in the dev profile: the tests that decode
+  pictures went from minutes to seconds.
 - `unwrap()` is forbidden outside tests; every remaining invariant says why.
 - The window's `lib.rs` (2,490 lines) is split into modules by subject.
 - Documentation builds without warnings; CI checks it and a coverage floor.

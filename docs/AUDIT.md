@@ -49,7 +49,7 @@ build and process). Numbers come from tools, not from reading samples.
 |---|---|---|
 | Production `unwrap()` | 320 | 0 (denied by lint) |
 | Advisories | 2 vulnerabilities | 0 |
-| Functions over 100 lines | 92 | 58 (the 10 over 150: 3 network flows, the window's `run()`, and 6 of 120-160 lines) |
+| Functions over 100 lines | 92 | 0 in production code but the window's list of commands (one macro; allowed with the reason written) and 15 test scenarios |
 | Readers that panic on damaged files | 2 found | 0 (test of every reader; one in a dependency handled by profile) |
 | Window CSP | none | set |
 | Coverage | 72.4% (unmeasured by CI) | floor of 70% enforced in CI |
