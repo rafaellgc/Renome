@@ -1717,4 +1717,130 @@ mod tests {
         assert!(get(Field::DiscSubtitle).is_none());
         assert!(details(&r, "other").is_empty());
     }
+
+    /// Every tag of the file read back: items (sorted) and pictures. The
+    /// bytes themselves are not compared: some writers date what they write.
+    fn dump(path: &Path) -> String {
+        let f = lofty::read_from_path(path).unwrap();
+        let mut out = String::new();
+        for t in f.tags() {
+            let mut items: Vec<String> = t
+                .items()
+                .map(|i| format!("{:?}={:?} [{:?}]", i.key(), i.value(), i.description()))
+                .collect();
+            items.sort();
+            out.push_str(&format!("{:?}: {items:?}\n", t.tag_type()));
+            for p in t.pictures() {
+                out.push_str(&format!(
+                    "  picture {:?} {:?} {}\n",
+                    p.pic_type(),
+                    p.mime_type(),
+                    xxhash_rust::xxh3::xxh3_64(p.data())
+                ));
+            }
+        }
+        out
+    }
+
+    /// What `write` leaves in each kind of song, with and without a
+    /// cover, cleaning or not, written twice: the tags read back after each
+    /// write and what was taken out. A change here is a change in the tags
+    /// people's songs get: update these only when that is the point, never
+    /// for a refactor.
+    #[test]
+    fn write_does_not_change() {
+        let cover = fs::read("tests/fixtures/gps.jpg").unwrap();
+        let rich = SongMatch {
+            genre: "Forró".into(),
+            artist_ids: vec!["art-1".into(), "art-2".into()],
+            ..song_match()
+        };
+        let d = tempfile::tempdir().unwrap();
+        let store = d.path().join("store");
+        let mut got: Vec<(String, u64)> = Vec::new();
+        for name in FORMATS {
+            for (mname, m) in [("plain", song_match()), ("rich", rich.clone())] {
+                for clean in [false, true] {
+                    for with_cover in [false, true] {
+                        let p = d.path().join(name);
+                        fs::copy(Path::new("tests/fixtures").join(name), &p).unwrap();
+                        let mut out = String::new();
+                        for round in 0..2 {
+                            let r = write(
+                                &p,
+                                &fields_of(&m),
+                                with_cover.then_some(cover.as_slice()),
+                                clean,
+                                &store,
+                            );
+                            let summary = match &r {
+                                Ok(Some(b)) => format!(
+                                    "written {:?} {} {}",
+                                    b.removed.iter().map(|s| s.key.clone()).collect::<Vec<_>>(),
+                                    b.raw.len(),
+                                    b.kept_text.len()
+                                ),
+                                Ok(None) => "unchanged".to_string(),
+                                Err(e) => format!("error {e}"),
+                            };
+                            out.push_str(&format!("{round}: {summary} {}\n", dump(&p)));
+                        }
+                        if std::env::var_os("GOLDEN_SHOW").is_some() {
+                            eprintln!(
+                                "#### {name}/{mname}/clean={clean}/cover={with_cover}\n{out}"
+                            );
+                        }
+                        got.push((
+                            format!("{name}/{mname}/clean={clean}/cover={with_cover}"),
+                            xxhash_rust::xxh3::xxh3_64(out.as_bytes()),
+                        ));
+                    }
+                }
+            }
+        }
+        let want: Vec<u64> = vec![
+            9302556820855344731,
+            16042273513044804035,
+            7870849031938427331,
+            1033672257916984605,
+            7786777747890035740,
+            10199129801641563740,
+            17900509384429229981,
+            12393271270780329121,
+            8307538742794604105,
+            14237785598785681935,
+            7303459965131259611,
+            10769872770662446464,
+            5195738303938548272,
+            14947577148197787481,
+            11948595302197602599,
+            1126829794988122281,
+            16961342910049684571,
+            8135256846541800849,
+            12740081851275613103,
+            537649975245547970,
+            1495243820957506917,
+            4966957448310005478,
+            3715659625804860750,
+            2058022698039249168,
+            14377061392725361794,
+            5249163959640141139,
+            2911525615031712216,
+            17863079901040572314,
+            3465713083484005782,
+            10219887999599471023,
+            15577477511809402752,
+            9145589403461653055,
+            12701680295239208543,
+            10424616603178140331,
+            6685296583826171992,
+            17151018023776608774,
+            2220912598488749214,
+            2007320264100262947,
+            15457088782572512922,
+            10325351297552206694,
+        ];
+        let hashes: Vec<u64> = got.iter().map(|g| g.1).collect();
+        assert_eq!(hashes, want, "{got:?}");
+    }
 }
