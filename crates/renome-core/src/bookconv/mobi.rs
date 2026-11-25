@@ -346,6 +346,16 @@ fn varlen(d: &[u8], at: &mut usize) -> Option<u32> {
     }
 }
 
+/// What an index tag has in an entry.
+enum Has {
+    Count(u32),
+    Bytes(u32),
+}
+
+/// A tag of an index: its number, how many values it has per count, its
+/// mask in the control bytes and whether it ends the control byte.
+type Tag = (u8, u8, u8, bool);
+
 fn read_index(r: &Records, first: usize) -> Option<Index> {
     let meta = r.read(first, 1 << 20)?;
     if !meta.starts_with(b"INDX") {
@@ -354,19 +364,7 @@ fn read_index(r: &Records, first: usize) -> Option<Index> {
     let header = be32(&meta, 4)? as usize;
     let records = be32(&meta, 24)? as usize;
     let strings_count = be32(&meta, 52).unwrap_or(0) as usize;
-    // The tag table.
-    let t = header;
-    if meta.get(t..t + 4)? != b"TAGX" {
-        return None;
-    }
-    let tlen = be32(&meta, t + 4)? as usize;
-    let control_bytes = be32(&meta, t + 8)? as usize;
-    let mut tags: Vec<(u8, u8, u8, bool)> = Vec::new();
-    let mut i = t + 12;
-    while i + 4 <= t + tlen {
-        tags.push((meta[i], meta[i + 1], meta[i + 2], meta[i + 3] & 1 == 1));
-        i += 4;
-    }
+    let (control_bytes, tags) = tag_table(&meta, header)?;
     let mut out = Index {
         entries: Vec::new(),
         strings: HashMap::new(),
@@ -381,64 +379,90 @@ fn read_index(r: &Records, first: usize) -> Option<Index> {
         let offs: Vec<usize> = (0..n)
             .filter_map(|j| be16(&rec, idxt + 4 + 2 * j).map(|v| v as usize))
             .collect();
-        for j in 0..offs.len() {
-            let start = offs[j];
-            let end = offs.get(j + 1).copied().unwrap_or(idxt);
-            let klen = *rec.get(start)? as usize;
-            let key = String::from_utf8_lossy(rec.get(start + 1..start + 1 + klen)?).into_owned();
-            let cb_at = start + 1 + klen;
-            let cbs = rec.get(cb_at..cb_at + control_bytes)?;
-            // First what each tag has (from the control bytes), then the
-            // values, in the tags' order.
-            enum Has {
-                Count(u32),
-                Bytes(u32),
-            }
-            let mut data = cb_at + control_bytes;
-            let mut cbi = 0;
-            let mut found: Vec<(u8, u8, Has)> = Vec::new();
-            for &(tag, per, mask, end_flag) in &tags {
-                if end_flag {
-                    cbi += 1;
-                    continue;
-                }
-                let Some(&cb) = cbs.get(cbi) else { break };
-                let v = cb & mask;
-                if v == 0 {
-                    continue;
-                }
-                if v == mask && mask.count_ones() > 1 {
-                    let bytes = varlen(&rec, &mut data)?;
-                    found.push((tag, per, Has::Bytes(bytes)));
-                } else {
-                    found.push((tag, per, Has::Count((v >> mask.trailing_zeros()) as u32)));
-                }
-            }
-            let mut map = HashMap::new();
-            for (tag, per, has) in found {
-                let mut vals = Vec::new();
-                match has {
-                    Has::Count(c) => {
-                        for _ in 0..c * per.max(1) as u32 {
-                            vals.push(varlen(&rec, &mut data)?);
-                        }
-                    }
-                    Has::Bytes(b) => {
-                        let stop = data + b as usize;
-                        while data < stop {
-                            vals.push(varlen(&rec, &mut data)?);
-                        }
-                    }
-                }
-                map.insert(tag, vals);
-            }
-            let _ = end;
-            out.entries.push((key, map));
+        for &start in &offs {
+            out.entries
+                .push(index_entry(&rec, start, control_bytes, &tags)?);
         }
     }
-    // Strings: a length, then the text; addressed by record and offset.
-    for k in 0..strings_count {
-        let Some(rec) = r.read(first + records + 1 + k, 1 << 20) else {
+    index_strings(r, first + records + 1, strings_count, &mut out);
+    Some(out)
+}
+
+/// The tag table of an index: its control bytes and its tags.
+fn tag_table(meta: &[u8], t: usize) -> Option<(usize, Vec<Tag>)> {
+    if meta.get(t..t + 4)? != b"TAGX" {
+        return None;
+    }
+    let tlen = be32(meta, t + 4)? as usize;
+    let control_bytes = be32(meta, t + 8)? as usize;
+    let mut tags: Vec<Tag> = Vec::new();
+    let mut i = t + 12;
+    while i + 4 <= t + tlen {
+        tags.push((meta[i], meta[i + 1], meta[i + 2], meta[i + 3] & 1 == 1));
+        i += 4;
+    }
+    Some((control_bytes, tags))
+}
+
+/// One entry of an index record: its key and its values by tag.
+fn index_entry(
+    rec: &[u8],
+    start: usize,
+    control_bytes: usize,
+    tags: &[Tag],
+) -> Option<(String, HashMap<u8, Vec<u32>>)> {
+    let klen = *rec.get(start)? as usize;
+    let key = String::from_utf8_lossy(rec.get(start + 1..start + 1 + klen)?).into_owned();
+    let cb_at = start + 1 + klen;
+    let cbs = rec.get(cb_at..cb_at + control_bytes)?;
+    // First what each tag has (from the control bytes), then the values, in
+    // the tags' order.
+    let mut data = cb_at + control_bytes;
+    let mut cbi = 0;
+    let mut found: Vec<(u8, u8, Has)> = Vec::new();
+    for &(tag, per, mask, end_flag) in tags {
+        if end_flag {
+            cbi += 1;
+            continue;
+        }
+        let Some(&cb) = cbs.get(cbi) else { break };
+        let v = cb & mask;
+        if v == 0 {
+            continue;
+        }
+        if v == mask && mask.count_ones() > 1 {
+            let bytes = varlen(rec, &mut data)?;
+            found.push((tag, per, Has::Bytes(bytes)));
+        } else {
+            found.push((tag, per, Has::Count((v >> mask.trailing_zeros()) as u32)));
+        }
+    }
+    let mut map = HashMap::new();
+    for (tag, per, has) in found {
+        let mut vals = Vec::new();
+        match has {
+            Has::Count(c) => {
+                for _ in 0..c * per.max(1) as u32 {
+                    vals.push(varlen(rec, &mut data)?);
+                }
+            }
+            Has::Bytes(b) => {
+                let stop = data + b as usize;
+                while data < stop {
+                    vals.push(varlen(rec, &mut data)?);
+                }
+            }
+        }
+        map.insert(tag, vals);
+    }
+    Some((key, map))
+}
+
+/// The strings of an index: a length, then the text; addressed by record
+/// and offset.
+fn index_strings(r: &Records, from: usize, count: usize, out: &mut Index) {
+    for k in 0..count {
+        let Some(rec) = r.read(from + k, 1 << 20) else {
             break;
         };
         let mut at = 0;
@@ -458,7 +482,6 @@ fn read_index(r: &Records, first: usize) -> Option<Index> {
             at += len;
         }
     }
-    Some(out)
 }
 
 /// Kindle's base-32 numbers (digits then `A`–`V`).
