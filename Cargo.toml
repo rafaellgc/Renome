@@ -15,6 +15,9 @@ strip = true
 # there (a damaged Opus file in `lofty`) says nothing about Renome.
 [profile.dev.package."*"]
 overflow-checks = false
+# The decoders and encoders (images, PDF) are far too slow unoptimised for
+# the tests that run them on real pictures.
+opt-level = 2
 
 [workspace.lints.clippy]
 # A panic on a user's files is a failure: fallible calls return errors, and

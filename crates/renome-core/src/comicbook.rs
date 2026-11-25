@@ -520,10 +520,43 @@ fn strips(img: DynamicImage, ratio: f32) -> Vec<DynamicImage> {
 fn prepare(data: &[u8], o: &EbookOptions, first: bool, rtl: bool) -> Result<Vec<Out>, String> {
     let img = image::load_from_memory(data).map_err(|e| format!("pageUnreadable: {e}"))?;
     let (w0, h0) = img.dimensions();
-    let source_grey = matches!(img.color(), image::ColorType::L8 | image::ColorType::L16);
+    let source = Source {
+        data,
+        size: (w0, h0),
+        grey: matches!(img.color(), image::ColorType::L8 | image::ColorType::L16),
+    };
+    let screen = o.screen();
+    let parts = parts_of(img, o, first, rtl, screen);
+    let whole = parts.len() == 1;
+    parts
+        .into_iter()
+        .map(|p| finish_part(p, o, &source, screen, whole))
+        .collect()
+}
+
+/// The page as it was read: its bytes, size, and whether it was grey.
+struct Source<'a> {
+    data: &'a [u8],
+    size: (u32, u32),
+    grey: bool,
+}
+
+/// Whether a picture is a double page (wider than tall by a margin).
+fn wide(i: &DynamicImage) -> bool {
+    i.width() * 100 > i.height() * 115
+}
+
+/// The pictures a page becomes: a cover scanned with its back is its
+/// front, the margins are cut, a webtoon's strip is cut into pages, a
+/// double page is kept, split, turned or both; else the page.
+fn parts_of(
+    mut img: DynamicImage,
+    o: &EbookOptions,
+    first: bool,
+    rtl: bool,
+    screen: Option<(u32, u32)>,
+) -> Vec<DynamicImage> {
     let spread = o.spread();
-    let mut img = img;
-    let wide = |i: &DynamicImage| i.width() * 100 > i.height() * 115;
     // A cover scanned with its back: the front only.
     if first && spread != Spread::Keep && wide(&img) {
         let (w, h) = img.dimensions();
@@ -537,8 +570,7 @@ fn prepare(data: &[u8], o: &EbookOptions, first: bool, rtl: bool) -> Result<Vec<
     if o.crop {
         img = cropped(img, o.numbers);
     }
-    let screen = o.screen();
-    let parts: Vec<DynamicImage> = if o.webtoon {
+    if o.webtoon {
         let ratio = screen.map_or(1.5, |(sw, sh)| sh as f32 / sw as f32);
         strips(img, ratio)
     } else if !first && wide(&img) {
@@ -565,92 +597,98 @@ fn prepare(data: &[u8], o: &EbookOptions, first: bool, rtl: bool) -> Result<Vec<
         }
     } else {
         vec![img]
-    };
-    let whole = parts.len() == 1;
+    }
+}
+
+/// One picture made ready: fit to the screen, kept as it was when nothing
+/// changed, else grey, stretched, softened and encoded (JPEG; a 4-bit PNG
+/// when that is smaller).
+fn finish_part(
+    p: DynamicImage,
+    o: &EbookOptions,
+    source: &Source,
+    screen: Option<(u32, u32)>,
+    whole: bool,
+) -> Result<Out, String> {
     let grey = o.device.grey();
-    parts
-        .into_iter()
-        .map(|p| {
-            let p = match screen {
-                Some((sw, sh)) if p.width() > sw || p.height() > sh => {
-                    p.resize(sw, sh, image::imageops::FilterType::Lanczos3)
-                }
-                Some((sw, sh)) if o.upscale && p.width() < sw && p.height() < sh => {
-                    p.resize(sw, sh, image::imageops::FilterType::CatmullRom)
-                }
-                _ => p,
-            };
-            let (w, h) = p.dimensions();
-            // Not cut, split, turned, resized nor retouched: a JPEG stays
-            // as it was (no second loss), unless a grey screen wants a
-            // colour page grey.
-            let same = whole
-                && (w, h) == (w0, h0)
-                && !o.contrast
-                && !(o.greys16 && grey && o.device.png_ok())
-                && !(o.soften && o.device.colour_ink());
-            if same && data.starts_with(&[0xff, 0xd8]) && (source_grey || !grey) {
-                return Ok(Out {
-                    data: data.to_vec(),
-                    w,
-                    h,
-                    grey: source_grey,
-                });
-            }
-            let p = if grey {
-                DynamicImage::ImageLuma8(p.to_luma8())
-            } else {
-                p
-            };
-            let p = if o.contrast {
-                stretched(p, if o.device.ink() { 1.2 } else { 1.0 })
-            } else {
-                p
-            };
-            let p = if o.soften && o.device.colour_ink() {
-                softened(p)
-            } else {
-                p
-            };
-            let encode = |q: u8| -> Result<Vec<u8>, String> {
-                let mut out = Vec::new();
-                let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, q);
-                let r = if grey {
-                    p.to_luma8().write_with_encoder(enc)
-                } else {
-                    p.to_rgb8().write_with_encoder(enc)
-                };
-                r.map_err(|e| e.to_string())?;
-                Ok(out)
-            };
-            let mut out = encode(QUALITY)?;
-            // A scan saved small already would grow: its share of the
-            // original's bytes (by area) is the budget, met with a lower
-            // quality when it can be (its own detail is all there is).
-            let share = data.len() as u64 * u64::from(w) * u64::from(h)
-                / (u64::from(w0) * u64::from(h0)).max(1);
-            if out.len() as u64 > share + share / 10 {
-                let lower = encode(QUALITY_LOW)?;
-                if lower.len() < out.len() {
-                    out = lower;
-                }
-            }
-            // The 16 greys an ink screen shows, as a 4-bit PNG: kept when
-            // smaller than the JPEG (drawings; rarely photos).
-            if grey && o.greys16 && o.device.png_ok() {
-                let png = png16(&p.to_luma8())?;
-                if png.len() < out.len() {
-                    out = png;
-                }
-            }
-            Ok(Out {
-                data: out,
-                w,
-                h,
-                grey,
-            })
-        })
-        .collect()
+    let p = match screen {
+        Some((sw, sh)) if p.width() > sw || p.height() > sh => {
+            p.resize(sw, sh, image::imageops::FilterType::Lanczos3)
+        }
+        Some((sw, sh)) if o.upscale && p.width() < sw && p.height() < sh => {
+            p.resize(sw, sh, image::imageops::FilterType::CatmullRom)
+        }
+        _ => p,
+    };
+    let (w, h) = p.dimensions();
+    // Not cut, split, turned, resized nor retouched: a JPEG stays as it
+    // was (no second loss), unless a grey screen wants a colour page grey.
+    let same = whole
+        && (w, h) == source.size
+        && !o.contrast
+        && !(o.greys16 && grey && o.device.png_ok())
+        && !(o.soften && o.device.colour_ink());
+    if same && source.data.starts_with(&[0xff, 0xd8]) && (source.grey || !grey) {
+        return Ok(Out {
+            data: source.data.to_vec(),
+            w,
+            h,
+            grey: source.grey,
+        });
+    }
+    let p = if grey {
+        DynamicImage::ImageLuma8(p.to_luma8())
+    } else {
+        p
+    };
+    let p = if o.contrast {
+        stretched(p, if o.device.ink() { 1.2 } else { 1.0 })
+    } else {
+        p
+    };
+    let p = if o.soften && o.device.colour_ink() {
+        softened(p)
+    } else {
+        p
+    };
+    let encode = |q: u8| -> Result<Vec<u8>, String> {
+        let mut out = Vec::new();
+        let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, q);
+        let r = if grey {
+            p.to_luma8().write_with_encoder(enc)
+        } else {
+            p.to_rgb8().write_with_encoder(enc)
+        };
+        r.map_err(|e| e.to_string())?;
+        Ok(out)
+    };
+    let mut out = encode(QUALITY)?;
+    // A scan saved small already would grow: its share of the original's
+    // bytes (by area) is the budget, met with a lower quality when it can
+    // be (its own detail is all there is).
+    let (w0, h0) = source.size;
+    let share = source.data.len() as u64 * u64::from(w) * u64::from(h)
+        / (u64::from(w0) * u64::from(h0)).max(1);
+    if out.len() as u64 > share + share / 10 {
+        let lower = encode(QUALITY_LOW)?;
+        if lower.len() < out.len() {
+            out = lower;
+        }
+    }
+    // The 16 greys an ink screen shows, as a 4-bit PNG: kept when smaller
+    // than the JPEG (drawings; rarely photos).
+    if grey && o.greys16 && o.device.png_ok() {
+        let png = png16(&p.to_luma8())?;
+        if png.len() < out.len() {
+            out = png;
+        }
+    }
+    Ok(Out {
+        data: out,
+        w,
+        h,
+        grey,
+    })
 }
 
 /// A grey page in 16 greys, as a 4-bit PNG.
@@ -1475,6 +1513,108 @@ mod tests {
             spread: Spread::Keep,
             ..Default::default()
         }
+    }
+
+    /// Pins what `prepare` makes of pages under many options, so it can
+    /// be taken apart. Only where it was made: the resizing's float math
+    /// may round differently on other processors.
+    #[test]
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    fn prepare_does_not_change() {
+        let png = |img: &DynamicImage| {
+            let mut b = std::io::Cursor::new(Vec::new());
+            img.write_to(&mut b, image::ImageFormat::Png).unwrap();
+            b.into_inner()
+        };
+        let grey = DynamicImage::ImageLuma8(page(200, 280).to_luma8());
+        let inputs: Vec<(&str, Vec<u8>)> = vec![
+            ("tall-jpeg", jpeg(page(200, 300))),
+            ("wide-jpeg", jpeg(page(600, 380))),
+            ("strip-jpeg", jpeg(page(120, 1000))),
+            ("small-png", png(&page(60, 90))),
+            ("grey-png", png(&grey)),
+            ("grey-jpeg", jpeg(grey.clone())),
+        ];
+        let mut sets: Vec<(EbookOptions, bool)> = Vec::new();
+        // A small custom screen: cheap, so every spread and tweak.
+        for spread in [Spread::Keep, Spread::Split, Spread::Rotate, Spread::Both] {
+            for device in [Device::Original, Device::Custom] {
+                sets.push((
+                    EbookOptions {
+                        device,
+                        width: 150,
+                        height: 200,
+                        spread,
+                        ..Default::default()
+                    },
+                    true,
+                ));
+            }
+        }
+        for tweak in 0..16u32 {
+            sets.push((
+                EbookOptions {
+                    device: Device::Custom,
+                    width: 150,
+                    height: 200,
+                    crop: tweak & 1 != 0,
+                    numbers: tweak & 1 != 0,
+                    contrast: tweak & 2 != 0,
+                    upscale: tweak & 4 != 0,
+                    webtoon: tweak & 8 != 0,
+                    ..Default::default()
+                },
+                true,
+            ));
+        }
+        // The ink screens (grey, colour): big, so a few inputs and tweaks.
+        for (device, tweaks) in [
+            (Device::KindleBasic, vec![0u32, 10]),
+            (Device::KindleScribeColor, vec![4]),
+        ] {
+            for tweak in tweaks {
+                sets.push((
+                    EbookOptions {
+                        device,
+                        contrast: tweak & 2 != 0,
+                        greys16: tweak & 8 != 0,
+                        soften: tweak & 4 != 0,
+                        ..Default::default()
+                    },
+                    false,
+                ));
+            }
+        }
+        let mut all = Vec::new();
+        for (name, data) in &inputs {
+            for (n, (o, small)) in sets.iter().enumerate() {
+                if !small && !matches!(*name, "tall-jpeg") {
+                    continue;
+                }
+                for (first, rtl) in [(false, false), (true, false), (false, true), (true, true)] {
+                    if !small && (first || rtl) {
+                        continue;
+                    }
+                    let r = prepare(data, o, first, rtl).map(|v| {
+                        v.into_iter()
+                            .map(|p| {
+                                format!(
+                                    "{}x{} {} {:x}",
+                                    p.w,
+                                    p.h,
+                                    p.grey,
+                                    xxhash_rust::xxh3::xxh3_64(&p.data)
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                    });
+                    all.push(format!("{name} {n} {first} {rtl} {r:?}"));
+                }
+            }
+        }
+        let sum = xxhash_rust::xxh3::xxh3_64(all.join("\n").as_bytes());
+        println!("hash {sum:016x} over {} pages", all.len());
+        assert_eq!(sum, 0xcb6cb52bc1df143e, "the pages changed");
     }
 
     #[test]
