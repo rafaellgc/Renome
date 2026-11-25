@@ -174,83 +174,19 @@ fn href_of(e: &Elem) -> Option<&str> {
         .map(|(_, v)| v.as_str())
 }
 
+/// The first child element with that name.
+fn child(e: &Elem, n: &str) -> Option<Elem> {
+    e.kids.iter().find_map(|k| match k {
+        Node::Elem(x) if x.name == n => Some(x.clone()),
+        _ => None,
+    })
+}
+
 fn details(desc: &Elem, book: &mut Book, pics: &HashMap<String, String>) {
-    let child = |e: &Elem, n: &str| -> Option<Elem> {
-        e.kids.iter().find_map(|k| match k {
-            Node::Elem(x) if x.name == n => Some(x.clone()),
-            _ => None,
-        })
-    };
-    let m = &mut book.meta;
     if let Some(ti) = child(desc, "title-info") {
-        let mut codes = Vec::new();
-        for k in &ti.kids {
-            let Node::Elem(e) = k else { continue };
-            match e.name.as_str() {
-                "author" => {
-                    let p = person(e);
-                    if !p.is_empty() {
-                        m.authors.push(p);
-                    }
-                }
-                "translator" => {
-                    let p = person(e);
-                    if !p.is_empty() {
-                        m.contributors.push((p, "trl".into()));
-                    }
-                }
-                "book-title" => m.title = clean_line(&e.plain()),
-                "lang" => m.language = clean_line(&e.plain()),
-                "date" => {
-                    let v = e
-                        .attr("value")
-                        .map(String::from)
-                        .unwrap_or_else(|| clean_line(&e.plain()));
-                    if m.date.is_empty() {
-                        m.date = v;
-                    }
-                }
-                "genre" => {
-                    let g = clean_line(&e.plain());
-                    if g.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
-                        // A code of the format's list: only when the book
-                        // gives no words of its own.
-                        if !g.is_empty() {
-                            codes.push(g);
-                        }
-                    } else if !g.is_empty() {
-                        m.subjects.push(g);
-                    }
-                }
-                "keywords" => {
-                    for w in e.plain().split(',') {
-                        let w = clean_line(w);
-                        if !w.is_empty() && !m.subjects.contains(&w) {
-                            m.subjects.push(w);
-                        }
-                    }
-                }
-                "annotation" => m.description = clean_line(&e.plain()),
-                "sequence" => {
-                    if m.series.is_empty() {
-                        m.series = e.attr("name").map(clean_line).unwrap_or_default();
-                        m.series_index = e.attr("number").map(clean_line).unwrap_or_default();
-                    }
-                }
-                "coverpage" => {
-                    let mut imgs = Vec::new();
-                    xhtml::find_all(&e.kids, "image", &mut imgs);
-                    if let Some(h) = imgs.first().and_then(|i| href_of(i)) {
-                        book.cover = pics.get(h.trim_start_matches('#')).cloned();
-                    }
-                }
-                _ => {}
-            }
-        }
-        if m.subjects.is_empty() {
-            m.subjects = codes.into_iter().filter(|c| c != "unrecognised").collect();
-        }
+        title_details(&ti, book, pics);
     }
+    let m = &mut book.meta;
     if let Some(pi) = child(desc, "publish-info") {
         for k in &pi.kids {
             let Node::Elem(e) = k else { continue };
@@ -278,6 +214,80 @@ fn details(desc: &Elem, book: &mut Book, pics: &HashMap<String, String>) {
         if !v.is_empty() {
             m.id = format!("urn:fb2:{v}");
         }
+    }
+}
+
+/// What a `<title-info>` says: authors, title, language, date, genres,
+/// keywords, annotation, series and cover.
+fn title_details(ti: &Elem, book: &mut Book, pics: &HashMap<String, String>) {
+    let m = &mut book.meta;
+    let mut codes = Vec::new();
+    for k in &ti.kids {
+        let Node::Elem(e) = k else { continue };
+        match e.name.as_str() {
+            "author" => {
+                let p = person(e);
+                if !p.is_empty() {
+                    m.authors.push(p);
+                }
+            }
+            "translator" => {
+                let p = person(e);
+                if !p.is_empty() {
+                    m.contributors.push((p, "trl".into()));
+                }
+            }
+            "book-title" => m.title = clean_line(&e.plain()),
+            "lang" => m.language = clean_line(&e.plain()),
+            "date" => {
+                let v = e
+                    .attr("value")
+                    .map(String::from)
+                    .unwrap_or_else(|| clean_line(&e.plain()));
+                if m.date.is_empty() {
+                    m.date = v;
+                }
+            }
+            "genre" => {
+                let g = clean_line(&e.plain());
+                if g.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
+                    // A code of the format's list: only when the book gives
+                    // no words of its own.
+                    if !g.is_empty() {
+                        codes.push(g);
+                    }
+                } else if !g.is_empty() {
+                    m.subjects.push(g);
+                }
+            }
+            "keywords" => {
+                for w in e.plain().split(',') {
+                    let w = clean_line(w);
+                    if !w.is_empty() && !m.subjects.contains(&w) {
+                        m.subjects.push(w);
+                    }
+                }
+            }
+            "annotation" => m.description = clean_line(&e.plain()),
+            "sequence" => {
+                if m.series.is_empty() {
+                    m.series = e.attr("name").map(clean_line).unwrap_or_default();
+                    m.series_index = e.attr("number").map(clean_line).unwrap_or_default();
+                }
+            }
+            "coverpage" => {
+                let mut imgs = Vec::new();
+                xhtml::find_all(&e.kids, "image", &mut imgs);
+                if let Some(h) = imgs.first().and_then(|i| href_of(i)) {
+                    book.cover = pics.get(h.trim_start_matches('#')).cloned();
+                }
+            }
+            _ => {}
+        }
+    }
+    let m = &mut book.meta;
+    if m.subjects.is_empty() {
+        m.subjects = codes.into_iter().filter(|c| c != "unrecognised").collect();
     }
 }
 
