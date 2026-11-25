@@ -493,8 +493,11 @@ fn scan(
                         }
                         *used += p.len();
                         list.push(Event {
-                            start: (cluster_ts + i64::from(rel)) * scale,
-                            duration: duration.map(|d| d * scale),
+                            // A damaged file's numbers can be anything: saturate.
+                            start: cluster_ts
+                                .saturating_add(i64::from(rel))
+                                .saturating_mul(scale),
+                            duration: duration.map(|d| d.saturating_mul(scale)),
                             data: p.to_vec(),
                         });
                     }
@@ -941,5 +944,195 @@ pub(crate) mod tests {
         ];
         let (_, _, parts) = frames(&data).unwrap();
         assert_eq!(parts, [&b"ab"[..], b"cd", b"ef"]);
+    }
+
+    /// A Matroska file by hand: two clusters of known size and one of
+    /// unknown size, simple blocks and block groups of three tracks.
+    fn synthetic() -> Vec<u8> {
+        let info = el(INFO, &uint(0x2ad7b1, 1_000_000));
+        let c1 = el(
+            CLUSTER,
+            &[
+                uint(0xe7, 0),
+                simple(1, 0, b"a"),
+                simple(2, 10, b"b"),
+                group(1, 20, 500, b"c"),
+                simple(9, 5, b"other track"),
+            ]
+            .concat(),
+        );
+        let c2 = el(
+            CLUSTER,
+            &[uint(0xe7, 1000), group(2, 0, 100, b"d"), simple(3, 7, b"e")].concat(),
+        );
+        // A cluster of unknown size: its end is where another element begins.
+        let mut c3 = CLUSTER
+            .to_be_bytes()
+            .iter()
+            .skip_while(|b| **b == 0)
+            .copied()
+            .collect::<Vec<u8>>();
+        c3.extend_from_slice(&[0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+        c3.extend(uint(0xe7, 2000));
+        c3.extend(simple(1, 1, b"f"));
+        c3.extend(simple(2, 2, b"g"));
+        let mut seg = info;
+        seg.extend(c1);
+        seg.extend(c2);
+        seg.extend(c3);
+        seg.extend(el(0x1c53bb6b, &[0u8; 4]));
+        let mut file = el(0x1a45_dfa3, &el(0x4282, b"matroska"));
+        file.extend(el(SEGMENT, &seg));
+        file
+    }
+
+    /// What `scan` finds in files and in damaged copies of them: the
+    /// events of the tracks asked for, or the error. A change here is a
+    /// change in the subtitles people get out of their videos: update
+    /// these only when that is the point, never for a refactor.
+    #[test]
+    fn scan_does_not_change() {
+        let seeds: Vec<(&str, Vec<u8>)> = vec![
+            ("synthetic", synthetic()),
+            (
+                "fixture",
+                std::fs::read("tests/fixtures/video.mkv").unwrap(),
+            ),
+            (
+                "fixture subs",
+                std::fs::read("tests/fixtures/video-subs.mkv").unwrap(),
+            ),
+        ];
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("a.mkv");
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let mut got: Vec<(String, u64)> = Vec::new();
+        for (name, bytes) in &seeds {
+            let n = bytes.len();
+            let mut cases: Vec<(String, Vec<u8>)> = vec![("whole".into(), bytes.clone())];
+            for (label, cut) in [
+                ("half", n / 2),
+                ("third", n / 3),
+                ("almost", n - 1),
+                ("quarter3", n * 3 / 4),
+            ] {
+                cases.push((format!("cut {label}"), bytes[..cut].to_vec()));
+            }
+            for k in 0..24 {
+                let mut b = bytes.clone();
+                for _ in 0..1 + k % 3 {
+                    let at = (next() % n as u64) as usize;
+                    b[at] = next() as u8;
+                }
+                cases.push((format!("flip {k}"), b));
+            }
+            for (label, b) in cases {
+                std::fs::write(&p, &b).unwrap();
+                // In the tracks' order: a map prints in any order.
+                let r = scan(&p, &[1, 2, 3, 4], &|| false, &|_, _| {})
+                    .map(|m| m.into_iter().collect::<std::collections::BTreeMap<_, _>>());
+                got.push((
+                    format!("{name}/{label}"),
+                    xxhash_rust::xxh3::xxh3_64(format!("{r:?}").as_bytes()),
+                ));
+            }
+        }
+        let want: Vec<u64> = vec![
+            17490649294497600160,
+            5409046580004410131,
+            17502117596690866678,
+            17490649294497600160,
+            5409046580004410131,
+            14715641978097193875,
+            5858702486562217063,
+            7625867663594165129,
+            7781492462170314091,
+            1997610886969699674,
+            7781492462170314091,
+            5746340986643322918,
+            15693928008188820132,
+            4014310979084501715,
+            1177917416598511656,
+            17490649294497600160,
+            14715641978097193875,
+            17490649294497600160,
+            14227727379821959842,
+            7781492462170314091,
+            5180109381228643133,
+            6488193179580620138,
+            7781492462170314091,
+            17490649294497600160,
+            17588193066724702890,
+            17490649294497600160,
+            1177917416598511656,
+            14537963686069114867,
+            10178621721909011070,
+            7175430888331382994,
+            13052104533494045199,
+            7781492462170314091,
+            7175430888331382994,
+            3025003258283396606,
+            15728787690361019544,
+            4045938006723415278,
+            1823900053809807701,
+            10466245072262289132,
+            12734629262927125160,
+            10241813146675411471,
+            13372137466899819336,
+            3129072783996813594,
+            2604431609725722358,
+            2341058516259258611,
+            10248326464239528886,
+            6409784130447934265,
+            3712193322260932923,
+            1824736415926128210,
+            3001470060924926760,
+            7175430888331382994,
+            5015837132343925613,
+            10738272679689738030,
+            14304148328263930724,
+            2436555464684623886,
+            9831580550215645879,
+            4935746921885739406,
+            5098565672397520211,
+            6730686664452693208,
+            16218372699710330464,
+            11829641623621845010,
+            7781492462170314091,
+            16218372699710330464,
+            6527440838070983387,
+            16272994680625626791,
+            15438442017686501803,
+            7014331965384174554,
+            8094328675286727008,
+            7903751210840811711,
+            16479781936562825088,
+            12236122436633514777,
+            17855362776506859145,
+            2496037785780146385,
+            9486711828515358468,
+            955793388416570209,
+            14175680333755557760,
+            11336276658561696405,
+            18325777305419693973,
+            18236490073095605754,
+            14717435371450778960,
+            12046970688341059990,
+            4913112853576004825,
+            14380336634859874681,
+            8558743709581209471,
+            8424544401065547681,
+            16218372699710330464,
+            3297719813062026755,
+            8763252019226504279,
+        ];
+        let hashes: Vec<u64> = got.iter().map(|g| g.1).collect();
+        assert_eq!(hashes, want, "{got:?}");
     }
 }
