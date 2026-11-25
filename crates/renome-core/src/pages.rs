@@ -159,21 +159,10 @@ pub(crate) fn epub(path: &Path) -> Result<EpubComic, String> {
             (at, media, n.attribute("properties").unwrap_or_default()),
         );
     }
-    let picture_of = |at: &str| -> Result<EpubPage, String> {
-        if locked.contains(at) {
-            return Err("archiveLocked".into());
-        }
-        if !names.contains(at) {
-            return Err(format!("archiveBroken: {at} missing"));
-        }
-        let media = types.get(at).copied().unwrap_or_default();
-        let ext = picture_ext(at)
-            .filter(|_| media.is_empty() || media.starts_with("image/"))
-            .ok_or("comicUnsupported")?;
-        Ok(EpubPage {
-            entry: at.to_string(),
-            ext,
-        })
+    let package = Package {
+        names: &names,
+        locked: &locked,
+        types: &types,
     };
     let mut pages = Vec::new();
     for item in doc.descendants().filter(|n| n.has_tag_name("itemref")) {
@@ -181,32 +170,15 @@ pub(crate) fn epub(path: &Path) -> Result<EpubComic, String> {
             continue;
         };
         if media.starts_with("image/") && *media != "image/svg+xml" {
-            pages.push(picture_of(at)?);
+            pages.push(package.picture(at)?);
             continue;
         }
         if locked.contains(at) {
             return Err("archiveLocked".into());
         }
         let markup = entry_text(&mut zip, at, 8 << 20)?;
-        let shown = HIDDEN.replace_all(&markup, " ");
-        let mut pictures: Vec<String> = Vec::new();
-        for tag in PICTURE.find_iter(&shown) {
-            let link = attr(tag.as_str(), "src").or_else(|| attr(tag.as_str(), "href"));
-            if let Some(link) = link.filter(|l| !l.is_empty() && !l.starts_with("data:")) {
-                let p = crate::ebook::join_zip(at, &link);
-                if !pictures.contains(&p) {
-                    pictures.push(p);
-                }
-            }
-        }
-        if shown_letters(&shown) > PAGE_TEXT {
-            return Err("comicUnsupported".into());
-        }
-        match pictures.as_slice() {
-            // A blank page: nothing to keep.
-            [] => {}
-            [one] => pages.push(picture_of(one)?),
-            _ => return Err("comicUnsupported".into()),
+        if let Some(page) = package.page_picture(at, &markup)? {
+            pages.push(page);
         }
     }
     if pages.is_empty() {
@@ -227,7 +199,7 @@ pub(crate) fn epub(path: &Path) -> Result<EpubComic, String> {
         });
     if let Some(cover) = cover
         && !pages.iter().any(|p| p.entry == cover)
-        && let Ok(p) = picture_of(&cover)
+        && let Ok(p) = package.picture(&cover)
     {
         pages.insert(0, p);
     }
@@ -240,6 +212,59 @@ pub(crate) fn epub(path: &Path) -> Result<EpubComic, String> {
         })
         .cloned();
     Ok(EpubComic { pages, info })
+}
+
+/// What an EPUB says of its files: which are there, which are locked, and
+/// the media type of each.
+struct Package<'a> {
+    names: &'a HashSet<String>,
+    locked: &'a HashSet<String>,
+    types: &'a HashMap<String, &'a str>,
+}
+
+impl Package<'_> {
+    /// A picture file as a page.
+    fn picture(&self, at: &str) -> Result<EpubPage, String> {
+        if self.locked.contains(at) {
+            return Err("archiveLocked".into());
+        }
+        if !self.names.contains(at) {
+            return Err(format!("archiveBroken: {at} missing"));
+        }
+        let media = self.types.get(at).copied().unwrap_or_default();
+        let ext = picture_ext(at)
+            .filter(|_| media.is_empty() || media.starts_with("image/"))
+            .ok_or("comicUnsupported")?;
+        Ok(EpubPage {
+            entry: at.to_string(),
+            ext,
+        })
+    }
+
+    /// The one picture of a page of markup (none: a blank page). A page
+    /// with text, or several pictures, is no comic's.
+    fn page_picture(&self, at: &str, markup: &str) -> Result<Option<EpubPage>, String> {
+        let shown = HIDDEN.replace_all(markup, " ");
+        let mut pictures: Vec<String> = Vec::new();
+        for tag in PICTURE.find_iter(&shown) {
+            let link = attr(tag.as_str(), "src").or_else(|| attr(tag.as_str(), "href"));
+            if let Some(link) = link.filter(|l| !l.is_empty() && !l.starts_with("data:")) {
+                let p = crate::ebook::join_zip(at, &link);
+                if !pictures.contains(&p) {
+                    pictures.push(p);
+                }
+            }
+        }
+        if shown_letters(&shown) > PAGE_TEXT {
+            return Err("comicUnsupported".into());
+        }
+        match pictures.as_slice() {
+            // A blank page: nothing to keep.
+            [] => Ok(None),
+            [one] => self.picture(one).map(Some),
+            _ => Err("comicUnsupported".into()),
+        }
+    }
 }
 
 // ---------------------------------------------------------------- Kindle
