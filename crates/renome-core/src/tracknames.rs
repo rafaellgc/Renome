@@ -1345,10 +1345,10 @@ mod tests {
                     name: said[(n * 7 + chunk) % said.len()].into(),
                     codec: ["AC3", "SRT", "", "DTS"][(n + k) % 4].into(),
                     channels: [0, 2, 6, 8][(n / 3) % 4],
-                    forced: n % 11 == 0,
-                    hearing: n % 13 == 0,
-                    commentary: n % 17 == 0,
-                    described: n % 19 == 0,
+                    forced: n.is_multiple_of(11),
+                    hearing: n.is_multiple_of(13),
+                    commentary: n.is_multiple_of(17),
+                    described: n.is_multiple_of(19),
                 });
             }
             all.push(format!("{:?}", names(&tracks)));

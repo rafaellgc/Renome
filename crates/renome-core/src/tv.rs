@@ -1433,15 +1433,31 @@ pub fn show_nfo(d: &ShowDetails, lang: &str) -> String {
     if let Some(key) = d.videos.trailer(lang2) {
         tag(&mut o, "trailer", &trailer_url(key));
     }
+    show_ids(&mut o, d);
+    for (i, a) in d.aggregate_credits.cast.iter().take(20).enumerate() {
+        let role = a
+            .roles
+            .first()
+            .map(|r| r.character.as_str())
+            .unwrap_or_default();
+        person(&mut o, &a.name, role, "Actor", i, &a.profile_path);
+    }
+    o.push_str("</tvshow>\n");
+    o
+}
+
+/// The show's ids in the places the media servers read them: plain tags,
+/// unique ids and the episode guide.
+fn show_ids(o: &mut String, d: &ShowDetails) {
     let imdb = d.external_ids.imdb_id.as_deref().unwrap_or_default();
     let tvdb = d
         .external_ids
         .tvdb_id
         .map(|i| i.to_string())
         .unwrap_or_default();
-    tag(&mut o, "tmdbid", &d.id.to_string());
-    tag(&mut o, "imdb_id", imdb);
-    tag(&mut o, "tvdbid", &tvdb);
+    tag(o, "tmdbid", &d.id.to_string());
+    tag(o, "imdb_id", imdb);
+    tag(o, "tvdbid", &tvdb);
     o.push_str(&format!(
         "  <uniqueid type=\"tmdb\" default=\"true\">{}</uniqueid>\n",
         d.id
@@ -1464,17 +1480,7 @@ pub fn show_nfo(d: &ShowDetails, lang: &str) -> String {
         guide.push_str(&format!(",\"tvdb\":\"{tvdb}\""));
     }
     guide.push('}');
-    tag(&mut o, "episodeguide", &guide);
-    for (i, a) in d.aggregate_credits.cast.iter().take(20).enumerate() {
-        let role = a
-            .roles
-            .first()
-            .map(|r| r.character.as_str())
-            .unwrap_or_default();
-        person(&mut o, &a.name, role, "Actor", i, &a.profile_path);
-    }
-    o.push_str("</tvshow>\n");
-    o
+    tag(o, "episodeguide", &guide);
 }
 
 /// `season.nfo`, inside the season's folder.
