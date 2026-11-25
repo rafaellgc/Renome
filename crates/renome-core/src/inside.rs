@@ -1376,4 +1376,115 @@ mod tests {
         crate::tagwrite::restore(&b, &store).unwrap();
         assert_eq!(entry_of(&epub, "OEBPS/content.opf").unwrap(), OPF2);
     }
+
+    /// The OPFs the golden test edits: each way details are written.
+    fn golden_opfs() -> Vec<(&'static str, String)> {
+        let head2 = "<?xml version=\"1.0\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"2.0\" unique-identifier=\"id\">\n";
+        let head3 = "<?xml version=\"1.0\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\" unique-identifier=\"id\">\n";
+        let tail = "<manifest><item id=\"c\" href=\"c.xhtml\" media-type=\"application/xhtml+xml\"/></manifest>\n</package>\n";
+        let two = format!(
+            "{head2}  <metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:opf=\"http://www.idpf.org/2007/opf\">\n    <dc:title>Old Title</dc:title>\n    <dc:creator opf:role=\"aut\" opf:file-as=\"One, Old\">Old One</dc:creator>\n    <dc:creator opf:role=\"aut\">Old Two</dc:creator>\n    <dc:creator opf:role=\"ill\">Drawer</dc:creator>\n    <dc:date>1999-05-01</dc:date>\n    <dc:publisher>Old Press</dc:publisher>\n    <dc:language>pt-BR</dc:language>\n    <dc:identifier id=\"id\">uuid:1234</dc:identifier>\n    <dc:identifier opf:scheme=\"ISBN\">9780306406157</dc:identifier>\n    <meta name=\"calibre:series\" content=\"Old Series\"/>\n    <meta name=\"calibre:series_index\" content=\"1\"/>\n  </metadata>\n{tail}"
+        );
+        let three = format!(
+            "{head3}  <metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n    <dc:identifier id=\"id\">urn:uuid:1234</dc:identifier>\n    <dc:title id=\"t1\">Old Title</dc:title>\n    <meta refines=\"#t1\" property=\"title-type\">main</meta>\n    <dc:title id=\"t2\">A Subtitle</dc:title>\n    <meta refines=\"#t2\" property=\"title-type\">subtitle</meta>\n    <dc:creator id=\"a1\">Old One</dc:creator>\n    <meta refines=\"#a1\" property=\"role\" scheme=\"marc:relators\">aut</meta>\n    <meta refines=\"#a1\" property=\"file-as\">One, Old</meta>\n    <dc:date>2001</dc:date>\n    <dc:language>en</dc:language>\n    <dc:identifier>urn:isbn:9781402894626</dc:identifier>\n    <meta property=\"belongs-to-collection\" id=\"c1\">Old Series</meta>\n    <meta refines=\"#c1\" property=\"collection-type\">series</meta>\n    <meta refines=\"#c1\" property=\"group-position\">3</meta>\n    <meta property=\"dcterms:modified\">2020-01-01T00:00:00Z</meta>\n  </metadata>\n{tail}"
+        );
+        let bare = format!(
+            "{head3}<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>Only</dc:title></metadata>\n{tail}"
+        );
+        let bom = format!(
+            "\u{feff}{head2}\t<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n\t\t<dc:title>Bom</dc:title>\n\t\t<dc:creator>Someone</dc:creator>\n\t</metadata>\n{tail}"
+        );
+        let empty = format!("{head2}<metadata/>\n{tail}");
+        vec![
+            ("two", two),
+            ("three", three),
+            ("bare", bare),
+            ("bom", bom),
+            ("empty", empty),
+        ]
+    }
+
+    fn golden_values() -> Vec<(&'static str, BookValues)> {
+        let s = |x: &str| x.to_string();
+        vec![
+            (
+                "full",
+                BookValues {
+                    title: s("New Title"),
+                    authors: vec![s("New One"), s("New Two"), s("New Three")],
+                    year: s("2015"),
+                    publisher: s("New Press"),
+                    language: s("en"),
+                    isbn: s("9780306406157"),
+                    series: s("New Series"),
+                    series_index: s("7"),
+                },
+            ),
+            (
+                "fewer",
+                BookValues {
+                    title: s("Old Title"),
+                    authors: vec![s("Only Author")],
+                    isbn: s("9781402894626"),
+                    series: s("Old Series"),
+                    series_index: s("9"),
+                    ..Default::default()
+                },
+            ),
+            (
+                "same",
+                BookValues {
+                    title: s("Old Title"),
+                    authors: vec![s("Old One")],
+                    year: s("2001"),
+                    language: s("en"),
+                    ..Default::default()
+                },
+            ),
+            ("none", BookValues::default()),
+        ]
+    }
+
+    /// What `book_opf` writes for each OPF and each set of values. A change
+    /// here is a change in the EPUBs people's books are saved as: update
+    /// these only when that is the point, never for a refactor.
+    #[test]
+    fn book_opf_does_not_change() {
+        let mut got: Vec<(String, u64)> = Vec::new();
+        for (on, opf) in golden_opfs() {
+            for (vn, v) in golden_values() {
+                let out = format!("{:?}", book_opf(&opf, &v));
+                if std::env::var_os("GOLDEN_SHOW").is_some() {
+                    eprintln!("#### {on}/{vn}\n{out}");
+                }
+                got.push((
+                    format!("{on}/{vn}"),
+                    xxhash_rust::xxh3::xxh3_64(out.as_bytes()),
+                ));
+            }
+        }
+        let want: Vec<(String, u64)> = vec![
+            ("two/full".to_string(), 5746460103816541910),
+            ("two/fewer".to_string(), 3645695271312550084),
+            ("two/same".to_string(), 7480915198357479523),
+            ("two/none".to_string(), 8169143652509480441),
+            ("three/full".to_string(), 5074791247990556880),
+            ("three/fewer".to_string(), 15986331220408464918),
+            ("three/same".to_string(), 8169143652509480441),
+            ("three/none".to_string(), 8169143652509480441),
+            ("bare/full".to_string(), 10417967633236188159),
+            ("bare/fewer".to_string(), 15146349055602855066),
+            ("bare/same".to_string(), 12419388878216890658),
+            ("bare/none".to_string(), 8169143652509480441),
+            ("bom/full".to_string(), 14210168727809629928),
+            ("bom/fewer".to_string(), 8404833533463941923),
+            ("bom/same".to_string(), 7086486855153481615),
+            ("bom/none".to_string(), 8169143652509480441),
+            ("empty/full".to_string(), 8169143652509480441),
+            ("empty/fewer".to_string(), 8169143652509480441),
+            ("empty/same".to_string(), 8169143652509480441),
+            ("empty/none".to_string(), 8169143652509480441),
+        ];
+        assert_eq!(got, want);
+    }
 }
