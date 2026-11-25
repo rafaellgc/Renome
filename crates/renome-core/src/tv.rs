@@ -640,6 +640,78 @@ fn without_show(title: &str, show: &Show) -> String {
 /// its title: when the title clearly names another episode than the
 /// numbers, the user decides (suggesting the title's).
 pub fn find(show: &Show, g: &EpisodeGuess) -> EpisodeLookup {
+    let mut by_number = numbered(show, g);
+    let title = without_show(&g.title, show);
+    let sim = |k: Key| {
+        show.episodes
+            .iter()
+            .find(|e| (e.season, e.number) == k)
+            .map_or(0.0, |e| {
+                std::iter::once(&e.name)
+                    .chain(&e.names)
+                    .map(|n| similarity(&title, n))
+                    .fold(0.0, f64::max)
+            })
+    };
+    let mut scored: Vec<(Key, f64)> = if title.is_empty() {
+        Vec::new()
+    } else {
+        show.episodes
+            .iter()
+            .map(|e| ((e.season, e.number), sim((e.season, e.number))))
+            .collect()
+    };
+    scored.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let found = |choice: Vec<Key>, alternatives: Vec<Vec<Key>>| EpisodeLookup {
+        guess: g.clone(),
+        choice,
+        conflict: false,
+        doubled: None,
+        alternatives,
+    };
+    if by_number.is_empty() {
+        return by_title(&scored, found);
+    }
+    if title.is_empty() {
+        return if by_number.len() == 1 {
+            found(by_number[0].clone(), by_number)
+        } else {
+            found(Vec::new(), by_number)
+        };
+    }
+    let group_sim = |grp: &Vec<Key>| grp.iter().map(|&k| sim(k)).fold(0.0, f64::max);
+    by_number.sort_by(|a, b| group_sim(b).total_cmp(&group_sim(a)));
+    let best = group_sim(&by_number[0]);
+    if let Some(&(k, s)) = scored.first()
+        && s >= 0.7
+        && s > best + 0.2
+        && !by_number.iter().any(|grp| grp.contains(&k))
+    {
+        let mut alternatives = vec![vec![k]];
+        alternatives.extend(by_number);
+        return EpisodeLookup {
+            guess: g.clone(),
+            choice: Vec::new(),
+            conflict: true,
+            doubled: None,
+            alternatives,
+        };
+    }
+    // The very title ("Part 2") beats a close one ("Part 1").
+    let clear = by_number.get(1).is_none_or(|second| {
+        let second = group_sim(second);
+        best >= 0.6 && (second < best - 0.1 || (best == 1.0 && second < 1.0))
+    });
+    if clear {
+        found(by_number[0].clone(), by_number)
+    } else {
+        found(Vec::new(), by_number)
+    }
+}
+
+/// The episodes the numbers in a name can mean (each a list: a file may
+/// hold several), those the show has, without repeats.
+fn numbered(show: &Show, g: &EpisodeGuess) -> Vec<Vec<Key>> {
     let has = |k: Key| show.episodes.iter().any(|e| (e.season, e.number) == k);
     let regular: Vec<Key> = show
         .episodes
@@ -701,74 +773,15 @@ pub fn find(show: &Show, g: &EpisodeGuess) -> EpisodeLookup {
             push(Some(vec![(e.season, e.number)]));
         }
     }
+    by_number
+}
 
-    let title = without_show(&g.title, show);
-    let sim = |k: Key| {
-        show.episodes
-            .iter()
-            .find(|e| (e.season, e.number) == k)
-            .map_or(0.0, |e| {
-                std::iter::once(&e.name)
-                    .chain(&e.names)
-                    .map(|n| similarity(&title, n))
-                    .fold(0.0, f64::max)
-            })
-    };
-    let mut scored: Vec<(Key, f64)> = if title.is_empty() {
-        Vec::new()
-    } else {
-        show.episodes
-            .iter()
-            .map(|e| ((e.season, e.number), sim((e.season, e.number))))
-            .collect()
-    };
-    scored.sort_by(|a, b| b.1.total_cmp(&a.1));
-    let top = scored.first().copied();
-    let group_sim = |grp: &Vec<Key>| grp.iter().map(|&k| sim(k)).fold(0.0, f64::max);
-
-    let found = |choice: Vec<Key>, alternatives: Vec<Vec<Key>>| EpisodeLookup {
-        guess: g.clone(),
-        choice,
-        conflict: false,
-        doubled: None,
-        alternatives,
-    };
-    if !by_number.is_empty() {
-        if title.is_empty() {
-            return if by_number.len() == 1 {
-                found(by_number[0].clone(), by_number)
-            } else {
-                found(Vec::new(), by_number)
-            };
-        }
-        by_number.sort_by(|a, b| group_sim(b).total_cmp(&group_sim(a)));
-        let best = group_sim(&by_number[0]);
-        if let Some((k, s)) = top
-            && s >= 0.7
-            && s > best + 0.2
-            && !by_number.iter().any(|grp| grp.contains(&k))
-        {
-            let mut alternatives = vec![vec![k]];
-            alternatives.extend(by_number);
-            return EpisodeLookup {
-                guess: g.clone(),
-                choice: Vec::new(),
-                conflict: true,
-                doubled: None,
-                alternatives,
-            };
-        }
-        // The very title ("Part 2") beats a close one ("Part 1").
-        let clear = by_number.get(1).is_none_or(|second| {
-            let second = group_sim(second);
-            best >= 0.6 && (second < best - 0.1 || (best == 1.0 && second < 1.0))
-        });
-        return if clear {
-            found(by_number[0].clone(), by_number)
-        } else {
-            found(Vec::new(), by_number)
-        };
-    }
+/// A file with no usable numbers: the episodes its title is most like,
+/// the first one chosen when it is clearly the one.
+fn by_title(
+    scored: &[(Key, f64)],
+    found: impl Fn(Vec<Key>, Vec<Vec<Key>>) -> EpisodeLookup,
+) -> EpisodeLookup {
     let alternatives: Vec<Vec<Key>> = scored
         .iter()
         .filter(|(_, s)| *s >= 0.4)
@@ -1739,6 +1752,54 @@ mod tests {
             ],
             aliases: vec!["Química Mortal".into()],
         }
+    }
+
+    /// Pins `find` over a grid of guesses, so it can be taken apart.
+    #[test]
+    fn find_does_not_change() {
+        let regular = show();
+        let mut long = show();
+        long.episodes = (1..=130u16)
+            .map(|n| ep(1, n, &format!("Episode {n}")))
+            .collect();
+        long.episodes.push(ep(0, 1, "Special"));
+        let mut all = Vec::new();
+        for s in [&regular, &long] {
+            for season in [None, Some(1u16), Some(2)] {
+                for episodes in [vec![], vec![1u16], vec![2], vec![1, 2], vec![8]] {
+                    for number in [None, Some(1u32), Some(3), Some(101), Some(208), Some(125)] {
+                        for title in [
+                            "",
+                            "Pilot",
+                            "Seven Thirty-Seven",
+                            "Better Call Saul",
+                            "Random",
+                        ] {
+                            let g = EpisodeGuess {
+                                season,
+                                episodes: episodes.clone(),
+                                number,
+                                title: title.into(),
+                                ..EpisodeGuess::default()
+                            };
+                            let r = find(s, &g);
+                            all.push(format!(
+                                "{:?} {} {:?} {:?}",
+                                r.choice, r.conflict, r.alternatives, r.doubled
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        let date = EpisodeGuess {
+            date: Some("2008-01-20".into()),
+            ..EpisodeGuess::default()
+        };
+        all.push(format!("{:?}", find(&regular, &date).choice));
+        let sum = xxhash_rust::xxh3::xxh3_64(all.join("\n").as_bytes());
+        println!("hash {sum:016x}");
+        assert_eq!(sum, 0xbca75d489532e280, "what `find` answers changed");
     }
 
     #[test]
