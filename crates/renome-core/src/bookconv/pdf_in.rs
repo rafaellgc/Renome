@@ -2198,4 +2198,207 @@ mod tests {
         assert!(c1.contains("epub:type=\"noteref\">1</a> que"), "{c1}");
         assert_eq!(b.toc.len(), 3);
     }
+
+    /// Filler prose: `n` lines of a justified paragraph, from `y`.
+    fn prose(x: f32, y: f32, n: usize, seed: usize) -> Vec<Line<'static>> {
+        const LINES: [&str; 6] = [
+            "Quando a tarde caía sobre os telhados da vila pequena e quieta,",
+            "os moradores acendiam as lamparinas e sentavam nas calçadas para",
+            "conversar sobre as colheitas, os filhos distantes e as chuvas que",
+            "tardavam a chegar naquele ano de calor e de poeira fina no ar.",
+            "Ninguém falava da estrada, embora todos olhassem para ela com um",
+            "misto de esperança e de receio, como quem espera uma carta antiga.",
+        ];
+        (0..n)
+            .map(|i| (x, y + 14.0 * i as f32, 11.0, false, LINES[(i + seed) % 6]))
+            .collect()
+    }
+
+    /// The pages the golden test reads: a poem and a list, a bold line over
+    /// its paragraph, a centred line, notes with symbols, headings of two
+    /// sizes, paragraphs with and without indents, hyphens at line ends.
+    fn golden_pdfs() -> Vec<(&'static str, Vec<u8>)> {
+        let header: Line = (250.0, 40.0, 9.0, false, "Livro de Teste");
+        let mut one: Vec<Vec<Line>> = Vec::new();
+        for n in 1..=6usize {
+            let mut l: Vec<Line> = vec![header];
+            match n {
+                1 => {
+                    l.push((200.0, 100.0, 22.0, true, "Primeira Parte"));
+                    l.push((200.0, 150.0, 16.0, true, "Capítulo Um"));
+                    l.extend(prose(72.0, 190.0, 5, 0));
+                    l.push((
+                        90.0,
+                        260.0,
+                        11.0,
+                        false,
+                        "Um parágrafo recuado começa aqui e continua por",
+                    ));
+                    l.push((
+                        72.0,
+                        274.0,
+                        11.0,
+                        false,
+                        "mais uma linha, terminando com um ponto final.",
+                    ));
+                    l.push((90.0, 288.0, 11.0, false, "Outro parágrafo recuado, curto."));
+                    l.push((72.0, 320.0, 11.0, true, "Um título em negrito sozinho"));
+                    l.extend(prose(72.0, 334.0, 3, 2));
+                    l.push((250.0, 400.0, 11.0, false, "* * *"));
+                    l.extend(prose(72.0, 430.0, 4, 1));
+                }
+                2 => {
+                    l.push((72.0, 100.0, 11.0, false, "Versos de um poema curto:"));
+                    for (k, t) in [
+                        "O vento passa",
+                        "a casa fica",
+                        "e o tempo corre",
+                        "sem pressa alguma",
+                    ]
+                    .iter()
+                    .enumerate()
+                    {
+                        l.push((120.0, 130.0 + 14.0 * k as f32, 11.0, false, t));
+                    }
+                    l.push((
+                        72.0,
+                        200.0,
+                        11.0,
+                        false,
+                        "Depois do poema, a prosa volta e segue por uma",
+                    ));
+                    l.push((72.0, 214.0, 11.0, false, "linha com hifeniza-"));
+                    l.push((72.0, 228.0, 11.0, false, "ção no fim e termina aqui."));
+                    l.push((72.0, 260.0, 11.0, false, "Texto com nota"));
+                    l.push((150.0, 256.0, 7.0, false, "1"));
+                    l.push((170.0, 260.0, 11.0, false, "e outra"));
+                    l.push((210.0, 256.0, 7.0, false, "*"));
+                    l.push((72.0, 690.0, 8.0, false, "1 Primeira nota do rodapé."));
+                    l.push((72.0, 702.0, 8.0, false, "* Nota com asterisco."));
+                }
+                3 => {
+                    l.push((200.0, 100.0, 16.0, true, "Capítulo Dois"));
+                    l.extend(prose(72.0, 140.0, 6, 3));
+                    l.push((72.0, 240.0, 11.0, false, "Item um da lista"));
+                    l.push((72.0, 254.0, 11.0, false, "Item dois da lista"));
+                    l.push((72.0, 268.0, 11.0, false, "Item três"));
+                }
+                4 => {
+                    l.extend(prose(72.0, 100.0, 6, 4));
+                    l.push((300.0, 200.0, 11.0, false, "Linha centralizada"));
+                    l.extend(prose(72.0, 230.0, 3, 5));
+                }
+                5 => {
+                    l.push((200.0, 100.0, 16.0, true, "Capítulo Três"));
+                    l.extend(prose(72.0, 140.0, 4, 2));
+                }
+                _ => {
+                    l.extend(prose(72.0, 100.0, 5, 1));
+                }
+            }
+            l.push((
+                300.0,
+                760.0,
+                9.0,
+                false,
+                Box::leak(n.to_string().into_boxed_str()),
+            ));
+            one.push(l);
+        }
+        // The same prose with no indents and no bold: paragraphs by gaps.
+        let mut two: Vec<Vec<Line>> = Vec::new();
+        for n in 0..3usize {
+            let mut l: Vec<Line> = Vec::new();
+            l.extend(prose(72.0, 100.0, 4, n));
+            l.extend(prose(72.0, 100.0 + 14.0 * 4.0 + 20.0, 4, n + 2));
+            l.extend(prose(72.0, 100.0 + 14.0 * 8.0 + 40.0, 2, n + 4));
+            two.push(l);
+        }
+        // Bookmarks lead to the chapters of the first book.
+        let outlined = {
+            let mut doc = lopdf::Document::load_mem(&pdf_of(&one)).unwrap();
+            let pages: Vec<_> = doc.get_pages().into_iter().collect();
+            let item = |doc: &mut lopdf::Document, title: &str, page: u32| {
+                let id = pages.iter().find(|(n, _)| *n == page).unwrap().1;
+                doc.add_object(dictionary! {
+                    "Title" => Object::string_literal(title),
+                    "Dest" => vec![Object::Reference(id), "Fit".into()],
+                })
+            };
+            let a = item(&mut doc, "Capítulo Um", 1);
+            let b = item(&mut doc, "Capítulo Dois", 3);
+            let c = item(&mut doc, "Capítulo Três", 5);
+            let outlines = doc.new_object_id();
+            for (me, next, prev) in [
+                (a, Some(b), None),
+                (b, Some(c), Some(a)),
+                (c, None, Some(b)),
+            ] {
+                let d = doc.get_object_mut(me).unwrap().as_dict_mut().unwrap();
+                d.set("Parent", outlines);
+                if let Some(n) = next {
+                    d.set("Next", n);
+                }
+                if let Some(p) = prev {
+                    d.set("Prev", p);
+                }
+            }
+            doc.objects.insert(
+                outlines,
+                Object::Dictionary(dictionary! {
+                    "Type" => "Outlines", "First" => a, "Last" => c, "Count" => 3,
+                }),
+            );
+            let root = doc.trailer.get(b"Root").unwrap().as_reference().unwrap();
+            doc.get_object_mut(root)
+                .unwrap()
+                .as_dict_mut()
+                .unwrap()
+                .set("Outlines", outlines);
+            let mut out = Vec::new();
+            doc.save_to(&mut out).unwrap();
+            out
+        };
+        vec![
+            ("plain", pdf_of(&one)),
+            ("no indents", pdf_of(&two)),
+            ("outlined", outlined),
+        ]
+    }
+
+    /// Everything of a read book that the text and its structure decide.
+    fn show(b: &Book) -> String {
+        let mut s = format!("meta {:?} cover {:?}\n", b.meta.title, b.cover);
+        for c in &b.chapters {
+            s.push_str(&format!("== {} | {}\n{}\n", c.name, c.title, c.body));
+        }
+        s.push_str(&format!("toc {:?}\n", b.toc));
+        s
+    }
+
+    /// What `read` makes of each golden PDF. A change here is a change in
+    /// the books people get from their PDFs: update these only when that is
+    /// the point, never for a refactor.
+    #[test]
+    fn read_does_not_change() {
+        let d = tempfile::tempdir().unwrap();
+        let got: Vec<(&str, u64)> = golden_pdfs()
+            .into_iter()
+            .map(|(n, pdf)| {
+                let p = d.path().join(format!("{n}.pdf").replace(' ', "_"));
+                std::fs::write(&p, pdf).unwrap();
+                let out = show(&read(&p).unwrap());
+                if std::env::var_os("GOLDEN_SHOW").is_some() {
+                    eprintln!("#### {n}\n{out}");
+                }
+                (n, xxhash_rust::xxh3::xxh3_64(out.as_bytes()))
+            })
+            .collect();
+        let want: Vec<(&str, u64)> = vec![
+            ("plain", 6435475428799919159),
+            ("no indents", 18265214840376558369),
+            ("outlined", 10057295717483814146),
+        ];
+        assert_eq!(got, want);
+    }
 }
