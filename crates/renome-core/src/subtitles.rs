@@ -542,6 +542,9 @@ pub fn target(video: &Path, lang: &str, hearing_impaired: bool, ext: &str) -> Pa
     video.with_file_name(format!("{stem}.{lang}{flag}.{ext}"))
 }
 
+/// The most a subtitle may unpack to (the biggest real ones are a few MB).
+const MAX_SUBTITLE: u64 = 32 << 20;
+
 /// The subtitle in a downloaded archive (SubDL sends zips): the one file
 /// with a subtitle extension (macOS' `__MACOSX` copies left out); when
 /// there are several, the one for the episode (its number read as in
@@ -576,9 +579,14 @@ pub fn from_archive(
         }
     }
     let pick = pick_in_archive(&found, episode, video)?;
+    // A subtitle is small: an entry that unpacks to more is a zip bomb.
     let mut out = Vec::new();
-    zip.by_index(pick.0).ok()?.read_to_end(&mut out).ok()?;
-    Some((pick.2.clone(), out))
+    zip.by_index(pick.0)
+        .ok()?
+        .take(MAX_SUBTITLE + 1)
+        .read_to_end(&mut out)
+        .ok()?;
+    (out.len() as u64 <= MAX_SUBTITLE).then(|| (pick.2.clone(), out))
 }
 
 #[cfg(test)]
@@ -796,6 +804,26 @@ mod tests {
             from_archive(b"1\n00:00", None, "").unwrap(),
             ("srt".into(), b"1\n00:00".to_vec())
         );
+    }
+
+    #[test]
+    fn a_zip_bomb_is_not_unpacked() {
+        use std::io::Write;
+        let mut buf = std::io::Cursor::new(Vec::new());
+        {
+            let mut z = zip::ZipWriter::new(&mut buf);
+            let o = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            z.start_file("big.srt", o).unwrap();
+            let zeros = vec![0u8; 1 << 20];
+            for _ in 0..40 {
+                z.write_all(&zeros).unwrap();
+            }
+            z.finish().unwrap();
+        }
+        let zip = buf.into_inner();
+        assert!(zip.len() < 1 << 20, "the archive itself is small");
+        assert!(from_archive(&zip, None, "").is_none());
     }
 
     #[test]
