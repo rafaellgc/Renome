@@ -948,4 +948,32 @@ mod tests {
         assert_eq!(base32("000V"), Some(31));
         assert_eq!(base32("0010"), Some(32));
     }
+
+    /// What `read` makes of the golden AZW3 books (the KF8 way in).
+    /// A change here is a change in the books people get from their Kindle
+    /// files: update these only when that is the point, never for a refactor.
+    #[test]
+    fn kf8_read_does_not_change() {
+        let d = tempfile::tempdir().unwrap();
+        let got: Vec<(&str, u64)> = super::super::azw3_out::tests::golden_books()
+            .into_iter()
+            .map(|(n, b)| {
+                let bytes = super::super::azw3_out::tests::stable(
+                    super::super::azw3_out::build(&b).unwrap(),
+                );
+                let p = d.path().join(format!("{n}.azw3"));
+                std::fs::write(&p, bytes).unwrap();
+                let r = read(&p).unwrap();
+                (n, xxhash_rust::xxh3::xxh3_64(format!("{r:?}").as_bytes()))
+            })
+            .collect();
+        let want: Vec<(&str, u64)> = vec![
+            ("simple", 2181435713242122434),
+            ("links", 9564980845062299125),
+            ("nested", 3196049895270438486),
+            ("fixed", 17234169336371307781),
+            ("cover", 15503281571532766628),
+        ];
+        assert_eq!(got, want);
+    }
 }

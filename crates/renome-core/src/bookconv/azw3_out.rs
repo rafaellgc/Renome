@@ -1225,7 +1225,7 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::*;
 
     #[test]
@@ -1420,7 +1420,7 @@ mod tests {
     }
 
     /// The books the golden test writes: each part of `build` is on one.
-    fn golden_books() -> Vec<(&'static str, Book)> {
+    pub(crate) fn golden_books() -> Vec<(&'static str, Book)> {
         let toc = |t: &str, f: &str, kids: Vec<Toc>| Toc {
             title: t.into(),
             href: f.into(),
@@ -1498,7 +1498,7 @@ mod tests {
     }
 
     /// The bytes of a written book without the two dates in its header.
-    fn stable(mut b: Vec<u8>) -> Vec<u8> {
+    pub(crate) fn stable(mut b: Vec<u8>) -> Vec<u8> {
         b[36..44].fill(0);
         b
     }
