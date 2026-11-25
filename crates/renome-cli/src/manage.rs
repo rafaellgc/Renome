@@ -223,52 +223,23 @@ pub(crate) fn list_of<'a>(settings: &'a mut Value, key: &str) -> &'a mut Vec<Val
 }
 
 pub fn sets(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> {
+    let name = |s: &ArgMatches| -> String {
+        s.get_one::<String>("name")
+            .expect("required by the argument parser")
+            .clone()
+    };
     match m.subcommand() {
-        Some(("show", s)) => {
-            let name = s
-                .get_one::<String>("name")
-                .expect("required by the argument parser");
-            let set = rulespec::find_set(settings.as_ref(), name)
-                .ok_or_else(|| t("noSet", &[("name", name)]))?;
-            if out::json() {
-                println!("{}", serde_json::to_string_pretty(set).unwrap_or_default());
-            } else {
-                let steps =
-                    rulespec::steps(&[rulespec::Source::Set(name.clone())], settings.as_ref())?;
-                for step in &steps {
-                    println!("-r {}", shell_quote(&spec_of(step)));
-                }
-            }
-        }
+        Some(("show", s)) => show_set(&name(s), settings.as_ref())?,
         Some(("save", s)) => {
-            let name = s
-                .get_one::<String>("name")
-                .expect("required by the argument parser")
-                .trim()
-                .to_string();
             let sources = crate::sources(s);
             if sources.is_empty() {
                 return Err(t("noRules", &[]));
             }
             let steps = rulespec::steps(&sources, settings.as_ref())?;
             rulespec::check_together(&steps)?;
-            put_set(&name, steps, s.get_flag("replace"))?;
+            put_set(name(s).trim(), steps, s.get_flag("replace"))?;
         }
-        Some(("export", s)) => {
-            let name = s
-                .get_one::<String>("name")
-                .expect("required by the argument parser");
-            let set = rulespec::find_set(settings.as_ref(), name)
-                .ok_or_else(|| t("noSet", &[("name", name)]))?;
-            // As the window saves a preset: the list of steps.
-            let text =
-                serde_json::to_string_pretty(set.get("steps").unwrap_or(&Value::Array(vec![])))
-                    .unwrap_or_default();
-            match s.get_one::<String>("file").map(String::as_str) {
-                Some("-") | None => println!("{text}"),
-                Some(file) => std::fs::write(file, text).map_err(|e| e.to_string())?,
-            }
-        }
+        Some(("export", s)) => export_set(&name(s), s, settings.as_ref())?,
         Some(("import", s)) => {
             let file = s
                 .get_one::<String>("file")
@@ -284,68 +255,98 @@ pub fn sets(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> {
             rulespec::check_together(&steps)?;
             put_set(name.trim(), steps, s.get_flag("replace"))?;
         }
-        Some(("delete", s)) => {
-            let name = s
-                .get_one::<String>("name")
-                .expect("required by the argument parser");
-            let mut now = settings_now();
-            let sets = sets_of(&mut now);
-            let at = renome_services::options::set_index(sets, name, None)
-                .ok_or_else(|| t("noSet", &[("name", name)]))?;
-            sets.remove(at);
-            save_settings(&now)?;
-            out::note(&t("setDeleted", &[("name", name)]));
-        }
+        Some(("delete", s)) => delete_set(&name(s))?,
         Some(("rename", s)) => {
-            let from = s
-                .get_one::<String>("name")
-                .expect("required by the argument parser");
             let to = s
                 .get_one::<String>("new")
                 .expect("required by the argument parser")
                 .trim()
                 .to_string();
-            let mut now = settings_now();
-            let sets = sets_of(&mut now);
-            let at = renome_services::options::set_index(sets, from, None)
-                .ok_or_else(|| t("noSet", &[("name", from)]))?;
-            renome_services::options::rename_set(sets, at, &to)
-                .map_err(|_| t("setExists", &[("name", &to)]))?;
-            save_settings(&now)?;
-            out::note(&t("setRenamed", &[("from", from), ("to", &to)]));
+            rename_set(&name(s), &to)?;
         }
-        _ => {
-            let sets = settings
-                .as_ref()
-                .and_then(|s| s.get("ruleSets")?.as_array().cloned())
-                .unwrap_or_default();
-            // In the window's menu order (`options::set_order`).
-            let sets: Vec<&Value> = renome_services::options::set_order(&sets)
-                .into_iter()
-                .map(|i| &sets[i])
-                .collect();
-            if out::json() {
-                let list: Vec<Value> = sets
-                    .iter()
-                    .map(|s| json!({ "name": s["name"], "rules": s["steps"].as_array().map_or(0, Vec::len) }))
-                    .collect();
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&list).unwrap_or_default()
-                );
-            } else {
-                for s in sets {
-                    let n = s["steps"].as_array().map_or(0, Vec::len);
-                    println!(
-                        "{}  {}",
-                        out::bold(s["name"].as_str().unwrap_or_default()),
-                        out::dim(&t("ruleSetCount", &[("n", &n)]))
-                    );
-                }
-            }
-        }
+        _ => list_sets(settings.as_ref()),
     }
     Ok(Exit::Done)
+}
+
+/// A rule set as JSON, or as the `-r` options that make it.
+fn show_set(name: &str, settings: Option<&Value>) -> Result<(), String> {
+    let set = rulespec::find_set(settings, name).ok_or_else(|| t("noSet", &[("name", &name)]))?;
+    if out::json() {
+        println!("{}", serde_json::to_string_pretty(set).unwrap_or_default());
+    } else {
+        let steps = rulespec::steps(&[rulespec::Source::Set(name.to_string())], settings)?;
+        for step in &steps {
+            println!("-r {}", shell_quote(&spec_of(step)));
+        }
+    }
+    Ok(())
+}
+
+/// A rule set as the window saves a preset (the list of steps), to a file
+/// or to the output.
+fn export_set(name: &str, s: &ArgMatches, settings: Option<&Value>) -> Result<(), String> {
+    let set = rulespec::find_set(settings, name).ok_or_else(|| t("noSet", &[("name", &name)]))?;
+    let text = serde_json::to_string_pretty(set.get("steps").unwrap_or(&Value::Array(vec![])))
+        .unwrap_or_default();
+    match s.get_one::<String>("file").map(String::as_str) {
+        Some("-") | None => println!("{text}"),
+        Some(file) => std::fs::write(file, text).map_err(|e| e.to_string())?,
+    }
+    Ok(())
+}
+
+fn delete_set(name: &str) -> Result<(), String> {
+    let mut now = settings_now();
+    let sets = sets_of(&mut now);
+    let at = renome_services::options::set_index(sets, name, None)
+        .ok_or_else(|| t("noSet", &[("name", &name)]))?;
+    sets.remove(at);
+    save_settings(&now)?;
+    out::note(&t("setDeleted", &[("name", &name)]));
+    Ok(())
+}
+
+fn rename_set(from: &str, to: &str) -> Result<(), String> {
+    let mut now = settings_now();
+    let sets = sets_of(&mut now);
+    let at = renome_services::options::set_index(sets, from, None)
+        .ok_or_else(|| t("noSet", &[("name", &from)]))?;
+    renome_services::options::rename_set(sets, at, to)
+        .map_err(|_| t("setExists", &[("name", &to)]))?;
+    save_settings(&now)?;
+    out::note(&t("setRenamed", &[("from", &from), ("to", &to)]));
+    Ok(())
+}
+
+/// The rule sets, in the window's menu order.
+fn list_sets(settings: Option<&Value>) {
+    let sets = settings
+        .and_then(|s| s.get("ruleSets")?.as_array().cloned())
+        .unwrap_or_default();
+    let sets: Vec<&Value> = renome_services::options::set_order(&sets)
+        .into_iter()
+        .map(|i| &sets[i])
+        .collect();
+    if out::json() {
+        let list: Vec<Value> = sets
+            .iter()
+            .map(|s| json!({ "name": s["name"], "rules": s["steps"].as_array().map_or(0, Vec::len) }))
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&list).unwrap_or_default()
+        );
+    } else {
+        for s in sets {
+            let n = s["steps"].as_array().map_or(0, Vec::len);
+            println!(
+                "{}  {}",
+                out::bold(s["name"].as_str().unwrap_or_default()),
+                out::dim(&t("ruleSetCount", &[("n", &n)]))
+            );
+        }
+    }
 }
 
 fn put_set(name: &str, steps: Vec<Value>, replace: bool) -> Result<(), String> {
