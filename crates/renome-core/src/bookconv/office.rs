@@ -186,106 +186,118 @@ impl Docx<'_> {
     }
 }
 
-/// A Word document.
-pub fn docx(path: &Path) -> Result<Book, String> {
-    let z = Zip::open(path)?;
-    let doc = z.xml("word/document.xml").ok_or("bookBroken")?;
-    let mut book = Book::new();
-    if let Some(core) = z.xml("docProps/core.xml") {
-        dublin_core(&core, &mut book);
-    }
-    // Styles.
-    let mut styles = HashMap::new();
-    let mut default_first_line = false;
-    let mut default_after = false;
-    if let Some(st) = z.xml("word/styles.xml") {
-        let mut all = Vec::new();
-        xhtml::find_all(&st, "style", &mut all);
-        for s in all {
-            let Some(id) = s.attr("w:styleid") else {
-                continue;
-            };
-            let ppr = kid(s, "ppr");
-            let rpr = kid(s, "rpr");
-            let ws = WStyle {
-                name: kid(s, "name")
-                    .and_then(|n| n.attr("w:val"))
-                    .unwrap_or_default()
-                    .to_string(),
-                based_on: kid(s, "basedon")
-                    .and_then(|n| n.attr("w:val"))
-                    .map(String::from),
-                outline: ppr
-                    .and_then(|p| kid(p, "outlinelvl"))
-                    .and_then(|o| o.attr("w:val"))
-                    .and_then(|v| v.parse().ok()),
-                bold: on(rpr.and_then(|r| kid(r, "b"))),
-                italic: on(rpr.and_then(|r| kid(r, "i"))),
-                center: ppr
-                    .and_then(|p| kid(p, "jc"))
-                    .and_then(|j| j.attr("w:val"))
-                    .map(String::from),
-                first_line: ppr
-                    .and_then(|p| kid(p, "ind"))
-                    .and_then(|i| i.attr("w:firstline").or_else(|| i.attr("w:firstlinechars")))
-                    .is_some_and(|v| v.parse::<i64>().unwrap_or(0) > 0),
-                after: ppr
-                    .and_then(|p| kid(p, "spacing"))
-                    .and_then(|i| i.attr("w:after"))
-                    .is_some_and(|v| v.parse::<i64>().unwrap_or(0) > 60),
-            };
-            if s.attr("w:default") == Some("1") && s.attr("w:type") == Some("paragraph") {
-                default_first_line = ws.first_line;
-                default_after = ws.after;
-            }
-            styles.insert(id.to_string(), ws);
+/// What `word/styles.xml` says: each style, and whether the default
+/// paragraph indents its first line or leaves room after it.
+struct DocxStyles {
+    styles: HashMap<String, WStyle>,
+    default_first_line: bool,
+    default_after: bool,
+}
+
+fn word_styles(z: &Zip) -> DocxStyles {
+    let mut out = DocxStyles {
+        styles: HashMap::new(),
+        default_first_line: false,
+        default_after: false,
+    };
+    let Some(st) = z.xml("word/styles.xml") else {
+        return out;
+    };
+    let mut all = Vec::new();
+    xhtml::find_all(&st, "style", &mut all);
+    for s in all {
+        let Some(id) = s.attr("w:styleid") else {
+            continue;
+        };
+        let ppr = kid(s, "ppr");
+        let rpr = kid(s, "rpr");
+        let ws = WStyle {
+            name: kid(s, "name")
+                .and_then(|n| n.attr("w:val"))
+                .unwrap_or_default()
+                .to_string(),
+            based_on: kid(s, "basedon")
+                .and_then(|n| n.attr("w:val"))
+                .map(String::from),
+            outline: ppr
+                .and_then(|p| kid(p, "outlinelvl"))
+                .and_then(|o| o.attr("w:val"))
+                .and_then(|v| v.parse().ok()),
+            bold: on(rpr.and_then(|r| kid(r, "b"))),
+            italic: on(rpr.and_then(|r| kid(r, "i"))),
+            center: ppr
+                .and_then(|p| kid(p, "jc"))
+                .and_then(|j| j.attr("w:val"))
+                .map(String::from),
+            first_line: ppr
+                .and_then(|p| kid(p, "ind"))
+                .and_then(|i| i.attr("w:firstline").or_else(|| i.attr("w:firstlinechars")))
+                .is_some_and(|v| v.parse::<i64>().unwrap_or(0) > 0),
+            after: ppr
+                .and_then(|p| kid(p, "spacing"))
+                .and_then(|i| i.attr("w:after"))
+                .is_some_and(|v| v.parse::<i64>().unwrap_or(0) > 60),
+        };
+        if s.attr("w:default") == Some("1") && s.attr("w:type") == Some("paragraph") {
+            out.default_first_line = ws.first_line;
+            out.default_after = ws.after;
         }
-        if let Some(d) = xhtml::find(&st, "pprdefault")
-            && let Some(sp) = xhtml::find(&d.kids, "spacing")
-            && sp
-                .attr("w:after")
-                .is_some_and(|v| v.parse::<i64>().unwrap_or(0) > 60)
-        {
-            default_after = true;
-        }
+        out.styles.insert(id.to_string(), ws);
     }
-    // Lists: which levels are numbered.
+    if let Some(d) = xhtml::find(&st, "pprdefault")
+        && let Some(sp) = xhtml::find(&d.kids, "spacing")
+        && sp
+            .attr("w:after")
+            .is_some_and(|v| v.parse::<i64>().unwrap_or(0) > 60)
+    {
+        out.default_after = true;
+    }
+    out
+}
+
+/// Lists: which levels of each list are numbered (`(numId, level)`).
+fn word_numbering(z: &Zip) -> HashMap<(String, String), bool> {
     let mut ordered = HashMap::new();
-    if let Some(num) = z.xml("word/numbering.xml") {
-        let mut abstracts: HashMap<String, HashMap<String, bool>> = HashMap::new();
-        let mut all = Vec::new();
-        xhtml::find_all(&num, "abstractnum", &mut all);
-        for a in all {
-            let Some(id) = a.attr("w:abstractnumid") else {
-                continue;
-            };
-            let mut lv = HashMap::new();
-            for l in kids(a, "lvl") {
-                let fmt = kid(l, "numfmt")
-                    .and_then(|f| f.attr("w:val"))
-                    .unwrap_or("bullet");
-                lv.insert(
-                    l.attr("w:ilvl").unwrap_or("0").to_string(),
-                    !matches!(fmt, "bullet" | "none"),
-                );
-            }
-            abstracts.insert(id.into(), lv);
+    let Some(num) = z.xml("word/numbering.xml") else {
+        return ordered;
+    };
+    let mut abstracts: HashMap<String, HashMap<String, bool>> = HashMap::new();
+    let mut all = Vec::new();
+    xhtml::find_all(&num, "abstractnum", &mut all);
+    for a in all {
+        let Some(id) = a.attr("w:abstractnumid") else {
+            continue;
+        };
+        let mut lv = HashMap::new();
+        for l in kids(a, "lvl") {
+            let fmt = kid(l, "numfmt")
+                .and_then(|f| f.attr("w:val"))
+                .unwrap_or("bullet");
+            lv.insert(
+                l.attr("w:ilvl").unwrap_or("0").to_string(),
+                !matches!(fmt, "bullet" | "none"),
+            );
         }
-        let mut nums = Vec::new();
-        xhtml::find_all(&num, "num", &mut nums);
-        for n in nums {
-            let (Some(id), Some(a)) = (
-                n.attr("w:numid"),
-                kid(n, "abstractnumid").and_then(|a| a.attr("w:val")),
-            ) else {
-                continue;
-            };
-            for (l, o) in abstracts.get(a).cloned().unwrap_or_default() {
-                ordered.insert((id.to_string(), l), o);
-            }
+        abstracts.insert(id.into(), lv);
+    }
+    let mut nums = Vec::new();
+    xhtml::find_all(&num, "num", &mut nums);
+    for n in nums {
+        let (Some(id), Some(a)) = (
+            n.attr("w:numid"),
+            kid(n, "abstractnumid").and_then(|a| a.attr("w:val")),
+        ) else {
+            continue;
+        };
+        for (l, o) in abstracts.get(a).cloned().unwrap_or_default() {
+            ordered.insert((id.to_string(), l), o);
         }
     }
-    // Relationships: pictures and links.
+    ordered
+}
+
+/// Relationships: the target of each id, and whether it is outside.
+fn word_rels(z: &Zip) -> HashMap<String, (String, bool)> {
     let mut rels = HashMap::new();
     if let Some(r) = z.xml("word/_rels/document.xml.rels") {
         let mut all = Vec::new();
@@ -299,6 +311,41 @@ pub fn docx(path: &Path) -> Result<Book, String> {
             }
         }
     }
+    rels
+}
+
+/// The footnotes or endnotes of a file, by id.
+fn word_notes(z: &Zip, file: &str, tag: &str) -> HashMap<String, Elem> {
+    let mut m = HashMap::new();
+    if let Some(n) = z.xml(file) {
+        let mut all = Vec::new();
+        xhtml::find_all(&n, tag, &mut all);
+        for e in all {
+            if let Some(id) = e.attr("w:id")
+                && e.attr("w:type").is_none_or(|t| t == "normal")
+            {
+                m.insert(id.to_string(), e.clone());
+            }
+        }
+    }
+    m
+}
+
+/// A Word document.
+pub fn docx(path: &Path) -> Result<Book, String> {
+    let z = Zip::open(path)?;
+    let doc = z.xml("word/document.xml").ok_or("bookBroken")?;
+    let mut book = Book::new();
+    if let Some(core) = z.xml("docProps/core.xml") {
+        dublin_core(&core, &mut book);
+    }
+    let DocxStyles {
+        styles,
+        default_first_line,
+        default_after,
+    } = word_styles(&z);
+    let ordered = word_numbering(&z);
+    let rels = word_rels(&z);
     let mut pics = HashMap::new();
     for (id, (t, ext)) in &rels {
         if *ext || !t.contains("media/") {
@@ -310,21 +357,6 @@ pub fn docx(path: &Path) -> Result<Book, String> {
             pics.insert(id.clone(), name);
         }
     }
-    let notes_of = |file: &str, tag: &str| -> HashMap<String, Elem> {
-        let mut m = HashMap::new();
-        if let Some(n) = z.xml(file) {
-            let mut all = Vec::new();
-            xhtml::find_all(&n, tag, &mut all);
-            for e in all {
-                if let Some(id) = e.attr("w:id")
-                    && e.attr("w:type").is_none_or(|t| t == "normal")
-                {
-                    m.insert(id.to_string(), e.clone());
-                }
-            }
-        }
-        m
-    };
     let mut d = Docx {
         styles,
         ordered,
@@ -332,8 +364,8 @@ pub fn docx(path: &Path) -> Result<Book, String> {
         pics: &pics,
         notes: Vec::new(),
         note_n: 0,
-        foot: notes_of("word/footnotes.xml", "footnote"),
-        end: notes_of("word/endnotes.xml", "endnote"),
+        foot: word_notes(&z, "word/footnotes.xml", "footnote"),
+        end: word_notes(&z, "word/endnotes.xml", "endnote"),
     };
     let body = xhtml::find(&doc, "body").ok_or("bookBroken")?;
     let mut nodes = d.blocks(&body.kids);
@@ -426,83 +458,86 @@ fn has_img(e: &Elem) -> bool {
     !v.is_empty()
 }
 
+/// The lists open while reading: (numId, list element) per level.
+#[derive(Default)]
+struct Lists(Vec<(String, Elem)>);
+
+impl Lists {
+    /// Closes the lists deeper than `to`, each into its parent's last
+    /// item (or the output).
+    fn close_to(&mut self, out: &mut Vec<Node>, to: usize) {
+        while self.0.len() > to {
+            let (_, l) = self.0.pop().expect("the list is longer than `to`");
+            match self.0.last_mut() {
+                Some((_, parent)) => {
+                    // A nested list goes in the parent's last item.
+                    if let Some(Node::Elem(li)) = parent.kids.last_mut() {
+                        li.push(Node::Elem(l));
+                    } else {
+                        parent.push(Node::Elem(l));
+                    }
+                }
+                None => out.push(Node::Elem(l)),
+            }
+        }
+    }
+
+    /// Opens the lists down to level `lvl` of list `id`, closing another
+    /// list's first.
+    fn open_to(&mut self, out: &mut Vec<Node>, id: &str, lvl: usize, ordered: bool) {
+        if self.0.first().is_some_and(|(nid, _)| nid != id) {
+            self.close_to(out, 0);
+        }
+        self.close_to(out, lvl + 1);
+        while self.0.len() < lvl + 1 {
+            self.0
+                .push((id.to_string(), el(if ordered { "ol" } else { "ul" })));
+        }
+    }
+
+    fn add_item(&mut self, li: Elem) {
+        self.0
+            .last_mut()
+            .expect("the list is never empty here")
+            .1
+            .push(Node::Elem(li));
+    }
+}
+
 impl Docx<'_> {
     fn blocks(&mut self, nodes: &[Node]) -> Vec<Node> {
         let mut out: Vec<Node> = Vec::new();
-        // Open lists: (numId, level) stack of list elements being built.
-        let mut list: Vec<(String, Elem)> = Vec::new();
-        let close_lists = |list: &mut Vec<(String, Elem)>, out: &mut Vec<Node>, to: usize| {
-            while list.len() > to {
-                let (_, l) = list.pop().expect("the list is longer than `to`");
-                match list.last_mut() {
-                    Some((_, parent)) => {
-                        // A nested list goes in the parent's last item.
-                        if let Some(Node::Elem(li)) = parent.kids.last_mut() {
-                            li.push(Node::Elem(l));
-                        } else {
-                            parent.push(Node::Elem(l));
-                        }
-                    }
-                    None => out.push(Node::Elem(l)),
-                }
-            }
-        };
+        let mut lists = Lists::default();
         for n in nodes {
             let Node::Elem(e) = n else { continue };
             match e.name.as_str() {
                 "p" => {
-                    let ppr = kid(e, "ppr");
-                    let num = ppr.and_then(|p| kid(p, "numpr"));
-                    let num_id = num
-                        .and_then(|n| kid(n, "numid"))
-                        .and_then(|x| x.attr("w:val"))
-                        .filter(|v| *v != "0");
-                    let style = ppr
-                        .and_then(|p| kid(p, "pstyle"))
-                        .and_then(|s| s.attr("w:val"))
-                        .unwrap_or("");
-                    let is_heading = self.heading(style).is_some()
-                        || ppr.and_then(|p| kid(p, "outlinelvl")).is_some();
-                    if let Some(id) = num_id.filter(|_| !is_heading) {
-                        let lvl: usize = num
-                            .and_then(|n| kid(n, "ilvl"))
-                            .and_then(|x| x.attr("w:val"))
-                            .and_then(|v| v.parse().ok())
-                            .unwrap_or(0);
+                    if let Some((id, lvl)) = self.list_place(e) {
                         let ordered = *self
                             .ordered
-                            .get(&(id.to_string(), lvl.to_string()))
+                            .get(&(id.clone(), lvl.to_string()))
                             .unwrap_or(&false);
-                        if list.first().is_some_and(|(nid, _)| nid != id) {
-                            close_lists(&mut list, &mut out, 0);
-                        }
-                        close_lists(&mut list, &mut out, lvl + 1);
-                        while list.len() < lvl + 1 {
-                            list.push((id.to_string(), el(if ordered { "ol" } else { "ul" })));
-                        }
+                        lists.open_to(&mut out, &id, lvl, ordered);
                         let mut li = el("li");
                         li.kids = self.runs(&e.kids);
-                        list.last_mut()
-                            .expect("the list is never empty here")
-                            .1
-                            .push(Node::Elem(li));
+                        lists.add_item(li);
                         continue;
                     }
-                    close_lists(&mut list, &mut out, 0);
+                    lists.close_to(&mut out, 0);
                     out.extend(self.paragraph(e));
                 }
                 "tbl" => {
-                    close_lists(&mut list, &mut out, 0);
+                    lists.close_to(&mut out, 0);
                     out.push(Node::Elem(self.table(e)));
                 }
                 "sdt" => {
-                    close_lists(&mut list, &mut out, 0);
+                    lists.close_to(&mut out, 0);
                     if let Some(c) = kid(e, "sdtcontent") {
                         out.extend(self.blocks(&c.kids));
                     }
                 }
                 "customxml" | "smarttag" | "ins" => {
-                    close_lists(&mut list, &mut out, 0);
+                    lists.close_to(&mut out, 0);
                     out.extend(self.blocks(&e.kids));
                 }
                 "alternatecontent" => {
@@ -513,8 +548,34 @@ impl Docx<'_> {
                 _ => {}
             }
         }
-        close_lists(&mut list, &mut out, 0);
+        lists.close_to(&mut out, 0);
         out
+    }
+
+    /// The list and level a paragraph is an item of (none: a heading or
+    /// not in a list).
+    fn list_place(&self, e: &Elem) -> Option<(String, usize)> {
+        let ppr = kid(e, "ppr");
+        let num = ppr.and_then(|p| kid(p, "numpr"));
+        let id = num
+            .and_then(|n| kid(n, "numid"))
+            .and_then(|x| x.attr("w:val"))
+            .filter(|v| *v != "0")?;
+        let style = ppr
+            .and_then(|p| kid(p, "pstyle"))
+            .and_then(|s| s.attr("w:val"))
+            .unwrap_or("");
+        let is_heading =
+            self.heading(style).is_some() || ppr.and_then(|p| kid(p, "outlinelvl")).is_some();
+        if is_heading {
+            return None;
+        }
+        let lvl: usize = num
+            .and_then(|n| kid(n, "ilvl"))
+            .and_then(|x| x.attr("w:val"))
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        Some((id.to_string(), lvl))
     }
 
     fn paragraph(&mut self, e: &Elem) -> Vec<Node> {
@@ -711,6 +772,41 @@ impl Docx<'_> {
         if hidden {
             return Vec::new();
         }
+        let content = self.run_content(r, rpr);
+        // Marks around the text, innermost first.
+        let has_text = content
+            .iter()
+            .any(|n| matches!(n, Node::Text(t) if !t.trim().is_empty()));
+        if !has_text {
+            return content;
+        }
+        let mut marks: Vec<(&str, Option<&str>)> = Vec::new();
+        if small_caps {
+            marks.push(("span", Some("font-variant: small-caps")));
+        }
+        match vert {
+            Some("superscript") => marks.push(("sup", None)),
+            Some("subscript") => marks.push(("sub", None)),
+            _ => {}
+        }
+        if strike {
+            marks.push(("s", None));
+        }
+        if underline {
+            marks.push(("u", None));
+        }
+        if italic {
+            marks.push(("em", None));
+        }
+        if bold {
+            marks.push(("strong", None));
+        }
+        wrap_marks(content, &marks)
+    }
+
+    /// What a run holds: text, tabs, breaks, symbols, note references and
+    /// pictures.
+    fn run_content(&mut self, r: &Elem, rpr: Option<&Elem>) -> Vec<Node> {
         let mut content: Vec<Node> = Vec::new();
         for k in &r.kids {
             let Node::Elem(e) = k else { continue };
@@ -743,40 +839,8 @@ impl Docx<'_> {
                     }
                 }
                 "footnotereference" | "endnotereference" => {
-                    let id = e.attr("w:id").unwrap_or_default();
-                    let src = if e.name == "footnotereference" {
-                        self.foot.get(id)
-                    } else {
-                        self.end.get(id)
-                    };
-                    if let Some(note) = src.cloned() {
-                        self.note_n += 1;
-                        let n = self.note_n;
-                        let nid = format!("note{n}");
-                        let mut a = el("a")
-                            .with("href", format!("#{nid}"))
-                            .with("id", format!("ref{n}"))
-                            .with("class", "noteref")
-                            .with("epub:type", "noteref");
-                        a.text(n.to_string());
-                        content.push(Node::Elem(a));
-                        let mut body = self.blocks(&note.kids);
-                        // The note's own number mark is replaced by a link back.
-                        let mut back = el("a")
-                            .with("href", format!("#ref{n}"))
-                            .with("class", "back");
-                        back.text(format!("{n}."));
-                        if let Some(Node::Elem(first)) = body.first_mut() {
-                            first.kids.insert(0, Node::Text(" ".into()));
-                            first.kids.insert(0, Node::Elem(back));
-                        } else {
-                            let mut p = el("p");
-                            p.push(Node::Elem(back));
-                            body.push(Node::Elem(p));
-                        }
-                        let mut aside = el("aside");
-                        aside.kids = body;
-                        self.notes.push((nid, aside));
+                    if let Some(a) = self.note_reference(e) {
+                        content.push(a);
                     }
                 }
                 "drawing" | "pict" | "object" => {
@@ -804,42 +868,60 @@ impl Docx<'_> {
                 _ => {}
             }
         }
-        // Marks around the text, innermost first.
-        let has_text = content
-            .iter()
-            .any(|n| matches!(n, Node::Text(t) if !t.trim().is_empty()));
-        let mut wrap = |tag: &str, cls: Option<&str>| {
-            let mut x = el(tag);
-            if let Some(c) = cls {
-                x.set("style", c);
-            }
-            x.kids = std::mem::take(&mut content);
-            content = vec![Node::Elem(x)];
-        };
-        if has_text {
-            if small_caps {
-                wrap("span", Some("font-variant: small-caps"));
-            }
-            match vert {
-                Some("superscript") => wrap("sup", None),
-                Some("subscript") => wrap("sub", None),
-                _ => {}
-            }
-            if strike {
-                wrap("s", None);
-            }
-            if underline {
-                wrap("u", None);
-            }
-            if italic {
-                wrap("em", None);
-            }
-            if bold {
-                wrap("strong", None);
-            }
-        }
         content
     }
+
+    /// A reference to a foot- or endnote: the link in the text; the note
+    /// (with a link back) is kept for the end of the book.
+    fn note_reference(&mut self, e: &Elem) -> Option<Node> {
+        let id = e.attr("w:id").unwrap_or_default();
+        let src = if e.name == "footnotereference" {
+            self.foot.get(id)
+        } else {
+            self.end.get(id)
+        };
+        let note = src.cloned()?;
+        self.note_n += 1;
+        let n = self.note_n;
+        let nid = format!("note{n}");
+        let mut a = el("a")
+            .with("href", format!("#{nid}"))
+            .with("id", format!("ref{n}"))
+            .with("class", "noteref")
+            .with("epub:type", "noteref");
+        a.text(n.to_string());
+        let mut body = self.blocks(&note.kids);
+        // The note's own number mark is replaced by a link back.
+        let mut back = el("a")
+            .with("href", format!("#ref{n}"))
+            .with("class", "back");
+        back.text(format!("{n}."));
+        if let Some(Node::Elem(first)) = body.first_mut() {
+            first.kids.insert(0, Node::Text(" ".into()));
+            first.kids.insert(0, Node::Elem(back));
+        } else {
+            let mut p = el("p");
+            p.push(Node::Elem(back));
+            body.push(Node::Elem(p));
+        }
+        let mut aside = el("aside");
+        aside.kids = body;
+        self.notes.push((nid, aside));
+        Some(Node::Elem(a))
+    }
+}
+
+/// `content` inside each mark in turn, the first innermost.
+fn wrap_marks(mut content: Vec<Node>, marks: &[(&str, Option<&str>)]) -> Vec<Node> {
+    for (tag, style) in marks {
+        let mut x = el(tag);
+        if let Some(c) = *style {
+            x.set("style", c);
+        }
+        x.kids = std::mem::take(&mut content);
+        content = vec![Node::Elem(x)];
+    }
+    content
 }
 
 /// Picture relationship ids inside a drawing.
@@ -1447,5 +1529,120 @@ mod tests {
         assert!(c.contains("<p class=\"center\">fim</p>"), "{c}");
         assert!(c.contains("<ul><li>x</li></ul>"), "{c}");
         assert!(b.chapters[1].body.contains("Nota."));
+    }
+
+    const PNG: &[u8] = &[
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90,
+        0x77, 0x53, 0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8,
+        0xcf, 0xc0, 0x00, 0x00, 0x03, 0x01, 0x01, 0x00, 0xc9, 0xfe, 0x92, 0xef, 0x00, 0x00, 0x00,
+        0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
+
+    fn zip_with(path: &Path, files: &[(&str, &[u8])]) {
+        let mut z = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        for (n, c) in files {
+            z.start_file(*n, SimpleFileOptions::default()).unwrap();
+            z.write_all(c).unwrap();
+        }
+        z.finish().unwrap();
+    }
+
+    /// Pins what a rich Word and a rich OpenDocument text are read as, so
+    /// the readers can be taken apart.
+    #[test]
+    fn office_does_not_change() {
+        let d = tempfile::tempdir().unwrap();
+        let doc = format!(
+            r#"<?xml version="1.0"?><w:document {W} xmlns:mc="m"><w:body>
+<w:p><w:pPr><w:pStyle w:val="H1"/></w:pPr><w:r><w:t>Primeiro</w:t></w:r></w:p>
+<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>negrito</w:t></w:r><w:r><w:rPr><w:i/><w:u w:val="single"/></w:rPr><w:t> it-sub </w:t></w:r><w:r><w:rPr><w:strike/><w:smallCaps/></w:rPr><w:t>riscado</w:t></w:r><w:r><w:rPr><w:vertAlign w:val="superscript"/></w:rPr><w:t>sup</w:t></w:r><w:r><w:rPr><w:vertAlign w:val="subscript"/></w:rPr><w:t>sub</w:t></w:r><w:r><w:rPr><w:vanish/></w:rPr><w:t>oculto</w:t></w:r><w:r><w:rPr><w:rStyle w:val="Forte"/></w:rPr><w:t>estilo</w:t></w:r><w:r><w:tab/><w:t>tab</w:t><w:br/><w:t>quebra</w:t><w:br w:type="page"/><w:noBreakHyphen/><w:softHyphen/><w:sym w:char="F041"/></w:r></w:p>
+<w:p><w:r><w:footnoteReference w:id="2"/></w:r><w:r><w:endnoteReference w:id="3"/></w:r><w:r><w:drawing><a:graphic xmlns:a="a"><a:blip r:embed="rId5"/></a:graphic></w:drawing></w:r><w:hyperlink r:id="rId6"><w:r><w:t>link</w:t></w:r></w:hyperlink><w:hyperlink w:anchor="alvo"><w:r><w:t>ancora</w:t></w:r></w:hyperlink><w:bookmarkStart w:id="1" w:name="alvo"/><w:bookmarkStart w:id="2" w:name="_GoBack"/><w:fldSimple w:instr="x"><w:r><w:t>campo</w:t></w:r></w:fldSimple><w:sdt><w:sdtContent><w:r><w:t>sdt</w:t></w:r></w:sdtContent></w:sdt><mc:AlternateContent><mc:Choice><w:r><w:t>alt</w:t></w:r></mc:Choice></mc:AlternateContent></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>um</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>sub um</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>dois</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr><w:r><w:t>outra lista</w:t></w:r></w:p>
+<w:p><w:pPr><w:jc w:val="right"/></w:pPr><w:r><w:t>direita</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="Citacao"/></w:pPr><w:r><w:t>citação</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="Sub"/></w:pPr><w:r><w:t>subtítulo</w:t></w:r></w:p>
+<w:p><w:pPr><w:outlineLvl w:val="1"/><w:pageBreakBefore/></w:pPr><w:r><w:t>por contorno</w:t></w:r><w:r><w:pict><w:txbxContent><w:p><w:r><w:t>caixa</w:t></w:r></w:p></w:txbxContent></w:pict></w:r></w:p>
+<w:tbl><w:tr><w:tc><w:tcPr><w:vMerge w:val="restart"/></w:tcPr><w:p><w:r><w:t>m</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:gridSpan w:val="2"/></w:tcPr><w:p><w:r><w:t>a</w:t></w:r></w:p><w:p><w:r><w:t>b</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc><w:tc><w:p><w:r><w:t>c</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+<w:p><w:pPr><w:pStyle w:val="H1"/></w:pPr><w:r><w:t>Segundo</w:t></w:r></w:p>
+<w:sdt><w:sdtContent><w:p><w:r><w:t>em sdt</w:t></w:r></w:p></w:sdtContent></w:sdt>
+<w:customXml><w:p><w:r><w:t>em xml</w:t></w:r></w:p></w:customXml>
+<w:ins><w:p><w:r><w:t>inserido</w:t></w:r></w:p></w:ins>
+<mc:AlternateContent><mc:Fallback><w:p><w:r><w:t>reserva</w:t></w:r></w:p></mc:Fallback></mc:AlternateContent>
+<w:p><w:pPr><w:pStyle w:val="Normal"/></w:pPr><w:r><w:t>fim</w:t></w:r></w:p>
+<w:sectPr/></w:body></w:document>"#
+        );
+        let styles = format!(
+            r#"<w:styles {W}><w:docDefaults><w:pPrDefault><w:pPr><w:spacing w:after="160"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style><w:style w:type="paragraph" w:styleId="H1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:pPr><w:outlineLvl w:val="0"/></w:pPr></w:style><w:style w:type="paragraph" w:styleId="Citacao"><w:name w:val="Quote"/></w:style><w:style w:type="paragraph" w:styleId="Sub"><w:name w:val="Subtitle"/><w:pPr><w:jc w:val="center"/></w:pPr></w:style><w:style w:type="character" w:styleId="Forte"><w:name w:val="Strong"/><w:rPr><w:b/><w:i w:val="0"/></w:rPr></w:style></w:styles>"#
+        );
+        let numbering = format!(
+            r#"<w:numbering {W}><w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/></w:lvl><w:lvl w:ilvl="1"><w:numFmt w:val="bullet"/></w:lvl></w:abstractNum><w:abstractNum w:abstractNumId="1"><w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/></w:lvl></w:abstractNum><w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num><w:num w:numId="2"><w:abstractNumId w:val="1"/></w:num></w:numbering>"#
+        );
+        let notes = format!(
+            r#"<w:footnotes {W}><w:footnote w:id="2"><w:p><w:r><w:t>Nota de rodapé.</w:t></w:r></w:p></w:footnote></w:footnotes>"#
+        );
+        let ends = format!(
+            r#"<w:endnotes {W}><w:endnote w:id="3"><w:p><w:r><w:t>Nota final.</w:t></w:r></w:p></w:endnote></w:endnotes>"#
+        );
+        let rels = r#"<Relationships xmlns="r"><Relationship Id="rId5" Type="image" Target="media/image1.png"/><Relationship Id="rId6" Type="hyperlink" Target="https://example.org/" TargetMode="External"/></Relationships>"#;
+        let core = r#"<cp:coreProperties xmlns:cp="x" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Rico</dc:title><dc:creator>Ana Mar</dc:creator><dc:language>pt-BR</dc:language></cp:coreProperties>"#;
+        let p = d.path().join("rich.docx");
+        zip_with(
+            &p,
+            &[
+                ("word/document.xml", doc.as_bytes()),
+                ("word/styles.xml", styles.as_bytes()),
+                ("word/numbering.xml", numbering.as_bytes()),
+                ("word/footnotes.xml", notes.as_bytes()),
+                ("word/endnotes.xml", ends.as_bytes()),
+                ("word/_rels/document.xml.rels", rels.as_bytes()),
+                ("word/media/image1.png", PNG),
+                ("docProps/core.xml", core.as_bytes()),
+            ],
+        );
+        let mut all = vec![format!("{:?}", docx(&p))];
+
+        let content = r##"<?xml version="1.0"?><office:document-content xmlns:office="o" xmlns:text="t" xmlns:style="s" xmlns:fo="f" xmlns:xlink="x" xmlns:draw="d" xmlns:table="tb">
+<office:automatic-styles><style:style style:name="T1" style:family="text"><style:text-properties fo:font-weight="bold" fo:font-style="italic" style:text-underline-style="solid" style:text-line-through-style="solid" fo:font-variant="small-caps"/></style:style>
+<style:style style:name="T2" style:family="text"><style:text-properties style:text-position="super 58%"/></style:style>
+<style:style style:name="T3" style:family="text"><style:text-properties style:text-position="sub 58%"/></style:style>
+<style:style style:name="P1" style:family="paragraph"><style:paragraph-properties fo:text-align="center"/></style:style>
+<style:style style:name="P2" style:family="paragraph"><style:paragraph-properties fo:text-align="end" fo:break-before="page"/></style:style>
+<style:style style:name="Q" style:family="paragraph" style:display-name="Quotation"/>
+<style:style style:name="Tt" style:family="paragraph" style:display-name="Title"/>
+<style:style style:name="St" style:family="paragraph" style:display-name="Subtitle"/>
+<style:style style:name="Hh" style:family="paragraph" style:display-name="Heading 2"/>
+<style:style style:name="Ol" style:family="paragraph" style:default-outline-level="3"/>
+<style:style style:name="Child" style:family="paragraph" style:parent-style-name="P1"/>
+<text:list-style style:name="L1"><text:list-level-style-number text:level="1"/><text:list-level-style-bullet text:level="2"/></text:list-style></office:automatic-styles>
+<office:body><office:text><text:sequence-decls/><text:h text:outline-level="1">Parte Um</text:h>
+<text:p>Texto <text:span text:style-name="T1">rico</text:span> com <text:span text:style-name="T2">sup</text:span><text:span text:style-name="T3">sub</text:span><text:a xlink:href="https://example.org/">link</text:a><text:s text:c="3"/><text:tab/>após<text:line-break/>quebra<text:bookmark text:name="alvo"/><text:bookmark-start text:name="b2"/><text:bookmark-end/><text:soft-page-break/><text:note text:note-class="footnote"><text:note-citation>a</text:note-citation><text:note-body><text:p>Nota um.</text:p></text:note-body></text:note><draw:frame><draw:image xlink:href="Pictures/a.png"/></draw:frame></text:p>
+<text:p text:style-name="P1">centro</text:p><text:p text:style-name="P2">direita com quebra</text:p><text:p text:style-name="Q">citação</text:p><text:p text:style-name="Tt">Título</text:p><text:p text:style-name="St">Subtítulo</text:p><text:p text:style-name="Hh">Cabeçalho por nome</text:p><text:p text:style-name="Ol">Contorno</text:p><text:p text:style-name="Child">herdado</text:p>
+<text:p>com caixa<draw:frame><draw:text-box><text:p>dentro da caixa</text:p></draw:text-box></draw:frame></text:p>
+<text:list text:style-name="L1"><text:list-item><text:p>a</text:p><text:list><text:list-item><text:p>a1</text:p></text:list-item></text:list></text:list-item><text:list-item><text:p>b</text:p><text:p>b2</text:p></text:list-item></text:list>
+<table:table><table:table-header-rows><table:table-row><table:table-cell table:number-columns-spanned="2"><text:p>h</text:p></table:table-cell></table:table-row></table:table-header-rows><table:table-row><table:table-cell table:number-rows-spanned="2"><text:p>x</text:p></table:table-cell><table:table-cell><text:p>y</text:p><text:p>z</text:p></table:table-cell></table:table-row></table:table>
+<text:section><text:p>em seção</text:p></text:section><text:table-of-content><text:p>índice</text:p></text:table-of-content>
+<text:h text:outline-level="1" text:style-name="P2">Parte Dois</text:h><text:p>fim</text:p></office:text></office:body></office:document-content>"##;
+        let meta = r#"<office:document-meta xmlns:office="o" xmlns:dc="http://purl.org/dc/elements/1.1/"><office:meta><dc:title>Texto Rico</dc:title><dc:creator>Ana Mar</dc:creator></office:meta></office:document-meta>"#;
+        let o = d.path().join("rich.odt");
+        zip_with(
+            &o,
+            &[
+                ("mimetype", b"application/vnd.oasis.opendocument.text"),
+                ("content.xml", content.as_bytes()),
+                ("meta.xml", meta.as_bytes()),
+                ("Pictures/a.png", PNG),
+            ],
+        );
+        all.push(format!("{:?}", odt(&o)));
+        let sum = xxhash_rust::xxh3::xxh3_64(all.join("\n").as_bytes());
+        println!("hash {sum:016x}\n{}", all.join("\n"));
+        assert_eq!(
+            sum, 0xeb17344dd01cc55f,
+            "what the office readers give changed"
+        );
     }
 }
