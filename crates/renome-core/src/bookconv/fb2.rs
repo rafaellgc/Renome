@@ -1116,154 +1116,155 @@ fn pieces(s: &str) -> Option<Vec<Piece>> {
     stack.pop().map(|(_, _, k)| k)
 }
 
+fn fix_piece(p: &mut Piece) {
+    if let Piece::Elem { name, kids, .. } = p {
+        for k in kids.iter_mut() {
+            fix_piece(k);
+        }
+        lift_images(kids);
+        if name == "section" {
+            fix_section(kids);
+        }
+    }
+}
+/// Quotes and epigraphs cannot hold pictures: they follow the quote
+/// (which goes when nothing else was in it). A table with no rows
+/// goes too.
+fn lift_images(kids: &mut Vec<Piece>) {
+    let mut out = Vec::with_capacity(kids.len());
+    for k in std::mem::take(kids) {
+        match k {
+            Piece::Elem {
+                name,
+                open,
+                kids: inner,
+            } if name == "cite" || name == "epigraph" => {
+                let (pics, rest): (Vec<Piece>, Vec<Piece>) =
+                    inner.into_iter().partition(|k| k.name() == Some("image"));
+                if rest.iter().any(|k| !k.blank()) || pics.is_empty() {
+                    out.push(Piece::Elem {
+                        name,
+                        open,
+                        kids: rest,
+                    });
+                }
+                out.extend(pics);
+            }
+            Piece::Leaf { name: Some(n), raw } if n == "table" && raw.ends_with("/>") => {}
+            Piece::Elem { name, .. } if name == "table" && !has_rows(&k) => {}
+            k => out.push(k),
+        }
+    }
+    *kids = out;
+}
+fn has_rows(p: &Piece) -> bool {
+    matches!(p, Piece::Elem { kids, .. } if kids.iter().any(|k| k.name() == Some("tr")))
+}
+fn fix_section(kids: &mut Vec<Piece>) {
+    // Headings one after another make one title.
+    let mut i = 0;
+    let mut last_title: Option<usize> = None;
+    while i < kids.len() {
+        if kids[i].blank() {
+            i += 1;
+            continue;
+        }
+        if kids[i].name() == Some("title") {
+            if let Some(t) = last_title {
+                if let Piece::Elem { kids: more, .. } = kids.remove(i)
+                    && let Piece::Elem { kids: first, .. } = &mut kids[t]
+                {
+                    first.extend(more);
+                }
+                continue;
+            }
+            last_title = Some(i);
+        } else {
+            break;
+        }
+        i += 1;
+    }
+    let mut i = 0;
+    let mut stage = 0;
+    while i < kids.len() {
+        let next = match kids[i].name() {
+            _ if kids[i].blank() => stage,
+            Some("title") if stage < 1 => 1,
+            Some("epigraph") if stage <= 2 => 2,
+            Some("image") if stage < 3 => 3,
+            Some("annotation") if stage < 4 => 4,
+            _ => break,
+        };
+        stage = next;
+        i += 1;
+    }
+    let mut rest = kids.split_off(i);
+    // Text may not start with a picture (only the heading's one).
+    fn lead(run: &mut Vec<Piece>) {
+        if run.iter().find(|k| !k.blank()).and_then(|k| k.name()) == Some("image") {
+            run.insert(
+                0,
+                Piece::Leaf {
+                    name: Some("empty-line".into()),
+                    raw: "<empty-line/>".into(),
+                },
+            );
+        }
+    }
+    let sections = rest.iter().any(|k| k.name() == Some("section"));
+    let other = rest
+        .iter()
+        .any(|k| !k.blank() && k.name() != Some("section"));
+    if !other && !sections {
+        kids.extend(rest);
+        kids.push(Piece::Leaf {
+            name: Some("empty-line".into()),
+            raw: "<empty-line/>".into(),
+        });
+        return;
+    }
+    if !(sections && other) {
+        if other {
+            lead(&mut rest);
+        }
+        kids.extend(rest);
+        return;
+    }
+    let mut run: Vec<Piece> = Vec::new();
+    let flush = |run: &mut Vec<Piece>, kids: &mut Vec<Piece>| {
+        if run.iter().any(|k| !k.blank()) {
+            lead(run);
+            kids.push(Piece::Elem {
+                name: "section".into(),
+                open: "<section>".into(),
+                kids: std::mem::take(run),
+            });
+        } else {
+            kids.append(run);
+        }
+    };
+    for k in rest {
+        if k.name() == Some("section") {
+            flush(&mut run, kids);
+            kids.push(k);
+        } else {
+            run.push(k);
+        }
+    }
+    flush(&mut run, kids);
+}
+
 /// Makes every section what the format allows: its heading (title,
 /// epigraphs, picture, annotation), then either sections or text, never
 /// both (text beside sections goes into a section of its own) and never
 /// nothing (an empty line then).
 fn valid_sections(body: &str) -> String {
-    fn fix(p: &mut Piece) {
-        if let Piece::Elem { name, kids, .. } = p {
-            for k in kids.iter_mut() {
-                fix(k);
-            }
-            lift_images(kids);
-            if name == "section" {
-                fix_section(kids);
-            }
-        }
-    }
-    /// Quotes and epigraphs cannot hold pictures: they follow the quote
-    /// (which goes when nothing else was in it). A table with no rows
-    /// goes too.
-    fn lift_images(kids: &mut Vec<Piece>) {
-        let mut out = Vec::with_capacity(kids.len());
-        for k in std::mem::take(kids) {
-            match k {
-                Piece::Elem {
-                    name,
-                    open,
-                    kids: inner,
-                } if name == "cite" || name == "epigraph" => {
-                    let (pics, rest): (Vec<Piece>, Vec<Piece>) =
-                        inner.into_iter().partition(|k| k.name() == Some("image"));
-                    if rest.iter().any(|k| !k.blank()) || pics.is_empty() {
-                        out.push(Piece::Elem {
-                            name,
-                            open,
-                            kids: rest,
-                        });
-                    }
-                    out.extend(pics);
-                }
-                Piece::Leaf { name: Some(n), raw } if n == "table" && raw.ends_with("/>") => {}
-                Piece::Elem { name, .. } if name == "table" && !has_rows(&k) => {}
-                k => out.push(k),
-            }
-        }
-        *kids = out;
-    }
-    fn has_rows(p: &Piece) -> bool {
-        matches!(p, Piece::Elem { kids, .. } if kids.iter().any(|k| k.name() == Some("tr")))
-    }
-    fn fix_section(kids: &mut Vec<Piece>) {
-        // Headings one after another make one title.
-        let mut i = 0;
-        let mut last_title: Option<usize> = None;
-        while i < kids.len() {
-            if kids[i].blank() {
-                i += 1;
-                continue;
-            }
-            if kids[i].name() == Some("title") {
-                if let Some(t) = last_title {
-                    if let Piece::Elem { kids: more, .. } = kids.remove(i)
-                        && let Piece::Elem { kids: first, .. } = &mut kids[t]
-                    {
-                        first.extend(more);
-                    }
-                    continue;
-                }
-                last_title = Some(i);
-            } else {
-                break;
-            }
-            i += 1;
-        }
-        let mut i = 0;
-        let mut stage = 0;
-        while i < kids.len() {
-            let next = match kids[i].name() {
-                _ if kids[i].blank() => stage,
-                Some("title") if stage < 1 => 1,
-                Some("epigraph") if stage <= 2 => 2,
-                Some("image") if stage < 3 => 3,
-                Some("annotation") if stage < 4 => 4,
-                _ => break,
-            };
-            stage = next;
-            i += 1;
-        }
-        let mut rest = kids.split_off(i);
-        // Text may not start with a picture (only the heading's one).
-        fn lead(run: &mut Vec<Piece>) {
-            if run.iter().find(|k| !k.blank()).and_then(|k| k.name()) == Some("image") {
-                run.insert(
-                    0,
-                    Piece::Leaf {
-                        name: Some("empty-line".into()),
-                        raw: "<empty-line/>".into(),
-                    },
-                );
-            }
-        }
-        let sections = rest.iter().any(|k| k.name() == Some("section"));
-        let other = rest
-            .iter()
-            .any(|k| !k.blank() && k.name() != Some("section"));
-        if !other && !sections {
-            kids.extend(rest);
-            kids.push(Piece::Leaf {
-                name: Some("empty-line".into()),
-                raw: "<empty-line/>".into(),
-            });
-            return;
-        }
-        if !(sections && other) {
-            if other {
-                lead(&mut rest);
-            }
-            kids.extend(rest);
-            return;
-        }
-        let mut run: Vec<Piece> = Vec::new();
-        let flush = |run: &mut Vec<Piece>, kids: &mut Vec<Piece>| {
-            if run.iter().any(|k| !k.blank()) {
-                lead(run);
-                kids.push(Piece::Elem {
-                    name: "section".into(),
-                    open: "<section>".into(),
-                    kids: std::mem::take(run),
-                });
-            } else {
-                kids.append(run);
-            }
-        };
-        for k in rest {
-            if k.name() == Some("section") {
-                flush(&mut run, kids);
-                kids.push(k);
-            } else {
-                run.push(k);
-            }
-        }
-        flush(&mut run, kids);
-    }
     let Some(mut all) = pieces(body) else {
         return body.to_string();
     };
     let mut out = String::with_capacity(body.len() + 64);
     for p in &mut all {
-        fix(p);
+        fix_piece(p);
         p.write(&mut out);
     }
     out
