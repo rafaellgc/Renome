@@ -457,18 +457,9 @@ async fn by_sound(
     releases: &mut HashMap<String, Result<Release, String>>,
     stopped: &impl Fn() -> bool,
 ) -> Vec<AlbumLookup> {
-    // Each folder (with its disc folders) on its own.
-    let mut folders: Vec<(PathBuf, Vec<usize>)> = Vec::new();
-    for (i, (p, _)) in songs.iter().enumerate() {
-        let dir = music::album_dir(p.parent().unwrap_or(Path::new(""))).to_path_buf();
-        match folders.iter_mut().find(|(d, _)| *d == dir) {
-            Some((_, v)) => v.push(i),
-            None => folders.push((dir, vec![i])),
-        }
-    }
     let by_path: HashMap<&Path, &Song> = songs.iter().map(|s| (s.0.as_path(), s)).collect();
     let mut found = Vec::new();
-    for (_, idx) in &folders {
+    for idx in folders_of(songs) {
         let part: Vec<_> = idx
             .iter()
             .map(|&i| {
@@ -477,36 +468,7 @@ async fn by_sound(
             })
             .collect();
         let mut groups = renome_core::acoustid::albums(&part);
-        // A folder mostly on one release is that album: its other songs
-        // (a remaster heard as the original recording, say) join it when
-        // their tags fit one of its tracks.
-        if let Some(best) = groups.first().and_then(|g| g.candidates.first())
-            && part.len() > 1
-            && groups[0].songs.len() * 2 >= part.len()
-            && !stopped()
-        {
-            let id = best.id.clone();
-            if !releases.contains_key(&id) {
-                releases.insert(id.clone(), s.mb.release(&id).await);
-            }
-            if let Some(Ok(r)) = releases.get(&id) {
-                let rest: Vec<Song> = groups[1..]
-                    .iter()
-                    .flat_map(|g| &g.songs)
-                    .map(|p| by_path[p.as_path()].clone())
-                    .collect();
-                let fit: Vec<PathBuf> = mb::match_tracks(r, &rest)
-                    .0
-                    .into_iter()
-                    .map(|(p, _)| p)
-                    .collect();
-                for g in &mut groups[1..] {
-                    g.songs.retain(|p| !fit.contains(p));
-                }
-                groups[0].songs.extend(fit);
-                groups.retain(|g| !g.songs.is_empty());
-            }
-        }
+        join_rest(s, &part, &mut groups, &by_path, releases, stopped).await;
         found.extend(groups);
     }
     let total = found.len();
@@ -518,62 +480,128 @@ async fn by_sound(
             .iter()
             .map(|p| by_path[p.as_path()].clone())
             .collect();
-        let mut query = query_of(&album);
-        if let Some(best) = f.candidates.first() {
-            query.artist = best.artist.clone();
-            query.album = best.title.clone();
-            query.year = best.date.get(..4).and_then(|y| y.parse().ok());
-        }
-        // Nothing heard because AcoustID failed: say why.
-        let failed = if f.candidates.is_empty() {
-            error.clone()
-        } else {
-            None
-        };
-        let mut lookup = AlbumLookup {
-            files: f.songs.clone(),
-            dir: f.songs[0]
-                .parent()
-                .map(Path::to_path_buf)
-                .unwrap_or_default(),
-            query,
-            candidates: f.candidates,
-            choice: None,
-            matches: Vec::new(),
-            tracks: Vec::new(),
-            error: failed,
-            heard: true,
-            status: crate::flow::Status::None,
-        };
-        if let Some(best) = lookup.candidates.first()
-            && !stopped()
-        {
-            if !releases.contains_key(&best.id) {
-                releases.insert(best.id.clone(), s.mb.release(&best.id).await);
-            }
-            match &releases[&best.id] {
-                Ok(r) => {
-                    let matches = mb::match_tracks(r, &album).0;
-                    if mb::sure(r, &album) {
-                        // The release's own details (format, label) for the review.
-                        let mut c = mb::rank(&lookup.query, std::slice::from_ref(r)).remove(0);
-                        c.score = best.score;
-                        lookup.candidates[0] = c.clone();
-                        lookup.choice = Some(c);
-                        lookup.matches = matches;
-                        lookup.tracks = mb::tracklist(r);
-                    }
-                }
-                Err(e) => lookup.error = Some(e.clone()),
-            }
-        }
-        lookup.candidates.truncate(12);
-        lookup.status =
-            crate::flow::Status::of(lookup.choice.is_some(), !lookup.candidates.is_empty());
-        out.push(lookup);
+        out.push(album_heard(s, f, &album, error, releases, stopped).await);
         progress(host, done + 1, total, None);
     }
     out
+}
+
+/// The songs of each folder (with its disc folders), as their places in
+/// `songs`.
+fn folders_of(songs: &[Song]) -> Vec<Vec<usize>> {
+    let mut folders: Vec<(PathBuf, Vec<usize>)> = Vec::new();
+    for (i, (p, _)) in songs.iter().enumerate() {
+        let dir = music::album_dir(p.parent().unwrap_or(Path::new(""))).to_path_buf();
+        match folders.iter_mut().find(|(d, _)| *d == dir) {
+            Some((_, v)) => v.push(i),
+            None => folders.push((dir, vec![i])),
+        }
+    }
+    folders.into_iter().map(|(_, v)| v).collect()
+}
+
+/// A folder mostly on one release is that album: its other songs (a
+/// remaster heard as the original recording, say) join it when their tags
+/// fit one of its tracks.
+async fn join_rest(
+    s: &Services<'_>,
+    part: &[(PathBuf, Heard)],
+    groups: &mut Vec<renome_core::acoustid::Found>,
+    by_path: &HashMap<&Path, &Song>,
+    releases: &mut HashMap<String, Result<Release, String>>,
+    stopped: &impl Fn() -> bool,
+) {
+    let Some(best) = groups.first().and_then(|g| g.candidates.first()) else {
+        return;
+    };
+    if part.len() <= 1 || groups[0].songs.len() * 2 < part.len() || stopped() {
+        return;
+    }
+    let id = best.id.clone();
+    if !releases.contains_key(&id) {
+        releases.insert(id.clone(), s.mb.release(&id).await);
+    }
+    if let Some(Ok(r)) = releases.get(&id) {
+        let rest: Vec<Song> = groups[1..]
+            .iter()
+            .flat_map(|g| &g.songs)
+            .map(|p| by_path[p.as_path()].clone())
+            .collect();
+        let fit: Vec<PathBuf> = mb::match_tracks(r, &rest)
+            .0
+            .into_iter()
+            .map(|(p, _)| p)
+            .collect();
+        for g in &mut groups[1..] {
+            g.songs.retain(|p| !fit.contains(p));
+        }
+        groups[0].songs.extend(fit);
+        groups.retain(|g| !g.songs.is_empty());
+    }
+}
+
+/// One album heard: its candidates and, when its best release is sure for
+/// the songs, that release chosen and matched.
+async fn album_heard(
+    s: &Services<'_>,
+    f: renome_core::acoustid::Found,
+    album: &[Song],
+    error: &Option<String>,
+    releases: &mut HashMap<String, Result<Release, String>>,
+    stopped: &impl Fn() -> bool,
+) -> AlbumLookup {
+    let mut query = query_of(album);
+    if let Some(best) = f.candidates.first() {
+        query.artist = best.artist.clone();
+        query.album = best.title.clone();
+        query.year = best.date.get(..4).and_then(|y| y.parse().ok());
+    }
+    // Nothing heard because AcoustID failed: say why.
+    let failed = if f.candidates.is_empty() {
+        error.clone()
+    } else {
+        None
+    };
+    let mut lookup = AlbumLookup {
+        files: f.songs.clone(),
+        dir: f.songs[0]
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default(),
+        query,
+        candidates: f.candidates,
+        choice: None,
+        matches: Vec::new(),
+        tracks: Vec::new(),
+        error: failed,
+        heard: true,
+        status: crate::flow::Status::None,
+    };
+    if let Some(best) = lookup.candidates.first()
+        && !stopped()
+    {
+        if !releases.contains_key(&best.id) {
+            releases.insert(best.id.clone(), s.mb.release(&best.id).await);
+        }
+        match &releases[&best.id] {
+            Ok(r) => {
+                let matches = mb::match_tracks(r, album).0;
+                if mb::sure(r, album) {
+                    // The release's own details (format, label) for the review.
+                    let mut c = mb::rank(&lookup.query, std::slice::from_ref(r)).remove(0);
+                    c.score = best.score;
+                    lookup.candidates[0] = c.clone();
+                    lookup.choice = Some(c);
+                    lookup.matches = matches;
+                    lookup.tracks = mb::tracklist(r);
+                }
+            }
+            Err(e) => lookup.error = Some(e.clone()),
+        }
+    }
+    lookup.candidates.truncate(12);
+    lookup.status = crate::flow::Status::of(lookup.choice.is_some(), !lookup.candidates.is_empty());
+    lookup
 }
 
 /// The release the user chose for an album, matched to its songs.
