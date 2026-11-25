@@ -1047,11 +1047,6 @@ pub async fn comics(
         .unwrap_or_default()
         .trim()
         .to_string();
-    let skip = rule
-        .get("skipPublishers")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
     let by_folder = rule
         .get("seriesByFolder")
         .and_then(Value::as_bool)
@@ -1093,10 +1088,14 @@ pub async fn comics(
         mu: &mu,
     };
     let params = flow::comics::Params {
-        source: source.clone(),
-        key: key.clone(),
-        series: typed.clone(),
-        skip: skip.clone(),
+        source,
+        key,
+        series: typed,
+        skip: rule
+            .get("skipPublishers")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
         lang: renome_services::options::comic_lang(lang()),
         ui_lang: lang().to_string(),
         by_folder,
@@ -1106,29 +1105,7 @@ pub async fn comics(
             .unwrap_or(false),
     };
     let items: Vec<flow::Item> = preview.items.iter().map(flow::Item::from).collect();
-    // A series forced with `--pick` for a file: its group's.
-    let mut picked = HashMap::new();
-    for i in &items {
-        let Some(text) = ask.picks.get(&i.path) else {
-            continue;
-        };
-        let stem = i.lookup_name.as_ref().map(|_| i.read_stem());
-        let Some(own) = renome_core::comics::from_path(&i.path, stem.as_deref(), by_folder) else {
-            continue;
-        };
-        let query = if typed.is_empty() {
-            own.series
-        } else {
-            typed.clone()
-        };
-        let found = sources
-            .search(&source, &key, text, None, "", &params.lang, &skip)
-            .await
-            .map_err(|e| crate::text::error_text(&e))?;
-        if let Some(v) = found.into_iter().next() {
-            picked.insert(flow::comics::picked_key(&source, &query), v);
-        }
-    }
+    let picked = forced_series(&sources, &params, &items, ask).await?;
     let tv = tmdb::Client::new("", "");
     let al_tv = renome_services::anilist::Client::default();
     let host = Asker {
@@ -1151,14 +1128,75 @@ pub async fn comics(
     if host.quit.load(std::sync::atomic::Ordering::SeqCst) {
         return Err(t("searchStopped", &[]));
     }
-    // The doubtful issues asked (or left).
+    let settled = settle_issues(found.files, &found.volumes, ask).await?;
+    let named = flow::comics::named(&settled, &found.volumes);
+    let mut out_comics = Comics {
+        chosen: HashMap::new(),
+        web: HashMap::new(),
+        settled,
+        volumes: found.volumes,
+    };
+    for (p, n) in named {
+        out_comics.web.insert(p.clone(), (n.web, n.manga));
+        out_comics.chosen.insert(p, n.comic);
+    }
+    Ok(out_comics)
+}
+
+/// The series forced with `--pick` for a file: its group's.
+async fn forced_series(
+    sources: &renome_services::comics::Sources<'_>,
+    params: &flow::comics::Params,
+    items: &[flow::Item],
+    ask: &Ask,
+) -> Result<HashMap<String, renome_core::comics::Volume>, String> {
+    let mut picked = HashMap::new();
+    for i in items {
+        let Some(text) = ask.picks.get(&i.path) else {
+            continue;
+        };
+        let stem = i.lookup_name.as_ref().map(|_| i.read_stem());
+        let Some(own) = renome_core::comics::from_path(&i.path, stem.as_deref(), params.by_folder)
+        else {
+            continue;
+        };
+        let typed = params.series.as_str();
+        let query = if typed.is_empty() {
+            own.series
+        } else {
+            typed.to_string()
+        };
+        let found = sources
+            .search(
+                &params.source,
+                &params.key,
+                text,
+                None,
+                "",
+                &params.lang,
+                &params.skip,
+            )
+            .await
+            .map_err(|e| crate::text::error_text(&e))?;
+        if let Some(v) = found.into_iter().next() {
+            picked.insert(flow::comics::picked_key(&params.source, &query), v);
+        }
+    }
+    Ok(picked)
+}
+
+/// The doubtful issues asked (or left).
+async fn settle_issues(
+    files: Vec<flow::comics::Found>,
+    volumes: &HashMap<String, flow::comics::Listed>,
+    ask: &Ask,
+) -> Result<Vec<flow::comics::Settled>, String> {
     let mut settled = Vec::new();
-    for f in found.files {
+    for f in files {
         let choice = if f.sure {
             Some(f.choice)
         } else if ask.choose == Choose::Ask && std::io::stdin().is_terminal() {
-            let issues = found
-                .volumes
+            let issues = volumes
                 .get(&f.volume_key)
                 .map_or(&[][..], |l| &l.issues[..]);
             choose_issue(&f.path, &f.own, issues).await?
@@ -1172,18 +1210,7 @@ pub async fn comics(
             choice,
         });
     }
-    let named = flow::comics::named(&settled, &found.volumes);
-    let mut out_comics = Comics {
-        chosen: HashMap::new(),
-        web: HashMap::new(),
-        settled,
-        volumes: found.volumes,
-    };
-    for (p, n) in named {
-        out_comics.web.insert(p.clone(), (n.web, n.manga));
-        out_comics.chosen.insert(p, n.comic);
-    }
-    Ok(out_comics)
+    Ok(settled)
 }
 
 /// A comic series, in the terminal; a new search with the words typed.
