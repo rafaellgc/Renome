@@ -1191,4 +1191,110 @@ mod tests {
         assert_eq!(r.meta.title, "Um Livro & Outro");
         assert_eq!(r.meta.language, b.meta.language);
     }
+
+    /// The books the golden test writes: each part of `build` is on one.
+    fn golden_books() -> Vec<(&'static str, Book)> {
+        let toc = |t: &str, f: &str, kids: Vec<Toc>| Toc {
+            title: t.into(),
+            href: f.into(),
+            kids,
+        };
+        let long: String = (0..400)
+            .map(|i| format!("<p>Parágrafo número {i}, com acentos: ação, coração, João.</p>"))
+            .collect();
+        let chapter = |n: &str, t: &str, body: String| Chapter {
+            name: n.into(),
+            title: t.into(),
+            body,
+            ..Default::default()
+        };
+        let simple = epub_out::tests::sample();
+
+        let mut links = epub_out::tests::sample();
+        links.chapters.push(chapter(
+            "c0002.xhtml",
+            "Dois",
+            format!("<h1 id=\"top\">Dois</h1>{long}<p id=\"end\">Fim. <a href=\"c0001.xhtml\">Volta</a> <a href=\"#top\">topo</a> <a href=\"https://example.org\">fora</a></p>"),
+        ));
+        links.toc = vec![
+            toc("Capítulo 1", "c0001.xhtml", vec![]),
+            toc("Dois", "c0002.xhtml#end", vec![]),
+        ];
+
+        let mut nested = epub_out::tests::sample();
+        let body = |t: &str| {
+            format!("<h2 id=\"a\">{t}</h2><p>Texto de {t}.</p><h3 id=\"b\">Sub</h3><p>Mais.</p>")
+        };
+        nested.chapters[0].body = body("Um");
+        nested
+            .chapters
+            .push(chapter("c0002.xhtml", "Dois", body("Dois")));
+        let two = |t: &str, f: &str| {
+            toc(
+                t,
+                &format!("{f}#a"),
+                vec![toc(&format!("{t}.1"), &format!("{f}#b"), vec![])],
+            )
+        };
+        nested.toc = vec![two("Um", "c0001.xhtml"), two("Dois", "c0002.xhtml")];
+
+        let mut fixed = epub_out::tests::sample();
+        fixed.fixed = true;
+        fixed.rtl = true;
+        fixed.chapters[0].page = Some((600, 800));
+        fixed.chapters[0].body =
+            "<div class=\"page\"><img src=\"x.png\" alt=\"\" style=\"width: 100%; height: 100%\"/></div>".into();
+        fixed.css = "@font-face { src: url(\"x.png\"); }\n".into();
+
+        let mut cover = Book::new();
+        cover.meta.title = "Com capa".into();
+        cover.meta.authors = vec!["A".into(), "B".into()];
+        cover.meta.publisher = "Editora".into();
+        cover.meta.description = "Resumo".into();
+        cover.meta.isbn = "9780306406157".into();
+        cover.meta.subjects = vec!["x".into(), "y".into()];
+        cover.meta.date = "2020-01-02".into();
+        let jpg = std::fs::read("tests/fixtures/gps.jpg").unwrap();
+        let pic = cover.add_file(jpg, "cover.jpg").unwrap();
+        cover.cover = Some(pic);
+        cover
+            .chapters
+            .push(chapter("c0001.xhtml", "", "<p>Só um parágrafo.</p>".into()));
+
+        vec![
+            ("simple", simple),
+            ("links", links),
+            ("nested", nested),
+            ("fixed", fixed),
+            ("cover", cover),
+        ]
+    }
+
+    /// The bytes of a written book without the two dates in its header.
+    fn stable(mut b: Vec<u8>) -> Vec<u8> {
+        b[36..44].fill(0);
+        b
+    }
+
+    /// What `build` writes for each golden book. A change here is a change
+    /// in the files Kindles read: only update these when that is the point
+    /// (and the file still opens on a Kindle), never for a refactor.
+    #[test]
+    fn output_does_not_change() {
+        let got: Vec<(&str, u64)> = golden_books()
+            .into_iter()
+            .map(|(n, b)| {
+                let out = stable(azw3_out::build(&b).unwrap());
+                (n, xxhash_rust::xxh3::xxh3_64(&out))
+            })
+            .collect();
+        let want: Vec<(&str, u64)> = vec![
+            ("simple", 5232308697530392993),
+            ("links", 7907823986793057421),
+            ("nested", 5813082902280299888),
+            ("fixed", 3208930823486919973),
+            ("cover", 17657428276110543721),
+        ];
+        assert_eq!(got, want);
+    }
 }
