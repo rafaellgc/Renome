@@ -922,178 +922,264 @@ pub async fn run(
     jobs: Jobs,
     services: &Services<'_>,
 ) -> Report {
-    let mut out = Report::default();
-    let movie = Opts::of(rules, "movie");
-    let series = Opts::of(rules, "series");
-    let music = Opts::of(rules, "music");
-    let book = Opts::of(rules, "book");
-    let subtitle = Opts::of(rules, "subtitle");
-    if let Some((files, folders, ads)) = &jobs.trash {
+    let mut w = Work {
+        host,
+        history,
+        id: history_id,
+        rules,
+        services,
+        out: Report::default(),
+    };
+    w.trash(&jobs.trash);
+    if renamed && w.id.is_none() {
+        w.out.lines = w.out.lines();
+        return w.out;
+    }
+    w.movie_sidecars(jobs.movie_sidecars).await;
+    w.covers(jobs.covers).await;
+    w.playlists(jobs.playlists);
+    w.song_tags(jobs.song_tags).await;
+    w.book_sidecars(jobs.book_sidecars).await;
+    // After the covers: a book without one in the catalogue takes the one
+    // just saved in its folder.
+    w.audiobook_tags(jobs.audiobook_tags).await;
+    w.inside(jobs.inside).await;
+    w.tv_sidecars(jobs.tv_sidecars).await;
+    w.video_tags(jobs.video_tags).await;
+    w.sub_tools(jobs.sub_tools).await;
+    w.subtitles(jobs.subtitles).await;
+    host.report("after-stage", json!({ "stage": Value::Null }));
+    w.out.lines = w.out.lines();
+    w.out
+}
+
+/// What the stages share: who runs the work, the history entry they
+/// record into, the rules' options, and the report they fill.
+struct Work<'a> {
+    host: &'a dyn Host,
+    history: &'a History,
+    id: Option<String>,
+    rules: &'a [Value],
+    services: &'a Services<'a>,
+    out: Report,
+}
+
+impl Work<'_> {
+    fn opts<'r>(&'r self, kind: &'r str) -> Opts<'r> {
+        Opts::of(self.rules, kind)
+    }
+
+    /// Counts the files a stage made; `own`: it recorded them in the
+    /// history itself.
+    fn sidecars(&mut self, mut r: tmdb::SidecarReport, own: bool) {
+        if !own {
+            aft::record_created(self.history, self.id.clone(), &mut r);
+        }
+        self.out.sidecars += r.created.len();
+        self.out.kept_lists += r.kept;
+        let done = self.out.sidecars;
+        self.out.trouble("sidecars", done, r.errors);
+    }
+
+    /// The release's adverts go to the trash.
+    fn trash(&mut self, trash: &Option<(Vec<PathBuf>, Vec<PathBuf>, usize)>) {
+        let Some((files, folders, ads)) = trash else {
+            return;
+        };
         let (trashed, failed) = renome_core::plan::trash_leftovers(files, folders);
         // Counted in files (a folder sent whole holds several), unless
         // some failed.
-        out.ads_trashed = if failed.is_empty() {
+        self.out.ads_trashed = if failed.is_empty() {
             *ads
         } else {
             trashed.len()
         };
-        out.ads_failed = failed.len();
-        out.trashed = trashed;
+        self.out.ads_failed = failed.len();
+        self.out.trashed = trashed;
     }
-    if renamed && history_id.is_none() {
-        out.lines = out.lines();
-        return out;
-    }
-    let id = || history_id.clone();
-    let sidecars = |out: &mut Report, mut r: tmdb::SidecarReport, own: bool| {
-        if !own {
-            aft::record_created(history, id(), &mut r);
+
+    async fn movie_sidecars(&mut self, items: Vec<tmdb::SidecarItem>) {
+        if items.is_empty() {
+            return;
         }
-        out.sidecars += r.created.len();
-        out.kept_lists += r.kept;
-        let done = out.sidecars;
-        out.trouble("sidecars", done, r.errors);
-    };
-    if !jobs.movie_sidecars.is_empty() {
-        stage(host, "sidecars", jobs.movie_sidecars.len());
+        stage(self.host, "sidecars", items.len());
+        let movie = self.opts("movie");
+        let (backdrop, folder) = (movie.bool("backdrop"), movie.bool("folder"));
         let r = aft::movie_sidecars(
-            host,
-            history,
-            &services.tmdb_key,
-            &services.tmdb_lang,
-            id(),
-            jobs.movie_sidecars,
-            movie.bool("backdrop"),
-            movie.bool("folder"),
+            self.host,
+            self.history,
+            &self.services.tmdb_key,
+            &self.services.tmdb_lang,
+            self.id.clone(),
+            items,
+            backdrop,
+            folder,
         )
         .await;
-        sidecars(&mut out, r, true);
+        self.sidecars(r, true);
     }
-    if !jobs.covers.is_empty() {
-        stage(host, "covers", jobs.covers.len());
-        let r = mbs::covers(host, services.mb, services.dg, jobs.covers).await;
-        sidecars(&mut out, r, false);
+
+    async fn covers(&mut self, items: Vec<mbs::CoverItem>) {
+        if items.is_empty() {
+            return;
+        }
+        stage(self.host, "covers", items.len());
+        let r = mbs::covers(self.host, self.services.mb, self.services.dg, items).await;
+        self.sidecars(r, false);
     }
-    if !jobs.playlists.is_empty() {
-        stage(host, "playlists", jobs.playlists.len());
-        let r = aft::playlists(history, id(), jobs.playlists);
-        sidecars(&mut out, r, true);
+
+    fn playlists(&mut self, lists: Vec<PathBuf>) {
+        if lists.is_empty() {
+            return;
+        }
+        stage(self.host, "playlists", lists.len());
+        let r = aft::playlists(self.history, self.id.clone(), lists);
+        self.sidecars(r, true);
     }
-    if !jobs.song_tags.is_empty() {
-        stage(host, "tags", jobs.song_tags.len());
+
+    async fn song_tags(&mut self, jobs: Vec<TagJob>) {
+        if jobs.is_empty() {
+            return;
+        }
+        stage(self.host, "tags", jobs.len());
+        let music = self.opts("music");
+        let (embed, clean) = (music.bool("embedCover"), music.bool("cleanTags"));
+        let size = Some(music.number("coverSize", 1200) as u32);
         match aft::song_tags(
-            host,
-            history,
-            services.mb,
-            services.dg,
-            id(),
-            jobs.song_tags,
-            music.bool("embedCover"),
-            music.bool("cleanTags"),
-            Some(music.number("coverSize", 1200) as u32),
+            self.host,
+            self.history,
+            self.services.mb,
+            self.services.dg,
+            self.id.clone(),
+            jobs,
+            embed,
+            clean,
+            size,
         )
         .await
         {
             Ok((r, written)) => {
-                out.tags = r.written;
-                out.retagged.extend(written);
-                out.trouble("tags", r.written, r.errors);
+                self.out.tags = r.written;
+                self.out.retagged.extend(written);
+                self.out.trouble("tags", r.written, r.errors);
             }
-            Err(e) => out.trouble("tags", 0, vec![(String::new(), e)]),
+            Err(e) => self.out.trouble("tags", 0, vec![(String::new(), e)]),
         }
     }
-    if !jobs.book_sidecars.is_empty() {
-        stage(host, "bookMeta", jobs.book_sidecars.len());
-        let r = ol::sidecars(
-            host,
-            services.ol,
-            jobs.book_sidecars,
+
+    async fn book_sidecars(&mut self, items: Vec<ol::SidecarItem>) {
+        if items.is_empty() {
+            return;
+        }
+        stage(self.host, "bookMeta", items.len());
+        let book = self.opts("book");
+        let (cover, opf, folders) = (
             book.bool("cover"),
             book.bool("metadataOpf"),
             book.bool("folders"),
-        )
-        .await;
-        sidecars(&mut out, r, false);
+        );
+        let r = ol::sidecars(self.host, self.services.ol, items, cover, opf, folders).await;
+        self.sidecars(r, false);
     }
-    // After the covers: a book without one in the catalogue takes the one
-    // just saved in its folder.
-    if !jobs.audiobook_tags.is_empty() {
-        stage(host, "audioTags", jobs.audiobook_tags.len());
+
+    async fn audiobook_tags(&mut self, jobs: Vec<AudiobookTagJob>) {
+        if jobs.is_empty() {
+            return;
+        }
+        stage(self.host, "audioTags", jobs.len());
+        let clean = self.opts("book").bool("audioClean");
         match aft::audiobook_tags(
-            host,
-            history,
-            services.ol,
-            id(),
-            jobs.audiobook_tags,
+            self.host,
+            self.history,
+            self.services.ol,
+            self.id.clone(),
+            jobs,
             true,
-            book.bool("audioClean"),
+            clean,
         )
         .await
         {
             Ok((r, written)) => {
-                out.audio_tags = r.written;
-                out.retagged.extend(written);
-                out.trouble("audioTags", r.written, r.errors);
+                self.out.audio_tags = r.written;
+                self.out.retagged.extend(written);
+                self.out.trouble("audioTags", r.written, r.errors);
             }
-            Err(e) => out.trouble("audioTags", 0, vec![(String::new(), e)]),
+            Err(e) => self.out.trouble("audioTags", 0, vec![(String::new(), e)]),
         }
     }
-    if !jobs.inside.is_empty() {
-        stage(host, "inside", jobs.inside.len());
-        match aft::inside(host, history, id(), jobs.inside).await {
+
+    async fn inside(&mut self, jobs: Vec<InsideJob>) {
+        if jobs.is_empty() {
+            return;
+        }
+        stage(self.host, "inside", jobs.len());
+        match aft::inside(self.host, self.history, self.id.clone(), jobs).await {
             Ok(o) => {
-                out.inside += o.report.written;
-                out.drawn = o.report.drawn;
-                out.retagged.extend(o.written);
-                out.moved = o.moved;
-                let done = out.inside;
-                out.trouble("inside", done, o.report.errors);
+                self.out.inside += o.report.written;
+                self.out.drawn = o.report.drawn;
+                self.out.retagged.extend(o.written);
+                self.out.moved = o.moved;
+                let done = self.out.inside;
+                self.out.trouble("inside", done, o.report.errors);
             }
-            Err(e) => out.trouble("inside", 0, vec![(String::new(), e)]),
+            Err(e) => self.out.trouble("inside", 0, vec![(String::new(), e)]),
         }
     }
-    if !jobs.tv_sidecars.is_empty() {
-        stage(host, "sidecars", jobs.tv_sidecars.len());
-        let client = tmdb::Client::new(&services.tmdb_key, &services.tmdb_lang);
-        let r = tmdb::tv_sidecars(
-            host,
-            &client,
-            jobs.tv_sidecars,
-            series.bool("backdrop"),
-            series.bool("folders"),
-        )
-        .await;
-        sidecars(&mut out, r, false);
+
+    async fn tv_sidecars(&mut self, items: Vec<tmdb::TvSidecarItem>) {
+        if items.is_empty() {
+            return;
+        }
+        stage(self.host, "sidecars", items.len());
+        let client = tmdb::Client::new(&self.services.tmdb_key, &self.services.tmdb_lang);
+        let series = self.opts("series");
+        let (backdrop, folders) = (series.bool("backdrop"), series.bool("folders"));
+        let r = tmdb::tv_sidecars(self.host, &client, items, backdrop, folders).await;
+        self.sidecars(r, false);
     }
-    if !jobs.video_tags.is_empty() {
-        stage(host, "inside", jobs.video_tags.len());
-        let vr = if movie.on() { movie } else { series };
+
+    async fn video_tags(&mut self, items: Vec<tmdb::VideoTagItem>) {
+        if items.is_empty() {
+            return;
+        }
+        stage(self.host, "inside", items.len());
+        let movie = self.opts("movie");
+        let vr = if movie.on() {
+            movie
+        } else {
+            self.opts("series")
+        };
         let options = VideoTagOptions {
             cover: true,
             clean: vr.bool("videoClean"),
             tracks: vr.bool("videoTracks"),
         };
         match aft::video_tags(
-            host,
-            history,
-            &services.tmdb_key,
-            &services.tmdb_lang,
-            id(),
-            jobs.video_tags,
+            self.host,
+            self.history,
+            &self.services.tmdb_key,
+            &self.services.tmdb_lang,
+            self.id.clone(),
+            items,
             options,
         )
         .await
         {
             Ok(r) => {
-                out.inside += r.written;
-                let done = out.inside;
-                out.trouble("inside", done, r.errors);
+                self.out.inside += r.written;
+                let done = self.out.inside;
+                self.out.trouble("inside", done, r.errors);
             }
-            Err(e) => out.trouble("inside", 0, vec![(String::new(), e)]),
+            Err(e) => self.out.trouble("inside", 0, vec![(String::new(), e)]),
         }
     }
-    if !jobs.sub_tools.is_empty() {
-        stage(host, "subTools", jobs.sub_tools.len());
+
+    async fn sub_tools(&mut self, jobs: Vec<SubJob>) {
+        if jobs.is_empty() {
+            return;
+        }
+        stage(self.host, "subTools", jobs.len());
+        let subtitle = self.opts("subtitle");
         let tools: renome_core::subtext::Tools = subtitle
             .rule
             .and_then(|r| serde_json::from_value(r.clone()).ok())
@@ -1107,39 +1193,51 @@ pub async fn run(
         } else {
             String::new()
         };
-        match aft::subtitle_tools(host, history, id(), jobs.sub_tools, tools, original, langs).await
+        match aft::subtitle_tools(
+            self.host,
+            self.history,
+            self.id.clone(),
+            jobs,
+            tools,
+            original,
+            langs,
+        )
+        .await
         {
             Ok((r, changed)) => {
-                out.sub_fixed = r.written;
-                out.sub_extracted = r.created;
-                out.retagged.extend(changed);
-                out.trouble("subTools", r.written, r.errors);
+                self.out.sub_fixed = r.written;
+                self.out.sub_extracted = r.created;
+                self.out.retagged.extend(changed);
+                self.out.trouble("subTools", r.written, r.errors);
             }
-            Err(e) => out.trouble("subTools", 0, vec![(String::new(), e)]),
+            Err(e) => self.out.trouble("subTools", 0, vec![(String::new(), e)]),
         }
     }
-    if !jobs.subtitles.is_empty() {
+
+    async fn subtitles(&mut self, writes: Vec<subs::Write>) {
+        if writes.is_empty() {
+            return;
+        }
         stage(
-            host,
+            self.host,
             "subtitles",
-            jobs.subtitles.iter().map(|w| w.langs.len()).sum(),
+            writes.iter().map(|w| w.langs.len()).sum(),
         );
-        let stop = host.stop_signal();
-        let mut written =
-            subs::write(host, services.subs.clone(), jobs.subtitles, move || stop()).await;
+        let stop = self.host.stop_signal();
+        let mut written = subs::write(self.host, self.services.subs.clone(), writes, move || {
+            stop()
+        })
+        .await;
         let mut r = tmdb::SidecarReport {
             created: std::mem::take(&mut written.created),
             errors: std::mem::take(&mut written.errors),
             kept: 0,
         };
-        aft::record_created(history, id(), &mut r);
-        out.subtitles = r.created.len();
-        out.remaining = written.remaining;
-        out.trouble("subtitles", r.created.len(), r.errors);
+        aft::record_created(self.history, self.id.clone(), &mut r);
+        self.out.subtitles = r.created.len();
+        self.out.remaining = written.remaining;
+        self.out.trouble("subtitles", r.created.len(), r.errors);
     }
-    host.report("after-stage", json!({ "stage": Value::Null }));
-    out.lines = out.lines();
-    out
 }
 
 #[cfg(test)]

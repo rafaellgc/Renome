@@ -40,7 +40,10 @@ async fn run_does_not_change() {
     cbz(&a);
     let list = t.join("missing.m3u");
     let job = |p: &Path| -> renome_services::after::InsideJob {
-        serde_json::from_value(json!({"path": p, "comic": {"series": "Capitão Aurora", "number": "1"}})).unwrap()
+        serde_json::from_value(
+            json!({"path": p, "comic": {"series": "Capitão Aurora", "number": "1"}}),
+        )
+        .unwrap()
     };
     let jobs = Jobs {
         playlists: vec![list],
