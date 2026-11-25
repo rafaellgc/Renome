@@ -280,17 +280,8 @@ fn sync_titlebar_buttons() {
     }
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    // Answers too old to use go, out of the way of the start.
-    std::thread::spawn(|| {
-        drop_old_cache();
-        ANSWERS.purge();
-    });
-
-    let history_dir = renome_services::history_dir();
-
-    // Paths given on the command line go into the initial list.
+/// The list the window starts with: the paths given on the command line.
+fn first_session() -> Session {
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
     let mut session = Session::default();
     if !args.is_empty() {
@@ -304,6 +295,163 @@ pub fn run() {
         session.files = renome_core::scan(&args, &opts, &HashSet::new()).files;
         renome_core::sort_files(&mut session.files, SortKey::Name, false);
     }
+    session
+}
+
+/// What the commands share: the session, the history, the caches and the
+/// clients of the services.
+fn app_state(session: Session, history_dir: PathBuf) -> AppState {
+    AppState {
+        session: Mutex::new(session),
+        history: History::new(history_dir),
+        hashes: Mutex::default(),
+        covers: renome_services::covers::Covers::default(),
+        pictures: Mutex::new(renome_core::similar::PictureCache::in_file(
+            cache_root().join("pictures"),
+        )),
+        identical_run: AtomicU64::new(0),
+        busy_disk: Mutex::new(()),
+        stop_run: AtomicU64::new(0),
+        asks: Mutex::default(),
+        ask_seq: AtomicU64::new(0),
+        mb: musicbrainz::Client::default(),
+        acoustid: acoustid::Client::default(),
+        heard: Mutex::new(HashMap::new()),
+        ol: openlibrary::Client::default(),
+        cv: comicvine::Client::default(),
+        gcd: gcd::Client::default(),
+        md: mangadex::Client::default(),
+        al: anilist::Client::default(),
+        mu: mangaupdates::Client::default(),
+        mt: metron::Client::default(),
+        dg: discogs::Client::default(),
+        shown: Mutex::default(),
+        missing: Mutex::default(),
+        renamed: Mutex::default(),
+    }
+}
+
+/// Every command the page can call. One macro makes the handler from the
+/// whole list (a second one would replace the first, and an unknown name is
+/// refused), so the list cannot be cut in parts.
+#[allow(clippy::too_many_lines)]
+fn commands() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
+    tauri::generate_handler![
+        pdf_print_available,
+        checkpoint,
+        drop_checkpoint,
+        undo_list,
+        add_paths,
+        remove_files,
+        stop_search,
+        find_similar,
+        picture_cards,
+        picture_picks,
+        own_cover,
+        cover_distances,
+        series_by_cover,
+        issue_order,
+        issue_covers,
+        remote_image,
+        trash_files,
+        tmdb_collections,
+        clear_files,
+        move_files,
+        sort_files,
+        file_details,
+        export_rows,
+        export_missing,
+        discogs_token,
+        google_books_key,
+        preview,
+        find_identical,
+        movie_search,
+        series_search,
+        series_named,
+        movie_named,
+        episode_codes,
+        rule_view,
+        account_check,
+        reader_choice,
+        subs_tally,
+        gcd_few,
+        picture_places,
+        flow_answer,
+        tmdb_search,
+        tv_search,
+        subs_search,
+        subs_targets,
+        subs_wanted,
+        subs_ready,
+        server_check,
+        server_read,
+        server_new,
+        sets_save,
+        sets_rename,
+        sets_order,
+        server_keys,
+        server_key_with,
+        server_tell,
+        update_check,
+        update_install,
+        update_way,
+        music_search,
+        mb_search,
+        mb_choose,
+        after_counts,
+        rename_ask,
+        rule_menu,
+        manual_order,
+        rule_reader,
+        edit_details,
+        edit_dates,
+        edit_start,
+        rule_table,
+        rule_blocks,
+        complete_steps,
+        album_on_discogs,
+        bigger_cover,
+        episodes_typed,
+        same_answer,
+        columns_for,
+        catalog_langs,
+        missing_items,
+        after_rename,
+        books_search,
+        book_matches,
+        book_search,
+        comic_search,
+        anime_search,
+        comics_search,
+        comic_named,
+        gcd_account,
+        save_csv,
+        tmdb_images,
+        recover,
+        apply,
+        history,
+        undo,
+        delete_history,
+        clear_history,
+        cache_size,
+        clear_cache,
+        save_preset,
+        load_preset,
+        load_settings,
+        save_settings,
+        load_secrets,
+        save_secrets,
+        system_language,
+    ]
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    // Answers too old to use go, out of the way of the start.
+    std::thread::spawn(|| {
+        drop_old_cache();
+        ANSWERS.purge();
+    });
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -314,141 +462,8 @@ pub fn run() {
             sync_titlebar_buttons();
             Ok(())
         })
-        .manage(AppState {
-            session: Mutex::new(session),
-            history: History::new(history_dir),
-            hashes: Mutex::default(),
-            covers: renome_services::covers::Covers::default(),
-            pictures: Mutex::new(renome_core::similar::PictureCache::in_file(
-                cache_root().join("pictures"),
-            )),
-            identical_run: AtomicU64::new(0),
-            busy_disk: Mutex::new(()),
-            stop_run: AtomicU64::new(0),
-            asks: Mutex::default(),
-            ask_seq: AtomicU64::new(0),
-            mb: musicbrainz::Client::default(),
-            acoustid: acoustid::Client::default(),
-            heard: Mutex::new(HashMap::new()),
-            ol: openlibrary::Client::default(),
-            cv: comicvine::Client::default(),
-            gcd: gcd::Client::default(),
-            md: mangadex::Client::default(),
-            al: anilist::Client::default(),
-            mu: mangaupdates::Client::default(),
-            mt: metron::Client::default(),
-            dg: discogs::Client::default(),
-            shown: Mutex::default(),
-            missing: Mutex::default(),
-            renamed: Mutex::default(),
-        })
-        .invoke_handler(tauri::generate_handler![
-            pdf_print_available,
-            checkpoint,
-            drop_checkpoint,
-            undo_list,
-            add_paths,
-            remove_files,
-            stop_search,
-            find_similar,
-            picture_cards,
-            picture_picks,
-            own_cover,
-            cover_distances,
-            series_by_cover,
-            issue_order,
-            issue_covers,
-            remote_image,
-            trash_files,
-            tmdb_collections,
-            clear_files,
-            move_files,
-            sort_files,
-            file_details,
-            export_rows,
-            export_missing,
-            discogs_token,
-            google_books_key,
-            preview,
-            find_identical,
-            movie_search,
-            series_search,
-            series_named,
-            movie_named,
-            episode_codes,
-            rule_view,
-            account_check,
-            reader_choice,
-            subs_tally,
-            gcd_few,
-            picture_places,
-            flow_answer,
-            tmdb_search,
-            tv_search,
-            subs_search,
-            subs_targets,
-            subs_wanted,
-            subs_ready,
-            server_check,
-            server_read,
-            server_new,
-            sets_save,
-            sets_rename,
-            sets_order,
-            server_keys,
-            server_key_with,
-            server_tell,
-            update_check,
-            update_install,
-            update_way,
-            music_search,
-            mb_search,
-            mb_choose,
-            after_counts,
-            rename_ask,
-            rule_menu,
-            manual_order,
-            rule_reader,
-            edit_details,
-            edit_dates,
-            edit_start,
-            rule_table,
-            rule_blocks,
-            complete_steps,
-            album_on_discogs,
-            bigger_cover,
-            episodes_typed,
-            same_answer,
-            columns_for,
-            catalog_langs,
-            missing_items,
-            after_rename,
-            books_search,
-            book_matches,
-            book_search,
-            comic_search,
-            anime_search,
-            comics_search,
-            comic_named,
-            gcd_account,
-            save_csv,
-            tmdb_images,
-            recover,
-            apply,
-            history,
-            undo,
-            delete_history,
-            clear_history,
-            cache_size,
-            clear_cache,
-            save_preset,
-            load_preset,
-            load_settings,
-            save_settings,
-            load_secrets,
-            save_secrets,
-            system_language,
-        ])
+        .manage(app_state(first_session(), renome_services::history_dir()))
+        .invoke_handler(commands())
         .run(tauri::generate_context!())
         .expect("failed to start Renome");
 }
