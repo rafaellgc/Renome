@@ -448,172 +448,241 @@ pub fn plan(
     chosen: &Chosen,
     moved: &HashMap<PathBuf, PathBuf>,
 ) -> Jobs {
-    let movie = Opts::of(rules, "movie");
-    let series = Opts::of(rules, "series");
-    let music = Opts::of(rules, "music");
-    let book = Opts::of(rules, "book");
-    let comic = Opts::of(rules, "comic");
-    let subtitle = Opts::of(rules, "subtitle");
+    let k = Kinds::of(rules);
     let pairs = pairs(preview, moved);
-    let mut jobs = Jobs::default();
+    let mut jobs = Jobs {
+        trash: trash_job(&k, preview, moved),
+        ..Jobs::default()
+    };
+    for p in &pairs {
+        movie_jobs(&k, chosen, p, &mut jobs);
+        episode_jobs(&k, chosen, p, &mut jobs);
+        song_job(&k, chosen, p, &mut jobs);
+        book_side_jobs(&k, chosen, p, &mut jobs);
+        if k.comic.on()
+            && let Some(job) = comic_job(&k.comic, chosen, p)
+        {
+            jobs.inside.push(job);
+        }
+        if k.book.on()
+            && !p.item.is_dir
+            && let Some(job) = book_job(&k.book, chosen, p)
+        {
+            jobs.inside.push(job);
+        }
+        subtitle_tool_job(&k, p, &mut jobs);
+    }
+    if k.music.bool("cover") {
+        jobs.covers = album_covers(chosen, &pairs, moved);
+    }
+    if k.music.bool("playlist") {
+        jobs.playlists = playlist_dirs(preview, &pairs);
+    }
+    if k.movie.bool("subtitles") || k.series.bool("subtitles") {
+        jobs.subtitles = subtitle_writes(chosen, &pairs);
+    }
+    jobs
+}
 
-    if (movie.bool("trashAds") || series.bool("trashAds"))
+/// The options of each kind of rule.
+#[derive(Clone, Copy)]
+struct Kinds<'a> {
+    movie: Opts<'a>,
+    series: Opts<'a>,
+    music: Opts<'a>,
+    book: Opts<'a>,
+    comic: Opts<'a>,
+    subtitle: Opts<'a>,
+}
+
+impl<'a> Kinds<'a> {
+    fn of(rules: &'a [Value]) -> Self {
+        Self {
+            movie: Opts::of(rules, "movie"),
+            series: Opts::of(rules, "series"),
+            music: Opts::of(rules, "music"),
+            book: Opts::of(rules, "book"),
+            comic: Opts::of(rules, "comic"),
+            subtitle: Opts::of(rules, "subtitle"),
+        }
+    }
+}
+
+/// The release's adverts and the folders they leave empty, when the rules
+/// say they go and files were renamed.
+fn trash_job(
+    k: &Kinds,
+    preview: &Preview,
+    moved: &HashMap<PathBuf, PathBuf>,
+) -> Option<(Vec<PathBuf>, Vec<PathBuf>, usize)> {
+    if (k.movie.bool("trashAds") || k.series.bool("trashAds"))
         && !moved.is_empty()
         && (!preview.trash.is_empty() || !preview.trash_folders.is_empty())
     {
         let ads = preview.items.iter().filter(|i| i.to_trash).count();
-        jobs.trash = Some((preview.trash.clone(), preview.trash_folders.clone(), ads));
+        return Some((preview.trash.clone(), preview.trash_folders.clone(), ads));
     }
-    for p in &pairs {
-        let video = !p.item.is_dir && is_video(&p.to);
-        if let Some(id) = chosen.movies.get(p.from).filter(|_| video) {
-            if movie.bool("nfo") {
-                jobs.movie_sidecars.push(tmdb::SidecarItem {
-                    path: p.to.clone(),
-                    id: *id,
-                });
-            }
-            if movie.bool("videoTags") && renome_core::videotags::writable(&p.to) {
-                jobs.video_tags.push(tmdb::VideoTagItem {
-                    path: p.to.clone(),
-                    movie: Some(*id),
-                    show: None,
-                    season: 0,
-                    episodes: vec![],
-                });
-            }
-        }
-        // AniList's shows get neither (`catalog::inert`: off).
-        if let Some(m) = chosen.episodes.get(p.from).filter(|_| video) {
-            if series.bool("nfo") {
-                jobs.tv_sidecars.push(tmdb::TvSidecarItem {
-                    path: p.to.clone(),
-                    id: m.id,
-                    season: m.season,
-                    episodes: m.episodes.clone(),
-                    titles: m.titles.clone(),
-                });
-            }
-            if series.bool("videoTags") && m.id > 0 && renome_core::videotags::writable(&p.to) {
-                jobs.video_tags.push(tmdb::VideoTagItem {
-                    path: p.to.clone(),
-                    movie: None,
-                    show: Some(m.id),
-                    season: m.season,
-                    episodes: m.episodes.clone(),
-                });
-            }
-        }
-        if let Some(song) = chosen.songs.get(p.from)
-            && music.bool("writeTags")
-            && is_audio(&p.to)
-            && (p.renamed || p.item.retag || (music.bool("cleanTags") && p.item.junk))
-        {
-            jobs.song_tags.push(TagJob {
+    None
+}
+
+/// A movie's `.nfo` and details written inside the video.
+fn movie_jobs(k: &Kinds, chosen: &Chosen, p: &Pair, jobs: &mut Jobs) {
+    let video = !p.item.is_dir && is_video(&p.to);
+    let Some(id) = chosen.movies.get(p.from).filter(|_| video) else {
+        return;
+    };
+    if k.movie.bool("nfo") {
+        jobs.movie_sidecars.push(tmdb::SidecarItem {
+            path: p.to.clone(),
+            id: *id,
+        });
+    }
+    if k.movie.bool("videoTags") && renome_core::videotags::writable(&p.to) {
+        jobs.video_tags.push(tmdb::VideoTagItem {
+            path: p.to.clone(),
+            movie: Some(*id),
+            show: None,
+            season: 0,
+            episodes: vec![],
+        });
+    }
+}
+
+/// An episode's `.nfo` and details written inside the video.
+fn episode_jobs(k: &Kinds, chosen: &Chosen, p: &Pair, jobs: &mut Jobs) {
+    let video = !p.item.is_dir && is_video(&p.to);
+    // AniList's shows get neither (`catalog::inert`: off).
+    let Some(m) = chosen.episodes.get(p.from).filter(|_| video) else {
+        return;
+    };
+    if k.series.bool("nfo") {
+        jobs.tv_sidecars.push(tmdb::TvSidecarItem {
+            path: p.to.clone(),
+            id: m.id,
+            season: m.season,
+            episodes: m.episodes.clone(),
+            titles: m.titles.clone(),
+        });
+    }
+    if k.series.bool("videoTags") && m.id > 0 && renome_core::videotags::writable(&p.to) {
+        jobs.video_tags.push(tmdb::VideoTagItem {
+            path: p.to.clone(),
+            movie: None,
+            show: Some(m.id),
+            season: m.season,
+            episodes: m.episodes.clone(),
+        });
+    }
+}
+
+/// A song's tags.
+fn song_job(k: &Kinds, chosen: &Chosen, p: &Pair, jobs: &mut Jobs) {
+    if let Some(song) = chosen.songs.get(p.from)
+        && k.music.bool("writeTags")
+        && is_audio(&p.to)
+        && (p.renamed || p.item.retag || (k.music.bool("cleanTags") && p.item.junk))
+    {
+        jobs.song_tags.push(TagJob {
+            path: p.to.clone(),
+            song: song.clone(),
+        });
+    }
+}
+
+/// A book's cover and `metadata.opf`, and an audiobook's tags.
+fn book_side_jobs(k: &Kinds, chosen: &Chosen, p: &Pair, jobs: &mut Jobs) {
+    let book = k.book;
+    if !book.on() || p.item.is_dir || !chosen.books.contains_key(p.from) {
+        return;
+    }
+    let leads = chosen
+        .book_parts
+        .get(p.from)
+        .is_none_or(|g| &g.leader == p.from);
+    if (book.bool("cover") || book.bool("metadataOpf"))
+        && (is_book(&p.to) || (is_audio(&p.to) && leads))
+        && let Some(s) = book_sidecar(chosen, p.from, &p.to)
+    {
+        jobs.book_sidecars.push(s);
+    }
+    if book.bool("audiobooks")
+        && book.bool("audioTags")
+        && is_audio(&p.to)
+        && let Some(s) = book_sidecar(chosen, p.from, &p.to)
+    {
+        jobs.audiobook_tags.push(AudiobookTagJob {
+            path: s.path,
+            book: s.book,
+            cover: s.cover,
+            cover_url: s.cover_url,
+            description: s.description,
+            language: s.language,
+        });
+    }
+}
+
+/// A subtitle file to fix or to take out of a video.
+fn subtitle_tool_job(k: &Kinds, p: &Pair, jobs: &mut Jobs) {
+    if k.subtitle.on() && p.item.status != Status::Conflict {
+        let fix = p.item.sub_fix.as_ref().is_some_and(|f| !f.no_fps);
+        let extract = p.item.sub_extract > 0;
+        if fix || extract {
+            jobs.sub_tools.push(SubJob {
                 path: p.to.clone(),
-                song: song.clone(),
+                fix,
+                extract,
             });
         }
-        if book.on() && !p.item.is_dir && chosen.books.contains_key(p.from) {
-            let leads = chosen
-                .book_parts
-                .get(p.from)
-                .is_none_or(|g| &g.leader == p.from);
-            if (book.bool("cover") || book.bool("metadataOpf"))
-                && (is_book(&p.to) || (is_audio(&p.to) && leads))
-                && let Some(s) = book_sidecar(chosen, p.from, &p.to)
-            {
-                jobs.book_sidecars.push(s);
-            }
-            if book.bool("audiobooks")
-                && book.bool("audioTags")
-                && is_audio(&p.to)
-                && let Some(s) = book_sidecar(chosen, p.from, &p.to)
-            {
-                jobs.audiobook_tags.push(AudiobookTagJob {
-                    path: s.path,
-                    book: s.book,
-                    cover: s.cover,
-                    cover_url: s.cover_url,
-                    description: s.description,
-                    language: s.language,
-                });
-            }
-        }
-        if comic.on()
-            && let Some(job) = comic_job(&comic, chosen, p)
-        {
-            jobs.inside.push(job);
-        }
-        if book.on()
-            && !p.item.is_dir
-            && let Some(job) = book_job(&book, chosen, p)
-        {
-            jobs.inside.push(job);
-        }
-        if subtitle.on() && p.item.status != Status::Conflict {
-            let fix = p.item.sub_fix.as_ref().is_some_and(|f| !f.no_fps);
-            let extract = p.item.sub_extract > 0;
-            if fix || extract {
-                jobs.sub_tools.push(SubJob {
-                    path: p.to.clone(),
-                    fix,
-                    extract,
-                });
-            }
-        }
     }
+}
 
-    // Album covers: in the folder most of each album's renamed songs went to.
-    if music.bool("cover") {
-        let here: HashSet<&PathBuf> = pairs.iter().map(|p| p.from).collect();
-        let albums: Vec<(String, Vec<PathBuf>)> = chosen
-            .albums
-            .iter()
-            .filter(|(_, songs)| songs.iter().any(|s| here.contains(s)))
-            .cloned()
-            .collect();
-        jobs.covers = super::music::cover_items(&albums, moved)
-            .into_iter()
-            .filter(|c| !mbs::has_cover(&c.dir))
-            .collect();
-    }
-    // Playlists: the folders the songs went to, and those whose songs all
-    // keep their names (when they would get one).
-    if music.bool("playlist") {
-        let mut dirs: Vec<PathBuf> = Vec::new();
-        let mut add = |d: PathBuf| {
-            if !dirs.contains(&d) {
-                dirs.push(d);
-            }
-        };
-        for p in pairs.iter().filter(|p| p.renamed && is_audio(&p.to)) {
-            if let Some(d) = p.to.parent() {
-                add(d.to_path_buf());
-            }
+/// Album covers: in the folder most of each album's renamed songs went to.
+fn album_covers(
+    chosen: &Chosen,
+    pairs: &[Pair],
+    moved: &HashMap<PathBuf, PathBuf>,
+) -> Vec<mbs::CoverItem> {
+    let here: HashSet<&PathBuf> = pairs.iter().map(|p| p.from).collect();
+    let albums: Vec<(String, Vec<PathBuf>)> = chosen
+        .albums
+        .iter()
+        .filter(|(_, songs)| songs.iter().any(|s| here.contains(s)))
+        .cloned()
+        .collect();
+    super::music::cover_items(&albums, moved)
+        .into_iter()
+        .filter(|c| !mbs::has_cover(&c.dir))
+        .collect()
+}
+
+/// Playlists: the folders the songs went to, and those whose songs all
+/// keep their names (when they would get one).
+fn playlist_dirs(preview: &Preview, pairs: &[Pair]) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    let mut add = |d: PathBuf| {
+        if !dirs.contains(&d) {
+            dirs.push(d);
         }
-        let changed: HashSet<&PathBuf> = preview
-            .items
-            .iter()
-            .filter(|i| i.status != Status::Unchanged)
-            .map(|i| &i.dir)
-            .collect();
-        for i in preview.items.iter().filter(|i| {
-            !i.is_dir
-                && i.status == Status::Unchanged
-                && is_audio(&i.path)
-                && !changed.contains(&i.dir)
-        }) {
-            if let Some(d) = renome_core::playlists::playlist_dir(&i.dir) {
-                add(d);
-            }
+    };
+    for p in pairs.iter().filter(|p| p.renamed && is_audio(&p.to)) {
+        if let Some(d) = p.to.parent() {
+            add(d.to_path_buf());
         }
-        jobs.playlists = dirs;
     }
-    if movie.bool("subtitles") || series.bool("subtitles") {
-        jobs.subtitles = subtitle_writes(chosen, &pairs);
+    let changed: HashSet<&PathBuf> = preview
+        .items
+        .iter()
+        .filter(|i| i.status != Status::Unchanged)
+        .map(|i| &i.dir)
+        .collect();
+    for i in preview.items.iter().filter(|i| {
+        !i.is_dir && i.status == Status::Unchanged && is_audio(&i.path) && !changed.contains(&i.dir)
+    }) {
+        if let Some(d) = renome_core::playlists::playlist_dir(&i.dir) {
+            add(d);
+        }
     }
-    jobs
+    dirs
 }
 
 /// The subtitles picked for each video, downloaded beside it.
