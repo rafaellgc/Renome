@@ -19,6 +19,7 @@ regex = "1"
 
 [dev-dependencies]
 tempfile = "3"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
 tokio = { version = "1", features = ["time", "sync", "rt", "rt-multi-thread", "macros"] }
 
 [lints]
