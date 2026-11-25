@@ -1687,47 +1687,84 @@ impl History {
         if j.undone {
             return Err("alreadyUndone".into());
         }
-        // Files the rename created go first (already gone is fine).
-        j.extra_files.retain(|p| match fs::remove_file(p) {
-            Ok(()) => false,
-            Err(e) => e.kind() != std::io::ErrorKind::NotFound,
-        });
-        // Copies go while they are as they were left; a changed one stays
-        // (and leaves the entry), with its lists and tags as they are.
-        let mut kept = Vec::new();
-        let mut removed = 0;
-        let mut copies = Vec::new();
-        let stamps = std::mem::take(&mut j.stamps);
-        let before = j.ops.len();
-        j.ops.retain(|op| {
-            if !op.copy {
-                return true;
-            }
-            let left = stamps.iter().find(|(p, _)| *p == op.to).map(|(_, s)| *s);
-            match stamp(&op.to) {
-                None => {}
-                Some(now) if Some(now) == left => {
-                    if remove_any(&op.to).is_err() {
-                        return true;
-                    }
-                    removed += 1;
-                }
-                Some(_) => kept.push(op.to.clone()),
-            }
-            copies.push(op.clone());
-            false
-        });
-        j.reverted += before - j.ops.len();
-        j.stamps = stamps
-            .into_iter()
-            .filter(|(p, _)| j.ops.iter().any(|op| op.to == *p))
-            .collect();
-        let in_copy = |p: &Path| copies.iter().any(|c| p.starts_with(&c.to));
-        j.tags.retain(|b| !in_copy(&b.path));
-        j.lists.retain(|(p, _)| !in_copy(p));
+        remove_created(&mut j);
+        let copies = remove_copies(&mut j);
         let backups = self.backups(id)?;
-        // Songs get their old tags back where they are now, before the
-        // renames take them back.
+        let (errors, stopped) = self.restore_tags(id, &mut j, &backups, hooks, tags);
+        restore_lists(&mut j, &backups);
+        if j.lists.is_empty() && j.tags.is_empty() {
+            let _ = fs::remove_dir_all(&backups);
+        }
+        // Stopped among the tags: no file is renamed back yet.
+        if stopped {
+            let report = ApplyReport {
+                errors,
+                stopped: true,
+                kept: copies.kept,
+                copies_removed: copies.removed,
+                ..ApplyReport::default()
+            };
+            j.failed = report.errors.len();
+            self.write(id, &j)?;
+            return Ok(report);
+        }
+        let times = restore_dates(&mut j);
+        let reverse: Vec<Operation> = j
+            .ops
+            .iter()
+            .map(|op| Operation {
+                from: op.to.clone(),
+                to: op.from.clone(),
+                copy: false,
+                within: None,
+            })
+            .collect();
+        // As for a rename: written first, so a stop halfway is recovered.
+        let pending = self.write_undo_pending(id, &j, &reverse);
+        let mut report = execute_with(&reverse, Depth::ShallowestFirst, hooks);
+        report.kept = copies.kept;
+        report.copies_removed = copies.removed;
+        // The list goes back to the originals.
+        report
+            .done
+            .extend(copies.copies.into_iter().map(|op| Operation {
+                from: op.to,
+                to: op.from,
+                copy: true,
+                within: None,
+            }));
+        j.reverted += report.done.len();
+        forget_undone(&mut j, &report, times);
+        report.errors.extend(errors);
+        j.failed = report.errors.len();
+        if j.ops.is_empty() {
+            // Innermost first; a folder that is not empty (the user put
+            // something there) stays.
+            for dir in j.dirs.iter().rev() {
+                let _ = fs::remove_dir(dir);
+            }
+            j.dirs.clear();
+        }
+        j.undone =
+            j.ops.is_empty() && j.extra_files.is_empty() && j.lists.is_empty() && j.tags.is_empty();
+        self.write(id, &j)?;
+        if let Some(p) = pending {
+            let _ = fs::remove_file(p);
+        }
+        Ok(report)
+    }
+
+    /// Songs get their old tags back where they are now, before the renames
+    /// take them back. What could not go back stays in the entry; says
+    /// those errors and whether a stop came among them.
+    fn restore_tags(
+        &self,
+        id: &str,
+        j: &mut Journal,
+        backups: &Path,
+        hooks: &Hooks,
+        tags: &dyn Fn(usize, usize),
+    ) -> (Vec<OpError>, bool) {
         let mut errors = Vec::new();
         // Noted like writing them, for the copies a stop would leave.
         let mut note = (!j.tags.is_empty())
@@ -1748,7 +1785,7 @@ impl History {
             }
             back += 1;
             tags(back, tagged);
-            match crate::tagwrite::restore(b, &backups) {
+            match crate::tagwrite::restore(b, backups) {
                 Ok(()) => false,
                 Err(e) => {
                     errors.push(OpError {
@@ -1765,59 +1802,17 @@ impl History {
         if let Some(n) = note {
             n.finish();
         }
-        // Rewritten lists get their content back where they are now; the
-        // renames below then take them back.
-        j.lists.retain(|(path, name)| {
-            // A deleted list's folder may be gone too.
-            let restored = fs::read(backups.join(name)).and_then(|old| {
-                if let Some(dir) = path.parent() {
-                    fs::create_dir_all(dir)?;
-                }
-                fs::write(path, old)
-            });
-            restored.is_err()
-        });
-        if j.lists.is_empty() && j.tags.is_empty() {
-            let _ = fs::remove_dir_all(&backups);
-        }
-        // Stopped among the tags: no file is renamed back yet.
-        if stopped {
-            let report = ApplyReport {
-                errors,
-                stopped: true,
-                kept,
-                copies_removed: removed,
-                ..ApplyReport::default()
-            };
-            j.failed = report.errors.len();
-            self.write(id, &j)?;
-            return Ok(report);
-        }
-        // Change dates go back before the files do (copies are gone).
-        let times = std::mem::take(&mut j.times);
-        for (path, secs, nanos) in &times {
-            if j.ops.iter().any(|op| op.to == *path)
-                && let Ok(s) = u64::try_from(*secs)
-            {
-                let t = std::time::UNIX_EPOCH + std::time::Duration::new(s, *nanos);
-                let _ = set_time(path, t);
-            }
-        }
-        let reverse: Vec<Operation> = j
-            .ops
-            .iter()
-            .map(|op| Operation {
-                from: op.to.clone(),
-                to: op.from.clone(),
-                copy: false,
-                within: None,
-            })
-            .collect();
-        // As for a rename: written first, so a stop halfway is recovered.
-        let pending = self.pending_path(id).ok().filter(|path| {
+        (errors, stopped)
+    }
+
+    /// An undo's list of renames, written before it starts (as for a
+    /// rename), so a stop halfway is recovered. Where it is, when it could
+    /// be written.
+    fn write_undo_pending(&self, id: &str, j: &Journal, reverse: &[Operation]) -> Option<PathBuf> {
+        self.pending_path(id).ok().filter(|path| {
             let p = Pending {
                 created: j.created,
-                ops: reverse.clone(),
+                ops: reverse.to_vec(),
                 temps: reverse
                     .iter()
                     .enumerate()
@@ -1831,48 +1826,113 @@ impl History {
                     .collect(),
             };
             serde_json::to_vec(&p).is_ok_and(|t| write_synced(path, &t).is_ok())
-        });
-        let mut report = execute_with(&reverse, Depth::ShallowestFirst, hooks);
-        report.kept = kept;
-        report.copies_removed = removed;
-        // The list goes back to the originals.
-        report.done.extend(copies.into_iter().map(|op| Operation {
-            from: op.to,
-            to: op.from,
-            copy: true,
-            within: None,
-        }));
-        j.reverted += report.done.len();
-        let back: HashSet<(&Path, &Path)> = report
-            .done
-            .iter()
-            .map(|d| (d.to.as_path(), d.from.as_path()))
-            .collect();
-        j.ops
-            .retain(|op| !back.contains(&(op.from.as_path(), op.to.as_path())));
-        // Those not reached (a stop) get their dates back with them later.
-        j.times = times
-            .into_iter()
-            .filter(|(p, ..)| j.ops.iter().any(|op| op.to == *p))
-            .collect();
-        report.errors.extend(errors);
-        j.failed = report.errors.len();
-        if j.ops.is_empty() {
-            // Innermost first; a folder that is not empty (the user put
-            // something there) stays.
-            for dir in j.dirs.iter().rev() {
-                let _ = fs::remove_dir(dir);
-            }
-            j.dirs.clear();
-        }
-        j.undone =
-            j.ops.is_empty() && j.extra_files.is_empty() && j.lists.is_empty() && j.tags.is_empty();
-        self.write(id, &j)?;
-        if let Some(p) = pending {
-            let _ = fs::remove_file(p);
-        }
-        Ok(report)
+        })
     }
+}
+
+/// Files the rename created go first (already gone is fine).
+fn remove_created(j: &mut Journal) {
+    j.extra_files.retain(|p| match fs::remove_file(p) {
+        Ok(()) => false,
+        Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+    });
+}
+
+/// What was done about the copies an undo found.
+struct Copies {
+    /// Copies that changed since: they stay, and leave the entry.
+    kept: Vec<PathBuf>,
+    /// How many were removed.
+    removed: usize,
+    /// The operations of the copies that leave the entry.
+    copies: Vec<Operation>,
+}
+
+/// Copies go while they are as they were left; a changed one stays (and
+/// leaves the entry), with its lists and tags as they are.
+fn remove_copies(j: &mut Journal) -> Copies {
+    let mut kept = Vec::new();
+    let mut removed = 0;
+    let mut copies = Vec::new();
+    let stamps = std::mem::take(&mut j.stamps);
+    let before = j.ops.len();
+    j.ops.retain(|op| {
+        if !op.copy {
+            return true;
+        }
+        let left = stamps.iter().find(|(p, _)| *p == op.to).map(|(_, s)| *s);
+        match stamp(&op.to) {
+            None => {}
+            Some(now) if Some(now) == left => {
+                if remove_any(&op.to).is_err() {
+                    return true;
+                }
+                removed += 1;
+            }
+            Some(_) => kept.push(op.to.clone()),
+        }
+        copies.push(op.clone());
+        false
+    });
+    j.reverted += before - j.ops.len();
+    j.stamps = stamps
+        .into_iter()
+        .filter(|(p, _)| j.ops.iter().any(|op| op.to == *p))
+        .collect();
+    let in_copy = |p: &Path| copies.iter().any(|c| p.starts_with(&c.to));
+    j.tags.retain(|b| !in_copy(&b.path));
+    j.lists.retain(|(p, _)| !in_copy(p));
+    Copies {
+        kept,
+        removed,
+        copies,
+    }
+}
+
+/// Rewritten lists get their content back where they are now; the renames
+/// then take them back. A list that could not be put back stays.
+fn restore_lists(j: &mut Journal, backups: &Path) {
+    j.lists.retain(|(path, name)| {
+        // A deleted list's folder may be gone too.
+        let restored = fs::read(backups.join(name)).and_then(|old| {
+            if let Some(dir) = path.parent() {
+                fs::create_dir_all(dir)?;
+            }
+            fs::write(path, old)
+        });
+        restored.is_err()
+    });
+}
+
+/// Change dates go back before the files do (copies are gone). The dates
+/// taken from the entry are returned, for those not reached to keep.
+fn restore_dates(j: &mut Journal) -> Vec<(PathBuf, i64, u32)> {
+    let times = std::mem::take(&mut j.times);
+    for (path, secs, nanos) in &times {
+        if j.ops.iter().any(|op| op.to == *path)
+            && let Ok(s) = u64::try_from(*secs)
+        {
+            let t = std::time::UNIX_EPOCH + std::time::Duration::new(s, *nanos);
+            let _ = set_time(path, t);
+        }
+    }
+    times
+}
+
+/// What the report says went back leaves the entry; the dates of the
+/// files not reached (a stop) stay, to go back with them later.
+fn forget_undone(j: &mut Journal, report: &ApplyReport, times: Vec<(PathBuf, i64, u32)>) {
+    let back: HashSet<(&Path, &Path)> = report
+        .done
+        .iter()
+        .map(|d| (d.to.as_path(), d.from.as_path()))
+        .collect();
+    j.ops
+        .retain(|op| !back.contains(&(op.from.as_path(), op.to.as_path())));
+    j.times = times
+        .into_iter()
+        .filter(|(p, ..)| j.ops.iter().any(|op| op.to == *p))
+        .collect();
 }
 
 #[cfg(test)]
