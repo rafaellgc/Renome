@@ -250,7 +250,10 @@ fn duplicates_are_listed_as_text() {
     w.touch("c.bin", b"other");
     let (code, out, _) = w.run(&["duplicates", s(&w.files())]);
     assert_eq!(code, 0);
-    let out = out.replace(w.files().to_str().unwrap(), "<dir>");
+    // The folder out, and Windows' separator made the other one.
+    let out = out
+        .replace(w.files().to_str().unwrap(), "<dir>")
+        .replace('\\', "/");
     assert_eq!(
         out,
         "2 files with an identical copy\n  1\n    <dir>/a.bin (17 B)\n    <dir>/b.bin (17 B)\n"
