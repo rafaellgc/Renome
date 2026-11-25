@@ -754,19 +754,7 @@ pub async fn search(
     stop: impl Fn() -> bool,
 ) -> Search {
     let langs = subs::langs(langs);
-    let http = http();
-    let os = auth.os().then(|| Os {
-        http: http.clone(),
-        auth: auth.clone(),
-    });
-    let subdl = auth.subdl().then(|| Subdl {
-        http: http.clone(),
-        key: auth.subdl_key.clone(),
-    });
-    let subsource = auth
-        .subsource()
-        .then(|| Subsource::new(http.clone(), &auth));
-    let (mut os_ok, mut subdl_ok, mut subsource_ok) = (true, true, true);
+    let mut sources = Sources::new(&auth);
     let mut out = Search {
         langs: langs.iter().map(|l| l.tag.clone()).collect(),
         ..Search::default()
@@ -777,72 +765,18 @@ pub async fn search(
         if stop() {
             break;
         }
-        let video = item.path.clone();
-        let (beside, tracks, hash) = tokio::task::spawn_blocking(move || {
-            (
-                subs::beside(&video),
-                renome_core::video::subtitle_tracks(&video),
-                subs::hash(&video),
-            )
-        })
-        .await
-        .unwrap_or_default();
-        let has = |found: &[String], l: &Lang| found.iter().any(|p| subs::same_lang(p, l));
-        let have: Vec<String> = langs
-            .iter()
-            .filter(|l| has(&beside, l))
-            .map(|l| l.tag.clone())
-            .collect();
-        // Inside the video only: still looked up, in case one beside it
-        // is wanted all the same (not chosen until asked).
-        let inside: Vec<String> = langs
-            .iter()
-            .filter(|l| !have.contains(&l.tag) && has(&tracks, l))
-            .map(|l| l.tag.clone())
-            .collect();
-        let missing: Vec<Lang> = langs
-            .iter()
-            .filter(|l| !have.contains(&l.tag))
-            .cloned()
-            .collect();
+        let (have, inside, missing, hash) = on_hand(&item, &langs).await;
         let mut candidates = Vec::new();
         if !missing.is_empty() {
-            if let Some(os) = os.as_ref().filter(|_| os_ok) {
-                match os.search(&item, &missing, hash.as_deref()).await {
-                    Ok(c) => candidates.extend(c),
-                    Err(e) => {
-                        os_ok = !(e == "osBadKey" || e == "osBadLogin" || e.ends_with("Offline"));
-                        if !out.errors.contains(&e) {
-                            out.errors.push(e);
-                        }
-                    }
-                }
-            }
-            if let Some(sd) = subdl.as_ref().filter(|_| subdl_ok) {
-                match sd.search(&item, &missing).await {
-                    Ok(c) => candidates.extend(c),
-                    Err(e) => {
-                        subdl_ok =
-                            !(e == "subdlBadKey" || e == "subdlQuota" || e.ends_with("Offline"));
-                        if !out.errors.contains(&e) {
-                            out.errors.push(e);
-                        }
-                    }
-                }
-            }
-            if let Some(ss) = subsource.as_ref().filter(|_| subsource_ok) {
-                match ss.search(&item, &missing).await {
-                    Ok(c) => candidates.extend(c),
-                    Err(e) => {
-                        subsource_ok = !(e == "subsourceBadKey"
-                            || e == "subsourceQuota"
-                            || e.ends_with("Offline"));
-                        if !out.errors.contains(&e) {
-                            out.errors.push(e);
-                        }
-                    }
-                }
-            }
+            sources
+                .search(
+                    &item,
+                    &missing,
+                    hash.as_deref(),
+                    &mut candidates,
+                    &mut out.errors,
+                )
+                .await;
         }
         let name = item
             .path
@@ -858,10 +792,97 @@ pub async fn search(
         });
         crate::report(host, "subs-progress", Progress { done: i + 1, total });
     }
-    if let Some(os) = os.filter(|_| os_ok) {
+    if let Some(os) = sources.os.filter(|_| sources.os_ok) {
         out.remaining = os.remaining().await;
     }
     out
+}
+
+/// What a video has of the languages asked: those beside it, those only
+/// inside it as a track, those missing, and its hash (for OpenSubtitles).
+async fn on_hand(
+    item: &Item,
+    langs: &[Lang],
+) -> (Vec<String>, Vec<String>, Vec<Lang>, Option<String>) {
+    let video = item.path.clone();
+    let (beside, tracks, hash) = tokio::task::spawn_blocking(move || {
+        (
+            subs::beside(&video),
+            renome_core::video::subtitle_tracks(&video),
+            subs::hash(&video),
+        )
+    })
+    .await
+    .unwrap_or_default();
+    let has = |found: &[String], l: &Lang| found.iter().any(|p| subs::same_lang(p, l));
+    let have: Vec<String> = langs
+        .iter()
+        .filter(|l| has(&beside, l))
+        .map(|l| l.tag.clone())
+        .collect();
+    // Inside the video only: still looked up, in case one beside it is
+    // wanted all the same (not chosen until asked).
+    let inside: Vec<String> = langs
+        .iter()
+        .filter(|l| !have.contains(&l.tag) && has(&tracks, l))
+        .map(|l| l.tag.clone())
+        .collect();
+    let missing: Vec<Lang> = langs
+        .iter()
+        .filter(|l| !have.contains(&l.tag))
+        .cloned()
+        .collect();
+    (have, inside, missing, hash)
+}
+
+impl Sources {
+    /// Asks each service still answering for the languages missing. A
+    /// service with a wrong key (or offline) is left out from then on; each
+    /// failure is told once.
+    async fn search(
+        &mut self,
+        item: &Item,
+        missing: &[Lang],
+        hash: Option<&str>,
+        candidates: &mut Vec<Candidate>,
+        errors: &mut Vec<String>,
+    ) {
+        let mut note = |e: String| {
+            if !errors.contains(&e) {
+                errors.push(e);
+            }
+        };
+        if let Some(os) = self.os.as_ref().filter(|_| self.os_ok) {
+            match os.search(item, missing, hash).await {
+                Ok(c) => candidates.extend(c),
+                Err(e) => {
+                    self.os_ok = !(e == "osBadKey" || e == "osBadLogin" || e.ends_with("Offline"));
+                    note(e);
+                }
+            }
+        }
+        if let Some(sd) = self.subdl.as_ref().filter(|_| self.subdl_ok) {
+            match sd.search(item, missing).await {
+                Ok(c) => candidates.extend(c),
+                Err(e) => {
+                    self.subdl_ok =
+                        !(e == "subdlBadKey" || e == "subdlQuota" || e.ends_with("Offline"));
+                    note(e);
+                }
+            }
+        }
+        if let Some(ss) = self.subsource.as_ref().filter(|_| self.subsource_ok) {
+            match ss.search(item, missing).await {
+                Ok(c) => candidates.extend(c),
+                Err(e) => {
+                    self.subsource_ok = !(e == "subsourceBadKey"
+                        || e == "subsourceQuota"
+                        || e.ends_with("Offline"));
+                    note(e);
+                }
+            }
+        }
+    }
 }
 
 /// A renamed video and its subtitles to download: for each language, the
