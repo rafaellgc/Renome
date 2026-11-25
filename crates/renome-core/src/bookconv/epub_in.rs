@@ -506,4 +506,116 @@ mod tests {
         assert_eq!(r.toc[1].href, "c0003.xhtml");
         assert!(r.css.contains("text-indent"));
     }
+
+    fn zip_of(files: &[(&str, &[u8])]) -> Vec<u8> {
+        use std::io::Write;
+        let mut buf = std::io::Cursor::new(Vec::new());
+        {
+            let mut z = zip::ZipWriter::new(&mut buf);
+            let o = zip::write::SimpleFileOptions::default();
+            for (n, b) in files {
+                z.start_file(*n, o).unwrap();
+                z.write_all(b).unwrap();
+            }
+            z.finish().unwrap();
+        }
+        buf.into_inner()
+    }
+
+    /// EPUBs written by hand: an EPUB 2 with a nested NCX, a cover by its
+    /// `meta`, a style sheet naming a picture and a `<style>` in a head; and
+    /// an EPUB 3 with a nav, a cover by its property, fixed pages that turn
+    /// right to left, and classes and ids on the body.
+    fn hand_made() -> Vec<(&'static str, Vec<u8>)> {
+        let container = |opf: &str| {
+            format!(
+                "<?xml version=\"1.0\"?><container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\"><rootfiles><rootfile full-path=\"{opf}\" media-type=\"application/oebps-package+xml\"/></rootfiles></container>"
+            )
+        };
+        let two = {
+            let opf = "<?xml version=\"1.0\"?><package xmlns=\"http://www.idpf.org/2007/opf\" version=\"2.0\" unique-identifier=\"id\"><metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:opf=\"http://www.idpf.org/2007/opf\"><dc:identifier id=\"id\">x</dc:identifier><dc:title>Dois</dc:title><dc:creator>A B</dc:creator><dc:language>pt</dc:language><meta name=\"cover\" content=\"img\"/></metadata><manifest><item id=\"ncx\" href=\"toc.ncx\" media-type=\"application/x-dtbncx+xml\"/><item id=\"css\" href=\"s/style.css\" media-type=\"text/css\"/><item id=\"img\" href=\"s/cover.png\" media-type=\"image/png\"/><item id=\"a\" href=\"a.xhtml\" media-type=\"application/xhtml+xml\"/><item id=\"b\" href=\"b.xhtml\" media-type=\"application/xhtml+xml\"/></manifest><spine toc=\"ncx\"><itemref idref=\"a\"/><itemref idref=\"b\"/></spine></package>";
+            let ncx = "<?xml version=\"1.0\"?><ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\" version=\"2005-1\"><navMap><navPoint id=\"n1\" playOrder=\"1\"><navLabel><text>Um</text></navLabel><content src=\"a.xhtml\"/><navPoint id=\"n2\" playOrder=\"2\"><navLabel><text>Um.1</text></navLabel><content src=\"a.xhtml#sub\"/></navPoint></navPoint><navPoint id=\"n3\" playOrder=\"3\"><navLabel><text>Dois</text></navLabel><content src=\"b.xhtml\"/></navPoint></navMap></ncx>";
+            let a = "<?xml version=\"1.0\"?><html xmlns=\"http://www.w3.org/1999/xhtml\" lang=\"en\"><head><title>Dois</title><style>p.q { color: red; background: url(s/cover.png); }</style></head><body><h1>Um</h1><p class=\"q\">Texto <a href=\"b.xhtml#x\">link</a> e <a href=\"https://example.org\">fora</a>.</p><h2 id=\"sub\">Sub</h2><p><img src=\"s/cover.png\" alt=\"c\"/></p></body></html>";
+            let b = "<?xml version=\"1.0\"?><html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>Dois</title></head><body><p id=\"x\">Outro.</p><p><a href=\"#x\">aqui</a> <a href=\"a.xhtml\">volta</a></p></body></html>";
+            zip_of(&[
+                ("mimetype", b"application/epub+zip"),
+                (
+                    "META-INF/container.xml",
+                    container("content.opf").as_bytes(),
+                ),
+                ("content.opf", opf.as_bytes()),
+                ("toc.ncx", ncx.as_bytes()),
+                (
+                    "s/style.css",
+                    b"body { margin: 1em; } .x { background: url(\"cover.png\"); }",
+                ),
+                ("s/cover.png", b"\x89PNGfake"),
+                ("a.xhtml", a.as_bytes()),
+                ("b.xhtml", b.as_bytes()),
+            ])
+        };
+        let three = {
+            let opf = "<?xml version=\"1.0\"?><package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\" unique-identifier=\"id\"><metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:identifier id=\"id\">y</dc:identifier><dc:title>Três</dc:title><dc:language>ja</dc:language><meta property=\"rendition:layout\">pre-paginated</meta></metadata><manifest><item id=\"nav\" href=\"nav.xhtml\" media-type=\"application/xhtml+xml\" properties=\"nav\"/><item id=\"cv\" href=\"cover.jpg\" media-type=\"image/jpeg\" properties=\"cover-image\"/><item id=\"p1\" href=\"p1.xhtml\" media-type=\"application/xhtml+xml\"/><item id=\"p2\" href=\"p2.xhtml\" media-type=\"application/xhtml+xml\"/></manifest><spine page-progression-direction=\"rtl\"><itemref idref=\"p1\"/><itemref idref=\"p2\"/><itemref idref=\"p1\"/></spine></package>";
+            let nav = "<?xml version=\"1.0\"?><html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\"><head><title>n</title></head><body><nav epub:type=\"toc\"><ol><li><a href=\"p1.xhtml\">Primeira</a><ol><li><a href=\"p2.xhtml#z\">Filha</a></li></ol></li></ol></nav></body></html>";
+            let page = |t: &str| {
+                format!(
+                    "<?xml version=\"1.0\"?><html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"ja\"><head><title>{t}</title><meta name=\"viewport\" content=\"width=800, height=1200\"/></head><body class=\"pg\" id=\"b{t}\"><div id=\"z\"><img src=\"cover.jpg\" alt=\"\"/></div></body></html>"
+                )
+            };
+            zip_of(&[
+                ("mimetype", b"application/epub+zip"),
+                (
+                    "META-INF/container.xml",
+                    container("OEBPS/content.opf").as_bytes(),
+                ),
+                ("OEBPS/content.opf", opf.as_bytes()),
+                ("OEBPS/nav.xhtml", nav.as_bytes()),
+                ("OEBPS/cover.jpg", b"\xFF\xD8\xFFjpeg"),
+                ("OEBPS/p1.xhtml", page("p1").as_bytes()),
+                ("OEBPS/p2.xhtml", page("p2").as_bytes()),
+            ])
+        };
+        vec![("two", two), ("three", three)]
+    }
+
+    /// What `read` makes of the golden books written as EPUB and of the
+    /// hand-made EPUBs. A change here is a change in the books people get
+    /// from their EPUBs: update these only when that is the point, never
+    /// for a refactor.
+    #[test]
+    fn read_does_not_change() {
+        let d = tempfile::tempdir().unwrap();
+        let mut epubs: Vec<(String, std::path::PathBuf)> = Vec::new();
+        for (n, b) in azw3_out::tests::golden_books() {
+            let p = d.path().join(format!("{n}.epub"));
+            epub_out::write(&b, &p).unwrap();
+            epubs.push((n.to_string(), p));
+        }
+        for (n, bytes) in hand_made() {
+            let p = d.path().join(format!("{n}.epub"));
+            std::fs::write(&p, bytes).unwrap();
+            epubs.push((n.to_string(), p));
+        }
+        let got: Vec<(String, u64)> = epubs
+            .into_iter()
+            .map(|(n, p)| {
+                let out = format!("{:?}", super::read(&p));
+                if std::env::var_os("GOLDEN_SHOW").is_some() {
+                    eprintln!("#### {n}\n{out}");
+                }
+                (n, xxhash_rust::xxh3::xxh3_64(out.as_bytes()))
+            })
+            .collect();
+        let want: Vec<(&str, u64)> = vec![
+            ("simple", 263465287373259303),
+            ("links", 11556572818826798299),
+            ("nested", 4333629227591994552),
+            ("fixed", 7820914619835550331),
+            ("cover", 4087728477410217561),
+            ("two", 3817293457430922268),
+            ("three", 10025166894620662115),
+        ];
+        let got: Vec<(&str, u64)> = got.iter().map(|(n, h)| (n.as_str(), *h)).collect();
+        assert_eq!(got, want);
+    }
 }
