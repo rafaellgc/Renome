@@ -642,22 +642,22 @@ fn volume_number(s: &str) -> Option<u32> {
     u32::try_from(n).ok().filter(|n| *n > 0)
 }
 
-/// Reads series, numbers and year from a file name without extension;
-/// `folder` (the name of the folder it is in) gives the series when the
-/// name has none, and the series' year.
-pub fn parse_name(stem: &str, folder: &str) -> ComicGuess {
-    let mut g = ComicGuess::default();
-    // What follows `--` or `__` is a note, not the name.
-    let (stem, note) = match [stem.find("--"), stem.find("__")]
+/// The name with what follows `--` or `__` split off: that is a note, not
+/// the name.
+fn split_note(stem: &str) -> (&str, &str) {
+    match [stem.find("--"), stem.find("__")]
         .into_iter()
         .flatten()
         .min()
     {
         Some(i) if i > 0 => (&stem[..i], stem[i + 2..].trim_matches(['-', '_', ' '])),
         _ => (stem, ""),
-    };
-    g.scan = note.replace('_', " ").trim().to_string();
-    // `Series.012.2019`: dots stand for spaces, but not in `12.1`.
+    }
+}
+
+/// `Series.012.2019`: dots stand for spaces, but not in `12.1`; a name
+/// with no spaces at all is cut where its words join.
+fn spaced_name(stem: &str) -> String {
     let mut s = unescape(&colons(stem)).replace('_', " ");
     if !s.contains(' ') {
         let chars: Vec<char> = s.chars().collect();
@@ -681,8 +681,12 @@ pub fn parse_name(stem: &str, folder: &str) -> ComicGuess {
     if !s.contains(' ') {
         s = split_joined(&s);
     }
-    // What is in brackets: the year, the count, or release notes.
-    for c in BRACKETS.captures_iter(&s) {
+    s
+}
+
+/// What is in brackets: the year, the count, or release notes.
+fn read_brackets(s: &str, g: &mut ComicGuess) {
+    for c in BRACKETS.captures_iter(s) {
         let inner = c
             .iter()
             .skip(1)
@@ -703,9 +707,12 @@ pub fn parse_name(stem: &str, folder: &str) -> ComicGuess {
             g.scan = inner.to_string();
         }
     }
-    // A volume in brackets (`Series (Vol.03) - Story`) is read as if it
-    // were not in them; the rest in brackets goes.
-    let s = BRACKETS.replace_all(&s, |c: &regex::Captures| {
+}
+
+/// The name without what is in brackets. A volume in brackets (`Series
+/// (Vol.03) - Story`) is read as if it were not in them.
+fn without_brackets(s: &str) -> String {
+    let s = BRACKETS.replace_all(s, |c: &regex::Captures| {
         let inner = c.iter().skip(1).flatten().next().map_or("", |m| m.as_str());
         match VOLUME.find(inner.trim()) {
             Some(v) if v.start() == 0 => format!(" {} ", inner.trim()),
@@ -713,8 +720,22 @@ pub fn parse_name(stem: &str, folder: &str) -> ComicGuess {
         }
     });
     let s = JUNK.replace_all(&s, " ");
-    let s = text::collapse_spaces(&s);
+    text::collapse_spaces(&s)
+}
 
+/// Where the markers (chapter, volume, number) were found in a name.
+struct Markers {
+    /// Where the first begins: the series is what comes before.
+    cut: usize,
+    /// Where the last ends.
+    end: usize,
+    volume_end: Option<usize>,
+    number_start: Option<usize>,
+}
+
+/// Reads the chapter, volume and number from `s` into `g`, and says where
+/// they were.
+fn read_markers(s: &str, g: &mut ComicGuess) -> Markers {
     let mut cut = s.len();
     let mut end = 0;
     let mut mark = |m: regex::Match| {
@@ -723,10 +744,10 @@ pub fn parse_name(stem: &str, folder: &str) -> ComicGuess {
     };
     // What a marker took is blanked for the next ones (same length, so
     // positions stay): `Vol. 41` is no issue 41.
-    let mut masked = s.clone();
+    let mut masked = s.to_string();
     let mut blank =
         |r: std::ops::Range<usize>| masked.replace_range(r.clone(), &" ".repeat(r.len()));
-    if let Some(c) = CHAPTER.captures(&s) {
+    if let Some(c) = CHAPTER.captures(s) {
         g.chapter = c
             .get(1)
             .or_else(|| c.get(2))
@@ -737,7 +758,7 @@ pub fn parse_name(stem: &str, folder: &str) -> ComicGuess {
         blank(c.get(0).expect("group is in the match").range());
     }
     let mut volume_end = None;
-    if let Some(c) = VOLUME.captures(&s) {
+    if let Some(c) = VOLUME.captures(s) {
         g.volume = volume_number(
             c.get(1)
                 .or_else(|| c.get(2))
@@ -748,7 +769,6 @@ pub fn parse_name(stem: &str, folder: &str) -> ComicGuess {
         blank(c.get(0).expect("group is in the match").range());
         volume_end = Some(c.get(0).expect("group is in the match").end());
     }
-    let s_all = s.clone();
     let s = masked;
     let mut number_start = None;
     if let Some(c) = ISSUE.captures(&s) {
@@ -788,12 +808,23 @@ pub fn parse_name(stem: &str, folder: &str) -> ComicGuess {
             mark(m);
         }
     }
-    let s = s_all;
-    let before = if cut < s.len() { &s[..cut] } else { s.as_str() };
+    Markers {
+        cut,
+        end,
+        volume_end,
+        number_start,
+    }
+}
+
+/// The series (before the markers), the words between the volume and the
+/// number, and what follows the number: its count, a loose year and the
+/// title.
+fn read_around_markers(s: &str, m: &mut Markers, g: &mut ComicGuess) {
+    let before = if m.cut < s.len() { &s[..m.cut] } else { s };
     g.series = tidy_part(before);
     // Words between the volume and the number belong to the series
     // (`Series Vol. 5 Annual #01`: the annual, not issue 1).
-    if let (Some(v), Some(n)) = (volume_end, number_start)
+    if let (Some(v), Some(n)) = (m.volume_end, m.number_start)
         && n > v
     {
         let mid = tidy_part(&s[v..n]);
@@ -802,15 +833,15 @@ pub fn parse_name(stem: &str, folder: &str) -> ComicGuess {
         }
     }
     // The number first (`03 - Series`): what follows is the series.
-    if g.series.is_empty() && end > 0 && end < s.len() {
-        let after = tidy_part(&s[end..]);
+    if g.series.is_empty() && m.end > 0 && m.end < s.len() {
+        let after = tidy_part(&s[m.end..]);
         if after.chars().any(char::is_alphabetic) {
             g.series = after;
-            end = s.len();
+            m.end = s.len();
         }
     }
-    if end > 0 && end <= s.len() {
-        let mut after = s[end..].trim_start_matches([' ', '-', '–', ':', '.']);
+    if m.end > 0 && m.end <= s.len() {
+        let mut after = s[m.end..].trim_start_matches([' ', '-', '–', ':', '.']);
         // The count after the number (`#2 de 6`, `#2 of 6`).
         static COUNT: LazyLock<Regex> = LazyLock::new(|| {
             Regex::new(r"(?i)^(?:of|de|di|von|sur)\s+(\d{1,4})\b").expect("valid regex")
@@ -829,17 +860,36 @@ pub fn parse_name(stem: &str, folder: &str) -> ComicGuess {
         }
         g.title = tidy_part(after);
     }
-    // A year written loose at the end of the series (`Series 2012 012`).
-    if g.year.is_none() {
-        static TRAILING_YEAR: LazyLock<Regex> =
-            LazyLock::new(|| Regex::new(r"\s((?:19|20)\d{2})$").expect("valid regex"));
-        if let Some(c) = TRAILING_YEAR.captures(&g.series.clone()) {
-            g.year = c[1].parse().ok();
-            g.series = g.series[..c.get(0).expect("group is in the match").start()]
-                .trim()
-                .to_string();
-        }
+}
+
+/// A year written loose at the end of the series (`Series 2012 012`).
+fn trailing_year(g: &mut ComicGuess) {
+    if g.year.is_some() {
+        return;
     }
+    static TRAILING_YEAR: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\s((?:19|20)\d{2})$").expect("valid regex"));
+    if let Some(c) = TRAILING_YEAR.captures(&g.series.clone()) {
+        g.year = c[1].parse().ok();
+        g.series = g.series[..c.get(0).expect("group is in the match").start()]
+            .trim()
+            .to_string();
+    }
+}
+
+/// Reads series, numbers and year from a file name without extension;
+/// `folder` (the name of the folder it is in) gives the series when the
+/// name has none, and the series' year.
+pub fn parse_name(stem: &str, folder: &str) -> ComicGuess {
+    let mut g = ComicGuess::default();
+    let (stem, note) = split_note(stem);
+    g.scan = note.replace('_', " ").trim().to_string();
+    let s = spaced_name(stem);
+    read_brackets(&s, &mut g);
+    let s = without_brackets(&s);
+    let mut markers = read_markers(&s, &mut g);
+    read_around_markers(&s, &mut markers, &mut g);
+    trailing_year(&mut g);
     // The folder: the series' year, its name for files without one, and
     // the volume (`Series/Vol. 3/012.cbz`).
     let f = parse_folder(folder);
