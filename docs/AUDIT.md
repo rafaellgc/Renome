@@ -42,3 +42,14 @@ build and process). Numbers come from tools, not from reading samples.
 - **Performance**: nothing measured; no benches, no budgets.
 - **Process**: CI runs fmt, clippy, tests (3 OSes), deny; lacks audit as a
   failing job, coverage, doc build, MSRV, and docs for contributors.
+
+## After the refactor (same day)
+
+| Item | Before | After |
+|---|---|---|
+| Production `unwrap()` | 320 | 0 (denied by lint) |
+| Advisories | 2 vulnerabilities | 0 |
+| Functions over 100 lines | 92 | 58 (the 10 over 150: 3 network flows, the window's `run()`, and 6 of 120-160 lines) |
+| Readers that panic on damaged files | 2 found | 0 (test of every reader; one in a dependency handled by profile) |
+| Window CSP | none | set |
+| Coverage | 72.4% (unmeasured by CI) | floor of 70% enforced in CI |

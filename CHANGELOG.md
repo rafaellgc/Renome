@@ -24,7 +24,14 @@ changed in the code between releases and is kept for the unreleased work.
 - `cargo bench -p renome-core` (scan, preview, sort) and `docs/PERFORMANCE.md`.
 - Coverage is measured (72% of lines) and CI keeps it from falling below 70%.
 
+### Fixes found by the new golden tests
+- A damaged Matroska file whose numbers overflowed the time of a subtitle
+  block (a panic in debug builds, garbage in release) now saturates.
+
 ### Code
+- 34 functions of over 100 lines (up to 572) were split into steps, each
+  with a golden test of its output written first: AZW3 and PDF writing and
+  reading, EPUB, OPF, Matroska, comic names, tags, undo, and the preview.
 - `unwrap()` is forbidden outside tests; every remaining invariant says why.
 - The window's `lib.rs` (2,490 lines) is split into modules by subject.
 - Documentation builds without warnings; CI checks it and a coverage floor.
