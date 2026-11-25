@@ -1431,17 +1431,53 @@ fn follow_work(
 ///   to one place go there too. Two such files that would get the same
 ///   name (`CD 01/log.txt`, `CD 02/log.txt`) get their folder's name added.
 fn follow_songs(items: &mut [PreviewItem], folders: bool, identical: &HashMap<PathBuf, usize>) {
-    /// Where the songs of a folder go: where most of them go, or nowhere
-    /// in particular.
-    #[derive(Clone, PartialEq)]
-    enum Album {
-        One(Option<PathBuf>, Option<String>),
-        Split,
+    let (by_stem, albums) = song_places(items);
+    let mut followers = Vec::new();
+    for (n, i) in items.iter_mut().enumerate() {
+        if i.is_dir || i.manual || is_song(i) || i.new_name != i.original || i.dest.is_some() {
+            continue;
+        }
+        let (stem, ext) = split_name(&i.original);
+        if let Some((new_stem, dest, folder)) = by_stem.get(&(i.dir.clone(), stem.to_string())) {
+            i.new_name = join_name(new_stem, ext);
+            i.dest = dest.clone();
+            i.folder = folder.clone();
+        } else if folders && let Some((dest, folder)) = album_place(&albums, &i.dir) {
+            i.dest = Some(dest);
+            i.folder = Some(folder);
+        } else {
+            continue;
+        }
+        if i.status == Status::Unchanged {
+            i.status = Status::Ok;
+        }
+        i.windows_unsafe = windows_bad(&i.new_name);
+        followers.push(n);
     }
+    rename_clashes(items, &followers, identical);
+}
+
+/// Where the songs of a folder go: where most of them go, or nowhere in
+/// particular.
+#[derive(Clone, PartialEq)]
+enum Album {
+    One(Option<PathBuf>, Option<String>),
+    Split,
+}
+
+/// A song's new stem, destination and folder shown.
+type Song = (String, Option<PathBuf>, Option<String>);
+
+fn is_song(i: &PreviewItem) -> bool {
+    !i.is_dir && music::is_audio(split_name(&i.original).1)
+}
+
+/// The songs by folder and stem (to name their lyrics), and where each
+/// folder's songs go.
+fn song_places(
+    items: &[PreviewItem],
+) -> (HashMap<(PathBuf, String), Song>, HashMap<PathBuf, Album>) {
     type Place = (Option<PathBuf>, Option<String>);
-    let is_song = |i: &PreviewItem| !i.is_dir && music::is_audio(split_name(&i.original).1);
-    /// A song's new stem, destination and folder shown.
-    type Song = (String, Option<PathBuf>, Option<String>);
     let mut by_stem: HashMap<(PathBuf, String), Song> = HashMap::new();
     let mut places: HashMap<PathBuf, Vec<(Place, usize)>> = HashMap::new();
     for i in items
@@ -1463,7 +1499,7 @@ fn follow_songs(items: &mut [PreviewItem], folders: bool, identical: &HashMap<Pa
     }
     // Bonus tracks tagged with other albums go their way; the folder's
     // other files go with most of its songs.
-    let albums: HashMap<PathBuf, Album> = places
+    let albums = places
         .into_iter()
         .map(|(dir, counts)| {
             let total: usize = counts.iter().map(|(_, n)| n).sum();
@@ -1474,68 +1510,55 @@ fn follow_songs(items: &mut [PreviewItem], folders: bool, identical: &HashMap<Pa
             (dir, album)
         })
         .collect();
-    // Where a song-less folder's files go, if anywhere.
-    let place = |dir: &Path| -> Option<(PathBuf, String)> {
-        if let Some(a) = albums.get(dir) {
-            return match a {
-                Album::One(Some(dest), Some(folder)) => Some((dest.clone(), folder.clone())),
-                _ => None,
-            };
-        }
-        // A subfolder of an album folder (`Artwork`).
-        for up in dir.ancestors().skip(1).take(2) {
-            if let Some(a) = albums.get(up) {
-                let Album::One(Some(dest), Some(folder)) = a else {
-                    return None;
-                };
-                let rel = dir.strip_prefix(up).ok()?;
-                let rel_shown = rel.to_string_lossy().replace('\\', "/");
-                return Some((dest.join(rel), format!("{folder}/{rel_shown}")));
-            }
-        }
-        // The folder above disc folders.
-        let mut found: Option<&Album> = None;
-        for (d, a) in &albums {
-            if d.parent() == Some(dir) {
-                let name = d.file_name().unwrap_or_default().to_string_lossy();
-                if music::disc_folder(&name).is_none() || found.is_some_and(|f| f != a) {
-                    return None;
-                }
-                found = Some(a);
-            }
-        }
-        match found {
-            Some(Album::One(Some(dest), Some(folder))) => Some((dest.clone(), folder.clone())),
+    (by_stem, albums)
+}
+
+/// Where a song-less folder's files go, if anywhere.
+fn album_place(albums: &HashMap<PathBuf, Album>, dir: &Path) -> Option<(PathBuf, String)> {
+    if let Some(a) = albums.get(dir) {
+        return match a {
+            Album::One(Some(dest), Some(folder)) => Some((dest.clone(), folder.clone())),
             _ => None,
-        }
-    };
-    let mut followers = Vec::new();
-    for (n, i) in items.iter_mut().enumerate() {
-        if i.is_dir || i.manual || is_song(i) || i.new_name != i.original || i.dest.is_some() {
-            continue;
-        }
-        let (stem, ext) = split_name(&i.original);
-        if let Some((new_stem, dest, folder)) = by_stem.get(&(i.dir.clone(), stem.to_string())) {
-            i.new_name = join_name(new_stem, ext);
-            i.dest = dest.clone();
-            i.folder = folder.clone();
-        } else if folders && let Some((dest, folder)) = place(&i.dir) {
-            i.dest = Some(dest);
-            i.folder = Some(folder);
-        } else {
-            continue;
-        }
-        if i.status == Status::Unchanged {
-            i.status = Status::Ok;
-        }
-        i.windows_unsafe = windows_bad(&i.new_name);
-        followers.push(n);
+        };
     }
-    // Same name in the same place: add the folder each came from (identical
-    // copies are left to the duplicate check, which lets one through).
+    // A subfolder of an album folder (`Artwork`).
+    for up in dir.ancestors().skip(1).take(2) {
+        if let Some(a) = albums.get(up) {
+            let Album::One(Some(dest), Some(folder)) = a else {
+                return None;
+            };
+            let rel = dir.strip_prefix(up).ok()?;
+            let rel_shown = rel.to_string_lossy().replace('\\', "/");
+            return Some((dest.join(rel), format!("{folder}/{rel_shown}")));
+        }
+    }
+    // The folder above disc folders.
+    let mut found: Option<&Album> = None;
+    for (d, a) in albums {
+        if d.parent() == Some(dir) {
+            let name = d.file_name().unwrap_or_default().to_string_lossy();
+            if music::disc_folder(&name).is_none() || found.is_some_and(|f| f != a) {
+                return None;
+            }
+            found = Some(a);
+        }
+    }
+    match found {
+        Some(Album::One(Some(dest), Some(folder))) => Some((dest.clone(), folder.clone())),
+        _ => None,
+    }
+}
+
+/// Same name in the same place: add the folder each came from (identical
+/// copies are left to the duplicate check, which lets one through).
+fn rename_clashes(
+    items: &mut [PreviewItem],
+    followers: &[usize],
+    identical: &HashMap<PathBuf, usize>,
+) {
     let mut keys = PathKeys::default();
     let mut by_target: HashMap<PathBuf, Vec<usize>> = HashMap::new();
-    for &n in &followers {
+    for &n in followers {
         by_target
             .entry(keys.key(&items[n].target()))
             .or_default()
