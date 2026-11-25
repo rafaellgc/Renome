@@ -2236,6 +2236,381 @@ fn comic_matches<'a>(
         .collect()
 }
 
+/// What the preview works out once for the whole list, before it names
+/// each file.
+struct Batch<'a> {
+    pipeline: &'a Pipeline,
+    view: &'a View,
+    overrides: &'a HashMap<PathBuf, String>,
+    now: chrono::DateTime<Local>,
+    /// The files shown: place in the list, place in its folder, file.
+    shown: Vec<(usize, usize, &'a FileEntry)>,
+    /// The music rule: whether it names from the file's name, and whether
+    /// it makes folders.
+    music: Option<(bool, bool)>,
+    movie_rule: bool,
+    /// Rules that move a release's videos out of its folder.
+    video_rule: bool,
+    converts: Option<bool>,
+    book_to: Option<crate::bookconv::Target>,
+    comic_ebook: Option<(crate::comicbook::Format, bool)>,
+    cleans: bool,
+    /// Songs' tags, with the album-wide fields agreed across each album.
+    songs: HashMap<&'a Path, AudioTags>,
+    /// The photo rule names a photo's files (raw, edits, a Live Photo's
+    /// video) by the date of the one that has it (see
+    /// `photos::lead_rank`).
+    photo_rule: Option<(crate::photos::Options, bool)>,
+    photo_groups: HashMap<&'a Path, (usize, String)>,
+    photos: HashMap<&'a Path, crate::photos::Named>,
+    sub_tools: Option<(crate::subtext::Tools, Option<String>)>,
+    sub_langs: Option<Vec<crate::subtitles::Lang>>,
+    subtitle_video: HashMap<&'a Path, &'a FileEntry>,
+    /// The same, files of one name with other extensions counting as one.
+    pairs: crate::rules::Places,
+    /// A rule for some files only counts among them.
+    step_places: Vec<Option<crate::rules::Places>>,
+    /// What each lookup reads (see `Pipeline::lookup_name`).
+    lookup: HashMap<&'a Path, (String, String)>,
+    /// The batch's comics, what each is, and the series of its folder.
+    comics: HashMap<&'a Path, (ComicMatch, Option<ComicMatch>)>,
+}
+
+/// The name and place the rules (or the hand) give a file.
+struct Naming {
+    new_name: String,
+    /// The name was typed by hand.
+    manual: bool,
+    folders: Vec<String>,
+    dest: Option<PathBuf>,
+    /// The rules emptied the name but left the extension: `.txt` would be
+    /// a hidden file with no name.
+    empty_stem: bool,
+}
+
+impl<'a> Batch<'a> {
+    fn new(
+        files: &'a [FileEntry],
+        pipeline: &'a Pipeline,
+        overrides: &'a HashMap<PathBuf, String>,
+        view: &'a View,
+        filter: &Filter,
+    ) -> Self {
+        let music = pipeline.music();
+        let movie_rule = pipeline.movie();
+        let songs: HashMap<&Path, AudioTags> = match music {
+            None => HashMap::new(),
+            Some((from_name, _)) => song_tags_of(files, filter, view, from_name),
+        };
+        let shown = list_shown(files, filter, view);
+        let photo_rule = pipeline.photos().map(|(mut o, set)| {
+            o.lang = crate::geo::Lang::from_code(&view.lang);
+            (o, set)
+        });
+        let sub_tools = pipeline.subtitle_tools();
+        let sub_langs = sub_tools
+            .as_ref()
+            .and_then(|(_, l)| l.as_deref())
+            .map(crate::subtitles::langs);
+        let photo_groups: HashMap<&Path, (usize, String)> = match photo_rule {
+            None => HashMap::new(),
+            Some(_) => {
+                let list: Vec<&FileEntry> = shown.iter().map(|&(_, _, f)| f).collect();
+                crate::photos::groups(&list)
+            }
+        };
+        let photos: HashMap<&Path, crate::photos::Named> = match &photo_rule {
+            None => HashMap::new(),
+            Some((opts, _)) => photo_names(&shown, &photo_groups, opts, view),
+        };
+        let pairs = crate::rules::Places::of(shown.iter().map(|&(_, _, f)| f));
+        let step_places: Vec<Option<crate::rules::Places>> = pipeline
+            .filters()
+            .map(|only| {
+                only.map(|o| {
+                    crate::rules::Places::of(
+                        shown.iter().map(|&(_, _, f)| f).filter(|f| o.takes(f)),
+                    )
+                })
+            })
+            .collect();
+        Batch {
+            pipeline,
+            view,
+            overrides,
+            now: Local::now(),
+            movie_rule,
+            video_rule: movie_rule || pipeline.series(),
+            converts: pipeline.converts_comics(),
+            book_to: pipeline.converts_books(),
+            comic_ebook: pipeline.comic_ebook(),
+            cleans: pipeline.cleans_comic_info(),
+            subtitle_video: subtitle_videos(files, view),
+            shown,
+            music,
+            songs,
+            photo_rule,
+            photo_groups,
+            photos,
+            sub_tools,
+            sub_langs,
+            pairs,
+            step_places,
+            lookup: HashMap::new(),
+            comics: HashMap::new(),
+        }
+    }
+
+    /// The context the rules name `file` in.
+    fn ctx(&self, index: usize, folder_index: usize, file: &'a FileEntry) -> Ctx<'_> {
+        let view = self.view;
+        Ctx {
+            file,
+            index,
+            folder_index,
+            pair_index: self.pairs.get(&file.path).map_or(index, |p| p[2]),
+            pair_folder_index: self.pairs.get(&file.path).map_or(folder_index, |p| p[3]),
+            step_places: Some(&self.step_places),
+            now: self.now,
+            // Each lookup names only its own kind of file.
+            movie: view
+                .movies
+                .get(&file.path)
+                .filter(|_| file.is_dir || tmdb::is_screen(&file.ext))
+                .filter(|_| !self.movie_rule || crate::extras::extra_kind(&file.path).is_none()),
+            episode: view
+                .episodes
+                .get(&file.path)
+                .filter(|_| !file.is_dir && tmdb::is_screen(&file.ext)),
+            song: self.songs.get(file.path.as_path()),
+            book: view.books.get(&file.path).filter(|_| {
+                !file.is_dir
+                    && (crate::ebook::is_book(&file.ext) || crate::music::is_audio(&file.ext))
+            }),
+            comic: None,
+            comic_folder: None,
+            video: if tmdb::is_video(&file.ext) {
+                Some(file)
+            } else {
+                self.subtitle_video.get(file.path.as_path()).copied()
+            },
+            as_folder: false,
+            photo: self.photos.get(file.path.as_path()),
+        }
+    }
+
+    /// What each lookup reads, and the comics the comic rule finds in the
+    /// batch (it names them together: see `comics::arrange`).
+    fn find_lookups(&mut self, steps: &[Step]) {
+        self.lookup = self
+            .shown
+            .iter()
+            .filter_map(|&(index, folder_index, file)| {
+                let name = self
+                    .pipeline
+                    .lookup_name(&self.ctx(index, folder_index, file))?;
+                Some((file.path.as_path(), name))
+            })
+            .collect();
+        let by_folder = steps.iter().find_map(|s| match &s.rule {
+            Rule::Comic { by_folder, .. } if s.enabled => Some(*by_folder),
+            _ => None,
+        });
+        self.comics = match by_folder {
+            None => HashMap::new(),
+            Some(by_folder) => comic_matches(
+                &self.shown,
+                self.view,
+                &self.lookup,
+                self.converts,
+                by_folder,
+            ),
+        };
+    }
+
+    /// The name and place of `file`: a name typed by hand replaces the
+    /// rules' name, not the folder they move the file into.
+    fn naming(&self, index: usize, folder_index: usize, file: &'a FileEntry) -> Naming {
+        let ctx = Ctx {
+            comic: self
+                .comics
+                .get(file.path.as_path())
+                .map(|(m, _)| m)
+                .or_else(|| self.view.comics.get(&file.path)),
+            comic_folder: self
+                .comics
+                .get(file.path.as_path())
+                .and_then(|(_, f)| f.as_ref()),
+            ..self.ctx(index, folder_index, file)
+        };
+        let (stem, ext, moved) = self.pipeline.run_full(&ctx);
+        let empty_stem =
+            stem.is_empty() && !file.stem.is_empty() && !self.overrides.contains_key(&file.path);
+        // The movie's folder is named as the video, without a subtitle's
+        // language or the picture's size.
+        let folder = match moved {
+            Some(Move::OwnFolder) => {
+                self.pipeline
+                    .run_full(&Ctx {
+                        as_folder: true,
+                        ..ctx
+                    })
+                    .0
+            }
+            _ => String::new(),
+        };
+        let (folders, dest) = move_target(file, self.view, moved, folder);
+        let (new_name, manual) = match self.overrides.get(&file.path) {
+            Some(name) => (name.clone(), true),
+            None => (join_name(&stem, &ext), false),
+        };
+        Naming {
+            new_name,
+            manual,
+            folders,
+            dest,
+            empty_stem,
+        }
+    }
+
+    /// The preview's row for `file`.
+    fn item(&self, index: usize, folder_index: usize, file: &'a FileEntry) -> PreviewItem {
+        let view = self.view;
+        let original = file.file_name();
+        let lookup_name = self
+            .lookup
+            .get(file.path.as_path())
+            .map(|(stem, ext)| join_name(stem, ext))
+            .filter(|n| *n != original);
+        let Naming {
+            new_name,
+            manual,
+            folders,
+            dest,
+            empty_stem,
+        } = self.naming(index, folder_index, file);
+        let problem = if empty_stem {
+            Some(Problem::Empty)
+        } else {
+            validate(&new_name).or_else(|| folders.iter().find_map(|f| validate(f)))
+        };
+        let folder = (!folders.is_empty()).then(|| folders.join("/"));
+        let status = if problem.is_some() {
+            Status::Conflict
+        } else if new_name == original && dest.is_none() {
+            Status::Unchanged
+        } else {
+            Status::Ok
+        };
+        let windows_unsafe = windows_bad(&new_name);
+        let untagged = self.music.is_some_and(|_| {
+            !file.is_dir
+                && music::is_audio(&file.ext)
+                && !self.songs.contains_key(file.path.as_path())
+        });
+        let (retag, junk) = tag_state(file, view, self.cleans);
+        let (convert, to_book, drm, drawn) = convert_state(file, self.converts, self.book_to);
+        let (sub_fix, sub_extract, sub_pictures) =
+            subtitle_state(file, &new_name, &self.sub_tools, &self.sub_langs);
+        let comic_to = self
+            .comic_ebook
+            .filter(|(_, draw)| crate::rules::to_ebook(file, *draw))
+            .map(|(t, _)| t);
+        let (extra, release_junk) = extra_state(file, view, self.movie_rule, self.video_rule);
+        let photo_set = self.photo_rule.as_ref().is_some_and(|(_, set)| *set);
+        PreviewItem {
+            kinds: kinds_of(file),
+            editable: false,
+            pair: if file.is_dir {
+                file.stem.clone()
+            } else {
+                crate::rules::pair_split(file).0.to_string()
+            },
+            outside: None,
+            follows: None,
+            companion: false,
+            with_folder: None,
+            stays_behind: false,
+            extra,
+            release_junk,
+            to_trash: release_junk
+                && view.trash_ads
+                && !view.send_to.as_ref().is_some_and(|s| s.copy),
+            comic_to,
+            sub_fix,
+            sub_extract,
+            sub_pictures,
+            path: file.path.clone(),
+            dir: file.dir.clone(),
+            size: file.size,
+            size_text: crate::text::size(file.size),
+            modified: file.modified,
+            is_dir: file.is_dir,
+            original,
+            new_name,
+            folder,
+            dir_shown: crate::text::home_short(&file.dir),
+            dest_shown: dest.as_deref().map(crate::text::home_short),
+            dest,
+            status,
+            problem,
+            windows_unsafe,
+            manual,
+            untagged,
+            retag,
+            junk,
+            convert,
+            book_to: to_book,
+            drm,
+            drawn,
+            lookup_name,
+            within: view.send_to.as_ref().map(|_| file.base.clone()),
+            photo_date: self.photo_groups.get(file.path.as_path()).map(|_| {
+                self.photos
+                    .get(file.path.as_path())
+                    .map_or(crate::photos::DateFrom::None, |n| n.shot.from)
+            }),
+            touch: photo_touch(file, photo_set, &self.photos),
+        }
+    }
+
+    /// The rows, one per file shown.
+    fn items(&self) -> Vec<PreviewItem> {
+        self.shown
+            .iter()
+            .map(|&(index, folder_index, file)| self.item(index, folder_index, file))
+            .collect()
+    }
+
+    /// What needs the whole list: the folders files go to, clashes between
+    /// targets, the order.
+    fn settle(&self, items: &mut [PreviewItem], files: &[FileEntry]) {
+        let view = self.view;
+        place_folders(
+            items,
+            files,
+            view,
+            &self.comics,
+            &self.songs,
+            self.music.map(|(_, folders)| folders),
+            self.photo_rule.is_some(),
+            &self.photos,
+            &self.photo_groups,
+        );
+        let mut keys = PathKeys::default();
+        if view.number_clashes {
+            number_clashes(items, &mut keys, view);
+        }
+        flag_repeated_targets(items, &mut keys, view);
+        flag_windows_disks(items, &mut keys);
+        let copying = view.send_to.as_ref().is_some_and(|s| s.copy);
+        flag_existing_targets(items, &mut keys, copying);
+        keep_followers(items, view);
+        sort_items(items, view);
+        mark_outside(items, self.pipeline);
+    }
+}
+
 /// Computes the preview. `overrides` maps path → hand-edited name.
 /// Files hidden by the filter are left out (and will not be renamed);
 /// numbering only counts the visible ones.
@@ -2246,265 +2621,18 @@ pub fn preview(
     view: &View,
 ) -> Preview {
     let pipeline = Pipeline::new(steps);
-    let now = Local::now();
     let (filter, filter_error) = match Filter::new(&view.filter) {
         Ok(f) => (f, None),
         Err(e) => (Filter::default(), Some(e)),
     };
-
-    let music = pipeline.music();
-    let movie_rule = pipeline.movie();
-    // Rules that move a release's videos out of its folder.
-    let video_rule = movie_rule || pipeline.series();
-    let converts = pipeline.converts_comics();
-    let book_to = pipeline.converts_books();
-    let comic_ebook = pipeline.comic_ebook();
-    let cleans = pipeline.cleans_comic_info();
-    // Songs' tags, with the album-wide fields agreed across each album.
-    let songs: HashMap<&Path, AudioTags> = match music {
-        None => HashMap::new(),
-        Some((from_name, _)) => song_tags_of(files, &filter, view, from_name),
+    let (mut items, hints) = {
+        let mut batch = Batch::new(files, &pipeline, overrides, view, &filter);
+        batch.find_lookups(steps);
+        let mut items = batch.items();
+        batch.settle(&mut items, files);
+        let shown: Vec<&FileEntry> = batch.shown.iter().map(|&(_, _, f)| f).collect();
+        (items, hints(&shown, steps))
     };
-    let shown = list_shown(files, &filter, view);
-    // The photo rule names a photo's files (raw, edits, a Live Photo's
-    // video) by the date of the one that has it (see `photos::lead_rank`).
-    let photo_rule = pipeline.photos().map(|(mut o, set)| {
-        o.lang = crate::geo::Lang::from_code(&view.lang);
-        (o, set)
-    });
-    let sub_tools = pipeline.subtitle_tools();
-    let sub_langs = sub_tools
-        .as_ref()
-        .and_then(|(_, l)| l.as_deref())
-        .map(crate::subtitles::langs);
-    let photo_groups: HashMap<&Path, (usize, String)> = match photo_rule {
-        None => HashMap::new(),
-        Some(_) => {
-            let list: Vec<&FileEntry> = shown.iter().map(|&(_, _, f)| f).collect();
-            crate::photos::groups(&list)
-        }
-    };
-    let photos: HashMap<&Path, crate::photos::Named> = match photo_rule {
-        None => HashMap::new(),
-        Some((opts, _)) => photo_names(&shown, &photo_groups, &opts, view),
-    };
-    let subtitle_video = subtitle_videos(files, view);
-    // The same, files of one name with other extensions counting as one.
-    let pairs = crate::rules::Places::of(shown.iter().map(|&(_, _, f)| f));
-    // A rule for some files only counts among them.
-    let step_places: Vec<Option<crate::rules::Places>> = pipeline
-        .filters()
-        .map(|only| {
-            only.map(|o| {
-                crate::rules::Places::of(shown.iter().map(|&(_, _, f)| f).filter(|f| o.takes(f)))
-            })
-        })
-        .collect();
-    let ctx_of = |index, folder_index, file| Ctx {
-        file,
-        index,
-        folder_index,
-        pair_index: pairs.get(&file.path).map_or(index, |p| p[2]),
-        pair_folder_index: pairs.get(&file.path).map_or(folder_index, |p| p[3]),
-        step_places: Some(&step_places),
-        now,
-        // Each lookup names only its own kind of file.
-        movie: view
-            .movies
-            .get(&file.path)
-            .filter(|_| file.is_dir || tmdb::is_screen(&file.ext))
-            .filter(|_| !movie_rule || crate::extras::extra_kind(&file.path).is_none()),
-        episode: view
-            .episodes
-            .get(&file.path)
-            .filter(|_| !file.is_dir && tmdb::is_screen(&file.ext)),
-        song: songs.get(file.path.as_path()),
-        book: view.books.get(&file.path).filter(|_| {
-            !file.is_dir && (crate::ebook::is_book(&file.ext) || crate::music::is_audio(&file.ext))
-        }),
-        comic: None,
-        comic_folder: None,
-        video: if tmdb::is_video(&file.ext) {
-            Some(file)
-        } else {
-            subtitle_video.get(file.path.as_path()).copied()
-        },
-        as_folder: false,
-        photo: photos.get(file.path.as_path()),
-    };
-    // What each lookup reads (see `Pipeline::lookup_name`).
-    let lookup: HashMap<&Path, (String, String)> = shown
-        .iter()
-        .filter_map(|&(index, folder_index, file)| {
-            let name = pipeline.lookup_name(&ctx_of(index, folder_index, file))?;
-            Some((file.path.as_path(), name))
-        })
-        .collect();
-    // The comic rule names the batch's comics together (see
-    // `comics::arrange`): what each is, and the series of its folder.
-    let by_folder = steps.iter().find_map(|s| match &s.rule {
-        Rule::Comic { by_folder, .. } if s.enabled => Some(*by_folder),
-        _ => None,
-    });
-    let comics: HashMap<&Path, (ComicMatch, Option<ComicMatch>)> = match by_folder {
-        None => HashMap::new(),
-        Some(by_folder) => comic_matches(&shown, view, &lookup, converts, by_folder),
-    };
-    let photo_set = photo_rule.is_some_and(|(_, set)| set);
-    let mut items: Vec<PreviewItem> = shown
-        .iter()
-        .map(|&(index, folder_index, file)| {
-            let original = file.file_name();
-            let lookup_name = lookup
-                .get(file.path.as_path())
-                .map(|(stem, ext)| join_name(stem, ext))
-                .filter(|n| *n != original);
-            // The rules emptied the name but left the extension: `.txt` would
-            // be a hidden file with no name.
-            let empty_stem;
-            let folders: Vec<String>;
-            let dest: Option<PathBuf>;
-            // A name typed by hand replaces the rules' name, not the folder
-            // they move the file into.
-            let (new_name, manual) = {
-                let ctx = Ctx {
-                    comic: comics
-                        .get(file.path.as_path())
-                        .map(|(m, _)| m)
-                        .or_else(|| view.comics.get(&file.path)),
-                    comic_folder: comics
-                        .get(file.path.as_path())
-                        .and_then(|(_, f)| f.as_ref()),
-                    ..ctx_of(index, folder_index, file)
-                };
-                let (stem, ext, moved) = pipeline.run_full(&ctx);
-                empty_stem =
-                    stem.is_empty() && !file.stem.is_empty() && !overrides.contains_key(&file.path);
-                // The movie's folder is named as the video, without a
-                // subtitle's language or the picture's size.
-                let folder = match moved {
-                    Some(Move::OwnFolder) => {
-                        pipeline
-                            .run_full(&Ctx {
-                                as_folder: true,
-                                ..ctx
-                            })
-                            .0
-                    }
-                    _ => String::new(),
-                };
-                (folders, dest) = move_target(file, view, moved, folder);
-                match overrides.get(&file.path) {
-                    Some(name) => (name.clone(), true),
-                    None => (join_name(&stem, &ext), false),
-                }
-            };
-            let problem = if empty_stem {
-                Some(Problem::Empty)
-            } else {
-                validate(&new_name).or_else(|| folders.iter().find_map(|f| validate(f)))
-            };
-            let folder = (!folders.is_empty()).then(|| folders.join("/"));
-            let status = if problem.is_some() {
-                Status::Conflict
-            } else if new_name == original && dest.is_none() {
-                Status::Unchanged
-            } else {
-                Status::Ok
-            };
-            let windows_unsafe = windows_bad(&new_name);
-            let untagged = music.is_some_and(|_| {
-                !file.is_dir
-                    && music::is_audio(&file.ext)
-                    && !songs.contains_key(file.path.as_path())
-            });
-            let (retag, junk) = tag_state(file, view, cleans);
-            let (convert, to_book, drm, drawn) = convert_state(file, converts, book_to);
-            let (sub_fix, sub_extract, sub_pictures) =
-                subtitle_state(file, &new_name, &sub_tools, &sub_langs);
-            let comic_to = comic_ebook
-                .filter(|(_, draw)| crate::rules::to_ebook(file, *draw))
-                .map(|(t, _)| t);
-            let (extra, release_junk) = extra_state(file, view, movie_rule, video_rule);
-            PreviewItem {
-                kinds: kinds_of(file),
-                editable: false,
-                pair: if file.is_dir {
-                    file.stem.clone()
-                } else {
-                    crate::rules::pair_split(file).0.to_string()
-                },
-                outside: None,
-                follows: None,
-                companion: false,
-                with_folder: None,
-                stays_behind: false,
-                extra,
-                release_junk,
-                to_trash: release_junk
-                    && view.trash_ads
-                    && !view.send_to.as_ref().is_some_and(|s| s.copy),
-                comic_to,
-                sub_fix,
-                sub_extract,
-                sub_pictures,
-                path: file.path.clone(),
-                dir: file.dir.clone(),
-                size: file.size,
-                size_text: crate::text::size(file.size),
-                modified: file.modified,
-                is_dir: file.is_dir,
-                original,
-                new_name,
-                folder,
-                dir_shown: crate::text::home_short(&file.dir),
-                dest_shown: dest.as_deref().map(crate::text::home_short),
-                dest,
-                status,
-                problem,
-                windows_unsafe,
-                manual,
-                untagged,
-                retag,
-                junk,
-                convert,
-                book_to: to_book,
-                drm,
-                drawn,
-                lookup_name,
-                within: view.send_to.as_ref().map(|_| file.base.clone()),
-                photo_date: photo_groups.get(file.path.as_path()).map(|_| {
-                    photos
-                        .get(file.path.as_path())
-                        .map_or(crate::photos::DateFrom::None, |n| n.shot.from)
-                }),
-                touch: photo_touch(file, photo_set, &photos),
-            }
-        })
-        .collect();
-    place_folders(
-        &mut items,
-        files,
-        view,
-        &comics,
-        &songs,
-        music.map(|(_, folders)| folders),
-        photo_rule.is_some(),
-        &photos,
-        &photo_groups,
-    );
-    let mut keys = PathKeys::default();
-    if view.number_clashes {
-        number_clashes(&mut items, &mut keys, view);
-    }
-
-    flag_repeated_targets(&mut items, &mut keys, view);
-    flag_windows_disks(&mut items, &mut keys);
-    let copying = view.send_to.as_ref().is_some_and(|s| s.copy);
-    flag_existing_targets(&mut items, &mut keys, copying);
-    keep_followers(&mut items, view);
-    sort_items(&mut items, view);
-    mark_outside(&mut items, &pipeline);
     let changed = items.iter().filter(|i| i.status == Status::Ok).count();
     let conflicts = items
         .iter()
@@ -2526,7 +2654,6 @@ pub fn preview(
                 .unwrap_or_else(|| i.path.clone())
         })
         .collect();
-    let hints = hints(&shown.iter().map(|&(_, _, f)| f).collect::<Vec<_>>(), steps);
     if let Some((kind, audiobooks)) = editor(steps) {
         for i in items.iter_mut() {
             i.editable = editable(kind, i, audiobooks);
@@ -2544,7 +2671,7 @@ pub fn preview(
         left_folders,
         trash,
         trash_folders,
-        copy: copying,
+        copy: view.send_to.as_ref().is_some_and(|s| s.copy),
     }
 }
 
