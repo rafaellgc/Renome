@@ -106,8 +106,36 @@ pub(super) fn uuid_of(book: &Book) -> String {
     )
 }
 
-/// The package document.
-pub fn opf(book: &Book, has_cover_page: bool) -> String {
+/// The details of the series: the collection EPUB 3 has for it, and what
+/// most reading apps read.
+fn series_meta(m: &super::Meta) -> String {
+    let mut meta = String::new();
+    meta.push_str(&format!(
+        "<meta property=\"belongs-to-collection\" id=\"series\">{}</meta>\n<meta refines=\"#series\" property=\"collection-type\">series</meta>\n",
+        esc(&m.series)
+    ));
+    if !m.series_index.is_empty() {
+        meta.push_str(&format!(
+            "<meta refines=\"#series\" property=\"group-position\">{}</meta>\n",
+            esc(&m.series_index)
+        ));
+    }
+    // What most reading apps read for series.
+    meta.push_str(&format!(
+        "<meta name=\"calibre:series\" content=\"{}\"/>\n",
+        esc_attr(&m.series)
+    ));
+    if !m.series_index.is_empty() {
+        meta.push_str(&format!(
+            "<meta name=\"calibre:series_index\" content=\"{}\"/>\n",
+            esc_attr(&m.series_index)
+        ));
+    }
+    meta
+}
+
+/// The package's `metadata`.
+fn package_metadata(book: &Book) -> String {
     let m = &book.meta;
     let id = if !m.isbn.is_empty() {
         format!("urn:isbn:{}", m.isbn)
@@ -168,27 +196,7 @@ pub fn opf(book: &Book, has_cover_page: bool) -> String {
         meta.push_str(&format!("<dc:subject>{}</dc:subject>\n", esc(s)));
     }
     if !m.series.is_empty() {
-        meta.push_str(&format!(
-            "<meta property=\"belongs-to-collection\" id=\"series\">{}</meta>\n<meta refines=\"#series\" property=\"collection-type\">series</meta>\n",
-            esc(&m.series)
-        ));
-        if !m.series_index.is_empty() {
-            meta.push_str(&format!(
-                "<meta refines=\"#series\" property=\"group-position\">{}</meta>\n",
-                esc(&m.series_index)
-            ));
-        }
-        // What most reading apps read for series.
-        meta.push_str(&format!(
-            "<meta name=\"calibre:series\" content=\"{}\"/>\n",
-            esc_attr(&m.series)
-        ));
-        if !m.series_index.is_empty() {
-            meta.push_str(&format!(
-                "<meta name=\"calibre:series_index\" content=\"{}\"/>\n",
-                esc_attr(&m.series_index)
-            ));
-        }
+        meta.push_str(&series_meta(m));
     }
     let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
     meta.push_str(&format!(
@@ -203,7 +211,12 @@ pub fn opf(book: &Book, has_cover_page: bool) -> String {
     if book.fixed {
         meta.push_str("<meta property=\"rendition:layout\">pre-paginated</meta>\n<meta property=\"rendition:spread\">auto</meta>\n");
     }
+    meta
+}
 
+/// The package's `manifest`: the fixed files, the chapters and the
+/// resources.
+fn package_manifest(book: &Book, has_cover_page: bool) -> String {
     let mut items = String::new();
     items.push_str("<item id=\"nav\" href=\"nav.xhtml\" media-type=\"application/xhtml+xml\" properties=\"nav\"/>\n");
     items.push_str("<item id=\"ncx\" href=\"toc.ncx\" media-type=\"application/x-dtbncx+xml\"/>\n");
@@ -242,6 +255,28 @@ pub fn opf(book: &Book, has_cover_page: bool) -> String {
             esc_attr(&r.media)
         ));
     }
+    items
+}
+
+/// The package's `guide`: where the cover and the text are.
+fn package_guide(book: &Book, has_cover_page: bool) -> String {
+    let mut guide = String::new();
+    if has_cover_page {
+        guide.push_str("<reference type=\"cover\" title=\"Cover\" href=\"cover.xhtml\"/>\n");
+    }
+    if let Some(first) = book.chapters.first() {
+        guide.push_str(&format!(
+            "<reference type=\"text\" title=\"Text\" href=\"{}\"/>\n",
+            esc_attr(&first.name)
+        ));
+    }
+    guide
+}
+
+/// The package document.
+pub fn opf(book: &Book, has_cover_page: bool) -> String {
+    let meta = package_metadata(book);
+    let items = package_manifest(book, has_cover_page);
     let mut spine = String::new();
     if has_cover_page {
         spine.push_str("<itemref idref=\"coverpage\" linear=\"yes\"/>\n");
@@ -254,16 +289,7 @@ pub fn opf(book: &Book, has_cover_page: bool) -> String {
     } else {
         ""
     };
-    let mut guide = String::new();
-    if has_cover_page {
-        guide.push_str("<reference type=\"cover\" title=\"Cover\" href=\"cover.xhtml\"/>\n");
-    }
-    if let Some(first) = book.chapters.first() {
-        guide.push_str(&format!(
-            "<reference type=\"text\" title=\"Text\" href=\"{}\"/>\n",
-            esc_attr(&first.name)
-        ));
-    }
+    let guide = package_guide(book, has_cover_page);
     format!(
         "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\" unique-identifier=\"bookid\" xml:lang=\"{lang}\" prefix=\"rendition: http://www.idpf.org/vocab/rendition/#\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:opf=\"http://www.idpf.org/2007/opf\">\n{meta}</metadata>\n<manifest>\n{items}</manifest>\n<spine toc=\"ncx\"{dir}>\n{spine}</spine>\n<guide>\n{guide}</guide>\n</package>\n",
         lang = esc_attr(if book.meta.language.is_empty() {
