@@ -481,13 +481,9 @@ fn combining(c: char) -> Option<char> {
     })
 }
 
-/// A page's letters as chunks of lines.
-fn chunks_of(glyphs: &[Glyph]) -> Vec<Chunk> {
-    if glyphs.is_empty() {
-        return Vec::new();
-    }
+/// Lines: letters whose baselines are close, in the order of the page.
+fn lines_of(glyphs: &[Glyph]) -> Vec<Vec<&Glyph>> {
     let mut g: Vec<&Glyph> = glyphs.iter().collect();
-    // Lines: letters whose baselines are close.
     g.sort_by(|a, b| a.base.total_cmp(&b.base).then(a.x0.total_cmp(&b.x0)));
     let mut lines: Vec<Vec<&Glyph>> = Vec::new();
     for x in g {
@@ -496,21 +492,27 @@ fn chunks_of(glyphs: &[Glyph]) -> Vec<Chunk> {
             _ => lines.push(vec![x]),
         }
     }
-    let merged: Vec<(Vec<&Glyph>, Vec<&Glyph>)> =
-        lines.into_iter().map(|l| (l, Vec::new())).collect();
-    // A line of small letters lying within the upper part of
-    // the following line of bigger letters, overlapping it, is its marks.
+    lines
+}
+
+/// A line and the marks (small letters) that belong to it.
+type MarkedLine<'a> = (Vec<&'a Glyph>, Vec<&'a Glyph>);
+
+/// Lines with their marks joined: a line of small letters lying within the
+/// upper part of the following line of bigger letters, overlapping it, is
+/// its marks; or those of the line before (marks drawn after their line).
+fn join_marks(lines: Vec<Vec<&Glyph>>) -> Vec<MarkedLine<'_>> {
     let mut i = 0;
-    let mut out_lines: Vec<(Vec<&Glyph>, Vec<&Glyph>)> = Vec::new();
-    while i < merged.len() {
-        let (l, _) = &merged[i];
+    let mut out_lines: Vec<MarkedLine> = Vec::new();
+    while i < lines.len() {
+        let l = &lines[i];
         let size = median(l.iter().map(|x| x.size));
-        if i + 1 < merged.len() {
-            let (next, _) = &merged[i + 1];
+        if i + 1 < lines.len() {
+            let next = &lines[i + 1];
             let nsize = median(next.iter().map(|x| x.size));
             let lift = next[0].base - l[0].base;
             if size < nsize * 0.85 && lift > nsize * 0.15 && lift < nsize * 0.75 && l.len() <= 6 {
-                let mut n = merged[i + 1].0.clone();
+                let mut n = lines[i + 1].clone();
                 let sups = l.clone();
                 n.extend(sups.iter().copied());
                 out_lines.push((n, sups));
@@ -532,131 +534,137 @@ fn chunks_of(glyphs: &[Glyph]) -> Vec<Chunk> {
         out_lines.push((l.clone(), Vec::new()));
         i += 1;
     }
+    out_lines
+}
 
-    let mut out = Vec::new();
-    for (l, sups) in out_lines {
-        let sup_set: HashSet<*const Glyph> = sups.iter().map(|g| *g as *const Glyph).collect();
-        let mut l: Vec<(&Glyph, bool)> = l
-            .into_iter()
-            .map(|g| (g, sup_set.contains(&(g as *const Glyph))))
-            .collect();
-        l.sort_by(|a, b| a.0.x0.total_cmp(&b.0.x0));
-        // The same letter drawn twice in place (fake bold): once.
-        l.dedup_by(|b, a| {
-            a.0.text == b.0.text
-                && (a.0.x0 - b.0.x0).abs() < a.0.size * 0.08
-                && (a.0.base - b.0.base).abs() < 0.5
-        });
-        let line_size = median(l.iter().filter(|g| !g.1).map(|g| g.0.size));
-        let base = median(l.iter().filter(|g| !g.1).map(|g| g.0.base));
-        let mut cur: Option<Chunk> = None;
-        let mut prev_x1 = f32::MIN;
-        let mut word_gap = line_size * 0.2;
-        // The typical gap between words on this line (wide in justified
-        // text).
-        let line_gap = {
-            let mut gaps: Vec<f32> = l
-                .windows(2)
-                .map(|w| w[1].0.x0 - w[0].0.x1)
-                .filter(|g| *g > line_size * 0.1)
-                .collect();
-            gaps.sort_by(f32::total_cmp);
-            gaps.get(gaps.len() / 2).copied().unwrap_or(0.0)
-        };
-        {
-            let mut gaps: Vec<f32> = l
-                .windows(2)
-                .map(|w| w[1].0.x0 - w[0].0.x1)
-                .filter(|g| *g > line_size * 0.1)
-                .collect();
-            gaps.sort_by(f32::total_cmp);
-            if let Some(m) = gaps.get(gaps.len() / 2) {
-                word_gap = word_gap.max(m * 0.5).min(line_size * 0.4);
-            }
-        }
-        for (gl, is_sup) in l {
-            let gap = gl.x0 - prev_x1;
-            // A wide gap starts another chunk (another column, a tab).
-            // A wide gap starts another chunk (another column, a tab) —
-            // unless the line's words are all that far apart (justified
-            // text without hyphens), or a space was drawn there.
-            let spaced = cur
-                .as_ref()
-                .is_some_and(|c| c.runs.last().is_some_and(|r| r.text.ends_with(' ')));
-            let wide = gap > line_size.max(gl.size) * 1.6 && gap > line_gap * 2.5;
-            if cur.is_some() && wide && !is_sup && (!spaced || gap > line_size * 4.0) {
-                out.push(cur.take().expect("checked just above"));
-            }
-            let c = cur.get_or_insert_with(|| Chunk {
-                x0: gl.x0,
-                x1: gl.x1,
-                base,
-                size: line_size,
-                runs: Vec::new(),
-            });
-            let mut text = gl.text.clone();
-            // A spacing accent over the letter before it: combined.
-            if let Some(comb) = text
-                .chars()
-                .next()
-                .and_then(combining)
-                .filter(|_| text.chars().count() == 1)
-                && let Some(last) = c.runs.last_mut()
-                && gl.x0 < prev_x1 + gl.size * 0.05
-                && last
-                    .text
-                    .chars()
-                    .last()
-                    .is_some_and(|ch| ch.is_alphabetic())
-            {
-                last.text.push(comb);
-                last.text = last.text.nfc().collect();
-                prev_x1 = prev_x1.max(gl.x1);
-                c.x1 = c.x1.max(gl.x1);
-                continue;
-            }
-            let gap_needed = if is_sup { line_size * 0.35 } else { word_gap };
-            if gap > gap_needed && !c.runs.is_empty() && !text.starts_with(' ') {
-                let ends_space = c.runs.last().is_some_and(|r| r.text.ends_with(' '));
-                if !ends_space {
-                    text.insert(0, ' ');
-                }
-            }
-            let (bold, italic) = (gl.bold, gl.italic);
-            match c.runs.last_mut() {
-                Some(r) if r.bold == bold && r.italic == italic && r.sup == is_sup => {
-                    r.text.push_str(&text)
-                }
-                _ => {
-                    // A style change after a space: the space goes before.
-                    let (lead, rest) = match text.strip_prefix(' ') {
-                        Some(r) => (" ", r.to_string()),
-                        None => ("", text),
-                    };
-                    if !lead.is_empty()
-                        && let Some(r) = c.runs.last_mut()
-                    {
-                        r.text.push(' ');
-                    }
-                    c.runs.push(Run {
-                        text: rest,
-                        bold,
-                        italic,
-                        sup: is_sup,
-                        page: 0,
-                    });
-                }
-            }
-            prev_x1 = prev_x1.max(gl.x1);
-            c.x1 = c.x1.max(gl.x1);
-        }
-        if let Some(c) = cur {
-            out.push(c);
+/// Puts a letter on the chunk: after the runs so far, with a space when
+/// the gap before it is wide enough for one, or (a spacing accent over the
+/// letter before it) combined with that letter.
+fn add_glyph(
+    c: &mut Chunk,
+    gl: &Glyph,
+    is_sup: bool,
+    gap: f32,
+    gap_needed: f32,
+    prev_x1: &mut f32,
+) {
+    let mut text = gl.text.clone();
+    // A spacing accent over the letter before it: combined.
+    if let Some(comb) = text
+        .chars()
+        .next()
+        .and_then(combining)
+        .filter(|_| text.chars().count() == 1)
+        && let Some(last) = c.runs.last_mut()
+        && gl.x0 < *prev_x1 + gl.size * 0.05
+        && last
+            .text
+            .chars()
+            .last()
+            .is_some_and(|ch| ch.is_alphabetic())
+    {
+        last.text.push(comb);
+        last.text = last.text.nfc().collect();
+        *prev_x1 = prev_x1.max(gl.x1);
+        c.x1 = c.x1.max(gl.x1);
+        return;
+    }
+    if gap > gap_needed && !c.runs.is_empty() && !text.starts_with(' ') {
+        let ends_space = c.runs.last().is_some_and(|r| r.text.ends_with(' '));
+        if !ends_space {
+            text.insert(0, ' ');
         }
     }
-    // Spaces drawn as letters are kept once (a run's edges too: they part
-    // it from its neighbours).
-    for c in &mut out {
+    let (bold, italic) = (gl.bold, gl.italic);
+    match c.runs.last_mut() {
+        Some(r) if r.bold == bold && r.italic == italic && r.sup == is_sup => {
+            r.text.push_str(&text)
+        }
+        _ => {
+            // A style change after a space: the space goes before.
+            let (lead, rest) = match text.strip_prefix(' ') {
+                Some(r) => (" ", r.to_string()),
+                None => ("", text),
+            };
+            if !lead.is_empty()
+                && let Some(r) = c.runs.last_mut()
+            {
+                r.text.push(' ');
+            }
+            c.runs.push(Run {
+                text: rest,
+                bold,
+                italic,
+                sup: is_sup,
+                page: 0,
+            });
+        }
+    }
+    *prev_x1 = prev_x1.max(gl.x1);
+    c.x1 = c.x1.max(gl.x1);
+}
+
+/// The chunks of one line (its letters, `sups` of them marks).
+fn line_chunks(line: Vec<&Glyph>, sups: &[&Glyph], out: &mut Vec<Chunk>) {
+    let sup_set: HashSet<*const Glyph> = sups.iter().map(|g| *g as *const Glyph).collect();
+    let mut l: Vec<(&Glyph, bool)> = line
+        .into_iter()
+        .map(|g| (g, sup_set.contains(&(g as *const Glyph))))
+        .collect();
+    l.sort_by(|a, b| a.0.x0.total_cmp(&b.0.x0));
+    // The same letter drawn twice in place (fake bold): once.
+    l.dedup_by(|b, a| {
+        a.0.text == b.0.text
+            && (a.0.x0 - b.0.x0).abs() < a.0.size * 0.08
+            && (a.0.base - b.0.base).abs() < 0.5
+    });
+    let line_size = median(l.iter().filter(|g| !g.1).map(|g| g.0.size));
+    let base = median(l.iter().filter(|g| !g.1).map(|g| g.0.base));
+    let mut cur: Option<Chunk> = None;
+    let mut prev_x1 = f32::MIN;
+    let mut word_gap = line_size * 0.2;
+    // The typical gap between words on this line (wide in justified text).
+    let mut gaps: Vec<f32> = l
+        .windows(2)
+        .map(|w| w[1].0.x0 - w[0].0.x1)
+        .filter(|g| *g > line_size * 0.1)
+        .collect();
+    gaps.sort_by(f32::total_cmp);
+    let line_gap = gaps.get(gaps.len() / 2).copied().unwrap_or(0.0);
+    if let Some(m) = gaps.get(gaps.len() / 2) {
+        word_gap = word_gap.max(m * 0.5).min(line_size * 0.4);
+    }
+    for (gl, is_sup) in l {
+        let gap = gl.x0 - prev_x1;
+        // A wide gap starts another chunk (another column, a tab) — unless
+        // the line's words are all that far apart (justified text without
+        // hyphens), or a space was drawn there.
+        let spaced = cur
+            .as_ref()
+            .is_some_and(|c| c.runs.last().is_some_and(|r| r.text.ends_with(' ')));
+        let wide = gap > line_size.max(gl.size) * 1.6 && gap > line_gap * 2.5;
+        if cur.is_some() && wide && !is_sup && (!spaced || gap > line_size * 4.0) {
+            out.push(cur.take().expect("checked just above"));
+        }
+        let c = cur.get_or_insert_with(|| Chunk {
+            x0: gl.x0,
+            x1: gl.x1,
+            base,
+            size: line_size,
+            runs: Vec::new(),
+        });
+        let gap_needed = if is_sup { line_size * 0.35 } else { word_gap };
+        add_glyph(c, gl, is_sup, gap, gap_needed, &mut prev_x1);
+    }
+    if let Some(c) = cur {
+        out.push(c);
+    }
+}
+
+/// Spaces drawn as letters are kept once (a run's edges too: they part it
+/// from its neighbours).
+fn tidy_chunk_spaces(out: &mut [Chunk]) {
+    for c in out {
         for r in &mut c.runs {
             let mut t = String::with_capacity(r.text.len());
             for ch in r.text.chars() {
@@ -684,6 +692,18 @@ fn chunks_of(glyphs: &[Glyph]) -> Vec<Chunk> {
             l.text = l.text.trim_end().to_string();
         }
     }
+}
+
+/// A page's letters as chunks of lines.
+fn chunks_of(glyphs: &[Glyph]) -> Vec<Chunk> {
+    if glyphs.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for (line, sups) in join_marks(lines_of(glyphs)) {
+        line_chunks(line, &sups, &mut out);
+    }
+    tidy_chunk_spaces(&mut out);
     out.retain(|c| !c.text().trim().is_empty());
     out
 }
