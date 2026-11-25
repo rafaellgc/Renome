@@ -690,146 +690,157 @@ pub fn secrets() -> Result<(Map<String, Value>, bool), String> {
     }
 }
 
+/// A key by the name typed (its own or its field's, any case).
+fn find_key(name: &str) -> Result<&'static (&'static str, &'static str), String> {
+    let want = catalog::squash(name);
+    KEYS.iter()
+        .find(|(k, field)| catalog::squash(k) == want || catalog::squash(field) == want)
+        .ok_or_else(|| t("unknownKey", &[("name", &name)]))
+}
+
 pub fn keys(m: &ArgMatches) -> Result<Exit, String> {
-    let find = |name: &str| {
-        let want = catalog::squash(name);
-        KEYS.iter()
-            .find(|(k, field)| catalog::squash(k) == want || catalog::squash(field) == want)
-            .ok_or_else(|| t("unknownKey", &[("name", &name)]))
+    let key_arg = |s: &ArgMatches| {
+        find_key(
+            s.get_one::<String>("key")
+                .expect("required by the argument parser"),
+        )
     };
     match m.subcommand() {
         Some(("set", s)) => {
-            let (name, field) = find(
-                s.get_one::<String>("key")
-                    .expect("required by the argument parser"),
-            )?;
-            let value = if s.get_flag("stdin") {
-                let mut v = String::new();
-                std::io::Read::read_to_string(&mut std::io::stdin(), &mut v)
-                    .map_err(|e| e.to_string())?;
-                v.trim().to_string()
-            } else {
-                rpassword::prompt_password(t("keyPrompt", &[("name", name)]))
-                    .map_err(|e| e.to_string())?
-                    .trim()
-                    .to_string()
-            };
-            let (mut all, had_store) = secrets()?;
-            all.insert((*field).into(), Value::from(value));
-            let stored = renome_services::save_secrets(all)?;
-            out::note(&t(
-                match (stored, had_store) {
-                    (true, _) => "keyStored",
-                    // The store answered when read but refused the write
-                    // (macOS over SSH, a locked keychain).
-                    (false, true) => "keyStoreWouldNot",
-                    (false, false) => "keyInFile",
-                },
-                &[("name", name)],
-            ));
+            let (name, field) = key_arg(s)?;
+            set_key(name, field, s.get_flag("stdin"))?;
         }
-        Some(("test", s)) => {
-            let (name, _) = find(
-                s.get_one::<String>("key")
-                    .expect("required by the argument parser"),
-            )?;
-            let (all, _) = secrets()?;
-            let get = |f: &str| {
-                all.get(f)
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string()
-            };
-            let rt = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
-            let ok = rt.block_on(test_key(name, &get))?;
-            out::note(&out::green(&ok));
-        }
+        Some(("test", s)) => test_one_key(key_arg(s)?.0)?,
         Some(("delete", s)) => {
-            let (name, field) = find(
-                s.get_one::<String>("key")
-                    .expect("required by the argument parser"),
-            )?;
+            let (name, field) = key_arg(s)?;
             let (mut all, _) = secrets()?;
             all.insert((*field).into(), Value::from(""));
             renome_services::save_secrets(all)?;
             out::note(&t("keyDeleted", &[("name", name)]));
         }
-        _ => {
-            let (all, store) = secrets()?;
-            // Keys the store did not take stay in the settings file.
-            let in_file = renome_services::read_settings_file()
-                .and_then(|s| s.as_object().map(renome_services::secrets::of))
-                .unwrap_or_default();
-            let filled = |m: &Map<String, Value>, field: &str| {
-                m.get(field)
-                    .and_then(Value::as_str)
-                    .is_some_and(|v| !v.is_empty())
-            };
-            // (name, set, in the store)
-            let mut rows: Vec<(String, bool, bool)> = KEYS
-                .iter()
-                .map(|(name, field)| {
-                    (
-                        (*name).to_string(),
-                        filled(&all, field),
-                        store && !filled(&in_file, field),
-                    )
-                })
-                .collect();
-            // Each media server's key (kept together in `serverKeys`).
-            let server_keys: Map<String, Value> = all
-                .get("serverKeys")
-                .and_then(Value::as_str)
-                .and_then(|t| serde_json::from_str(t).ok())
-                .unwrap_or_default();
-            let servers = renome_services::read_settings_file()
-                .and_then(|s| s.get("servers")?.as_array().cloned())
-                .unwrap_or_default();
-            for srv in servers {
-                let id = srv.get("id").and_then(Value::as_str).unwrap_or_default();
-                let url = srv.get("url").and_then(Value::as_str).unwrap_or_default();
-                let set = server_keys
-                    .get(id)
-                    .and_then(Value::as_str)
-                    .is_some_and(|v| !v.trim().is_empty());
-                rows.push((
-                    format!("server {}", if url.is_empty() { id } else { url }),
-                    set,
-                    store && !filled(&in_file, "serverKeys"),
-                ));
-            }
-            let mut list = Vec::new();
-            for (name, set, in_store) in rows {
-                let where_ = t(
-                    if in_store {
-                        "keyWhereStore"
-                    } else {
-                        "keyWhereFile"
-                    },
-                    &[],
-                );
-                if out::json() {
-                    list.push(json!({ "name": name, "set": set, "store": set && in_store }));
-                } else if set {
-                    println!(
-                        "{:<24} {} {}",
-                        name,
-                        out::green(&t("keySetHere", &[])),
-                        out::dim(&where_)
-                    );
-                } else {
-                    println!("{:<24} {}", name, out::dim(&t("keyUnset", &[])));
-                }
-            }
-            if out::json() {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&list).unwrap_or_default()
-                );
-            }
-        }
+        _ => list_keys()?,
     }
     Ok(Exit::Done)
+}
+
+/// Keeps a key typed (or piped), and says where it went.
+fn set_key(name: &str, field: &str, stdin: bool) -> Result<(), String> {
+    let value = if stdin {
+        let mut v = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut v).map_err(|e| e.to_string())?;
+        v.trim().to_string()
+    } else {
+        rpassword::prompt_password(t("keyPrompt", &[("name", &name)]))
+            .map_err(|e| e.to_string())?
+            .trim()
+            .to_string()
+    };
+    let (mut all, had_store) = secrets()?;
+    all.insert(field.into(), Value::from(value));
+    let stored = renome_services::save_secrets(all)?;
+    out::note(&t(
+        match (stored, had_store) {
+            (true, _) => "keyStored",
+            // The store answered when read but refused the write (macOS
+            // over SSH, a locked keychain).
+            (false, true) => "keyStoreWouldNot",
+            (false, false) => "keyInFile",
+        },
+        &[("name", &name)],
+    ));
+    Ok(())
+}
+
+/// Asks the service whether the key works.
+fn test_one_key(name: &str) -> Result<(), String> {
+    let (all, _) = secrets()?;
+    let get = |f: &str| {
+        all.get(f)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    let rt = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
+    let ok = rt.block_on(test_key(name, &get))?;
+    out::note(&out::green(&ok));
+    Ok(())
+}
+
+/// Each key: set or not, and where it is kept (never its value).
+fn list_keys() -> Result<(), String> {
+    let (all, store) = secrets()?;
+    // Keys the store did not take stay in the settings file.
+    let in_file = renome_services::read_settings_file()
+        .and_then(|s| s.as_object().map(renome_services::secrets::of))
+        .unwrap_or_default();
+    let filled = |m: &Map<String, Value>, field: &str| {
+        m.get(field)
+            .and_then(Value::as_str)
+            .is_some_and(|v| !v.is_empty())
+    };
+    // (name, set, in the store)
+    let mut rows: Vec<(String, bool, bool)> = KEYS
+        .iter()
+        .map(|(name, field)| {
+            (
+                (*name).to_string(),
+                filled(&all, field),
+                store && !filled(&in_file, field),
+            )
+        })
+        .collect();
+    // Each media server's key (kept together in `serverKeys`).
+    let server_keys: Map<String, Value> = all
+        .get("serverKeys")
+        .and_then(Value::as_str)
+        .and_then(|t| serde_json::from_str(t).ok())
+        .unwrap_or_default();
+    let servers = renome_services::read_settings_file()
+        .and_then(|s| s.get("servers")?.as_array().cloned())
+        .unwrap_or_default();
+    for srv in servers {
+        let id = srv.get("id").and_then(Value::as_str).unwrap_or_default();
+        let url = srv.get("url").and_then(Value::as_str).unwrap_or_default();
+        let set = server_keys
+            .get(id)
+            .and_then(Value::as_str)
+            .is_some_and(|v| !v.trim().is_empty());
+        rows.push((
+            format!("server {}", if url.is_empty() { id } else { url }),
+            set,
+            store && !filled(&in_file, "serverKeys"),
+        ));
+    }
+    let mut list = Vec::new();
+    for (name, set, in_store) in rows {
+        let where_ = t(
+            if in_store {
+                "keyWhereStore"
+            } else {
+                "keyWhereFile"
+            },
+            &[],
+        );
+        if out::json() {
+            list.push(json!({ "name": name, "set": set, "store": set && in_store }));
+        } else if set {
+            println!(
+                "{:<24} {} {}",
+                name,
+                out::green(&t("keySetHere", &[])),
+                out::dim(&where_)
+            );
+        } else {
+            println!("{:<24} {}", name, out::dim(&t("keyUnset", &[])));
+        }
+    }
+    if out::json() {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&list).unwrap_or_default()
+        );
+    }
+    Ok(())
 }
 
 pub fn cache(m: &ArgMatches) -> Result<Exit, String> {
