@@ -196,6 +196,64 @@ fn fb2_write(bytes: &[u8], v: &BookValues) -> Result<Option<Vec<u8>>, String> {
         .children()
         .find(|n| n.has_tag_name("title-info"))
         .ok_or("bookUnreadable")?;
+    let ours = fb2_title_values(v);
+    const TITLE: &[&str] = &[
+        "genre",
+        "author",
+        "book-title",
+        "annotation",
+        "keywords",
+        "date",
+        "coverpage",
+        "lang",
+        "src-lang",
+        "translator",
+        "sequence",
+    ];
+    let new_title = rebuild(&text, title_info, TITLE, &ours, "      ");
+    let mut edits: Vec<(std::ops::Range<usize>, String)> = vec![(title_info.range(), new_title)];
+
+    let pub_ours = fb2_publish_values(v);
+    const PUBLISH: &[&str] = &["book-name", "publisher", "city", "year", "isbn", "sequence"];
+    match desc.children().find(|n| n.has_tag_name("publish-info")) {
+        Some(p) => edits.push((p.range(), rebuild(&text, p, PUBLISH, &pub_ours, "      "))),
+        None if !pub_ours.is_empty() => {
+            // After document-info (else title-info), as the schema wants.
+            let after = desc
+                .children()
+                .rfind(|n| n.has_tag_name("document-info") || n.has_tag_name("title-info"))
+                .unwrap_or(title_info);
+            let items: String = PUBLISH
+                .iter()
+                .filter_map(|k| pub_ours.get(k))
+                .flatten()
+                .map(|e| format!("\n      {e}"))
+                .collect();
+            let at = after.range().end;
+            edits.push((
+                at..at,
+                format!("\n    <publish-info>{items}\n    </publish-info>"),
+            ));
+        }
+        None => {}
+    }
+    let out = apply_edits(&text, edits);
+    // Checked before it replaces the book.
+    roxmltree::Document::parse_with_options(&out, opts()).map_err(|e| e.to_string())?;
+    if out == text {
+        return Ok(None);
+    }
+    let mut bytes_out = Vec::new();
+    if bytes.starts_with(b"\xEF\xBB\xBF") {
+        bytes_out.extend_from_slice(b"\xEF\xBB\xBF");
+    }
+    // Characters the old encoding lacks become numeric references.
+    bytes_out.extend_from_slice(&enc.encode(&out).0);
+    Ok(Some(bytes_out))
+}
+
+/// What goes in an FB2's `title-info` for these values, by element.
+fn fb2_title_values(v: &BookValues) -> HashMap<&'static str, Vec<String>> {
     let mut ours: HashMap<&str, Vec<String>> = HashMap::new();
     if !v.authors.is_empty() {
         ours.insert("author", v.authors.iter().map(|a| author_xml(a)).collect());
@@ -225,22 +283,11 @@ fn fb2_write(bytes: &[u8], v: &BookValues) -> Result<Option<Vec<u8>>, String> {
             vec![format!("<sequence name=\"{}\"{number}/>", esc(&v.series))],
         );
     }
-    const TITLE: &[&str] = &[
-        "genre",
-        "author",
-        "book-title",
-        "annotation",
-        "keywords",
-        "date",
-        "coverpage",
-        "lang",
-        "src-lang",
-        "translator",
-        "sequence",
-    ];
-    let new_title = rebuild(&text, title_info, TITLE, &ours, "      ");
-    let mut edits: Vec<(std::ops::Range<usize>, String)> = vec![(title_info.range(), new_title)];
+    ours
+}
 
+/// What goes in an FB2's `publish-info` for these values, by element.
+fn fb2_publish_values(v: &BookValues) -> HashMap<&'static str, Vec<String>> {
     let mut pub_ours: HashMap<&str, Vec<String>> = HashMap::new();
     if !v.publisher.is_empty() {
         pub_ours.insert(
@@ -254,50 +301,7 @@ fn fb2_write(bytes: &[u8], v: &BookValues) -> Result<Option<Vec<u8>>, String> {
     if !v.isbn.is_empty() {
         pub_ours.insert("isbn", vec![format!("<isbn>{}</isbn>", esc(&v.isbn))]);
     }
-    const PUBLISH: &[&str] = &["book-name", "publisher", "city", "year", "isbn", "sequence"];
-    match desc.children().find(|n| n.has_tag_name("publish-info")) {
-        Some(p) => edits.push((p.range(), rebuild(&text, p, PUBLISH, &pub_ours, "      "))),
-        None if !pub_ours.is_empty() => {
-            // After document-info (else title-info), as the schema wants.
-            let after = desc
-                .children()
-                .rfind(|n| n.has_tag_name("document-info") || n.has_tag_name("title-info"))
-                .unwrap_or(title_info);
-            let items: String = PUBLISH
-                .iter()
-                .filter_map(|k| pub_ours.get(k))
-                .flatten()
-                .map(|e| format!("\n      {e}"))
-                .collect();
-            let at = after.range().end;
-            edits.push((
-                at..at,
-                format!("\n    <publish-info>{items}\n    </publish-info>"),
-            ));
-        }
-        None => {}
-    }
-    edits.sort_by_key(|e| e.0.start);
-    let mut out = String::with_capacity(text.len() + 1024);
-    let mut at = 0;
-    for (r, s) in &edits {
-        out.push_str(&text[at..r.start]);
-        out.push_str(s);
-        at = r.end;
-    }
-    out.push_str(&text[at..]);
-    // Checked before it replaces the book.
-    roxmltree::Document::parse_with_options(&out, opts()).map_err(|e| e.to_string())?;
-    if out == text {
-        return Ok(None);
-    }
-    let mut bytes_out = Vec::new();
-    if bytes.starts_with(b"\xEF\xBB\xBF") {
-        bytes_out.extend_from_slice(b"\xEF\xBB\xBF");
-    }
-    // Characters the old encoding lacks become numeric references.
-    bytes_out.extend_from_slice(&enc.encode(&out).0);
-    Ok(Some(bytes_out))
+    pub_ours
 }
 
 // --------------------------------------------------------------- Kindle
