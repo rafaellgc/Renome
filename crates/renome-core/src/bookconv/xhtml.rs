@@ -1718,4 +1718,176 @@ mod tests {
             "<div><img src=\"cover.jpg\" alt=\"\"/></div>"
         );
     }
+
+    /// What `write` makes of markup written every way books have it. A
+    /// change here is a change in the books people get: update these only
+    /// when that is the point, never for a refactor.
+    #[test]
+    fn write_does_not_change() {
+        let cases: Vec<&str> = vec![
+            "<p>Plain <b>bold</b> and <i>italic</i>.</p>",
+            "<p class=\"x y\" id=\"a1\" lang=\"pt\" title=\"T\">Attributes</p>",
+            "<p id=\"bad id\" class=\"  \" xml:lang=\"en\" lang=\"fr\">Bad id</p>",
+            "<div dir=\"rtl\" epub:type=\"chapter\">Direction</div><div dir=\"up\">no</div>",
+            "<center>Centered</center>",
+            "<font size=\"5\" color=\"red\">Big</font> <font size=\"-2\">small</font> <font size=\"9\">x</font>",
+            "<big>Bigger</big> <strike>gone</strike> <tt>code</tt>",
+            "<listing>raw\n text</listing><xmp>x</xmp><plaintext>y</plaintext>",
+            "<pre>  keep\n    this</pre>",
+            "<mbp:pagebreak/><p>After break</p>",
+            "<epub:switch><p>In switch</p></epub:switch>",
+            "<p align=\"center\">Aligned</p><p align=\"JUSTIFY\">J</p><img src=\"a.png\" align=\"left\"/>",
+            "<p style=\"text-align: right; color: red; margin-left: 2em\">Styled</p>",
+            "<p style=\"background: url(x.png); width: 3px\">Bad style</p>",
+            "<p width=\"2em\">One</p><p width=\"-3em\">Two</p><p width=\"20\">Three</p><p width=\"0\">Four</p>",
+            "<p height=\"1em\">One</p><p height=\"10\">Two</p><p height=\"-1em\">Three</p>",
+            "<img src=\"pic.jpg\" alt=\"A\" width=\"50%\"/><hr width=\"40%\"/><hr width=\"3\"/>",
+            "<img src=\"pic.jpg\"/>",
+            "<img alt=\"no src\"/>",
+            "<img recindex=\"00012\"/>",
+            "<img xlink:href=\"z.png\" alt=\"\"/>",
+            "<svg><image xlink:href=\"cover.jpg\"/></svg>",
+            "<svg><image href=\"cover.jpg\"/><image xlink:href=\"two.jpg\"/></svg>",
+            "<image href=\"i.png\"/>",
+            "<a href=\"ch2.xhtml#x\">Link</a> <a href=\"x://none\">dropped link</a> <a filepos=\"123\">pos</a>",
+            "<a id=\"t\">Anchor only</a>",
+            "<ol start=\"3\" type=\"a\"><li value=\"7\">Seven</li><li>Next</li></ol><ol type=\"z\" start=\"x\"><li value=\"y\">q</li></ol>",
+            "<table><tr><td colspan=\"2\" rowspan=\"x\">Cell</td><th rowspan=\"3\">Head</th></tr></table>",
+            "<span>Empty span</span> <span class=\"k\">Classed span</span>",
+            "<span style=\"font-weight: bold\">Style span</span>",
+            "<p hidden=\"\">Hidden</p><p>Shown</p>",
+            "<nav epub:type=\"landmarks\"><ol><li>L</li></ol></nav><nav epub:type=\"toc\"><ol><li>T</li></ol></nav>",
+            "<nav epub:type=\"page-list\"><ol><li>P</li></ol></nav>",
+            "<script>alert(1)</script><style>p{}</style><p>After scripts</p>",
+            "<unknown-tag>Unknown <b>kept?</b></unknown-tag>",
+            "<br/>line<br>break<hr/>",
+            "<blockquote><p>Quote</p></blockquote><h2>Head</h2><h6>Six</h6>",
+            "<div><p>Nested <span class=\"a\"><em>deep <strong>very</strong></em></span></p></div>",
+            "<p>Entities &amp; &lt;tags&gt; &nbsp; &copy; é</p>",
+            "<sup>1</sup><sub>2</sub><u>u</u><s>s</s><del>d</del><ins>i</ins><code>c</code>",
+            "<p lang=\"\" xml:lang=\"\">Empty lang</p>",
+            "<p title=\"\" class=\"c\">Empty title</p>",
+            "<td>stray</td>",
+        ];
+        for classes in [true, false] {
+            let href = |h: &str, pic: bool| -> Option<String> {
+                if h.starts_with("x:") {
+                    None
+                } else if pic {
+                    Some(format!("pics/{h}"))
+                } else {
+                    Some(format!("links/{h}"))
+                }
+            };
+            let out = Out {
+                href: &href,
+                classes,
+            };
+            let got: Vec<u64> = cases
+                .iter()
+                .map(|c| {
+                    let mut s = String::new();
+                    write(&parse(c), &out, &mut s);
+                    if std::env::var_os("GOLDEN_SHOW").is_some() {
+                        eprintln!("#### {c}\n{s}");
+                    }
+                    xxhash_rust::xxh3::xxh3_64(s.as_bytes())
+                })
+                .collect();
+            let want: Vec<u64> = if classes {
+                vec![
+                    17483370891107955278,
+                    7557170117276232546,
+                    4160813766585710069,
+                    18217161662152828716,
+                    2940018704441057986,
+                    6833043317650773449,
+                    10922422599337892297,
+                    4984844700150092697,
+                    16887207702497733736,
+                    2187974244695306490,
+                    11026395670678752869,
+                    3773734283588175898,
+                    16456238172557052665,
+                    574192452661638487,
+                    7498360980605819262,
+                    16324210871644604241,
+                    1800042340857420513,
+                    1047667167316793642,
+                    3244421341483603138,
+                    14350202688216726633,
+                    5373508618242821477,
+                    12219512656879123448,
+                    15736320563021706821,
+                    11009718310064616408,
+                    2222308270184125451,
+                    8411843136634443542,
+                    12408168015752537447,
+                    8819121552427555991,
+                    4551678836730901769,
+                    7094513520027109003,
+                    18180102747803124041,
+                    6619022336191835425,
+                    3244421341483603138,
+                    13569127866808877792,
+                    6503380749890349598,
+                    2162414815500297053,
+                    13098113307758224728,
+                    3506504209203123018,
+                    2925199526121634324,
+                    10336720360739556536,
+                    13996180852470027117,
+                    18307805055009670553,
+                    12476896128035230139,
+                ]
+            } else {
+                vec![
+                    17483370891107955278,
+                    16412423439599861117,
+                    4160813766585710069,
+                    18217161662152828716,
+                    2940018704441057986,
+                    6833043317650773449,
+                    10922422599337892297,
+                    4984844700150092697,
+                    16887207702497733736,
+                    2187974244695306490,
+                    11026395670678752869,
+                    3773734283588175898,
+                    16456238172557052665,
+                    574192452661638487,
+                    7498360980605819262,
+                    16324210871644604241,
+                    1800042340857420513,
+                    1047667167316793642,
+                    3244421341483603138,
+                    14350202688216726633,
+                    5373508618242821477,
+                    12219512656879123448,
+                    15736320563021706821,
+                    11009718310064616408,
+                    2222308270184125451,
+                    8411843136634443542,
+                    12408168015752537447,
+                    8819121552427555991,
+                    12066025029079455620,
+                    7094513520027109003,
+                    18180102747803124041,
+                    6619022336191835425,
+                    3244421341483603138,
+                    13569127866808877792,
+                    6503380749890349598,
+                    2162414815500297053,
+                    13098113307758224728,
+                    11432340067170070050,
+                    2925199526121634324,
+                    10336720360739556536,
+                    13996180852470027117,
+                    7897229931957115069,
+                    12476896128035230139,
+                ]
+            };
+            assert_eq!(got, want, "classes {classes}");
+        }
+    }
 }
