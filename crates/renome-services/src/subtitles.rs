@@ -357,6 +357,39 @@ fn subdl_status(code: u16, body: &str) -> String {
 
 impl Subdl {
     async fn search(&self, item: &Item, langs: &[Lang]) -> Result<Vec<Candidate>, String> {
+        let (code, text) = self.ask(&self.query(item, langs)).await?;
+        if code != 200 {
+            return Err(subdl_status(code, &text));
+        }
+        let v: Value = serde_json::from_str(&text).map_err(|e| format!("subdlNetwork: {e}"))?;
+        if v["status"] == false || v["success"] == false {
+            let msg = v["error"]
+                .as_str()
+                .or(v["message"].as_str())
+                .unwrap_or_default()
+                .to_lowercase();
+            // Nothing for it: not an error.
+            if msg.contains("find") || msg.contains("not found") || msg.is_empty() {
+                return Ok(Vec::new());
+            }
+            return Err(subdl_status(200, &text));
+        }
+        let video = item
+            .path
+            .file_stem()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        Ok(v["subtitles"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|s| Self::candidate(s, item, langs, &video))
+            .collect())
+    }
+
+    /// What is asked: the title's TMDB id, the languages and, for an
+    /// episode, its season and number.
+    fn query(&self, item: &Item, langs: &[Lang]) -> Vec<(&'static str, String)> {
         let codes: Vec<&str> = langs.iter().map(|l| l.subdl.as_str()).collect();
         let mut q: Vec<(&str, String)> = vec![
             ("api_key", self.key.trim().to_string()),
@@ -374,12 +407,17 @@ impl Subdl {
             }
             _ => q.push(("type", "movie".into())),
         }
-        let mut res = None;
+        q
+    }
+
+    /// The answer's status and text; a busy service is asked again, up to
+    /// twice, unless it says the limit is reached.
+    async fn ask(&self, q: &[(&str, String)]) -> Result<(u16, String), String> {
         for attempt in 0..3u64 {
             let r = self
                 .http
                 .get(format!("{}/subtitles", subdl_api()))
-                .query(&q)
+                .query(q)
                 .send()
                 .await
                 .map_err(|e| net_error("subdl", e))?;
@@ -389,90 +427,65 @@ impl Subdl {
                 tokio::time::sleep(Duration::from_secs(5 * (attempt + 1))).await;
                 continue;
             }
-            res = Some((code, text));
-            break;
+            return Ok((code, text));
         }
-        let (code, text) = res.ok_or("subdlBusy")?;
-        if code != 200 {
-            return Err(subdl_status(code, &text));
+        Err("subdlBusy".into())
+    }
+
+    /// One subtitle of the answer, when it is in a language asked for and
+    /// (for an episode) is its own.
+    fn candidate(s: &Value, item: &Item, langs: &[Lang], video: &str) -> Option<Candidate> {
+        let code = s["language"].as_str().unwrap_or_default();
+        let lang = langs.iter().find(|l| l.subdl.eq_ignore_ascii_case(code))?;
+        let url = s["url"].as_str().filter(|u| u.starts_with('/'))?;
+        if let (Some(se), Some(ep)) = (item.season, item.episode)
+            && (s["season"].as_u64().is_some_and(|x| x != u64::from(se))
+                || (s["full_season"] != true
+                    && s["episode"].as_u64().is_some_and(|x| x != u64::from(ep))))
+        {
+            return None;
         }
-        let v: Value = serde_json::from_str(&text).map_err(|e| format!("subdlNetwork: {e}"))?;
-        if v["status"] == false || v["success"] == false {
-            let msg = v["error"]
+        // It can be for several releases: the one nearest the video's.
+        let mut releases: Vec<&str> = s["releases"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .flat_map(|r| r.split(';'))
+            .map(str::trim)
+            .filter(|r| !r.is_empty())
+            .collect();
+        if releases.is_empty() {
+            releases.extend(s["release_name"].as_str().or(s["name"].as_str()));
+        }
+        let fit = |r: &str| {
+            subs::score(
+                video,
+                &Candidate {
+                    release: r.to_string(),
+                    ..Candidate::default()
+                },
+            )
+        };
+        let release = releases
+            .iter()
+            .copied()
+            .max_by(|a, b| fit(a).total_cmp(&fit(b)))
+            .unwrap_or_default();
+        Some(Candidate {
+            source: Source::Subdl,
+            id: url.to_string(),
+            lang: lang.tag.clone(),
+            release: release.to_string(),
+            downloads: 0,
+            exact: false,
+            hearing_impaired: s["hi"].as_bool().unwrap_or(false),
+            trusted: false,
+            url: s["subtitlePage"]
                 .as_str()
-                .or(v["message"].as_str())
-                .unwrap_or_default()
-                .to_lowercase();
-            // Nothing for it: not an error.
-            if msg.contains("find") || msg.contains("not found") || msg.is_empty() {
-                return Ok(Vec::new());
-            }
-            return Err(subdl_status(200, &text));
-        }
-        let mut out = Vec::new();
-        for s in v["subtitles"].as_array().into_iter().flatten() {
-            let code = s["language"].as_str().unwrap_or_default();
-            let Some(lang) = langs.iter().find(|l| l.subdl.eq_ignore_ascii_case(code)) else {
-                continue;
-            };
-            let Some(url) = s["url"].as_str().filter(|u| u.starts_with('/')) else {
-                continue;
-            };
-            if let (Some(se), Some(ep)) = (item.season, item.episode)
-                && (s["season"].as_u64().is_some_and(|x| x != u64::from(se))
-                    || (s["full_season"] != true
-                        && s["episode"].as_u64().is_some_and(|x| x != u64::from(ep))))
-            {
-                continue;
-            }
-            // It can be for several releases: the one nearest the video's.
-            let mut releases: Vec<&str> = s["releases"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(Value::as_str)
-                .flat_map(|r| r.split(';'))
-                .map(str::trim)
-                .filter(|r| !r.is_empty())
-                .collect();
-            if releases.is_empty() {
-                releases.extend(s["release_name"].as_str().or(s["name"].as_str()));
-            }
-            let video = item
-                .path
-                .file_stem()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let fit = |r: &str| {
-                subs::score(
-                    &video,
-                    &Candidate {
-                        release: r.to_string(),
-                        ..Candidate::default()
-                    },
-                )
-            };
-            let release = releases
-                .iter()
-                .copied()
-                .max_by(|a, b| fit(a).total_cmp(&fit(b)))
-                .unwrap_or_default();
-            out.push(Candidate {
-                source: Source::Subdl,
-                id: url.to_string(),
-                lang: lang.tag.clone(),
-                release: release.to_string(),
-                downloads: 0,
-                exact: false,
-                hearing_impaired: s["hi"].as_bool().unwrap_or(false),
-                trusted: false,
-                url: s["subtitlePage"]
-                    .as_str()
-                    .map(|p| format!("https://subdl.com{p}"))
-                    .unwrap_or_default(),
-            });
-        }
-        Ok(out)
+                .map(|p| format!("https://subdl.com{p}"))
+                .unwrap_or_default(),
+        })
     }
 
     async fn download(&self, c: &Candidate) -> Result<Vec<u8>, String> {
