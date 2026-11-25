@@ -2720,4 +2720,46 @@ mod tests {
         ];
         assert_eq!(got, want);
     }
+
+    /// What `parse_metron` reads from MetronInfo files written every way
+    /// they come. A change here is a change in how people's comics are
+    /// read: update these only when that is the point, never for a refactor.
+    #[test]
+    fn parse_metron_does_not_change() {
+        let full = "<?xml version=\"1.0\"?><MetronInfo><IDS><ID source=\"Metron\">9</ID><ID source=\"Comic Vine\">12345</ID></IDS><Publisher><Name>Editora Aurora</Name><Imprint>Selo</Imprint></Publisher><Series lang=\"pt\"><Name>Aurora</Name><Volume>2</Volume><IssueCount>6</IssueCount><Format>Limited</Format></Series><CollectionTitle>Coletânea</CollectionTitle><Number>12</Number><AlternativeNumber>12A</AlternativeNumber><Stories><Story>Primeira</Story><Story>Segunda</Story></Stories><CoverDate>2019-05-01</CoverDate><PageCount>32</PageCount><AgeRating>Teen</AgeRating><Genres><Genre>Aventura</Genre><Genre>Drama</Genre></Genres><Arcs><Arc><Name>Arco Um</Name></Arc><Arc>Arco Dois</Arc></Arcs><GTIN><ISBN>9780306406157</ISBN></GTIN><Credits><Credit><Creator>Ana Escritora</Creator><Roles><Role>Writer</Role><Role>Plot</Role></Roles></Credit><Credit><Creator>Bia Lápis</Creator><Roles><Role>Artist</Role><Role>Inker</Role><Role>Cover</Role></Roles></Credit><Credit><Creator>Cris Cor</Creator><Roles><Role>Colorist</Role></Roles></Credit><Credit><Creator>Dani Letra</Creator><Roles><Role>Letterer</Role><Role>Editor</Role></Roles></Credit><Credit><Creator>Edu Tradução</Creator><Roles><Role>Translator</Role></Roles></Credit><Credit><Creator></Creator><Roles><Role>Writer</Role></Roles></Credit><Credit><Creator>Ana Escritora</Creator><Roles><Role>Script</Role></Roles></Credit></Credits></MetronInfo>";
+        let minimal = "<MetronInfo><Series><Name>Só Nome</Name></Series></MetronInfo>";
+        let unknowns = "\u{feff}<metroninfo><series><name> Aurora  Dois </name><issuecount>0</issuecount></series><number>3</number><pagecount>0</pagecount><agerating>Unknown</agerating><gtin><upc>012345678905</upc></gtin><coverdate>abcd</coverdate><ids><id source=\"comic vine\">12x</id></ids></metroninfo>";
+        let no_title = "<MetronInfo><Number>7</Number><CollectionTitle>Só coleção</CollectionTitle></MetronInfo>";
+        let cases: Vec<(&str, &str)> = vec![
+            ("full", full),
+            ("minimal", minimal),
+            ("unknowns", unknowns),
+            ("no title", no_title),
+            ("empty root", "<MetronInfo/>"),
+            ("other root", "<ComicInfo><Series>X</Series></ComicInfo>"),
+            ("not xml", "not xml at all"),
+            ("empty", ""),
+        ];
+        let got: Vec<u64> = cases
+            .iter()
+            .map(|(n, x)| {
+                let out = format!("{:?}", parse_metron(x));
+                if std::env::var_os("GOLDEN_SHOW").is_some() {
+                    eprintln!("#### {n}\n{out}");
+                }
+                xxhash_rust::xxh3::xxh3_64(out.as_bytes())
+            })
+            .collect();
+        let want: Vec<u64> = vec![
+            15331945936071825230,
+            8347040895344462428,
+            10587627834635537444,
+            2998095660270242754,
+            8169143652509480441,
+            8169143652509480441,
+            8169143652509480441,
+            8169143652509480441,
+        ];
+        assert_eq!(got, want);
+    }
 }
