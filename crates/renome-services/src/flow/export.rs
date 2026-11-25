@@ -116,22 +116,7 @@ pub fn missing(list: &[Missing], dir_of: &dyn Fn(&Path) -> Option<PathBuf>) -> M
     groups.sort_unstable();
     groups.dedup();
     let one = (kinds.len() == 1).then(|| kinds[0]);
-    let name_key = match one {
-        Some("episode") => "defaultMissingName",
-        Some("issue") => "defaultMissingIssuesName",
-        Some("track") => "defaultMissingTracksName",
-        Some("movie") => "defaultMissingMoviesName",
-        Some("book") => "defaultMissingBooksName",
-        _ => "defaultMissingItemsName",
-    };
-    let group = (groups.len() == 1).then(|| {
-        groups[0]
-            .chars()
-            .map(|c| if "\\/:*?\"<>|".contains(c) { ' ' } else { c })
-            .collect::<String>()
-            .trim()
-            .to_string()
-    });
+    let group = (groups.len() == 1).then(|| safe_name(groups[0]));
     let mut sorted: Vec<&Missing> = list.iter().collect();
     sorted.sort_by(|a, b| {
         a.group
@@ -140,7 +125,47 @@ pub fn missing(list: &[Missing], dir_of: &dyn Fn(&Path) -> Option<PathBuf>) -> M
             .then(a.season.cmp(&b.season))
             .then(a.number.cmp(&b.number))
     });
-    let (head, row): (Vec<&str>, Row) = match one {
+    let (head, row) = columns(one);
+    let mut rows = vec![head.into_iter().map(key).collect::<Vec<_>>()];
+    rows.extend(
+        sorted
+            .iter()
+            .map(|m| row(m).into_iter().map(Cell::Text).collect()),
+    );
+    MissingCsv {
+        dir: shared_folder(list.iter().filter_map(|m| dir_of(&m.anchor))),
+        group,
+        name_key: name_key(one),
+        rows,
+    }
+}
+
+/// The key of the file's name for the one kind of what is missing (or
+/// for a mix).
+fn name_key(one: Option<&str>) -> &'static str {
+    match one {
+        Some("episode") => "defaultMissingName",
+        Some("issue") => "defaultMissingIssuesName",
+        Some("track") => "defaultMissingTracksName",
+        Some("movie") => "defaultMissingMoviesName",
+        Some("book") => "defaultMissingBooksName",
+        _ => "defaultMissingItemsName",
+    }
+}
+
+/// A group's name as a part of a file name.
+fn safe_name(group: &str) -> String {
+    group
+        .chars()
+        .map(|c| if "\\/:*?\"<>|".contains(c) { ' ' } else { c })
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+/// A kind's columns (the keys of their titles) and how it makes a row.
+fn columns(one: Option<&str>) -> (Vec<&'static str>, Row) {
+    match one {
         Some("episode") => (
             vec![
                 "csv.show",
@@ -201,18 +226,6 @@ pub fn missing(list: &[Missing], dir_of: &dyn Fn(&Path) -> Option<PathBuf>) -> M
                 ]
             },
         ),
-    };
-    let mut rows = vec![head.into_iter().map(key).collect::<Vec<_>>()];
-    rows.extend(
-        sorted
-            .iter()
-            .map(|m| row(m).into_iter().map(Cell::Text).collect()),
-    );
-    MissingCsv {
-        dir: shared_folder(list.iter().filter_map(|m| dir_of(&m.anchor))),
-        group,
-        name_key,
-        rows,
     }
 }
 
