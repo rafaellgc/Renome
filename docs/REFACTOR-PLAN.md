@@ -32,3 +32,20 @@ window and `renome-cli` only call it. One commit per step; fmt, clippy
 11. **Documents** — SECURITY.md, CONTRIBUTING.md, CHANGELOG.md, ARCHITECTURE.md.
 12. **Verification** — full Linux run (tests + AppImage in Xvfb), Windows VM,
     macOS VM; fix what they find; push (no release, no tag, no version bump).
+
+## Status (2026-11-25)
+
+| Step | State |
+|---|---|
+| 1 Dependencies | Done: two advisories fixed, `cargo deny` is clean and runs in CI. |
+| 2 Window hardening | Done: CSP set and checked on Linux. Capabilities were already minimal. |
+| 3 Lint policy | Done: `unwrap_used`, `dbg_macro`, `todo`, `unimplemented` denied workspace-wide. |
+| 4 Unwrap triage | Done: every production `unwrap()` handled or turned into `expect("why")`. |
+| 5 Indexing and casts | Partly: the damaged-file test found and fixed the only crash (`videotags::read_at`). The ~930 `indexing_slicing` and ~330 cast sites that the pedantic lints list were not rewritten one by one: the robustness test is what guards them. |
+| 6 Robustness tests | Done: `crates/renome-core/tests/robustness.rs` (runs on Linux and Windows). |
+| 7 Archive safety | Done for the one network-fed archive path (subtitle zips: size cap + test). Comic/book archives are read from the user's own disk. |
+| 8 Split giant code | Done for the window (`lib.rs` 2,490 → 449 lines + 6 modules). **Not done:** the 92 functions over 100 lines in the crates (top: `azw3_out::build` 572, `pdf_in::read` 438, `flow/comics.rs` 315, `mobi` 313, `inside::book_opf` 312). They are covered by the tests but should be split next, one commit each, with the byte-for-byte outputs compared. |
+| 9 Performance | Done: baseline in `docs/PERFORMANCE.md`. No optimisation was needed. |
+| 10 CI | Done: doc build, machete, coverage floor (70%), bench compile. |
+| 11 Documents | Done: SECURITY, CONTRIBUTING, CHANGELOG. `ARCHITECTURE.md` is covered by the layout table in CONTRIBUTING. |
+| 12 Verification | Linux: tests, AppImage, window smoke (rename, undo, online lookup). Windows: core + Windows-specific tests and the real `renome-cli.exe` over SSH; the **window was not exercised** (the VM sat at the sign-in screen). macOS: see the commit log / final report. |
