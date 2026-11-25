@@ -186,54 +186,9 @@ fn mobi6(r: &Records, p: &crate::pages::Part, book: &mut Book) -> Result<(), Str
     let head = r.read(p.at, 64 << 10).unwrap_or_default();
     let utf8 = be32(&head, 0x1c) == Some(65001);
     // Places links point at, by byte: marked so the links can find them.
-    let mut targets: Vec<usize> = Vec::new();
-    {
-        let s = &raw;
-        let mut i = 0;
-        while let Some(at) = find(&s[i..], b"filepos=") {
-            let mut j = i + at + 8;
-            while j < s.len() && (s[j] == b'"' || s[j] == b'\'') {
-                j += 1;
-            }
-            let start = j;
-            while j < s.len() && s[j].is_ascii_digit() {
-                j += 1;
-            }
-            if let Ok(n) = std::str::from_utf8(&s[start..j])
-                .unwrap_or("")
-                .parse::<usize>()
-            {
-                targets.push(n);
-            }
-            i = j.max(i + at + 8);
-        }
-    }
+    let mut targets = filepos_targets(&raw);
     // The book's own table of contents: names and places.
-    let mut toc_flat: Vec<(usize, String, usize)> = Vec::new();
-    if let Some(i) = be32(&head, 0xF4).filter(|v| *v != u32::MAX)
-        && let Some(ncx) = read_index(r, i as usize)
-    {
-        for (_, t) in &ncx.entries {
-            let (Some(pos), Some(label)) = (
-                t.get(&1).and_then(|v| v.first()).copied(),
-                t.get(&3)
-                    .and_then(|v| v.first())
-                    .and_then(|o| ncx.strings.get(o))
-                    .cloned(),
-            ) else {
-                continue;
-            };
-            let depth = t.get(&4).and_then(|v| v.first()).copied().unwrap_or(0) as usize;
-            if !label.trim().is_empty() {
-                targets.push(pos as usize);
-                toc_flat.push((
-                    depth,
-                    crate::text::collapse_spaces(label.trim()),
-                    pos as usize,
-                ));
-            }
-        }
-    }
+    let toc_flat = old_toc(r, &head, &mut targets);
     // Chapters start where the table of contents' top entries are.
     let top = toc_flat.iter().map(|(d, _, _)| *d).min();
     let starts: std::collections::HashSet<usize> = toc_flat
@@ -243,21 +198,7 @@ fn mobi6(r: &Records, p: &crate::pages::Part, book: &mut Book) -> Result<(), Str
         .collect();
     targets.sort_unstable();
     targets.dedup();
-    for t in targets.iter().rev() {
-        let mut at = (*t).min(raw.len());
-        // Not inside a tag: before it.
-        if let Some(lt) = raw[..at].iter().rposition(|b| *b == b'<')
-            && !raw[lt..at].contains(&b'>')
-        {
-            at = lt;
-        }
-        let mark = if starts.contains(t) {
-            format!("<mbp:pagebreak/><a id=\"filepos{t}\"></a>")
-        } else {
-            format!("<a id=\"filepos{t}\"></a>")
-        };
-        raw.splice(at..at, mark.into_bytes());
-    }
+    mark_targets(&mut raw, &targets, &starts);
     let text = if utf8 {
         String::from_utf8_lossy(&raw).into_owned()
     } else {
@@ -303,6 +244,81 @@ fn mobi6(r: &Records, p: &crate::pages::Part, book: &mut Book) -> Result<(), Str
         );
     }
     Ok(())
+}
+
+/// The byte places the links of the text (`filepos=`) point at.
+fn filepos_targets(s: &[u8]) -> Vec<usize> {
+    let mut targets = Vec::new();
+    let mut i = 0;
+    while let Some(at) = find(&s[i..], b"filepos=") {
+        let mut j = i + at + 8;
+        while j < s.len() && (s[j] == b'"' || s[j] == b'\'') {
+            j += 1;
+        }
+        let start = j;
+        while j < s.len() && s[j].is_ascii_digit() {
+            j += 1;
+        }
+        if let Ok(n) = std::str::from_utf8(&s[start..j])
+            .unwrap_or("")
+            .parse::<usize>()
+        {
+            targets.push(n);
+        }
+        i = j.max(i + at + 8);
+    }
+    targets
+}
+
+/// The table of contents the book's index holds: (depth, title, place).
+/// Each place is also a target for links.
+fn old_toc(r: &Records, head: &[u8], targets: &mut Vec<usize>) -> Vec<(usize, String, usize)> {
+    let mut toc_flat: Vec<(usize, String, usize)> = Vec::new();
+    if let Some(i) = be32(head, 0xF4).filter(|v| *v != u32::MAX)
+        && let Some(ncx) = read_index(r, i as usize)
+    {
+        for (_, t) in &ncx.entries {
+            let (Some(pos), Some(label)) = (
+                t.get(&1).and_then(|v| v.first()).copied(),
+                t.get(&3)
+                    .and_then(|v| v.first())
+                    .and_then(|o| ncx.strings.get(o))
+                    .cloned(),
+            ) else {
+                continue;
+            };
+            let depth = t.get(&4).and_then(|v| v.first()).copied().unwrap_or(0) as usize;
+            if !label.trim().is_empty() {
+                targets.push(pos as usize);
+                toc_flat.push((
+                    depth,
+                    crate::text::collapse_spaces(label.trim()),
+                    pos as usize,
+                ));
+            }
+        }
+    }
+    toc_flat
+}
+
+/// Marks each target in the text (from the last, so places stay put): an
+/// anchor, with a page break before where a chapter starts. Not inside a
+/// tag: before it.
+fn mark_targets(raw: &mut Vec<u8>, targets: &[usize], starts: &std::collections::HashSet<usize>) {
+    for t in targets.iter().rev() {
+        let mut at = (*t).min(raw.len());
+        if let Some(lt) = raw[..at].iter().rposition(|b| *b == b'<')
+            && !raw[lt..at].contains(&b'>')
+        {
+            at = lt;
+        }
+        let mark = if starts.contains(t) {
+            format!("<mbp:pagebreak/><a id=\"filepos{t}\"></a>")
+        } else {
+            format!("<a id=\"filepos{t}\"></a>")
+        };
+        raw.splice(at..at, mark.into_bytes());
+    }
 }
 
 fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
@@ -1039,5 +1055,68 @@ mod tests {
             ("cover", 15503281571532766628),
         ];
         assert_eq!(got, want);
+    }
+
+    /// A MOBI 6 book (the old Kindle format) with `html` as its text.
+    fn mobi6_file(path: &std::path::Path, html: &[u8], utf8: bool) {
+        let mut rec0 = vec![0u8; 16 + 0xE8];
+        rec0[0..2].copy_from_slice(&1u16.to_be_bytes()); // no compression
+        rec0[4..8].copy_from_slice(&(html.len() as u32).to_be_bytes());
+        rec0[8..10].copy_from_slice(&1u16.to_be_bytes()); // one text record
+        rec0[10..12].copy_from_slice(&4096u16.to_be_bytes());
+        rec0[16..20].copy_from_slice(b"MOBI");
+        rec0[20..24].copy_from_slice(&0xE8u32.to_be_bytes());
+        let encoding: u32 = if utf8 { 65001 } else { 1252 };
+        rec0[28..32].copy_from_slice(&encoding.to_be_bytes());
+        rec0[36..40].copy_from_slice(&6u32.to_be_bytes());
+        rec0[108..112].copy_from_slice(&u32::MAX.to_be_bytes());
+        rec0[0xF4..0xF8].copy_from_slice(&u32::MAX.to_be_bytes());
+        let first = 78 + 2 * 8 + 2;
+        let mut head = vec![0u8; 78];
+        head[0..5].copy_from_slice(b"Livro");
+        head[60..68].copy_from_slice(b"BOOKMOBI");
+        head[76..78].copy_from_slice(&2u16.to_be_bytes());
+        let mut file = head;
+        file.extend((first as u32).to_be_bytes());
+        file.extend([0u8; 4]);
+        file.extend(((first + rec0.len()) as u32).to_be_bytes());
+        file.extend([0u8; 4]);
+        file.extend([0u8; 2]);
+        file.extend(rec0);
+        file.extend(html);
+        std::fs::write(path, file).unwrap();
+    }
+
+    /// What `read` makes of an old Kindle book, so `mobi6` can be taken
+    /// apart.
+    #[test]
+    fn mobi6_read_does_not_change() {
+        let d = tempfile::tempdir().unwrap();
+        let mut all = Vec::new();
+        for utf8 in [true, false] {
+            let accents: &[u8] = if utf8 {
+                "Ação é coração".as_bytes()
+            } else {
+                b"A\xe7\xe3o \xe9 cora\xe7\xe3o"
+            };
+            let mut html = b"<html><head><title>T</title></head><body><h1>Um</h1><p>".to_vec();
+            html.extend_from_slice(accents);
+            html.extend_from_slice(b" <a filepos=\"0000000000\">topo</a> <a filepos=\"");
+            let hole = html.len();
+            html.extend_from_slice(b"0000000000\">meio</a> <a href=\"http://example.org\">fora</a></p><mbp:pagebreak/><h1>Dois</h1><p>Fim<br/>com <b>negrito</b> <i>it</i></p><p>x</p></body></html>");
+            // The second link points at the second chapter's heading.
+            let at = html
+                .windows(4)
+                .position(|w| w == b"<h1>")
+                .map(|_| html.windows(8).rposition(|w| w == b"<h1>Dois").unwrap());
+            let n = format!("{:010}", at.unwrap());
+            html[hole..hole + 10].copy_from_slice(n.as_bytes());
+            let p = d.path().join(format!("m{utf8}.mobi"));
+            mobi6_file(&p, &html, utf8);
+            all.push(format!("{:?}", read(&p)));
+        }
+        let sum = xxhash_rust::xxh3::xxh3_64(all.join("\n").as_bytes());
+        println!("hash {sum:016x}\n{}", all.join("\n"));
+        assert_eq!(sum, 0xaac579cbf6de5d0e, "what MOBI 6 reads as changed");
     }
 }
