@@ -656,7 +656,10 @@ pub async fn search_show(
     // An id the files carry, when it finds nothing, gives way to the name.
     let (candidates, auto) = match &q {
         ShowQuery::Name(g) if g.id.is_some() => {
-            match client.search_tv(&ShowQuery::Id(g.id.unwrap())).await {
+            match client
+                .search_tv(&ShowQuery::Id(g.id.expect("checked by the guard")))
+                .await
+            {
                 Ok(found) if !found.0.is_empty() => found,
                 _ => {
                     client
@@ -834,7 +837,10 @@ pub async fn sidecars(
                         }
                         for (path, source) in files {
                             if std::fs::symlink_metadata(&path).is_ok()
-                                || !claimed.lock().unwrap().insert(path.clone())
+                                || !claimed
+                                    .lock()
+                                    .expect("lock not poisoned")
+                                    .insert(path.clone())
                             {
                                 continue;
                             }

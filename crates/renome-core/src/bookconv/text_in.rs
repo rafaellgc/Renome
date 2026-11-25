@@ -22,7 +22,7 @@ pub fn decode_bytes(b: &[u8], markup: bool) -> String {
     if markup {
         let head = String::from_utf8_lossy(&b[..b.len().min(2048)]).to_ascii_lowercase();
         static DECL: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r#"(?:encoding|charset)\s*=\s*["']?([a-z0-9_:.-]+)"#).unwrap()
+            Regex::new(r#"(?:encoding|charset)\s*=\s*["']?([a-z0-9_:.-]+)"#).expect("valid regex")
         });
         if let Some(c) = DECL.captures(&head)
             && let Some(enc) = encoding_rs::Encoding::for_label(c[1].as_bytes())
@@ -51,12 +51,13 @@ static CHAPTER: LazyLock<Regex> = LazyLock::new(|| {
             |[ivxlcdm]{1,7}\.?
         )\s*$",
     )
-    .unwrap()
+    .expect("valid regex")
 });
 
 /// A scene break: `* * *`, `***`, `---`, `#`, `~`.
-static BREAK: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*([*#~=•·◊§-]\s*){1,7}$|^\s*(\*\s*){3,}$").unwrap());
+static BREAK: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*([*#~=•·◊§-]\s*){1,7}$|^\s*(\*\s*){3,}$").expect("valid regex")
+});
 
 /// Splits `nodes` (a document's body, cleaned) into chapters at its main
 /// headings, and adds them to `book` with a table of contents; links and
@@ -111,7 +112,10 @@ pub fn add_document_with(
         if starts && parts.last().is_some_and(has_content) {
             parts.push(Vec::new());
         }
-        parts.last_mut().unwrap().push(n);
+        parts
+            .last_mut()
+            .expect("the list is never empty here")
+            .push(n);
     }
     // Long parts are cut at paragraphs: readers slow down on huge files.
     let mut cut = Vec::new();
@@ -276,12 +280,14 @@ fn cut_long(part: Vec<Node>) -> Vec<Vec<Node>> {
     for n in part {
         let s = size(&n);
         let block = matches!(&n, Node::Elem(e) if matches!(e.name.as_str(), "p" | "div" | "blockquote" | "table" | "ul" | "ol" | "pre" | "hr"));
-        if at + s > MAX && block && !out.last().unwrap().is_empty() {
+        if at + s > MAX && block && !out.last().expect("the list is never empty here").is_empty() {
             out.push(Vec::new());
             at = 0;
         }
         at += s;
-        out.last_mut().unwrap().push(n);
+        out.last_mut()
+            .expect("the list is never empty here")
+            .push(n);
     }
     out
 }
@@ -312,12 +318,12 @@ fn elem(name: &str, text: &str) -> Node {
 /// transcriptions): only around whole words.
 fn inline_marks(text: &str, e: &mut Elem) {
     static MARK: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(^|[\s(\[“‘—-])(_([^_\s][^_]{0,300}?[^_\s]|[^_\s])_|\*([^*\s][^*]{0,300}?[^*\s]|[^*\s])\*)([\s.,;:!?)\]”’—-]|$)").unwrap()
+        Regex::new(r"(^|[\s(\[“‘—-])(_([^_\s][^_]{0,300}?[^_\s]|[^_\s])_|\*([^*\s][^*]{0,300}?[^*\s]|[^*\s])\*)([\s.,;:!?)\]”’—-]|$)").expect("valid regex")
     });
     let mut at = 0;
     for c in MARK.captures_iter(text) {
-        let whole = c.get(2).unwrap();
-        let lead = c.get(1).unwrap();
+        let whole = c.get(2).expect("group is in the match");
+        let lead = c.get(1).expect("group is in the match");
         e.text(&text[at..lead.end()]);
         let (tag, inner) = match (c.get(3), c.get(4)) {
             (Some(i), _) => ("em", i.as_str()),
@@ -359,12 +365,16 @@ pub fn text_nodes(text: &str) -> Vec<Node> {
     let by_blank = blank * 8 >= filled;
     for l in &lines {
         if l.trim().is_empty() {
-            if !blocks.last().unwrap().is_empty() {
+            if !blocks
+                .last()
+                .expect("the list is never empty here")
+                .is_empty()
+            {
                 blocks.push(Vec::new());
             }
             continue;
         }
-        let cur = blocks.last().unwrap();
+        let cur = blocks.last().expect("the list is never empty here");
         let starts = if by_blank {
             false
         } else if indented * 10 > filled && indented * 10 < filled * 9 {
@@ -379,7 +389,10 @@ pub fn text_nodes(text: &str) -> Vec<Node> {
         if starts && !cur.is_empty() {
             blocks.push(Vec::new());
         }
-        blocks.last_mut().unwrap().push(l);
+        blocks
+            .last_mut()
+            .expect("the list is never empty here")
+            .push(l);
     }
 
     let mut out = Vec::new();

@@ -213,8 +213,8 @@ fn titles(m: &Value) -> (Vec<String>, Vec<String>) {
 
 /// A description without its markup (`<br>`, `<i>`).
 fn plain(text: &str) -> String {
-    let breaks = regex::Regex::new(r"(?i)<br\s*/?>").unwrap();
-    let tags = regex::Regex::new(r"<[^>]*>").unwrap();
+    let breaks = regex::Regex::new(r"(?i)<br\s*/?>").expect("valid regex");
+    let tags = regex::Regex::new(r"<[^>]*>").expect("valid regex");
     let text = breaks.replace_all(text, " ");
     renome_core::text::collapse_spaces(&tags.replace_all(&text, ""))
 }
@@ -275,7 +275,8 @@ fn episode_count(m: &Value) -> u16 {
 
 /// Episode titles from the streaming list (`Episode 3 - Title`), by number.
 fn episode_titles(m: &Value) -> HashMap<u16, String> {
-    let re = regex::Regex::new(r"(?i)^\s*(?:episode|ep\.?)\s*(\d+)\s*[-–:]\s*(.+?)\s*$").unwrap();
+    let re = regex::Regex::new(r"(?i)^\s*(?:episode|ep\.?)\s*(\d+)\s*[-–:]\s*(.+?)\s*$")
+        .expect("valid regex");
     m["streamingEpisodes"]
         .as_array()
         .into_iter()
@@ -308,7 +309,7 @@ fn anime_show(seasons: &[Value], typed: &str) -> renome_core::tv::Show {
     let others_s: Vec<&str> = others.iter().map(String::as_str).collect();
     // What was searched for, without the year after it (`Name (2020)`).
     let typed = regex::Regex::new(r"\s*\(\d{4}\)\s*$")
-        .unwrap()
+        .expect("valid regex")
         .replace(typed.trim(), "");
     let name = pick_title(&typed, &main_s, &others_s);
     let mut episodes = Vec::new();

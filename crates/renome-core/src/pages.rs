@@ -33,13 +33,14 @@ fn picture_ext(name: &str) -> Option<&'static str> {
 
 /// Markup that shows nothing: the head, scripts, styles, notes.
 static HIDDEN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?is)<head\b.*?</head\s*>|<script\b.*?</script\s*>|<style\b.*?</style\s*>|<!--.*?-->|<guide\b.*?</guide\s*>").unwrap()
+    Regex::new(r"(?is)<head\b.*?</head\s*>|<script\b.*?</script\s*>|<style\b.*?</style\s*>|<!--.*?-->|<guide\b.*?</guide\s*>").expect("valid regex")
 });
-static TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)<[^>]*>").unwrap());
-static ENTITY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"&#?\w{1,10};").unwrap());
+static TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)<[^>]*>").expect("valid regex"));
+static ENTITY: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"&#?\w{1,10};").expect("valid regex"));
 /// Tags that show a picture.
 static PICTURE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)<(?:\w+:)?(?:img|image)\b[^>]*>").unwrap());
+    LazyLock::new(|| Regex::new(r"(?is)<(?:\w+:)?(?:img|image)\b[^>]*>").expect("valid regex"));
 
 /// How many letters the markup shows (spaces left out).
 fn shown_letters(markup: &str) -> usize {
@@ -53,7 +54,8 @@ fn shown_letters(markup: &str) -> usize {
 /// The value of an attribute (`name`, or `prefix:name`) in a tag.
 fn attr(tag: &str, name: &str) -> Option<String> {
     static ATTR: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"(?s)\s(?:[\w-]+:)?([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')"#).unwrap()
+        Regex::new(r#"(?s)\s(?:[\w-]+:)?([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')"#)
+            .expect("valid regex")
     });
     ATTR.captures_iter(tag).find_map(|c| {
         c[1].eq_ignore_ascii_case(name).then(|| {

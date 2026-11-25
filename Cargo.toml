@@ -8,3 +8,11 @@ lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+
+[workspace.lints.clippy]
+# A panic on a user's files is a crash (the release build aborts): fallible
+# calls return errors, and an invariant is written as `expect("why")`.
+unwrap_used = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"

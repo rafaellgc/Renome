@@ -587,37 +587,38 @@ pub struct ComicGuess {
 }
 
 static BRACKETS: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\(([^()]*)\)|\[([^\[\]]*)\]|\{([^{}]*)\}").unwrap());
-static YEAR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(?:19|20)\d{2}$").unwrap());
+    LazyLock::new(|| Regex::new(r"\(([^()]*)\)|\[([^\[\]]*)\]|\{([^{}]*)\}").expect("valid regex"));
+static YEAR: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(?:19|20)\d{2}$").expect("valid regex"));
 static OF: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)^(?:of|de|di|von|sur)\s+(\d{1,4})$").unwrap());
+    LazyLock::new(|| Regex::new(r"(?i)^(?:of|de|di|von|sur)\s+(\d{1,4})$").expect("valid regex"));
 /// Words of release notes, not of the name.
 static JUNK: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)\b(?:digital|webrip|web-?dl|c2c|fcbd|hq|hd|scan(?:ned)?|repack|fixed|cbz|cbr|cb7|cbt|pdf|epub|\d{3,4}p|ctc|noads|no ads)\b",
     )
-    .unwrap()
+    .expect("valid regex")
 });
 static CHAPTER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)\b(?:ch|chap|chapter|cap|capítulo|capitulo|chapitre)\.?\s*(\d{1,4}(?:\.\d)?)\b|\bc(\d{2,4}(?:\.\d)?)\b",
     )
-    .unwrap()
+    .expect("valid regex")
 });
 static VOLUME: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)\b(?:vol|volume|volumen|tome|tomo|band|livro|book|libro)\.?\s*(\d{1,3}|(?-i:[IVX]{1,5}))\b|\b[vt](\d{1,3})\b",
     )
-    .unwrap()
+    .expect("valid regex")
 });
 static ISSUE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)#\s*(-?\d{1,7}(?:\.\d{1,2})?[a-z]?|½)|\b(?:n[º°o]|no\.|nr\.?|issue|edição|edicao|edición|ed\.|número|numero|num\.?)\s*(\d{1,4}(?:\.\d{1,2})?)\b",
     )
-    .unwrap()
+    .expect("valid regex")
 });
 static BARE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?:^|\s)(\d{1,4}(?:\.\d{1,2})?)(?:\s|$)").unwrap());
+    LazyLock::new(|| Regex::new(r"(?:^|\s)(\d{1,4}(?:\.\d{1,2})?)(?:\s|$)").expect("valid regex"));
 
 /// A volume's number: `3`, or in Roman numerals (`III`).
 fn volume_number(s: &str) -> Option<u32> {
@@ -726,29 +727,44 @@ pub fn parse_name(stem: &str, folder: &str) -> ComicGuess {
     let mut blank =
         |r: std::ops::Range<usize>| masked.replace_range(r.clone(), &" ".repeat(r.len()));
     if let Some(c) = CHAPTER.captures(&s) {
-        g.chapter = c.get(1).or_else(|| c.get(2)).unwrap().as_str().to_string();
-        mark(c.get(0).unwrap());
-        blank(c.get(0).unwrap().range());
+        g.chapter = c
+            .get(1)
+            .or_else(|| c.get(2))
+            .expect("group is in the match")
+            .as_str()
+            .to_string();
+        mark(c.get(0).expect("group is in the match"));
+        blank(c.get(0).expect("group is in the match").range());
     }
     let mut volume_end = None;
     if let Some(c) = VOLUME.captures(&s) {
-        g.volume = volume_number(c.get(1).or_else(|| c.get(2)).unwrap().as_str());
-        mark(c.get(0).unwrap());
-        blank(c.get(0).unwrap().range());
-        volume_end = Some(c.get(0).unwrap().end());
+        g.volume = volume_number(
+            c.get(1)
+                .or_else(|| c.get(2))
+                .expect("group is in the match")
+                .as_str(),
+        );
+        mark(c.get(0).expect("group is in the match"));
+        blank(c.get(0).expect("group is in the match").range());
+        volume_end = Some(c.get(0).expect("group is in the match").end());
     }
     let s_all = s.clone();
     let s = masked;
     let mut number_start = None;
     if let Some(c) = ISSUE.captures(&s) {
-        g.number = c.get(1).or_else(|| c.get(2)).unwrap().as_str().to_string();
-        number_start = Some(c.get(0).unwrap().start());
-        mark(c.get(0).unwrap());
+        g.number = c
+            .get(1)
+            .or_else(|| c.get(2))
+            .expect("group is in the match")
+            .as_str()
+            .to_string();
+        number_start = Some(c.get(0).expect("group is in the match").start());
+        mark(c.get(0).expect("group is in the match"));
     } else if g.chapter.is_empty() {
         // The number first (`19 - Story in 80 Words`): numbers in what
         // follows are no issue.
         static LEADING: LazyLock<Regex> =
-            LazyLock::new(|| Regex::new(r"^(\d{1,4})\s*[-–.]\s+\S").unwrap());
+            LazyLock::new(|| Regex::new(r"^(\d{1,4})\s*[-–.]\s+\S").expect("valid regex"));
         let leading = LEADING
             .captures(&s)
             .and_then(|c| c.get(1))
@@ -796,11 +812,12 @@ pub fn parse_name(stem: &str, folder: &str) -> ComicGuess {
     if end > 0 && end <= s.len() {
         let mut after = s[end..].trim_start_matches([' ', '-', '–', ':', '.']);
         // The count after the number (`#2 de 6`, `#2 of 6`).
-        static COUNT: LazyLock<Regex> =
-            LazyLock::new(|| Regex::new(r"(?i)^(?:of|de|di|von|sur)\s+(\d{1,4})\b").unwrap());
+        static COUNT: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"(?i)^(?:of|de|di|von|sur)\s+(\d{1,4})\b").expect("valid regex")
+        });
         if let Some(c) = COUNT.captures(after) {
             g.count = g.count.or(c[1].parse().ok());
-            after = &after[c.get(0).unwrap().end()..];
+            after = &after[c.get(0).expect("group is in the match").end()..];
         }
         // A loose year right after the number (`Series 012 2005`).
         if let Some((year, rest)) = after.split_once(' ').or(Some((after, "")))
@@ -815,10 +832,12 @@ pub fn parse_name(stem: &str, folder: &str) -> ComicGuess {
     // A year written loose at the end of the series (`Series 2012 012`).
     if g.year.is_none() {
         static TRAILING_YEAR: LazyLock<Regex> =
-            LazyLock::new(|| Regex::new(r"\s((?:19|20)\d{2})$").unwrap());
+            LazyLock::new(|| Regex::new(r"\s((?:19|20)\d{2})$").expect("valid regex"));
         if let Some(c) = TRAILING_YEAR.captures(&g.series.clone()) {
             g.year = c[1].parse().ok();
-            g.series = g.series[..c.get(0).unwrap().start()].trim().to_string();
+            g.series = g.series[..c.get(0).expect("group is in the match").start()]
+                .trim()
+                .to_string();
         }
     }
     // The folder: the series' year, its name for files without one, and
@@ -880,7 +899,7 @@ fn colons(s: &str) -> String {
 /// back. Only codes of letters (192 to 255) count: `Series_012_` stays.
 fn unescape(s: &str) -> String {
     static CODE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(\p{L})_(\d{3})(?:_|\b)").unwrap());
+        LazyLock::new(|| Regex::new(r"(\p{L})_(\d{3})(?:_|\b)").expect("valid regex"));
     CODE.replace_all(s, |c: &regex::Captures| {
         let letter = c[2]
             .parse::<u32>()
@@ -915,7 +934,7 @@ fn parse_folder(folder: &str) -> FolderGuess {
             .trim();
         // `(2012)`, or a run of years (`(1988-1998)`, `(2011 – 2016)`).
         static RANGE: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r"^((?:19|20)\d{2})\s*[-–—]\s*(?:(?:19|20)\d{2})?$").unwrap()
+            Regex::new(r"^((?:19|20)\d{2})\s*[-–—]\s*(?:(?:19|20)\d{2})?$").expect("valid regex")
         });
         if year.is_none() && YEAR.is_match(inner) {
             year = inner.parse().ok();
@@ -1128,7 +1147,7 @@ pub fn merge(g: &ComicGuess, info: &ComicInfo) -> ComicMatch {
 /// say it.
 fn title_without_number(title: &str, volume: Option<u32>, number: &str) -> String {
     static LEAD: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?i)^\s*(?:v|vol\.?|volume|tomo|t\.|#|n[º°o]\.?)\s*(\d+(?:\.\d+)?)\s*[-–—:.,]\s*(\S.*)$").unwrap()
+        Regex::new(r"(?i)^\s*(?:v|vol\.?|volume|tomo|t\.|#|n[º°o]\.?)\s*(\d+(?:\.\d+)?)\s*[-–—:.,]\s*(\S.*)$").expect("valid regex")
     });
     let Some(c) = LEAD.captures(title) else {
         return title.to_string();
@@ -1145,8 +1164,9 @@ fn title_without_number(title: &str, volume: Option<u32>, number: &str) -> Strin
 
 /// The issue id in a Comic Vine link (`…/4000-12345/`).
 pub fn comic_vine_id(web: &str) -> Option<String> {
-    static ID: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"comicvine\.gamespot\.com/.*?/4000-(\d+)").unwrap());
+    static ID: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"comicvine\.gamespot\.com/.*?/4000-(\d+)").expect("valid regex")
+    });
     ID.captures(web).map(|c| c[1].to_string())
 }
 
@@ -1210,7 +1230,8 @@ pub fn comic_name(template: &str, m: &ComicMatch, colon: &str) -> String {
         })
     };
     // A separator left before a bracket or at the end, by an empty title.
-    static DANGLING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s[-–—:]\s*(\(|$)").unwrap());
+    static DANGLING: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\s[-–—:]\s*(\(|$)").expect("valid regex"));
     let name = expand_labeled(template, value);
     crate::books::tidy(&DANGLING.replace_all(&name, " $1"))
 }
@@ -1219,8 +1240,9 @@ pub fn comic_name(template: &str, m: &ComicMatch, colon: &str) -> String {
 /// label just before it: one stuck to it (`v`, `#`, `c`) or one ending in a
 /// dot (`Vol. `, `Cap. `).
 fn expand_labeled<'a>(template: &str, value: impl Fn(&str) -> Option<&'a str>) -> String {
-    static LABEL: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?:(?:^|\s)[^\s{}]{1,6}\.\s?|[^\s{}()\[\]]{1,6})$").unwrap());
+    static LABEL: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?:(?:^|\s)[^\s{}]{1,6}\.\s?|[^\s{}()\[\]]{1,6})$").expect("valid regex")
+    });
     let template = crate::rules::optional_sections(template, &value);
     let mut out = String::new();
     let mut rest = template.as_str();
@@ -1641,7 +1663,7 @@ pub fn main_issues(descriptors: &[&str]) -> Vec<usize> {
 /// for none (`[nn]`, `[2ª Edição]`, a reprint without one).
 pub fn issue_number(descriptor: &str) -> String {
     static NUMBER: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"^\s*#?\s*(-?\d+(?:\.\d+)?[a-z]?|½)\b").unwrap());
+        LazyLock::new(|| Regex::new(r"^\s*#?\s*(-?\d+(?:\.\d+)?[a-z]?|½)\b").expect("valid regex"));
     NUMBER
         .captures(descriptor)
         .map(|c| c[1].to_string())

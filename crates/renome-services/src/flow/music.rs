@@ -54,7 +54,7 @@ pub async fn search(
     from_name: bool,
     listen: bool,
 ) -> Result<Vec<AlbumLookup>, String> {
-    let heard = services.heard.lock().unwrap().clone();
+    let heard = services.heard.lock().expect("lock not poisoned").clone();
     let (named, unnamed) = songs(files, &heard, from_name, listen);
     let found = mbs::lookup(host, services, mbs::albums(&named), unnamed, listen).await;
     if let Some(failed) = found.iter().find_map(|f| f.error.clone())
@@ -74,7 +74,7 @@ pub async fn choose(
     files: &[&FileEntry],
     from_name: bool,
 ) -> Result<Chosen, String> {
-    let heard = services.heard.lock().unwrap().clone();
+    let heard = services.heard.lock().expect("lock not poisoned").clone();
     let (songs, unnamed) = mbs::songs_of(files, &heard, from_name);
     let mut songs = mbs::albums(&songs).concat();
     songs.extend(unnamed);

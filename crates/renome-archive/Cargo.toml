@@ -14,3 +14,6 @@ cmake = "0.1"
 [package.metadata.cargo-machete]
 # Used by build.rs, which the scan does not read.
 ignored = ["cmake"]
+
+[lints]
+workspace = true

@@ -685,7 +685,7 @@ impl Builder {
             return;
         };
         while self.stack.len() > at {
-            let e = self.stack.pop().unwrap();
+            let e = self.stack.pop().expect("`at` is a position in the stack");
             self.cur().push(Node::Elem(e));
         }
     }

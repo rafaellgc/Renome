@@ -1384,7 +1384,10 @@ impl Writer<'_> {
                 if matches!(k, Node::Elem(x) if x.name == "br") {
                     lines.push(Vec::new());
                 } else {
-                    lines.last_mut().unwrap().push(k.clone());
+                    lines
+                        .last_mut()
+                        .expect("the list is never empty here")
+                        .push(k.clone());
                 }
             }
             self.out.push_str("<title>");
@@ -1411,7 +1414,10 @@ impl Writer<'_> {
                     if matches!(k, Node::Elem(x) if x.name == "br") {
                         lines.push(Vec::new());
                     } else {
-                        lines.last_mut().unwrap().push(k.clone());
+                        lines
+                            .last_mut()
+                            .expect("the list is never empty here")
+                            .push(k.clone());
                     }
                 }
                 let center = e.attr("class").is_some_and(|c| c.contains("center"));

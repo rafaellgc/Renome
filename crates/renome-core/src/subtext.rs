@@ -271,30 +271,31 @@ static SRT_TIMING: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"^\s*(\d+):(\d{1,2}):(\d{1,2})(?:[,.:](\d{1,4}))?\s*-->\s*(\d+):(\d{1,2}):(\d{1,2})(?:[,.:](\d{1,4}))?(.*)$",
     )
-    .unwrap()
+    .expect("valid regex")
 });
 
 static VTT_TIMING: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"^\s*(?:(\d+):)?(\d{1,2}):(\d{2})\.(\d{1,3})\s+-->\s+(?:(\d+):)?(\d{1,2}):(\d{2})\.(\d{1,3})(.*)$",
     )
-    .unwrap()
+    .expect("valid regex")
 });
 
-static ASS_TIME: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*(\d+):(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\s*$").unwrap());
+static ASS_TIME: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*(\d+):(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\s*$").expect("valid regex")
+});
 
 static SV_TIMING: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\s*(\d{1,2}):(\d{2}):(\d{2})[.,](\d{1,3})\s*,\s*(\d{1,2}):(\d{2}):(\d{2})[.,](\d{1,3})\s*$")
-        .unwrap()
+        .expect("valid regex")
 });
 
 static MDVD_LINE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\{(\d+)\}\{(\d*)\}(.*)$").unwrap());
+    LazyLock::new(|| Regex::new(r"^\{(\d+)\}\{(\d*)\}(.*)$").expect("valid regex"));
 
 /// The time of an inline WebVTT timestamp (`<00:01.500>`) inside a cue.
 static VTT_INLINE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"<(?:(\d+):)?(\d{1,2}):(\d{2})\.(\d{3})>").unwrap());
+    LazyLock::new(|| Regex::new(r"<(?:(\d+):)?(\d{1,2}):(\d{2})\.(\d{3})>").expect("valid regex"));
 
 fn ass_ms(text: &str) -> Option<i64> {
     let c = ASS_TIME.captures(text)?;
@@ -451,7 +452,9 @@ impl Doc {
                 .push(Item::Raw(format!("{}\n\n", head.trim_end())));
         }
         for (k, &at) in timings.iter().enumerate() {
-            let c = SRT_TIMING.captures(lines[at]).unwrap();
+            let c = SRT_TIMING
+                .captures(lines[at])
+                .expect("group is in the match");
             let get = |i: usize| c.get(i).map_or("", |m| m.as_str());
             let start = to_ms(get(1), get(2), get(3), get(4)).unwrap_or(0);
             let end = to_ms(get(5), get(6), get(7), get(8)).unwrap_or(start);
@@ -518,7 +521,9 @@ impl Doc {
                 || block[0].starts_with("REGION");
             match timing {
                 Some(at) if !header => {
-                    let c = VTT_TIMING.captures(block[at]).unwrap();
+                    let c = VTT_TIMING
+                        .captures(block[at])
+                        .expect("group is in the match");
                     let get = |i: usize| c.get(i).map_or("", |m| m.as_str());
                     let start = to_ms(get(1), get(2), get(3), get(4)).unwrap_or(0);
                     let end = to_ms(get(5), get(6), get(7), get(8)).unwrap_or(start);
@@ -702,15 +707,16 @@ impl Doc {
     }
 
     fn read_sami(&mut self, text: &str) {
-        static SYNC: LazyLock<Regex> =
-            LazyLock::new(|| Regex::new(r#"(?is)<sync\s[^>]*?start\s*=\s*"?(\d+)[^>]*>"#).unwrap());
+        static SYNC: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r#"(?is)<sync\s[^>]*?start\s*=\s*"?(\d+)[^>]*>"#).expect("valid regex")
+        });
         static P: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r#"(?is)<p(?:\s[^>]*?class\s*=\s*"?([\w-]+))?[^>]*>"#).unwrap()
+            Regex::new(r#"(?is)<p(?:\s[^>]*?class\s*=\s*"?([\w-]+))?[^>]*>"#).expect("valid regex")
         });
         let syncs: Vec<(usize, usize, i64)> = SYNC
             .captures_iter(text)
             .map(|c| {
-                let m = c.get(0).unwrap();
+                let m = c.get(0).expect("group is in the match");
                 (m.start(), m.end(), c[1].parse().unwrap_or(0))
             })
             .collect();
@@ -728,10 +734,10 @@ impl Doc {
                 paras.push((time, String::new(), sami_text(chunk)));
             }
             for (j, c) in ps.iter().enumerate() {
-                let m = c.get(0).unwrap();
-                let to = ps
-                    .get(j + 1)
-                    .map_or(chunk.len(), |n| n.get(0).unwrap().start());
+                let m = c.get(0).expect("group is in the match");
+                let to = ps.get(j + 1).map_or(chunk.len(), |n| {
+                    n.get(0).expect("group is in the match").start()
+                });
                 let class = c.get(1).map_or("", |m| m.as_str()).to_ascii_lowercase();
                 paras.push((time, class, sami_text(&chunk[m.end()..to])));
             }
@@ -1009,7 +1015,10 @@ impl Doc {
                     // SubViewer's cues end with a blank line, but the last.
                     if self.format == Format::SubViewer
                         && matches!(it, Item::Cue(..))
-                        && !std::ptr::eq(it, self.items.last().unwrap())
+                        && !std::ptr::eq(
+                            it,
+                            self.items.last().expect("the list is never empty here"),
+                        )
                     {
                         out.push_str(nl);
                     }
@@ -1138,9 +1147,11 @@ fn join_lines(format: Format, lines: &[String]) -> String {
 
 /// Where the markup is in a line: byte ranges of tags.
 fn tag_ranges(format: Format, line: &str) -> Vec<(usize, usize)> {
-    static ANGLE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^<>]*>").unwrap());
-    static CURLY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{[^{}]*\}").unwrap());
-    static SRT_CURLY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{\\[^{}]*\}").unwrap());
+    static ANGLE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^<>]*>").expect("valid regex"));
+    static CURLY: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\{[^{}]*\}").expect("valid regex"));
+    static SRT_CURLY: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\{\\[^{}]*\}").expect("valid regex"));
     let mut out: Vec<(usize, usize)> = Vec::new();
     match format {
         Format::Srt | Format::Sami => {
@@ -1193,7 +1204,7 @@ static URL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)(?:https?://|www\.)\S+|\b[a-z0-9][a-z0-9-]*\.(?:com|net|org|info|tv|io|me|cc|ws|biz|to|xyz)(?:\.[a-z]{2})?\b|\b[a-z0-9][a-z0-9-]*\.com?\.br\b",
     )
-    .unwrap()
+    .expect("valid regex")
 });
 
 /// Who made, timed or translated the subtitle (`Subtitles by…`,
@@ -1203,7 +1214,7 @@ static CREDIT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)\b(?:subtitles?|subtitled|subs|captions?|captioned|captioning|synced|sync|synchroni[sz]ed|resynced?|corrected|corrections?|encoded|ripped|translated|translation|transcript|legendas?|legendad[oa]s?|legendagem|tradu[çc](?:[ãa]o|[õo]es)|traduzid[oa]s?|revis[ãa]o|revisad[oa]|sincronia|sincroni[az]a[çc][ãa]o|sincronizad[oa]s?|subt[ií]tulos?|subtitulad[oa]s?|traducci[óo]n|traducid[oa]s?)(?:\s+(?:[\w&]+|&)){0,2}?\s*(?:\b(?:by|por|from)\b|:)|\b(?:legendas?|tradu[çc][ãa]o|traducci[óo]n|subt[ií]tulos)\s+de\b",
     )
-    .unwrap()
+    .expect("valid regex")
 });
 
 /// Words that make a web address an advertisement (`Visit…`, `Acesse…`).
@@ -1211,7 +1222,7 @@ static AD_WORDS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)\b(?:visit[ea]?|acesse|acessem|baixe|baixar|download|downloads|site|subs?|legendas?|subt[ií]tulos|torrents?|follow|siga|sigam|twitter|facebook|instagram|telegram|discord)\b",
     )
-    .unwrap()
+    .expect("valid regex")
 });
 
 /// A credit's heading alone on its line, the names under it.
@@ -1219,7 +1230,7 @@ static CREDIT_HEAD: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)^[\W_]*(?:subtitles?|subtitled\s+by|captions?|synced\s+by|sync|translation|translated\s+by|legendas?|legendado\s+por|tradu[çc][ãa]o|revis[ãa]o|sincronia|sincroniza[çc][ãa]o|subt[ií]tulos?|traducci[óo]n|ajustes?)\s*:[\W_]*$",
     )
-    .unwrap()
+    .expect("valid regex")
 });
 
 /// Subtitle sites and their notices, anywhere in the film.
@@ -1227,7 +1238,7 @@ static SERVICE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)opensubtitles|open\s*subtitles|subdl\b|addic7ed|podnapisi|subscene|yifysubtitles|become\s+(?:a\s+)?vip\s+member|advertise\s+your\s+product|rate\s+this\s+subtitle|remove\s+all\s+ads",
     )
-    .unwrap()
+    .expect("valid regex")
 });
 
 /// A line that is an advertisement or a credit: a subtitle site's notice
@@ -1279,7 +1290,7 @@ fn cut_visible(format: Format, line: &str, cut: &[(usize, usize)]) -> String {
             t += 1;
             continue;
         }
-        let ch = line[i..].chars().next().unwrap();
+        let ch = line[i..].chars().next().expect("`i` is inside the line");
         let len = ch.len_utf8();
         let inside = cut.iter().any(|&(s, e)| vis >= s && vis < e);
         if !inside {
@@ -1307,14 +1318,16 @@ fn plain(format: Format, line: &str) -> String {
 }
 
 static BRACKETS: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\[[^\[\]]*\]|［[^［］]*］").unwrap());
-static PARENS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\(([^()]*)\)").unwrap());
+    LazyLock::new(|| Regex::new(r"\[[^\[\]]*\]|［[^［］]*］").expect("valid regex"));
+static PARENS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\(([^()]*)\)").expect("valid regex"));
 static SPEAKER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(\s*[-–—]?\s*)([\p{Lu}][\p{Lu}\p{Nd} .'’&#-]{0,30}?)\s*:(?:\s|$)").unwrap()
+    Regex::new(r"^(\s*[-–—]?\s*)([\p{Lu}][\p{Lu}\p{Nd} .'’&#-]{0,30}?)\s*:(?:\s|$)")
+        .expect("valid regex")
 });
 static EMPTY_TAGS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)<(i|b|u)>\s*</(?:i|b|u)>|<font[^>]*>\s*</font>|\{\\[ibu]1\}\s*\{\\[ibu]0\}")
-        .unwrap()
+        .expect("valid regex")
 });
 
 /// A cue's text without what is there for the hard of hearing; `None`
@@ -1340,7 +1353,7 @@ fn clean_hearing(format: Format, text: &str, caps: bool) -> Option<String> {
                 .trim_start()
                 .len();
         for c in PARENS.captures_iter(&p) {
-            let m = c.get(0).unwrap();
+            let m = c.get(0).expect("group is in the match");
             let inner = c[1].trim();
             let words = inner.split_whitespace().count();
             let capital = inner.chars().next().is_some_and(char::is_uppercase);
@@ -1360,8 +1373,8 @@ fn clean_hearing(format: Format, text: &str, caps: bool) -> Option<String> {
             }
         }
         if !caps && let Some(c) = SPEAKER.captures(&p) {
-            let name = c.get(2).unwrap();
-            let m = c.get(0).unwrap();
+            let name = c.get(2).expect("group is in the match");
+            let m = c.get(0).expect("group is in the match");
             // A name before what is said; capitals and a colon over
             // capitals (`WANTED: OGRES`) or alone are a sign's words.
             let said = p[m.end()..].chars().any(char::is_lowercase);
@@ -1401,7 +1414,11 @@ fn clean_hearing(format: Format, text: &str, caps: bool) -> Option<String> {
         if let Some(pos) = v.find(|c: char| !c.is_whitespace())
             && v[pos..].starts_with(['-', '–', '—'])
         {
-            let dash = v[pos..].chars().next().unwrap().len_utf8();
+            let dash = v[pos..]
+                .chars()
+                .next()
+                .expect("the dash was found")
+                .len_utf8();
             let spaces = v[pos + dash..].len() - v[pos + dash..].trim_start().len();
             out[0] = cut_visible(format, &out[0], &[(pos, pos + dash + spaces)]);
         }
@@ -1426,8 +1443,10 @@ fn widen(p: &str, mut cut: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
 
 /// Spaces left by what was cut, and empty style marks.
 fn tidy(line: &str) -> String {
-    static SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[ \t]{2,}").unwrap());
-    static DASH_GAP: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*[-–—])\s{2,}").unwrap());
+    static SPACES: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"[ \t]{2,}").expect("valid regex"));
+    static DASH_GAP: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^(\s*[-–—])\s{2,}").expect("valid regex"));
     let mut s = line.to_string();
     for _ in 0..3 {
         let next = EMPTY_TAGS.replace_all(&s, "").into_owned();
@@ -1450,8 +1469,9 @@ fn strip_srt_tags(text: &str) -> String {
 /// `{\an8}`.
 fn vtt_to_srt(text: &str, settings: &str) -> String {
     static TAG: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"<(/?)([a-zA-Z]+)?[^<>]*>").unwrap());
-    static RT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<rt>.*?</rt>").unwrap());
+        LazyLock::new(|| Regex::new(r"<(/?)([a-zA-Z]+)?[^<>]*>").expect("valid regex"));
+    static RT: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?is)<rt>.*?</rt>").expect("valid regex"));
     let t = RT.replace_all(text, "");
     let t = TAG.replace_all(&t, |c: &regex::Captures| {
         let close = &c[1];
@@ -1477,9 +1497,10 @@ fn vtt_to_srt(text: &str, settings: &str) -> String {
 /// underline and placement on top kept; drawings and other overrides left
 /// out. `italic`: its style is in italics.
 fn ass_to_srt(text: &str, italic: bool) -> String {
-    static BLOCK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{([^{}]*)\}").unwrap());
+    static BLOCK: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\{([^{}]*)\}").expect("valid regex"));
     static OVERRIDE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"\\(an|a|i|b|u|p|r)(\d*)([a-zA-Z]*)").unwrap());
+        LazyLock::new(|| Regex::new(r"\\(an|a|i|b|u|p|r)(\d*)([a-zA-Z]*)").expect("valid regex"));
     let mut out = String::new();
     let (mut i_on, mut b_on, mut u_on) = (italic, false, false);
     let mut drawing = false;
@@ -1491,7 +1512,7 @@ fn ass_to_srt(text: &str, italic: bool) -> String {
     let mut pieces: Vec<(usize, usize, String)> = BLOCK
         .captures_iter(text)
         .map(|c| {
-            let m = c.get(0).unwrap();
+            let m = c.get(0).expect("group is in the match");
             (m.start(), m.end(), c[1].to_string())
         })
         .collect();
@@ -1558,7 +1579,7 @@ fn tidy_lines(text: &str) -> String {
 /// fonts are left out.
 fn microdvd_to_srt(text: &str) -> String {
     static CODE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"\{([a-zA-Z]):([^{}]*)\}").unwrap());
+        LazyLock::new(|| Regex::new(r"\{([a-zA-Z]):([^{}]*)\}").expect("valid regex"));
     let mut all: Vec<char> = Vec::new();
     let lines: Vec<String> = text.split('|').map(str::to_string).collect();
     let mut styled: Vec<(Vec<char>, String)> = Vec::new();
@@ -1601,9 +1622,11 @@ fn microdvd_to_srt(text: &str) -> String {
 /// kept, other markup left out, entities read; `&nbsp;` alone is empty
 /// (it clears the screen).
 fn sami_text(html: &str) -> String {
-    static BR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)<br\s*/?>").unwrap());
-    static TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<(/?)([a-zA-Z]+)[^<>]*>").unwrap());
-    static WS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[ \t\r\n]+").unwrap());
+    static BR: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)<br\s*/?>").expect("valid regex"));
+    static TAG: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"<(/?)([a-zA-Z]+)[^<>]*>").expect("valid regex"));
+    static WS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[ \t\r\n]+").expect("valid regex"));
     let t = WS.replace_all(html, " ");
     let t = BR.replace_all(&t, "\n");
     let t = TAG.replace_all(&t, |c: &regex::Captures| {

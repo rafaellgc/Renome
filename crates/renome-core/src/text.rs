@@ -543,8 +543,8 @@ fn tokens(s: &str) -> Vec<(bool, &str)> {
     let mut cur: Option<bool> = None;
     for (i, c) in s.char_indices() {
         let w = is_word_char(c);
-        if cur.is_some_and(|k| k != w) {
-            out.push((cur.unwrap(), &s[start..i]));
+        if let Some(k) = cur.filter(|&k| k != w) {
+            out.push((k, &s[start..i]));
             start = i;
         }
         cur = Some(w);
@@ -571,7 +571,7 @@ pub fn sentence_case(s: &str) -> String {
 /// "vi" and "xi" unless written in capitals.
 fn is_roman(word: &str) -> bool {
     static ROMAN: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"^X{0,3}(?:IX|IV|VI{0,3}|I{0,3})$").unwrap());
+        LazyLock::new(|| Regex::new(r"^X{0,3}(?:IX|IV|VI{0,3}|I{0,3})$").expect("valid regex"));
     let upper = word.to_uppercase();
     let word_like = matches!(word, "vi" | "xi" | "Vi" | "Xi");
     word.len() > 1 && ROMAN.is_match(&upper) && !word_like

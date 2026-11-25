@@ -503,7 +503,7 @@ fn text_kind(names: &'static [&'static str]) -> Option<Kind> {
 /// A SubRip subtitle: a number, then `00:00:01,000 --> 00:00:02,000`.
 fn srt(s: &str) -> bool {
     static TIMES: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"^\d+\s*\r?\n\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}\s*-->").unwrap()
+        regex::Regex::new(r"^\d+\s*\r?\n\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}\s*-->").expect("valid regex")
     });
     TIMES.is_match(s)
 }

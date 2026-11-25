@@ -756,7 +756,7 @@ fn kf8(r: &Records, p: &crate::pages::Part, at: usize, book: &mut Book) -> Resul
                     href: if marked { href } else { file },
                     kids: vec![],
                 };
-                *by_no.last_mut().unwrap() = Some(toc.clone());
+                *by_no.last_mut().expect("the list is never empty here") = Some(toc.clone());
                 flat.push((depth, toc));
             }
         }
@@ -802,7 +802,7 @@ fn nest(flat: Vec<(usize, Toc)>) -> Vec<Toc> {
             if *d < depth {
                 break;
             }
-            let (d, mut t) = it.next().unwrap();
+            let (d, mut t) = it.next().expect("peeked just above");
             t.kids = take(it, d + 1);
             out.push(t);
         }

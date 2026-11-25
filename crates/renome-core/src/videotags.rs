@@ -1360,13 +1360,15 @@ fn kids(data: &[u8]) -> Vec<([u8; 4], &[u8], &[u8])> {
     let mut out = Vec::new();
     let mut at = 0usize;
     while at + 8 <= data.len() {
-        let mut len = u32::from_be_bytes(data[at..at + 4].try_into().unwrap()) as usize;
+        let mut len =
+            u32::from_be_bytes(data[at..at + 4].try_into().expect("slice has this length"))
+                as usize;
         let mut head = 8;
         if len == 1 {
             let Some(b) = data.get(at + 8..at + 16) else {
                 break;
             };
-            len = u64::from_be_bytes(b.try_into().unwrap()) as usize;
+            len = u64::from_be_bytes(b.try_into().expect("slice has this length")) as usize;
             head = 16;
         } else if len == 0 {
             len = data.len() - at;
@@ -1374,7 +1376,9 @@ fn kids(data: &[u8]) -> Vec<([u8; 4], &[u8], &[u8])> {
         if len < head || at + len > data.len() {
             break;
         }
-        let kind: [u8; 4] = data[at + 4..at + 8].try_into().unwrap();
+        let kind: [u8; 4] = data[at + 4..at + 8]
+            .try_into()
+            .expect("slice has this length");
         out.push((kind, &data[at..at + head], &data[at + head..at + len]));
         at += len;
     }
@@ -1975,12 +1979,19 @@ fn mp4_tops(f: &mut File, len: u64) -> Result<Vec<Bx>, String> {
             return Err(bad());
         }
         let h = read_at(f, at, (len - at).min(16) as usize)?;
-        let mut size = u64::from(u32::from_be_bytes(h[..4].try_into().unwrap()));
-        let kind: [u8; 4] = h[4..8].try_into().unwrap();
+        let mut size = u64::from(u32::from_be_bytes(
+            h[..4].try_into().expect("slice has this length"),
+        ));
+        let kind: [u8; 4] = h[4..8].try_into().expect("slice has this length");
         let mut head = 8;
         let mut to_end = false;
         if size == 1 {
-            size = u64::from_be_bytes(h.get(8..16).ok_or_else(bad)?.try_into().unwrap());
+            size = u64::from_be_bytes(
+                h.get(8..16)
+                    .ok_or_else(bad)?
+                    .try_into()
+                    .expect("slice has this length"),
+            );
             head = 16;
         } else if size == 0 {
             size = len - at;

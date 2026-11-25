@@ -122,7 +122,7 @@ struct AddResult {
 #[tauri::command]
 async fn checkpoint(app: AppHandle, overrides: Overrides) -> Result<(), String> {
     in_background(app, move |state| {
-        let s = &mut *state.session.lock().unwrap();
+        let s = &mut *state.session.lock().expect("lock not poisoned");
         if s.undo.len() == UNDO_LIMIT {
             s.undo.remove(0);
         }
@@ -135,7 +135,7 @@ async fn checkpoint(app: AppHandle, overrides: Overrides) -> Result<(), String> 
 #[tauri::command]
 async fn drop_checkpoint(app: AppHandle) -> Result<(), String> {
     in_background(app, |state| {
-        state.session.lock().unwrap().undo.pop();
+        state.session.lock().expect("lock not poisoned").undo.pop();
     })
     .await
 }
@@ -145,7 +145,7 @@ async fn drop_checkpoint(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn undo_list(app: AppHandle) -> Result<Option<Overrides>, String> {
     in_background(app, |state| {
-        let s = &mut *state.session.lock().unwrap();
+        let s = &mut *state.session.lock().expect("lock not poisoned");
         let (files, overrides) = s.undo.pop()?;
         s.files = files;
         Some(overrides)
@@ -174,13 +174,18 @@ async fn add_paths(
 ) -> Result<AddResult, String> {
     in_background(app, move |state| {
         let known: HashSet<PathBuf> = {
-            let s = state.session.lock().unwrap();
+            let s = state.session.lock().expect("lock not poisoned");
             s.files.iter().map(|f| f.path.clone()).collect()
         };
         // Scanned without holding the list: a big folder takes a while.
         let result = renome_core::scan(&paths, &options, &known);
         let added = result.files.iter().map(|f| f.path.clone()).collect();
-        state.session.lock().unwrap().files.extend(result.files);
+        state
+            .session
+            .lock()
+            .expect("lock not poisoned")
+            .files
+            .extend(result.files);
         AddResult {
             added,
             skipped: result.skipped,
@@ -196,7 +201,7 @@ async fn remove_files(app: AppHandle, paths: Vec<PathBuf>) -> Result<(), String>
         state
             .session
             .lock()
-            .unwrap()
+            .expect("lock not poisoned")
             .files
             .retain(|f| !remove.contains(&f.path));
     })
@@ -205,14 +210,26 @@ async fn remove_files(app: AppHandle, paths: Vec<PathBuf>) -> Result<(), String>
 
 #[tauri::command]
 async fn clear_files(app: AppHandle) -> Result<(), String> {
-    in_background(app, |state| state.session.lock().unwrap().files.clear()).await
+    in_background(app, |state| {
+        state
+            .session
+            .lock()
+            .expect("lock not poisoned")
+            .files
+            .clear()
+    })
+    .await
 }
 
 /// Moves the selected files one position up (`-1`) or down (`1`).
 #[tauri::command]
 async fn move_files(app: AppHandle, paths: Vec<PathBuf>, delta: i32) -> Result<(), String> {
     in_background(app, move |state| {
-        move_in(&mut state.session.lock().unwrap().files, &paths, delta)
+        move_in(
+            &mut state.session.lock().expect("lock not poisoned").files,
+            &paths,
+            delta,
+        )
     })
     .await
 }
@@ -238,7 +255,11 @@ fn move_in(files: &mut [FileEntry], paths: &[PathBuf], delta: i32) {
 #[tauri::command]
 async fn sort_files(app: AppHandle, key: SortKey, descending: bool) -> Result<(), String> {
     in_background(app, move |state| {
-        renome_core::sort_files(&mut state.session.lock().unwrap().files, key, descending);
+        renome_core::sort_files(
+            &mut state.session.lock().expect("lock not poisoned").files,
+            key,
+            descending,
+        );
     })
     .await
 }
@@ -253,7 +274,7 @@ async fn file_details(
     // As the list shows them (see `Details::text`: the CSV saves the same).
     in_background(app, move |state| {
         let want: HashSet<PathBuf> = paths.into_iter().collect();
-        let s = state.session.lock().unwrap();
+        let s = state.session.lock().expect("lock not poisoned");
         s.files
             .iter()
             .filter(|f| want.contains(&f.path))
@@ -272,12 +293,17 @@ async fn export_rows(
     lang: String,
 ) -> Result<Vec<Vec<renome_services::flow::export::Cell>>, String> {
     in_background(app, move |state| {
-        let preview = state.shown.lock().unwrap().clone().unwrap_or_default();
+        let preview = state
+            .shown
+            .lock()
+            .expect("lock not poisoned")
+            .clone()
+            .unwrap_or_default();
         let cols: Vec<&str> = columns.iter().map(String::as_str).collect();
         let details: HashMap<PathBuf, renome_core::details::Details> = if cols.is_empty() {
             HashMap::new()
         } else {
-            let s = state.session.lock().unwrap();
+            let s = state.session.lock().expect("lock not poisoned");
             s.files
                 .iter()
                 .map(|f| (f.path.clone(), renome_core::details::of(f)))
@@ -295,8 +321,13 @@ async fn export_missing(
     app: AppHandle,
 ) -> Result<renome_services::flow::export::MissingCsv, String> {
     in_background(app, move |state| {
-        let missing = state.missing.lock().unwrap().clone();
-        let preview = state.shown.lock().unwrap().clone().unwrap_or_default();
+        let missing = state.missing.lock().expect("lock not poisoned").clone();
+        let preview = state
+            .shown
+            .lock()
+            .expect("lock not poisoned")
+            .clone()
+            .unwrap_or_default();
         let dirs: HashMap<&PathBuf, &PathBuf> =
             preview.items.iter().map(|i| (&i.path, &i.dir)).collect();
         renome_services::flow::export::missing(&missing, &|p| {
@@ -326,11 +357,11 @@ async fn preview(
     let steps = rule_steps(steps, &mut view)?;
     let emitter = app.clone();
     in_background(app, move |state| {
-        let _disk = state.busy_disk.lock().unwrap();
+        let _disk = state.busy_disk.lock().expect("lock not poisoned");
         // Read on a copy of the list: the list stays free for the window
         // (the first reading of thousands of photos takes a minute).
         let files = {
-            let s = state.session.lock().unwrap();
+            let s = state.session.lock().expect("lock not poisoned");
             view.identical = s.identical.clone();
             view.alike = s.alike.clone();
             view.similar = s.similar.clone();
@@ -344,7 +375,7 @@ async fn preview(
             let list: Vec<&FileEntry> = files.iter().collect();
             let last = Mutex::new(Instant::now());
             renome_core::photos::read_all(&list, &|done, total| {
-                let mut last = last.lock().unwrap();
+                let mut last = last.lock().expect("lock not poisoned");
                 if last.elapsed() > Duration::from_millis(150) || done == total {
                     *last = Instant::now();
                     let _ = emitter.emit(
@@ -358,10 +389,16 @@ async fn preview(
             });
         }
         let preview = renome_core::preview(&files, &steps, &overrides, &view);
-        *state.shown.lock().unwrap() = Some(preview.clone());
+        *state.shown.lock().expect("lock not poisoned") = Some(preview.clone());
         // What was read stays known.
         let read: HashMap<&PathBuf, &FileEntry> = files.iter().map(|f| (&f.path, f)).collect();
-        for f in state.session.lock().unwrap().files.iter_mut() {
+        for f in state
+            .session
+            .lock()
+            .expect("lock not poisoned")
+            .files
+            .iter_mut()
+        {
             if let Some(other) = read.get(&f.path) {
                 f.keep_read(other);
             }
@@ -437,7 +474,13 @@ fn sources(state: &AppState) -> renome_services::comics::Sources<'_> {
 /// Files written: their tags are read again when next needed.
 fn forget_tags_of(state: &AppState, written: Vec<PathBuf>) {
     let written: HashSet<PathBuf> = written.into_iter().collect();
-    for f in state.session.lock().unwrap().files.iter_mut() {
+    for f in state
+        .session
+        .lock()
+        .expect("lock not poisoned")
+        .files
+        .iter_mut()
+    {
         if written.contains(&f.path) {
             f.forget_tags();
         }
@@ -480,7 +523,7 @@ impl renome_services::Host for Gui {
             let state = self.0.state::<AppState>();
             let id = state.ask_seq.fetch_add(1, Ordering::SeqCst);
             let (tx, rx) = tokio::sync::oneshot::channel();
-            state.asks.lock().unwrap().insert(id, tx);
+            state.asks.lock().expect("lock not poisoned").insert(id, tx);
             let _ = self.0.emit(
                 "flow-ask",
                 serde_json::json!({ "id": id, "question": question }),
@@ -493,7 +536,7 @@ impl renome_services::Host for Gui {
 /// The page's answer to a flow's question (`None`: none fits).
 #[tauri::command]
 fn flow_answer(state: State<AppState>, id: u64, answer: Option<Value>) {
-    if let Some(tx) = state.asks.lock().unwrap().remove(&id) {
+    if let Some(tx) = state.asks.lock().expect("lock not poisoned").remove(&id) {
         let _ = tx.send(answer);
     }
 }
@@ -523,12 +566,17 @@ async fn find_identical(app: AppHandle) -> Result<Option<Copies>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let run = state.identical_run.fetch_add(1, Ordering::SeqCst) + 1;
-        let files = state.session.lock().unwrap().files.clone();
+        let files = state
+            .session
+            .lock()
+            .expect("lock not poisoned")
+            .files
+            .clone();
         let stale = || {
             drop(state.busy_disk.lock());
             state.identical_run.load(Ordering::SeqCst) != run
         };
-        let mut hashes = state.hashes.lock().unwrap();
+        let mut hashes = state.hashes.lock().expect("lock not poisoned");
         let mut last = Instant::now();
         let groups = renome_core::find_identical(
             &files,
@@ -553,7 +601,7 @@ async fn find_identical(app: AppHandle) -> Result<Option<Copies>, String> {
         if stale() {
             return None;
         }
-        let mut s = state.session.lock().unwrap();
+        let mut s = state.session.lock().expect("lock not poisoned");
         s.identical = identical;
         // One filter for both: songs' groups first, then the works'.
         let all: Vec<Vec<PathBuf>> = songs
@@ -597,10 +645,10 @@ async fn find_similar(app: AppHandle) -> Result<Option<Vec<Vec<PathBuf>>>, Strin
             state.identical_run.load(Ordering::SeqCst) != run
         };
         let (files, identical) = {
-            let s = state.session.lock().unwrap();
+            let s = state.session.lock().expect("lock not poisoned");
             (s.files.clone(), s.identical.clone())
         };
-        let mut cache = state.pictures.lock().unwrap();
+        let mut cache = state.pictures.lock().expect("lock not poisoned");
         let mut last = Instant::now();
         let groups = renome_core::similar::similar_pictures(
             &files,
@@ -617,7 +665,8 @@ async fn find_similar(app: AppHandle) -> Result<Option<Vec<Vec<PathBuf>>>, Strin
         cache.save();
         drop(cache);
         let groups = groups.filter(|_| !stale())?;
-        state.session.lock().unwrap().similar = renome_core::repeated::by_group(&groups);
+        state.session.lock().expect("lock not poisoned").similar =
+            renome_core::repeated::by_group(&groups);
         Some(groups)
     })
     .await
@@ -871,7 +920,7 @@ async fn trash_files(app: AppHandle, paths: Vec<PathBuf>) -> Result<Trashed, Str
             }
         }
         let gone: HashSet<&PathBuf> = done.trashed.iter().collect();
-        let mut s = state.session.lock().unwrap();
+        let mut s = state.session.lock().expect("lock not poisoned");
         s.files.retain(|f| !gone.contains(&f.path));
         for (files, _) in s.undo.iter_mut() {
             files.retain(|f| !gone.contains(&f.path));
@@ -951,10 +1000,10 @@ async fn apply(
     let stop = stop_signal(&app);
     let emitter = app.clone();
     in_background(app, move |state| {
-        let _disk = state.busy_disk.lock().unwrap();
+        let _disk = state.busy_disk.lock().expect("lock not poisoned");
         // Not while the command line renames.
         let _lock = renome_services::RenameLock::take(|| ()).ok();
-        let mut s = state.session.lock().unwrap();
+        let mut s = state.session.lock().expect("lock not poisoned");
         view.identical = s.identical.clone();
         view.alike = s.alike.clone();
         view.similar = s.similar.clone();
@@ -998,7 +1047,7 @@ async fn apply(
         // Earlier states point to the old names.
         s.undo.clear();
         let said = renome_services::flow::after::renamed(&plan, &report, sent);
-        *state.renamed.lock().unwrap() = Some(plan);
+        *state.renamed.lock().expect("lock not poisoned") = Some(plan);
         Applied::new(report, said)
     })
     .await
@@ -1387,13 +1436,13 @@ async fn edit_start(
         let items = state
             .shown
             .lock()
-            .unwrap()
+            .expect("lock not poisoned")
             .as_ref()
             .map(|p| p.items.clone())
             .unwrap_or_default();
         let chosen: HashSet<PathBuf> = chosen.into_iter().collect();
         let paths = edit::rows(&kind, &items, &chosen, &parts, audiobooks);
-        let s = state.session.lock().unwrap();
+        let s = state.session.lock().expect("lock not poisoned");
         let files: HashMap<&PathBuf, &FileEntry> = s.files.iter().map(|f| (&f.path, f)).collect();
         let by_path: HashMap<&PathBuf, &renome_core::PreviewItem> = items.iter().map(|i| (&i.path, i)).collect();
         let empty = Known::default();
@@ -1456,13 +1505,13 @@ fn missing_items(
 ) -> Vec<renome_services::flow::missing::Missing> {
     use renome_services::flow::missing;
     let state = app.state::<AppState>();
-    let shown = state.shown.lock().unwrap();
+    let shown = state.shown.lock().expect("lock not poisoned");
     let found = match shown.as_ref() {
         Some(p) => missing::of(&rules, &known, p, descending, &missing::today()),
         None => Vec::new(),
     };
     // Kept for "Export the missing".
-    *state.missing.lock().unwrap() = found.clone();
+    *state.missing.lock().expect("lock not poisoned") = found.clone();
     found
 }
 
@@ -1476,7 +1525,7 @@ fn after_counts(
     chosen: renome_services::flow::after::Chosen,
 ) -> renome_services::flow::after::Counts {
     let state = app.state::<AppState>();
-    let shown = state.shown.lock().unwrap();
+    let shown = state.shown.lock().expect("lock not poisoned");
     match shown.as_ref() {
         Some(p) => renome_services::flow::after::counts(&rules, p, &chosen),
         None => Default::default(),
@@ -1498,7 +1547,7 @@ fn rename_ask(
 ) {
     use renome_services::flow::after;
     let state = app.state::<AppState>();
-    let shown = state.shown.lock().unwrap();
+    let shown = state.shown.lock().expect("lock not poisoned");
     let Some(p) = shown.as_ref() else {
         return Default::default();
     };
@@ -1531,9 +1580,9 @@ async fn after_rename(
     // The list as renamed (as shown, when nothing was).
     let renamed = !done.is_empty();
     let preview = renamed
-        .then(|| state.renamed.lock().unwrap().take())
+        .then(|| state.renamed.lock().expect("lock not poisoned").take())
         .flatten()
-        .or_else(|| state.shown.lock().unwrap().clone())
+        .or_else(|| state.shown.lock().expect("lock not poisoned").clone())
         .unwrap_or_default();
     let moved: HashMap<PathBuf, PathBuf> = done.into_iter().collect();
     let jobs = after::plan(&rules, &preview, &chosen, &moved);
@@ -1556,7 +1605,7 @@ async fn after_rename(
     )
     .await;
     {
-        let s = &mut *state.session.lock().unwrap();
+        let s = &mut *state.session.lock().expect("lock not poisoned");
         if !report.trashed.is_empty() {
             s.files
                 .retain(|f| !report.trashed.iter().any(|t| f.path.starts_with(t)));
@@ -1720,7 +1769,7 @@ async fn server_tell(
 /// The list's files at these paths.
 fn session_files(app: &AppHandle, paths: &HashSet<PathBuf>) -> Vec<FileEntry> {
     let state = app.state::<AppState>();
-    let session = state.session.lock().unwrap();
+    let session = state.session.lock().expect("lock not poisoned");
     session
         .files
         .iter()
@@ -1854,7 +1903,7 @@ async fn print_to_pdf(
         .visible(false)
         .on_page_load(move |_, p| {
             if p.event() == PageLoadEvent::Finished
-                && let Some(t) = tx.lock().unwrap().take()
+                && let Some(t) = tx.lock().expect("lock not poisoned").take()
             {
                 let _ = t.send(());
             }
@@ -1895,7 +1944,7 @@ fn print_webview(
     win.with_webview(move |pw| {
         use webkit2gtk::PrintOperationExt;
         let send = move |r: Result<(), String>| {
-            if let Some(t) = done.lock().unwrap().take() {
+            if let Some(t) = done.lock().expect("lock not poisoned").take() {
                 let _ = t.send(r);
             }
         };
@@ -2124,7 +2173,7 @@ async fn undo(app: AppHandle, id: String) -> Result<Applied, String> {
         // Not while the command line renames.
         let _lock = renome_services::RenameLock::take(|| ()).ok();
         let mut report = state.history.undo_with(&id, &hooks, &tags)?;
-        let s = &mut *state.session.lock().unwrap();
+        let s = &mut *state.session.lock().expect("lock not poisoned");
         refresh_renamed(&mut s.files, &mut report);
         // Songs may have their old tags back: read again.
         for f in s.files.iter_mut() {
@@ -2209,7 +2258,7 @@ use renome_services::SETTINGS_FILE;
 /// Secrets come apart ([`load_secrets`]), unless the file still has them.
 #[tauri::command]
 fn load_settings(fallback_lang: String) -> Result<Value, String> {
-    let _file = SETTINGS_FILE.lock().unwrap();
+    let _file = SETTINGS_FILE.lock().expect("lock not poisoned");
     match read_settings_file() {
         Some(saved) => Ok(renome_services::options::whole(Some(saved))),
         // The first run: the system's language, saved.
@@ -2236,7 +2285,7 @@ fn load_settings(fallback_lang: String) -> Result<Value, String> {
 #[tauri::command]
 async fn save_settings(mut settings: Value) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let _file = SETTINGS_FILE.lock().unwrap();
+        let _file = SETTINGS_FILE.lock().expect("lock not poisoned");
         let old = read_settings_file()
             .and_then(|v| v.as_object().map(secrets::of))
             .unwrap_or_default();

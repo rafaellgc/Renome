@@ -77,7 +77,7 @@ pub fn read() -> Read {
         return Read::Missing;
     };
     let found = entry.get_password();
-    let mut stored = STORED.lock().unwrap();
+    let mut stored = STORED.lock().expect("lock not poisoned");
     match found {
         Ok(text) => match parse(&text) {
             Some(map) => {
@@ -120,7 +120,7 @@ fn text_of(map: &Map<String, Value>) -> String {
 /// what this program last saw there are changed: a field another copy
 /// saved meanwhile, or one this version does not know, stays as it is.
 pub fn write(secrets: &Map<String, Value>) -> bool {
-    let Some(last) = STORED.lock().unwrap().clone() else {
+    let Some(last) = STORED.lock().expect("lock not poisoned").clone() else {
         return false;
     };
     let Ok(entry) = entry() else {
@@ -136,7 +136,7 @@ pub fn write(secrets: &Map<String, Value>) -> bool {
     };
     let text = text_of(&merged(&now, &seen, secrets));
     if text == now_text {
-        *STORED.lock().unwrap() = Some(text);
+        *STORED.lock().expect("lock not poisoned") = Some(text);
         return true;
     }
     let done = if text.is_empty() {
@@ -148,7 +148,7 @@ pub fn write(secrets: &Map<String, Value>) -> bool {
         entry.set_password(&text)
     };
     if done.is_ok() {
-        *STORED.lock().unwrap() = Some(text);
+        *STORED.lock().expect("lock not poisoned") = Some(text);
     }
     done.is_ok()
 }
@@ -160,7 +160,7 @@ pub fn write(secrets: &Map<String, Value>) -> bool {
 pub fn unsaved(mine: &Map<String, Value>) -> Map<String, Value> {
     let seen = STORED
         .lock()
-        .unwrap()
+        .expect("lock not poisoned")
         .as_deref()
         .and_then(parse)
         .unwrap_or_default();

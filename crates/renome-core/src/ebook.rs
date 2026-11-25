@@ -70,7 +70,7 @@ pub fn read_as(path: &Path, ext: &str) -> BookMeta {
     // Some books put everyone in one field (`Author;Other;tradução de X`):
     // a name never has a `;`, and translators and the like are not authors.
     static ROLE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?i)^(tradu[cç][aã]o|traducci[oó]n|translat(ed|ion)|trad\.|ilustra[cç][oõ]es|ilustraciones|illustrat(ed|ions)|organiza[cç][aã]o|prefácio|pref[aá]cio|foreword|introdu[cç][aã]o)\b").unwrap()
+        Regex::new(r"(?i)^(tradu[cç][aã]o|traducci[oó]n|translat(ed|ion)|trad\.|ilustra[cç][oõ]es|ilustraciones|illustrat(ed|ions)|organiza[cç][aã]o|prefácio|pref[aá]cio|foreword|introdu[cç][aã]o)\b").expect("valid regex")
     });
     m.authors = m
         .authors
@@ -172,7 +172,7 @@ fn clean_title(t: &str) -> String {
                 [^\p{L}\p{N}]*
             )$",
         )
-        .unwrap()
+        .expect("valid regex")
     });
     let t = crate::text::collapse_spaces(t.trim());
     if JUNK.is_match(&t) || (t.contains(['\\', '/']) && t.contains('.')) {
@@ -187,7 +187,7 @@ fn is_junk_author(a: &str) -> bool {
         Regex::new(
             r"(?i)^(unknown|desconhecido|desconocido|an[oó]nimo|anonymous|user|usu[aá]rio|usuario|admin|administra(dor|tor)|owner|propriet[aá]rio|hp|dell|lenovo|asus|acer|pc|windows user|calibre.*|[^\p{L}]*)$",
         )
-        .unwrap()
+        .expect("valid regex")
     });
     JUNK.is_match(a.trim())
 }
@@ -252,13 +252,13 @@ pub fn find_isbns(text: &str) -> Vec<String> {
         Regex::new(&format!(
             r"(?i)ISBN(?:-?1[03])?[^0-9\n]{{0,25}}?((?:{DIGIT}){{9}}[0-9Xx](?:[\s\x{{a0}}\-\x{{2010}}-\x{{2015}}.]{{0,2}}[0-9]){{0,3}})"
         ))
-        .unwrap()
+        .expect("valid regex")
     });
     static BARE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(&format!(
             r"\b(97[89][\s\x{{a0}}\-\x{{2010}}-\x{{2015}}.]{{0,2}}(?:{DIGIT}){{9}}[0-9])\b"
         ))
-        .unwrap()
+        .expect("valid regex")
     });
     let mut out: Vec<String> = Vec::new();
     let mut add = |s: &str| {
@@ -348,7 +348,8 @@ pub(crate) fn join_zip(base: &str, href: &str) -> String {
 
 /// The text of a page, without its markup.
 fn strip_tags(html: &str) -> String {
-    static TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)<[^>]*>").unwrap());
+    static TAG: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?s)<[^>]*>").expect("valid regex"));
     TAG.replace_all(html, " ")
         .replace("&nbsp;", " ")
         .replace("&#160;", " ")
@@ -728,17 +729,18 @@ fn xmp(doc: &lopdf::Document) -> Option<String> {
 }
 
 fn xmp_meta(x: &str) -> BookMeta {
-    static TITLE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?s)<dc:title>.*?<rdf:li[^>]*>(.*?)</rdf:li>").unwrap());
+    static TITLE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?s)<dc:title>.*?<rdf:li[^>]*>(.*?)</rdf:li>").expect("valid regex")
+    });
     static CREATOR: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?s)<dc:creator>(.*?)</dc:creator>").unwrap());
+        LazyLock::new(|| Regex::new(r"(?s)<dc:creator>(.*?)</dc:creator>").expect("valid regex"));
     static LI: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?s)<rdf:li[^>]*>(.*?)</rdf:li>").unwrap());
+        LazyLock::new(|| Regex::new(r"(?s)<rdf:li[^>]*>(.*?)</rdf:li>").expect("valid regex"));
     static ISBN: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
             r"(?is)<(?:prism:isbn|prism:eIsbn|pdfx:isbn|xmp:Identifier|dc:identifier)[^>]*>(.*?)</",
         )
-        .unwrap()
+        .expect("valid regex")
     });
     let unxml = |s: &str| {
         s.replace("&amp;", "&")
@@ -765,8 +767,9 @@ fn xmp_meta(x: &str) -> BookMeta {
 
 /// `A; B`, `A & B`, `A and B` → each one.
 fn split_authors(s: &str) -> Vec<String> {
-    static SPLIT: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"\s*(?:;|&|\band\b|\s+e\s+|\s+y\s+)\s*").unwrap());
+    static SPLIT: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"\s*(?:;|&|\band\b|\s+e\s+|\s+y\s+)\s*").expect("valid regex")
+    });
     SPLIT
         .split(s)
         .map(|a| a.trim().to_string())
@@ -807,7 +810,7 @@ fn fbz(path: &Path) -> Option<BookMeta> {
 
 fn parse_fb2(bytes: &[u8]) -> Option<BookMeta> {
     static ENCODING: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"encoding=["']([A-Za-z0-9_-]+)["']"#).unwrap());
+        LazyLock::new(|| Regex::new(r#"encoding=["']([A-Za-z0-9_-]+)["']"#).expect("valid regex"));
     let head = String::from_utf8_lossy(&bytes[..bytes.len().min(200)]).into_owned();
     let enc = ENCODING
         .captures(&head)

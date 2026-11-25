@@ -39,3 +39,6 @@ webkit2gtk = "2.0.2"
 [package.metadata.cargo-machete]
 # Used by build.rs, which the scan does not read.
 ignored = ["tauri-build"]
+
+[lints]
+workspace = true

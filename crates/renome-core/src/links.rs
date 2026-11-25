@@ -65,7 +65,7 @@ impl Link {
 type Maker = (Regex, fn(&regex::Captures) -> Option<Link>);
 
 static LINKS: LazyLock<Vec<Maker>> = LazyLock::new(|| {
-    let re = |s: &str| Regex::new(&format!("(?i){s}")).unwrap();
+    let re = |s: &str| Regex::new(&format!("(?i){s}")).expect("valid regex");
     vec![
         (re(r"themoviedb\.org/(movie|tv)/(\d+)"), |c| {
             Some(Link::Tmdb {
@@ -126,7 +126,8 @@ static LINKS: LazyLock<Vec<Maker>> = LazyLock::new(|| {
 });
 
 /// `tmdbid-603`, `[tmdbid=603]`: a TMDB id written as Jellyfin does.
-static TMDB_ID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\btmdbid[-=](\d+)").unwrap());
+static TMDB_ID: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\btmdbid[-=](\d+)").expect("valid regex"));
 
 /// The item a pasted text names, if it is a link or an id that says which
 /// catalogue it is from. A bare number is not one: titles may be numbers

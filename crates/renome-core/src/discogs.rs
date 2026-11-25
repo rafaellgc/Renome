@@ -180,7 +180,8 @@ fn loose_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u32>, D::Error
 /// An artist's name without the number Discogs adds to tell artists of the
 /// same name apart (`Korn (2)` → `Korn`).
 pub fn clean_name(name: &str) -> String {
-    static NUMBER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+\(\d+\)$").unwrap());
+    static NUMBER: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\s+\(\d+\)$").expect("valid regex"));
     let name = NUMBER.replace(name.trim(), "").to_string();
     if name == "Various" {
         crate::music::VARIOUS_ARTISTS.to_string()
@@ -243,7 +244,8 @@ fn millis(duration: &str) -> Option<u64> {
 /// a track's parts `12.1`, `12.2`).
 fn disc_of(position: &str) -> u32 {
     static DISC: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?i)^(?:(?:cd|dvd|disc|disk|lp)\s*(\d+)\s*[-.]|(\d+)\s*-)\s*\d+").unwrap()
+        Regex::new(r"(?i)^(?:(?:cd|dvd|disc|disk|lp)\s*(\d+)\s*[-.]|(\d+)\s*-)\s*\d+")
+            .expect("valid regex")
     });
     DISC.captures(position.trim())
         .and_then(|c| c.get(1).or(c.get(2))?.as_str().parse().ok())
@@ -255,9 +257,9 @@ fn disc_of(position: &str) -> u32 {
 /// `2-3b` → `2-3`); `None` for a whole track (and `CD2.5`, a disc's).
 fn part_of(position: &str) -> Option<&str> {
     static PART: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"^([0-9][0-9-]*?)(?:\.[0-9]+|[a-z])$").unwrap());
+        LazyLock::new(|| Regex::new(r"^([0-9][0-9-]*?)(?:\.[0-9]+|[a-z])$").expect("valid regex"));
     PART.captures(position.trim())
-        .map(|c| c.get(1).unwrap().as_str())
+        .map(|c| c.get(1).expect("group is in the match").as_str())
 }
 
 /// Parts of one track listed as tracks (`12.1 Song`, `12.2 [hidden]`):

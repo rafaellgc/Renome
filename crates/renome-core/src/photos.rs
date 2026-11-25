@@ -282,7 +282,7 @@ static NAME_DATE: LazyLock<Regex> = LazyLock::new(|| {
         )?
         (?:[^0-9]|$)",
     )
-    .unwrap()
+    .expect("valid regex")
 });
 
 /// See [`NAME_DATE`]; `None` when the name has no date (or an impossible
@@ -457,7 +457,7 @@ pub fn expand(template: &str, s: &Shot, name: &str, folder: bool) -> String {
 /// Separators with nothing between them (`a .. b`, `a_._b`): two marks
 /// or more in a row become a space (or the first mark, without spaces).
 static TIDY: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[-_.:\s]*[-_.:][-_.:\s]*[-_.:][-_.:\s]*").unwrap());
+    LazyLock::new(|| Regex::new(r"[-_.:\s]*[-_.:][-_.:\s]*[-_.:][-_.:\s]*").expect("valid regex"));
 
 /// The folders for a photo, one per `/` in the template; empty levels are
 /// left out.

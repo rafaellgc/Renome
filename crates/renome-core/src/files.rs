@@ -371,7 +371,8 @@ pub(crate) fn picture_size(path: &Path) -> Option<(u32, u32)> {
     let mut f = std::io::BufReader::new(std::fs::File::open(path).ok()?);
     let mut head = [0u8; 24];
     let n = f.read(&mut head).ok()?;
-    let be = |i: usize| u32::from_be_bytes(head[i..i + 4].try_into().unwrap());
+    let be =
+        |i: usize| u32::from_be_bytes(head[i..i + 4].try_into().expect("slice has this length"));
     match &head[..n] {
         [0xff, 0xd8, ..] => {
             // A frame's start: precision, height, width.

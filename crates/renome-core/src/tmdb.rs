@@ -22,16 +22,18 @@ pub struct Guess {
     pub id: Option<u64>,
 }
 
-static YEAR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b((?:19|20)[0-9]{2})\b").unwrap());
-static TMDB_ID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)tmdbid[-=](\d+)").unwrap());
+static YEAR: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b((?:19|20)[0-9]{2})\b").expect("valid regex"));
+static TMDB_ID: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)tmdbid[-=](\d+)").expect("valid regex"));
 pub(crate) static BRACKETS: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\[[^\]]*\]|\([^)]*\)|\{[^}]*\}").unwrap());
+    LazyLock::new(|| Regex::new(r"\[[^\]]*\]|\([^)]*\)|\{[^}]*\}").expect("valid regex"));
 /// Release tags: whatever follows them is not part of the title.
 pub(crate) static TAGS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)\b(2160p|1080p|720p|576p|480p|4k|uhd|blu ?ray|brrip|bdrip|bdremux|remux|webrip|web-?dl|hdtv|hdrip|dvdrip|dvdscr|x26[45]|h ?26[45]|hevc|xvid|divx|hdr|hdr10\+?|dovi|10bit|aac|e?ac3|dts|ddp?5|atmos|truehd|amzn|dsnp|hmax|atvp|dual|dublado|legendado|nacional|extended|unrated|uncut|remastered|proper|repack|imax|multi|subbed|dubbed)\b",
     )
-    .unwrap()
+    .expect("valid regex")
 });
 
 /// Guesses title and year from a file name without extension:
@@ -567,9 +569,9 @@ impl NfoIds {
 /// fields, only links of the right kind.
 pub fn nfo_ids(text: &str, root: &str) -> NfoIds {
     static TMDB_LINK: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"themoviedb\.org/(movie|tv)/(\d+)").unwrap());
+        LazyLock::new(|| Regex::new(r"themoviedb\.org/(movie|tv)/(\d+)").expect("valid regex"));
     static IMDB_LINK: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"imdb\.com/title/(tt\d{6,10})").unwrap());
+        LazyLock::new(|| Regex::new(r"imdb\.com/title/(tt\d{6,10})").expect("valid regex"));
     let mut ids = NfoIds::default();
     let text = text.trim_start_matches('\u{feff}');
     // Kodi allows a link after the document: the document is what comes

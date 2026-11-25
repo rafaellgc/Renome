@@ -20,7 +20,8 @@ const SLACK: u32 = 3;
 /// trailing `- 2011 Remaster`.
 fn key(s: &str) -> String {
     static REMASTER: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?i)\s+-\s+[^-]*\b(?:remaster(?:ed)?|remix|mono|stereo)\b.*$").unwrap()
+        Regex::new(r"(?i)\s+-\s+[^-]*\b(?:remaster(?:ed)?|remix|mono|stereo)\b.*$")
+            .expect("valid regex")
     });
     let s = crate::tmdb::BRACKETS.replace_all(s, " ");
     let s = REMASTER.replace(&s, "");

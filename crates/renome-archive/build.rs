@@ -1,3 +1,6 @@
+// A build script that cannot do its work should stop the build.
+#![allow(clippy::unwrap_used)]
+
 //! Builds the copy of libarchive in `libarchive/` as a static library with
 //! nothing from the system: only its own readers (RAR among them) are
 //! needed, and the program must run where those libraries are missing.

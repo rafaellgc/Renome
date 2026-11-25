@@ -691,7 +691,7 @@ pub async fn inside(
         match join_volume(history, &id, group, &mut moved_ops).await {
             Ok(files) => {
                 report.written += 1;
-                made.lock().unwrap().extend(files);
+                made.lock().expect("lock not poisoned").extend(files);
             }
             Err((file, e)) => report.errors.push((file, e)),
         }
@@ -747,7 +747,7 @@ pub async fn inside(
                         &path, to, job.ebook, &v, job.manga, original, job.pdf, &store,
                     )
                     .map(|d| {
-                        made.lock().unwrap().extend(d.parts);
+                        made.lock().expect("lock not poisoned").extend(d.parts);
                         (Some(d.backup), d.not_trashed)
                     });
                 }
@@ -847,7 +847,7 @@ pub async fn inside(
     }
     report.written += backups.len();
     report.drawn = pages.load(std::sync::atomic::Ordering::Relaxed);
-    let made = std::mem::take(&mut *made.lock().unwrap());
+    let made = std::mem::take(&mut *made.lock().expect("lock not poisoned"));
     if !made.is_empty()
         && let Err(e) = history.add_created(&id, &made)
     {

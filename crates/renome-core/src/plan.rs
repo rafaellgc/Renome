@@ -822,7 +822,10 @@ fn climb_shared_roots(items: &mut [PreviewItem]) {
                 None => break,
             }
         }
-        let dest = i.dest.as_ref().unwrap();
+        let dest = i
+            .dest
+            .as_ref()
+            .expect("a leftover folder belongs to a row that has a destination");
         let tail: Vec<_> = dest
             .components()
             .skip(dest.components().count() - n)

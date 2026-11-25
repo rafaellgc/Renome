@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)] // a test that cannot set itself up should fail
+
 //! Renaming on Windows: what its file system does differently (names that
 //! ignore case, reserved names, long paths, files held open, hidden and
 //! system files, junctions, `\` in lists).

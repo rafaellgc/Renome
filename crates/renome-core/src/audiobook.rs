@@ -51,13 +51,13 @@ static JUNK: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)[(\[]\s*(unabridged|abridged|integral|completo|íntegra|audio ?book|audiolivro|audiolibro|\d+\s*k(bps)?|mp3|m4b|aac)\s*[)\]]|\b(unabridged|audiobook|audiolivro|audiolibro)\b",
     )
-    .unwrap()
+    .expect("valid regex")
 });
 /// `{Narrator}` (as Audiobookshelf writes it), `narrated by Name`,
 /// `narrado por Name`, `read by Name`.
 static NARRATOR: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\{([^}]+)\}|[\s(\[-]+(?:narrated by|read by|narrado por|lido por|narrado por|leído por)\s+([^)\]]+)[)\]]?")
-        .unwrap()
+        .expect("valid regex")
 });
 
 /// Title, author, year and narrator from a folder or file name.

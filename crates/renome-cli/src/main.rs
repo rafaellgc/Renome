@@ -109,9 +109,14 @@ fn main() -> ExitCode {
             let _ = c.print_help();
             Ok(Exit::Done)
         }
-        Some(("manpages", m)) => man_pages(m.get_one::<std::path::PathBuf>("dir").unwrap()),
+        Some(("manpages", m)) => man_pages(
+            m.get_one::<std::path::PathBuf>("dir")
+                .expect("required by the argument parser"),
+        ),
         Some(("completions", m)) => {
-            let shell = *m.get_one::<clap_complete::Shell>("shell").unwrap();
+            let shell = *m
+                .get_one::<clap_complete::Shell>("shell")
+                .expect("required by the argument parser");
             clap_complete::generate(shell, &mut cli(), "renome-cli", &mut std::io::stdout());
             Ok(Exit::Done)
         }

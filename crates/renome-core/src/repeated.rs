@@ -60,7 +60,7 @@ fn words(s: &str) -> Vec<String> {
         Regex::new(
             r"(?i)^(?:epub|pdf|mobi|azw3?|kepub|fb2|ebook|e-book|retail|scan|scans|ocr|digital|livro|libro|book|cbz|cbr)$",
         )
-        .unwrap()
+        .expect("valid regex")
     });
     let s = crate::tmdb::BRACKETS.replace_all(s, " ");
     crate::text::strip_accents(&s)
@@ -89,13 +89,13 @@ fn is_extra(f: &FileEntry) -> bool {
         Regex::new(
             r"(?i)[-._ ](?:trailer|sample|featurette|behindthescenes|deleted|deletedscene|interview|scene|short|extra|other|teaser|clip)\d*$",
         )
-        .unwrap()
+        .expect("valid regex")
     });
     static FOLDER: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
             r"(?i)^(?:extras?|bonus|trailers?|samples?|featurettes?|behind the scenes|deleted scenes|interviews?|scenes|shorts|other|others|clips)$",
         )
-        .unwrap()
+        .expect("valid regex")
     });
     SUFFIX.is_match(&f.stem) || FOLDER.is_match(folder_name(&f.path).trim())
 }
@@ -104,7 +104,7 @@ fn is_extra(f: &FileEntry) -> bool {
 /// Making Of` → `making of`); none for a release name's tags.
 fn after_year(stem: &str) -> String {
     static YEAR_END: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"[(\[]?\b(?:19|20)\d{2}\b[)\]]?").unwrap());
+        LazyLock::new(|| Regex::new(r"[(\[]?\b(?:19|20)\d{2}\b[)\]]?").expect("valid regex"));
     let Some(m) = YEAR_END.find_iter(stem).last() else {
         return String::new();
     };
@@ -176,7 +176,7 @@ fn keys(f: &FileEntry) -> Option<(Kind, Vec<String>)> {
             };
             // `Episode - Part 2`: another file of a two-part episode.
             static PART: LazyLock<Regex> = LazyLock::new(|| {
-                Regex::new(r"(?i)\b(?:parte?|pt)\.?\s*(\d+|i{1,3}|iv)\b").unwrap()
+                Regex::new(r"(?i)\b(?:parte?|pt)\.?\s*(\d+|i{1,3}|iv)\b").expect("valid regex")
             });
             let part = PART
                 .captures(&ep.title)
@@ -399,7 +399,7 @@ pub fn same_works(
         {
             continue;
         }
-        let kind = kinds[members[0]].unwrap();
+        let kind = kinds[members[0]].expect("every member has a kind");
         // Books joined only by their names: the same book in other
         // formats (same-format files with one name are as often
         // different documents, like a bill each month).

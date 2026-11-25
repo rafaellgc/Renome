@@ -1467,7 +1467,7 @@ fn plurals(text: &str, vars: &[(&str, String)]) -> String {
     let mut out = String::with_capacity(text.len());
     let mut i = 0;
     while i < text.len() {
-        let c = text[i..].chars().next().unwrap();
+        let c = text[i..].chars().next().expect("`i` is inside the text");
         if c == '['
             && let Some(close) = text[i..].find(']')
             && let Some((one, many)) = text[i + 1..i + close].split_once('|')

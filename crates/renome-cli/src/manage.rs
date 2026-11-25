@@ -120,7 +120,9 @@ pub fn history(m: &ArgMatches) -> Result<Exit, String> {
     let h = the_history();
     match m.subcommand() {
         Some(("show", s)) => {
-            let id = s.get_one::<String>("id").unwrap();
+            let id = s
+                .get_one::<String>("id")
+                .expect("required by the argument parser");
             let ops = h.operations(id).map_err(|_| t("noEntry", &[("id", id)]))?;
             if ops.is_empty() && !out::json() {
                 out::note(&t("undone", &[]));
@@ -152,7 +154,9 @@ pub fn history(m: &ArgMatches) -> Result<Exit, String> {
             }
         }
         Some(("delete", s)) => {
-            let id = s.get_one::<String>("id").unwrap();
+            let id = s
+                .get_one::<String>("id")
+                .expect("required by the argument parser");
             h.delete(id).map_err(|_| t("noEntry", &[("id", id)]))?;
             out::note(&t("entryDeleted", &[("id", id)]));
         }
@@ -198,7 +202,9 @@ pub(crate) fn settings_now() -> Value {
 }
 
 pub(crate) fn save_settings(settings: &Value) -> Result<(), String> {
-    let _file = renome_services::SETTINGS_FILE.lock().unwrap();
+    let _file = renome_services::SETTINGS_FILE
+        .lock()
+        .expect("lock not poisoned");
     renome_services::write_settings_file(settings)
 }
 
@@ -213,13 +219,16 @@ pub(crate) fn list_of<'a>(settings: &'a mut Value, key: &str) -> &'a mut Vec<Val
     if !list.is_array() {
         *list = Value::Array(vec![]);
     }
-    list.as_array_mut().unwrap()
+    list.as_array_mut()
+        .expect("the list was just made an array")
 }
 
 pub fn sets(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> {
     match m.subcommand() {
         Some(("show", s)) => {
-            let name = s.get_one::<String>("name").unwrap();
+            let name = s
+                .get_one::<String>("name")
+                .expect("required by the argument parser");
             let set = rulespec::find_set(settings.as_ref(), name)
                 .ok_or_else(|| t("noSet", &[("name", name)]))?;
             if out::json() {
@@ -233,7 +242,11 @@ pub fn sets(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> {
             }
         }
         Some(("save", s)) => {
-            let name = s.get_one::<String>("name").unwrap().trim().to_string();
+            let name = s
+                .get_one::<String>("name")
+                .expect("required by the argument parser")
+                .trim()
+                .to_string();
             let sources = crate::sources(s);
             if sources.is_empty() {
                 return Err(t("noRules", &[]));
@@ -243,7 +256,9 @@ pub fn sets(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> {
             put_set(&name, steps, s.get_flag("replace"))?;
         }
         Some(("export", s)) => {
-            let name = s.get_one::<String>("name").unwrap();
+            let name = s
+                .get_one::<String>("name")
+                .expect("required by the argument parser");
             let set = rulespec::find_set(settings.as_ref(), name)
                 .ok_or_else(|| t("noSet", &[("name", name)]))?;
             // As the window saves a preset: the list of steps.
@@ -256,7 +271,9 @@ pub fn sets(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> {
             }
         }
         Some(("import", s)) => {
-            let file = s.get_one::<String>("file").unwrap();
+            let file = s
+                .get_one::<String>("file")
+                .expect("required by the argument parser");
             let name = s.get_one::<String>("name").cloned().unwrap_or_else(|| {
                 Path::new(file)
                     .file_stem()
@@ -269,7 +286,9 @@ pub fn sets(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> {
             put_set(name.trim(), steps, s.get_flag("replace"))?;
         }
         Some(("delete", s)) => {
-            let name = s.get_one::<String>("name").unwrap();
+            let name = s
+                .get_one::<String>("name")
+                .expect("required by the argument parser");
             let mut now = settings_now();
             let sets = sets_of(&mut now);
             let at = renome_services::options::set_index(sets, name, None)
@@ -279,8 +298,14 @@ pub fn sets(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> {
             out::note(&t("setDeleted", &[("name", name)]));
         }
         Some(("rename", s)) => {
-            let from = s.get_one::<String>("name").unwrap();
-            let to = s.get_one::<String>("new").unwrap().trim().to_string();
+            let from = s
+                .get_one::<String>("name")
+                .expect("required by the argument parser");
+            let to = s
+                .get_one::<String>("new")
+                .expect("required by the argument parser")
+                .trim()
+                .to_string();
             let mut now = settings_now();
             let sets = sets_of(&mut now);
             let at = renome_services::options::set_index(sets, from, None)
@@ -517,7 +542,10 @@ pub fn options(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> 
     };
     match m.subcommand() {
         Some(("get", s)) => {
-            let set = find(s.get_one::<String>("option").unwrap())?;
+            let set = find(
+                s.get_one::<String>("option")
+                    .expect("required by the argument parser"),
+            )?;
             let v = value_of(set);
             println!(
                 "{}",
@@ -529,9 +557,14 @@ pub fn options(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> 
             );
         }
         Some(("set", s)) => {
-            let set = find(s.get_one::<String>("option").unwrap())?;
+            let set = find(
+                s.get_one::<String>("option")
+                    .expect("required by the argument parser"),
+            )?;
             let (key, kind) = (&set.name, &set.kind);
-            let raw = s.get_one::<String>("value").unwrap();
+            let raw = s
+                .get_one::<String>("value")
+                .expect("required by the argument parser");
             let spec = catalog::RuleSpec {
                 kind: "options",
                 hint: None,
@@ -553,7 +586,11 @@ pub fn options(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> 
             out::note(&t("settingSaved", &[("name", key), ("value", &v)]));
         }
         Some(("reset", s)) => {
-            let key = &find(s.get_one::<String>("option").unwrap())?.name;
+            let key = &find(
+                s.get_one::<String>("option")
+                    .expect("required by the argument parser"),
+            )?
+            .name;
             let mut now = settings_now();
             if let Some(obj) = now.as_object_mut() {
                 obj.remove(*key);
@@ -663,7 +700,10 @@ pub fn keys(m: &ArgMatches) -> Result<Exit, String> {
     };
     match m.subcommand() {
         Some(("set", s)) => {
-            let (name, field) = find(s.get_one::<String>("key").unwrap())?;
+            let (name, field) = find(
+                s.get_one::<String>("key")
+                    .expect("required by the argument parser"),
+            )?;
             let value = if s.get_flag("stdin") {
                 let mut v = String::new();
                 std::io::Read::read_to_string(&mut std::io::stdin(), &mut v)
@@ -690,7 +730,10 @@ pub fn keys(m: &ArgMatches) -> Result<Exit, String> {
             ));
         }
         Some(("test", s)) => {
-            let (name, _) = find(s.get_one::<String>("key").unwrap())?;
+            let (name, _) = find(
+                s.get_one::<String>("key")
+                    .expect("required by the argument parser"),
+            )?;
             let (all, _) = secrets()?;
             let get = |f: &str| {
                 all.get(f)
@@ -703,7 +746,10 @@ pub fn keys(m: &ArgMatches) -> Result<Exit, String> {
             out::note(&out::green(&ok));
         }
         Some(("delete", s)) => {
-            let (name, field) = find(s.get_one::<String>("key").unwrap())?;
+            let (name, field) = find(
+                s.get_one::<String>("key")
+                    .expect("required by the argument parser"),
+            )?;
             let (mut all, _) = secrets()?;
             all.insert((*field).into(), Value::from(""));
             renome_services::save_secrets(all)?;

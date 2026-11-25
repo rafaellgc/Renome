@@ -72,7 +72,9 @@ pub fn parse(specs: &[String], fields: &[Field]) -> Result<Edits, String> {
         let typed = out.entry(path).or_default();
         for (n, &from) in starts.iter().enumerate() {
             let to = starts.get(n + 1).map_or(rest.len(), |next| next - 1);
-            let (key, value) = rest[from..to].split_once('=').unwrap();
+            let (key, value) = rest[from..to]
+                .split_once('=')
+                .expect("the range was found at an `=`");
             let value = value.trim();
             // Checked as the window's details window takes it.
             if let Some(f) = fields.iter().find(|f| f.key == key)

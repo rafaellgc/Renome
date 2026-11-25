@@ -201,12 +201,14 @@ pub fn probe(path: &Path) -> Option<AudioTags> {
     Some(t)
 }
 
-static LEADING_NUMBER: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(?:(\d{1,2})[-.])?(\d{1,3})(?:\s*[-.)_]\s*|\s+)(.+)$").unwrap());
+static LEADING_NUMBER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(?:(\d{1,2})[-.])?(\d{1,3})(?:\s*[-.)_]\s*|\s+)(.+)$").expect("valid regex")
+});
 static FOLDER_YEAR: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\s*[(\[]((?:19|20)\d{2})[)\]]\s*$").unwrap());
-static DISC_FOLDER: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)^(?:cd|disc|disco|disk)[ ._-]*(\d{1,2})$").unwrap());
+    LazyLock::new(|| Regex::new(r"\s*[(\[]((?:19|20)\d{2})[)\]]\s*$").expect("valid regex"));
+static DISC_FOLDER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^(?:cd|disc|disco|disk)[ ._-]*(\d{1,2})$").expect("valid regex")
+});
 
 /// The disc a folder stands for (`CD1`, `Disc 2`, `Disco 2`).
 pub fn disc_folder(name: &str) -> Option<u32> {
@@ -254,7 +256,7 @@ pub fn from_name(stem: &str, dir: &Path) -> AudioTags {
     }
     if let Some(c) = FOLDER_YEAR.captures(&folder) {
         t.year = c[1].parse().ok();
-        folder = folder[..c.get(0).unwrap().start()].to_string();
+        folder = folder[..c.get(0).expect("group is in the match").start()].to_string();
     }
     match folder.split_once(" - ") {
         Some((artist, album)) => {
@@ -283,8 +285,9 @@ fn most_common<T: Clone + PartialEq>(values: impl Iterator<Item = T>) -> Option<
     counts.into_iter().find(|(_, n)| *n == most).map(|(v, _)| v)
 }
 
-static FEATURING: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)\s+(?:feat\.?|ft\.|featuring|with)\s.*$").unwrap());
+static FEATURING: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\s+(?:feat\.?|ft\.|featuring|with)\s.*$").expect("valid regex")
+});
 
 /// The main artist: `Banda Azul feat. Rui` → `Banda Azul`.
 pub(crate) fn main_artist(artist: &str) -> String {
@@ -526,9 +529,11 @@ fn initial(name: &str) -> String {
 }
 
 /// A year in an album's name (`Show 12 (2025-05-04)`).
-static YEAR_IN_NAME: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(?:19|20)\d{2}\b").unwrap());
+static YEAR_IN_NAME: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b(?:19|20)\d{2}\b").expect("valid regex"));
 
-static REPEATED_DASH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r" [-–](?: [-–])+ ").unwrap());
+static REPEATED_DASH: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r" [-–](?: [-–])+ ").expect("valid regex"));
 
 /// Expands a template with the tags: `{title}`, `{artist}`,
 /// `{album artist}`, `{album}`, `{year}`, `{track}` (two digits, three for
@@ -693,7 +698,7 @@ use crate::text::words;
 
 /// A bracketed part, or a year or date.
 static ASIDE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\([^()]*\)|\[[^\[\]]*\]|\b(?:19|20)\d{2}(?:-\d{2}){0,2}\b").unwrap()
+    Regex::new(r"\([^()]*\)|\[[^\[\]]*\]|\b(?:19|20)\d{2}(?:-\d{2}){0,2}\b").expect("valid regex")
 });
 
 /// The words of a name without its bracketed parts, years and dates

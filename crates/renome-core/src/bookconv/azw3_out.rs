@@ -34,7 +34,7 @@ fn base32(mut n: u32, width: usize) -> String {
         s[i] = D[(n % 32) as usize];
         n /= 32;
     }
-    String::from_utf8(s).unwrap()
+    String::from_utf8(s).expect("the digits are ASCII")
 }
 
 /// `body` with an `aid` on each element that has none (not on empty ones
@@ -44,7 +44,7 @@ fn with_aids(body: &str, next: &mut u32) -> String {
         "img", "br", "hr", "meta", "link", "input", "col", "area", "wbr", "source", "embed",
         "param",
     ];
-    let tag = regex::Regex::new(r"<([A-Za-z][A-Za-z0-9:-]*)([^<>]*?)(/?)>").unwrap();
+    let tag = regex::Regex::new(r"<([A-Za-z][A-Za-z0-9:-]*)([^<>]*?)(/?)>").expect("valid regex");
     tag.replace_all(body, |c: &regex::Captures| {
         let name = c[1].to_ascii_lowercase();
         if EMPTY.contains(&name.as_str()) || c[2].contains(" aid=") || !c[3].is_empty() {
@@ -402,11 +402,14 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
         bodies.push(with_aids(&body, &mut aid));
     }
     // Ids: (chapter, id) → offset of their element in the fragment.
-    let id_re = regex::Regex::new(r#"<[^<>]*\sid="([^"]+)""#).unwrap();
+    let id_re = regex::Regex::new(r#"<[^<>]*\sid="([^"]+)""#).expect("valid regex");
     let mut ids: HashMap<(usize, String), usize> = HashMap::new();
     for (i, b) in bodies.iter().enumerate() {
         for m in id_re.captures_iter(b) {
-            ids.insert((i, m[1].to_string()), m.get(0).unwrap().start());
+            ids.insert(
+                (i, m[1].to_string()),
+                m.get(0).expect("group is in the match").start(),
+            );
         }
     }
     let file_no: HashMap<&str, usize> = book
@@ -417,7 +420,7 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
         .collect();
     // Links: `file#id` → `kindle:pos:fid:F:off:O`. Offsets do not move,
     // as each address has the same length.
-    let href_re = regex::Regex::new(r##"href="([^"#]*)(?:#([^"]*))?""##).unwrap();
+    let href_re = regex::Regex::new(r##"href="([^"#]*)(?:#([^"]*))?""##).expect("valid regex");
     let place = |file: usize, id: Option<&str>| -> String {
         let off = id
             .and_then(|i| ids.get(&(file, i.to_string())))

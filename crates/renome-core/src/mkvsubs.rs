@@ -507,8 +507,8 @@ fn scan(
                 }
             }
         }
-        if cluster_end.is_some_and(|e| pos != e) {
-            pos = cluster_end.unwrap();
+        if let Some(end) = cluster_end.filter(|&e| pos != e) {
+            pos = end;
             if f.seek(SeekFrom::Start(pos)).is_err() {
                 break;
             }

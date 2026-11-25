@@ -102,7 +102,7 @@ static SITE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)(?:^|[^a-z0-9])(?:www[.\s]|[a-z0-9][a-z0-9-]*\.(?:com|net|org|to|site|biz|info|tv|me|cc|io|xyz|top|club|online|vip|link|lol|app|in|ws|br)(?:$|[^a-z0-9]))",
     )
-    .unwrap()
+    .expect("valid regex")
 });
 
 /// A name that is nothing but a site's address, at most with a word or two

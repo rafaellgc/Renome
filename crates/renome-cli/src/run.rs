@@ -100,7 +100,7 @@ fn build_steps(
 fn scan_list(m: &ArgMatches, settings: Option<&Value>) -> Option<Vec<FileEntry>> {
     let paths: Vec<PathBuf> = m
         .get_many::<PathBuf>("paths")
-        .unwrap()
+        .expect("required by the argument parser")
         .map(|p| std::path::absolute(p).unwrap_or_else(|_| p.clone()))
         .collect();
     let opts = ScanOptions {

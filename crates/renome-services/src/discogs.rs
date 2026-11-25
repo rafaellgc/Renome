@@ -50,12 +50,12 @@ fn net_error(e: reqwest::Error) -> String {
 
 impl Client {
     pub fn set_token(&self, token: &str) {
-        *self.token.lock().unwrap() = token.trim().to_string();
+        *self.token.lock().expect("lock not poisoned") = token.trim().to_string();
     }
 
     /// Whether the user gave a token.
     pub fn ready(&self) -> bool {
-        !self.token.lock().unwrap().is_empty()
+        !self.token.lock().expect("lock not poisoned").is_empty()
     }
 
     /// A request at most every 1.1 seconds; when the service says it is
@@ -74,7 +74,7 @@ impl Client {
         }
         let token = match token {
             Some(t) => t.trim().to_string(),
-            None => self.token.lock().unwrap().clone(),
+            None => self.token.lock().expect("lock not poisoned").clone(),
         };
         if token.is_empty() {
             return Err("dgNoKey".into());

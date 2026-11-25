@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)] // a test that cannot set itself up should fail
+
 //! The test archives are from libarchive's own tests (BSD license).
 
 use std::io::Read;

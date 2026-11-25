@@ -224,20 +224,21 @@ pub fn add_release(extra: &mut Extra, name: &str) {
         Regex::new(
             r"(?i)\b(director'?s[ ._-]?cut|extended(?:[ ._-](?:cut|edition))?|unrated|uncut|theatrical(?:[ ._-]cut)?|remastered|imax|criterion|special[ ._-]edition|ultimate[ ._-](?:cut|edition)|final[ ._-]cut|(?:\d+(?:th|st|nd|rd)[ ._-])?anniversary(?:[ ._-]edition)?)\b",
         )
-        .unwrap()
+        .expect("valid regex")
     });
     static SOURCE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
             r"(?i)\b(remux|blu-?ray|bdrip|brrip|bd25|bd50|web-?dl|webrip|web|hdtv|pdtv|dvdrip|dvd5|dvd9|dvd|hdrip|tvrip|vhsrip)\b",
         )
-        .unwrap()
+        .expect("valid regex")
     });
-    static RESOLUTION: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)\b(?:2160|1080|720|576|480)[pi]\b|\b4k\b").unwrap());
+    static RESOLUTION: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)\b(?:2160|1080|720|576|480)[pi]\b|\b4k\b").expect("valid regex")
+    });
     static GROUP_END: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"-([A-Za-z0-9]{2,20})(?:\[[^\]]*\])?$").unwrap());
+        LazyLock::new(|| Regex::new(r"-([A-Za-z0-9]{2,20})(?:\[[^\]]*\])?$").expect("valid regex"));
     static GROUP_START: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"^\[([^\]]{2,30})\]").unwrap());
+        LazyLock::new(|| Regex::new(r"^\[([^\]]{2,30})\]").expect("valid regex"));
     if let Some(m) = EDITION.find(name) {
         let words: Vec<String> = m
             .as_str()

@@ -100,8 +100,8 @@ pub fn print_page(book: &Book, dir: &Path, page: Page) -> Result<PathBuf, String
             std::fs::write(dir.join(&r.name), data).map_err(|e| e.to_string())?;
         }
     }
-    let id_re = regex::Regex::new(r#"\sid="([^"]+)""#).unwrap();
-    let href_re = regex::Regex::new(r##"\shref="([^"#]*)(?:#([^"]*))?""##).unwrap();
+    let id_re = regex::Regex::new(r#"\sid="([^"]+)""#).expect("valid regex");
+    let href_re = regex::Regex::new(r##"\shref="([^"#]*)(?:#([^"]*))?""##).expect("valid regex");
     let files: std::collections::HashMap<&str, usize> = book
         .chapters
         .iter()

@@ -389,8 +389,9 @@ fn ncx_entries(
 /// `@import` dropped (its sheet is in the book already).
 fn rewrite_css(css: &str, base: &str, names: &HashMap<String, String>) -> String {
     static URL: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"url\(\s*["']?([^"')]+)["']?\s*\)"#).unwrap());
-    static IMPORT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"@import[^;]*;"#).unwrap());
+        LazyLock::new(|| Regex::new(r#"url\(\s*["']?([^"')]+)["']?\s*\)"#).expect("valid regex"));
+    static IMPORT: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"@import[^;]*;"#).expect("valid regex"));
     let css = IMPORT.replace_all(css, "");
     URL.replace_all(&css, |c: &regex::Captures| {
         let h = &c[1];

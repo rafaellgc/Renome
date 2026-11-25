@@ -670,8 +670,10 @@ pub fn beside(path: &Path) -> Option<PathBuf> {
 pub fn fix_links(book: &mut Book) {
     use regex::Regex;
     use std::sync::LazyLock;
-    static ID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"\sid="([^"]+)""#).unwrap());
-    static HREF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r##"\shref="#([^"]*)""##).unwrap());
+    static ID: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"\sid="([^"]+)""#).expect("valid regex"));
+    static HREF: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r##"\shref="#([^"]*)""##).expect("valid regex"));
     let mut at: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     for c in &book.chapters {
         for cap in ID.captures_iter(&c.body) {
@@ -735,9 +737,10 @@ pub fn drop_dead_fragments(book: &mut Book) {
     use regex::Regex;
     use std::collections::{HashMap, HashSet};
     use std::sync::LazyLock;
-    static ID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"\sid="([^"]+)""#).unwrap());
+    static ID: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"\sid="([^"]+)""#).expect("valid regex"));
     static HREF: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r##"\shref="([^"#]*)#([^"]*)""##).unwrap());
+        LazyLock::new(|| Regex::new(r##"\shref="([^"#]*)#([^"]*)""##).expect("valid regex"));
     let ids: HashMap<String, HashSet<String>> = book
         .chapters
         .iter()
@@ -797,9 +800,10 @@ pub fn xml_ids(book: &mut Book) {
     use regex::Regex;
     use std::collections::{HashMap, HashSet};
     use std::sync::LazyLock;
-    static ID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(\sid=")([^"]+)""#).unwrap());
+    static ID: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"(\sid=")([^"]+)""#).expect("valid regex"));
     static HREF: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r##"(\shref=")([^"#]*)#([^"]*)""##).unwrap());
+        LazyLock::new(|| Regex::new(r##"(\shref=")([^"#]*)#([^"]*)""##).expect("valid regex"));
     // Per file: old id -> new.
     let mut moved: HashMap<String, HashMap<String, String>> = HashMap::new();
     for c in &book.chapters {
@@ -976,7 +980,7 @@ pub fn guess_language(text: &str) -> Option<&'static str> {
 fn sample_text(book: &Book) -> String {
     use regex::Regex;
     use std::sync::LazyLock;
-    static TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]*>").unwrap());
+    static TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]*>").expect("valid regex"));
     let mut s = String::new();
     for c in &book.chapters {
         s.push_str(&TAG.replace_all(&c.body, " "));

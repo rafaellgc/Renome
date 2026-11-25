@@ -1,3 +1,6 @@
+// A build script that cannot do its work should stop the build.
+#![allow(clippy::unwrap_used)]
+
 //! The page's texts (`src/lib/i18n.ts`) made into tables, so the command
 //! line says things as the window does, in the same three languages,
 //! without a second copy to keep in step.

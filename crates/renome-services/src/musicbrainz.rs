@@ -437,7 +437,7 @@ async fn hear(
         if !h.recordings.is_empty() {
             s.heard
                 .lock()
-                .unwrap()
+                .expect("lock not poisoned")
                 .insert(path.clone(), h.recordings.clone());
         }
         heard.insert(path.clone(), h);

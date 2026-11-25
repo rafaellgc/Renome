@@ -175,7 +175,9 @@ impl<'a> Device<'a> for Collector<'_> {
                 // A font whose plain letters are their codes moved by the
                 // same amount: this one too.
                 None if shift.is_some_and(|d| (33..127).contains(&(g.char_code() as i64 + d))) => {
-                    match char::from_u32((g.char_code() as i64 + shift.unwrap()) as u32) {
+                    match char::from_u32(
+                        (g.char_code() as i64 + shift.expect("checked by the guard above")) as u32,
+                    ) {
                         Some(c) => c.to_string(),
                         None => continue,
                     }
@@ -583,7 +585,7 @@ fn chunks_of(glyphs: &[Glyph]) -> Vec<Chunk> {
                 .is_some_and(|c| c.runs.last().is_some_and(|r| r.text.ends_with(' ')));
             let wide = gap > line_size.max(gl.size) * 1.6 && gap > line_gap * 2.5;
             if cur.is_some() && wide && !is_sup && (!spaced || gap > line_size * 4.0) {
-                out.push(cur.take().unwrap());
+                out.push(cur.take().expect("checked just above"));
             }
             let c = cur.get_or_insert_with(|| Chunk {
                 x0: gl.x0,
@@ -755,7 +757,7 @@ fn blocks_of(mut chunks: Vec<Chunk>, pics: &[Pic], body: f32) -> Vec<Block> {
             if b.pic.is_some() {
                 return false;
             }
-            let last = b.lines.last().unwrap();
+            let last = b.lines.last().expect("the list is never empty here");
             let gap = c.base - last.base;
             let size = last.size.max(c.size);
             let similar = c.size / last.size > 0.8 && c.size / last.size < 1.25;
@@ -1460,7 +1462,7 @@ pub fn read(path: &Path) -> Result<Book, String> {
                         size: bsize,
                         ..Default::default()
                     });
-                    let p = pending.as_mut().unwrap();
+                    let p = pending.as_mut().expect("set just above");
                     p.runs = l.runs.clone();
                     p.ends = ends_sentence(&t);
                     continue;
@@ -1523,7 +1525,7 @@ pub fn read(path: &Path) -> Result<Book, String> {
                         ..Default::default()
                     });
                 }
-                let p = pending.as_mut().unwrap();
+                let p = pending.as_mut().expect("set when it was none");
                 if p.runs.is_empty() {
                     p.runs = l.runs.clone();
                 } else {

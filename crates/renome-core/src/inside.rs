@@ -747,7 +747,10 @@ pub fn book_opf(old: &str, v: &BookValues) -> Option<String> {
                         set_text(&mut e, src, **n, a);
                         // The old name's sort form and the like.
                         for r in refines_of(n) {
-                            let m = elements.iter().find(|m| m.range() == r).unwrap();
+                            let m = elements
+                                .iter()
+                                .find(|m| m.range() == r)
+                                .expect("a refined element is one of the metadata");
                             if m.attribute("property") != Some("role") {
                                 e.put(whole_line(src, r), "");
                             }
@@ -896,7 +899,7 @@ pub fn book_opf(old: &str, v: &BookValues) -> Option<String> {
                     Some(p) => set_text(&mut e, src, *p, &v.series_index),
                     None if n.attribute("id").is_some() => added.push(format!(
                         "<meta refines=\"#{}\" property=\"group-position\">{}</meta>",
-                        esc(n.attribute("id").unwrap()),
+                        esc(n.attribute("id").expect("the arm checks the id")),
                         esc(&v.series_index)
                     )),
                     None => {}
@@ -922,7 +925,7 @@ pub fn book_opf(old: &str, v: &BookValues) -> Option<String> {
                         i => format!("renome-series-{i}"),
                     })
                     .find(|id| !taken(id))
-                    .unwrap();
+                    .expect("the numbers never run out");
                 added.push(format!(
                     "<meta property=\"belongs-to-collection\" id=\"{id}\">{}</meta>",
                     esc(&v.series)

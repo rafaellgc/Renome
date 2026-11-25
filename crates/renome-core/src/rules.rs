@@ -1776,7 +1776,7 @@ fn folder_name(file: &FileEntry) -> String {
 /// A number of up to three digits at the start, with a disc before it
 /// (`1-05`) and what separates it from the rest; not the whole name.
 static LEADING_NUMBER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^\s*(?:\d{1,2}[-.])?\d{1,3}(?:\s*[-.)_]\s*|\s+)(?:[-–]\s*)?").unwrap()
+    Regex::new(r"^\s*(?:\d{1,2}[-.])?\d{1,3}(?:\s*[-.)_]\s*|\s+)(?:[-–]\s*)?").expect("valid regex")
 });
 
 /// The movie with what its file's name tells (edition, source, group).

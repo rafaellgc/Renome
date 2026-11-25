@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)] // a test that cannot set itself up should fail
+
 //! renome-cli run as people and scripts run it, each test in a profile
 //! of its own (`RENOME_DIR`), offline.
 

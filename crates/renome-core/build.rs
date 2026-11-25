@@ -1,3 +1,6 @@
+// A build script that cannot do its work should stop the build.
+#![allow(clippy::unwrap_used)]
+
 //! The readers' list (`src/lib/readers.ts`, the window's) made into
 //! tables: the screens the comic converter fits pages to (size, ink,
 //! pixels per inch), the models with the formats each opens as it comes,

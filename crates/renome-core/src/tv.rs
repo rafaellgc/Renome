@@ -43,44 +43,47 @@ pub struct EpisodeGuess {
 /// S01E02, s1e2, S01 E02, T1E2, S01E01E02, S01E01-02, S2015E05.
 static SXE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b[st](\d{1,4}) ?-? ?ep? ?(\d{1,4})((?: ?-? ?e\d{1,4}\b|-\d{1,4}\b)*)")
-        .unwrap()
+        .expect("valid regex")
 });
 /// 6ª Temporada Ep. 2, 2a temporada episódio 3.
 static ORDINAL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)\b(\d{1,2})[ªºa°]? ?temporada\W{1,4}(?:episódio|episodio|ep|e|capítulo|capitulo|cap)[. ]{0,2}(\d{1,4})\b",
     )
-    .unwrap()
+    .expect("valid regex")
 });
 /// 1x02.
-static NXN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)\b(\d{1,2})x(\d{2,3})\b((?:-\d{2,3}\b)*)").unwrap());
+static NXN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b(\d{1,2})x(\d{2,3})\b((?:-\d{2,3}\b)*)").expect("valid regex")
+});
 /// Temporada 1 Episódio 2, Season 1, Episode 2, Temp. 1 Ep. 2.
 static LONG: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)\b(?:season|temporada|temp|saison|staffel)[. ]{0,2}(\d{1,2})\W{1,4}(?:episode|episódio|episodio|épisode|ep|e|capítulo|capitulo|cap|folge)[. ]{0,2}(\d{1,3})\b",
     )
-    .unwrap()
+    .expect("valid regex")
 });
 /// 2024.03.15 (dots are spaces by then).
-static DATE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\b((?:19|20)\d{2})[ -](\d{2})[ -](\d{2})\b").unwrap());
+static DATE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b((?:19|20)\d{2})[ -](\d{2})[ -](\d{2})\b").expect("valid regex")
+});
 /// Episódio 5, Ep 05, E05 (season from the folder).
 static EP_ONLY: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)\b(?:(?:episode|episódio|episodio|épisode|ep|capítulo|capitulo|cap|chapter|folge|part|parte)[. ]{0,2}|e)(\d{1,4})\b",
     )
-    .unwrap()
+    .expect("valid regex")
 });
-static BARE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b\d{1,4}\b").unwrap());
-static DIGITS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\d+").unwrap());
+static BARE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b\d{1,4}\b").expect("valid regex"));
+static DIGITS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\d+").expect("valid regex"));
 /// Season 2, Temporada 02, S02.
 static SEASON_DIR: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(?:season|temporada|temp|saison|staffel)[ ._-]*(\d{1,3})\b|^[st](\d{1,3})$")
-        .unwrap()
+        .expect("valid regex")
 });
-static SPECIALS_DIR: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)^(?:specials?|especiais|especiales|extras)$").unwrap());
+static SPECIALS_DIR: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^(?:specials?|especiais|especiales|extras)$").expect("valid regex")
+});
 
 /// The season a folder stands for (`Season 2`, `Temporada 02`,
 /// `Specials` = 0).
@@ -97,8 +100,9 @@ pub fn folder_season(folder: &str) -> Option<u16> {
 /// the piece with the episode, the one before it as the show and the one
 /// after it as the title, unless that is a release tag.
 fn unbracket(name: &str) -> Option<String> {
-    static PIECE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"[\[【〔「『]([^\]】〕」』]*)[\]】〕」』]").unwrap());
+    static PIECE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"[\[【〔「『]([^\]】〕」』]*)[\]】〕」』]").expect("valid regex")
+    });
     let pieces: Vec<&str> = PIECE
         .captures_iter(name)
         .filter_map(|c| c.get(1))
@@ -268,8 +272,9 @@ pub enum ShowQuery {
     Name(Guess),
 }
 
-static TV_LINK: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)themoviedb\.org/tv/(\d+)|tmdbid[-=](\d+)").unwrap());
+static TV_LINK: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)themoviedb\.org/tv/(\d+)|tmdbid[-=](\d+)").expect("valid regex")
+});
 
 pub fn show_query(q: &str) -> ShowQuery {
     let q = q.trim();
@@ -449,7 +454,7 @@ static GENERIC: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)^\s*(?:(?:episode|episódio|episodio|épisode|folge|aflevering|odcinek|capítulo|capitulo|ep)\.?\s*)?第?\s*\d+\s*話?\s*$",
     )
-    .unwrap()
+    .expect("valid regex")
 });
 
 /// TMDB fills untranslated titles with "Episode 3" in each language.
@@ -902,7 +907,7 @@ pub fn group_shows(items: &[(String, PathBuf)]) -> (Vec<Vec<usize>>, Vec<usize>)
                     ids: Vec::new(),
                     items: Vec::new(),
                 });
-                groups.last_mut().unwrap()
+                groups.last_mut().expect("the list is never empty here")
             }
         };
         if !g.show.is_empty() && !grp.names.contains(&g.show) {
@@ -1029,7 +1034,7 @@ fn id_tag_of(template: &str, m: &EpisodeMatch) -> String {
     if m.source != "anilist" {
         return template.to_string();
     }
-    let re = Regex::new(r"(?i)tmdbid([-=]\{)").unwrap();
+    let re = Regex::new(r"(?i)tmdbid([-=]\{)").expect("valid regex");
     re.replace_all(template, "anilistid$1").into_owned()
 }
 

@@ -35,16 +35,18 @@ pub struct Guess {
 }
 
 static YEAR: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\b(1[5-9][0-9]{2}|20[0-9]{2})\b").unwrap());
+    LazyLock::new(|| Regex::new(r"\b(1[5-9][0-9]{2}|20[0-9]{2})\b").expect("valid regex"));
 /// Words in book file names that are not part of title or author.
 static JUNK: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)\b(z-?lib(rary)?(\.org)?|libgen(\.\w+)?|anna'?s archive|1lib|b-ok|epub|pdf|mobi|azw3?|fb2|djvu|e-?book|retail|ocr|scan(ned)?|digital|v\d+(\.\d+)*)\b",
     )
-    .unwrap()
+    .expect("valid regex")
 });
-static SPLIT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+[-–—]+\s+|\s*--\s*").unwrap());
-static BY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\s+(?:by|por)\s+").unwrap());
+static SPLIT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\s+[-–—]+\s+|\s*--\s*").expect("valid regex"));
+static BY: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\s+(?:by|por)\s+").expect("valid regex"));
 
 /// Title, author, year and ISBN from a file name without extension:
 /// `Tomé de Alvarenga - Vento Leste (1899)`, `Vento Leste - Tomé de
@@ -82,7 +84,7 @@ pub fn guess_name(stem: &str) -> Guess {
         }
     }
     static ISBN_WORD: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)\bisbn(-?1[03])?\b:?").unwrap());
+        LazyLock::new(|| Regex::new(r"(?i)\bisbn(-?1[03])?\b:?").expect("valid regex"));
     s = ISBN_WORD.replace_all(&s, " ").into_owned();
     // A year in brackets is the book's (`(1899)`, `(2019, Vela)`).
     g.year = BRACKETS
@@ -556,7 +558,7 @@ fn shouting(s: &str) -> bool {
 fn article_first(title: &str) -> String {
     static INVERTED: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"(?i)^(.+),\s*(o|a|os|as|um|uma|the|an?|el|la|los|las|le|les|il|lo|gli)$")
-            .unwrap()
+            .expect("valid regex")
     });
     match INVERTED.captures(title.trim()) {
         Some(c) => format!("{} {}", &c[2], &c[1]),
@@ -571,7 +573,7 @@ fn article_first(title: &str) -> String {
 /// (`Antologia poética Alda Mourão`, `Cómo Rezar` for `Como rezar`).
 fn own_title(g: &Guess) -> Option<String> {
     static NUMBERED: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?i)^((livro|book|libro|parte|part|vol(ume|umen)?\.?|tomo|n[ºo°]\.?)\s*)?([0-9]{1,3}|[ivxlc]+)$").unwrap()
+        Regex::new(r"(?i)^((livro|book|libro|parte|part|vol(ume|umen)?\.?|tomo|n[ºo°]\.?)\s*)?([0-9]{1,3}|[ivxlc]+)$").expect("valid regex")
     });
     // Several books in one (`Título A | Título B`) have no title of their own.
     if !g.from_file || g.title.trim().is_empty() || shouting(&g.title) || g.title.contains('|') {
@@ -632,7 +634,7 @@ fn without_language(title: &str) -> String {
         Regex::new(
             r"(?i)\s*[:(\[–-]\s*(?:(?:european|brazilian|american|british|international)\s+)?(?:portuguese|english|spanish|french|german|italian)\s+edition\s*[)\]]?\s*$|\s*[:(\[–-]\s*edi[cç][aã]o\s+(?:em\s+portugu[eê]s|portuguesa|brasileira)\s*[)\]]?\s*$|\s*[:(\[–-]\s*edici[oó]n\s+(?:en\s+espa[nñ]ol|española)\s*[)\]]?\s*$",
         )
-        .unwrap()
+        .expect("valid regex")
     });
     let t = NOTE.replace(title, "");
     match t.trim().is_empty() {
@@ -978,7 +980,7 @@ static FORMAT_NOTE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)\s*(?:[-–(\[]\s*)(?:e-?pub|e-?book|ebook|digital|kindle|pdf|livro eletr[oô]nico|formato menor|edi[cç][aã]o digital)\s*[)\]]?\s*$",
     )
-    .unwrap()
+    .expect("valid regex")
 });
 
 /// A title as some records keep it: `((ED) A regra do êxito`,
@@ -1118,7 +1120,7 @@ pub fn google_cover(url: &str, zoom: u8) -> String {
     let url = url
         .replacen("http://books.google.", "https://books.google.", 1)
         .replace("&edge=curl", "");
-    static ZOOM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"zoom=\d").unwrap());
+    static ZOOM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"zoom=\d").expect("valid regex"));
     ZOOM.replace(&url, format!("zoom={zoom}").as_str())
         .into_owned()
 }
@@ -1438,8 +1440,9 @@ fn has_key(template: &str, keys: &[&str]) -> bool {
 /// at the ends or doubled.
 pub fn tidy(s: &str) -> String {
     static EMPTY: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"\(\s*\)|\[\s*\]|\{\s*\}|#(\s|$)").unwrap());
-    static DOUBLE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\s[-–—]\s*){2,}").unwrap());
+        LazyLock::new(|| Regex::new(r"\(\s*\)|\[\s*\]|\{\s*\}|#(\s|$)").expect("valid regex"));
+    static DOUBLE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(\s[-–—]\s*){2,}").expect("valid regex"));
     let s = EMPTY.replace_all(s, " ");
     let s = DOUBLE.replace_all(&s, " - ");
     text::collapse_spaces(&s)
@@ -1544,7 +1547,8 @@ pub(crate) fn language(code: &str) -> String {
 /// Open Library's descriptions are Markdown: `**bold**` and `[text](link)`
 /// become plain text.
 fn plain(s: &str) -> String {
-    static LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]*)\]\([^)]*\)").unwrap());
+    static LINK: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\[([^\]]*)\]\([^)]*\)").expect("valid regex"));
     LINK.replace_all(s, "$1")
         .replace("**", "")
         .replace("__", "")

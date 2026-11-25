@@ -130,7 +130,7 @@ impl Os {
             return Ok((base, None));
         }
         if !again
-            && let Some(l) = LOGIN.lock().unwrap().as_ref()
+            && let Some(l) = LOGIN.lock().expect("lock not poisoned").as_ref()
             && l.who == who
         {
             return Ok((l.base.clone(), Some(l.token.clone())));
@@ -169,7 +169,7 @@ impl Os {
             }
             _ => base,
         };
-        *LOGIN.lock().unwrap() = Some(Login {
+        *LOGIN.lock().expect("lock not poisoned") = Some(Login {
             who,
             token: token.clone(),
             base: base.clone(),
@@ -563,7 +563,7 @@ impl Subsource {
     /// SubSource's number for the item's movie or season.
     async fn movie(&self, item: &Item) -> Result<Option<u64>, String> {
         let key = (item.tmdb, item.season);
-        if let Some(id) = self.ids.lock().unwrap().get(&key) {
+        if let Some(id) = self.ids.lock().expect("lock not poisoned").get(&key) {
             return Ok(*id);
         }
         let tv = item.season.is_some();
@@ -590,7 +590,10 @@ impl Subsource {
                     .and_then(|m| m["movieId"].as_u64())
             }
         };
-        self.ids.lock().unwrap().insert(key, found);
+        self.ids
+            .lock()
+            .expect("lock not poisoned")
+            .insert(key, found);
         Ok(found)
     }
 
@@ -1105,7 +1108,7 @@ pub async fn check_os(auth: Auth) -> Result<Option<i64>, String> {
     if !auth.os() {
         return Err("osBadKey".into());
     }
-    *LOGIN.lock().unwrap() = None;
+    *LOGIN.lock().expect("lock not poisoned") = None;
     let os = Os { http: http(), auth };
     // A search costs nothing and needs the key; with an account it logs
     // in first (LOGIN was cleared), so a wrong password shows there too.

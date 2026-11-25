@@ -78,8 +78,15 @@ pub fn command(m: &ArgMatches, rt: &tokio::runtime::Runtime) -> Result<Exit, Str
     let keys = keys();
     match m.subcommand() {
         Some(("add", s)) => {
-            let kind = s.get_one::<String>("kind").unwrap().clone();
-            let url = s.get_one::<String>("url").unwrap().trim().to_string();
+            let kind = s
+                .get_one::<String>("kind")
+                .expect("required by the argument parser")
+                .clone();
+            let url = s
+                .get_one::<String>("url")
+                .expect("required by the argument parser")
+                .trim()
+                .to_string();
             let key = read_key(s)?;
             let mut server = mediaserver::new_server(&kind, &url);
             let id = server["id"].as_str().unwrap_or_default().to_string();
@@ -94,7 +101,9 @@ pub fn command(m: &ArgMatches, rt: &tokio::runtime::Runtime) -> Result<Exit, Str
             ));
         }
         Some(("remove", s)) => {
-            let id = s.get_one::<String>("id").unwrap();
+            let id = s
+                .get_one::<String>("id")
+                .expect("required by the argument parser");
             let mut now = settings_now();
             let list = servers_of(&mut now);
             let before = list.len();
@@ -107,7 +116,9 @@ pub fn command(m: &ArgMatches, rt: &tokio::runtime::Runtime) -> Result<Exit, Str
             out::note(&t("serverRemoved", &[("id", id)]));
         }
         Some(("libraries", s)) => {
-            let id = s.get_one::<String>("id").unwrap();
+            let id = s
+                .get_one::<String>("id")
+                .expect("required by the argument parser");
             let key = keys
                 .get(id)
                 .and_then(Value::as_str)
@@ -120,10 +131,17 @@ pub fn command(m: &ArgMatches, rt: &tokio::runtime::Runtime) -> Result<Exit, Str
             out::note(&t("serverRead", &[("libs", &libs), ("folders", &folders)]));
         }
         Some(("pair", s)) => {
-            let id = s.get_one::<String>("id").unwrap();
-            let server_path = s.get_one::<String>("server").unwrap();
-            let local = std::path::absolute(s.get_one::<String>("local").unwrap())
-                .map_err(|e| e.to_string())?;
+            let id = s
+                .get_one::<String>("id")
+                .expect("required by the argument parser");
+            let server_path = s
+                .get_one::<String>("server")
+                .expect("required by the argument parser");
+            let local = std::path::absolute(
+                s.get_one::<String>("local")
+                    .expect("required by the argument parser"),
+            )
+            .map_err(|e| e.to_string())?;
             let mut now = settings_now();
             let server = find(servers_of(&mut now), id)?;
             let folder = folder_of(server, server_path)?;
@@ -131,15 +149,21 @@ pub fn command(m: &ArgMatches, rt: &tokio::runtime::Runtime) -> Result<Exit, Str
             save(&now)?;
         }
         Some((on @ ("on" | "off"), s)) => {
-            let id = s.get_one::<String>("id").unwrap();
-            let server_path = s.get_one::<String>("server").unwrap();
+            let id = s
+                .get_one::<String>("id")
+                .expect("required by the argument parser");
+            let server_path = s
+                .get_one::<String>("server")
+                .expect("required by the argument parser");
             let mut now = settings_now();
             let server = find(servers_of(&mut now), id)?;
             folder_of(server, server_path)?["on"] = Value::from(on == "on");
             save(&now)?;
         }
         Some(("test", s)) => {
-            let id = s.get_one::<String>("id").unwrap();
+            let id = s
+                .get_one::<String>("id")
+                .expect("required by the argument parser");
             let mut now = settings_now();
             let server = find(servers_of(&mut now), id)?;
             let key = keys.get(id).and_then(Value::as_str).unwrap_or_default();

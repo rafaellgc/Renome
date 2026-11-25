@@ -433,7 +433,7 @@ impl Docx<'_> {
         let mut list: Vec<(String, Elem)> = Vec::new();
         let close_lists = |list: &mut Vec<(String, Elem)>, out: &mut Vec<Node>, to: usize| {
             while list.len() > to {
-                let (_, l) = list.pop().unwrap();
+                let (_, l) = list.pop().expect("the list is longer than `to`");
                 match list.last_mut() {
                     Some((_, parent)) => {
                         // A nested list goes in the parent's last item.
@@ -482,7 +482,10 @@ impl Docx<'_> {
                         }
                         let mut li = el("li");
                         li.kids = self.runs(&e.kids);
-                        list.last_mut().unwrap().1.push(Node::Elem(li));
+                        list.last_mut()
+                            .expect("the list is never empty here")
+                            .1
+                            .push(Node::Elem(li));
                         continue;
                     }
                     close_lists(&mut list, &mut out, 0);

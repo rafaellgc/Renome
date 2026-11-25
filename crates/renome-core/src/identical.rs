@@ -240,7 +240,12 @@ pub fn same_content(a: &Path, b: &Path) -> bool {
         ma.modified().ok(),
         mb.modified().ok(),
     );
-    if let Some(&known) = SEEN.lock().unwrap().as_ref().and_then(|m| m.get(&key)) {
+    if let Some(&known) = SEEN
+        .lock()
+        .expect("lock not poisoned")
+        .as_ref()
+        .and_then(|m| m.get(&key))
+    {
         return known;
     }
     let size = ma.len();
@@ -259,7 +264,7 @@ pub fn same_content(a: &Path, b: &Path) -> bool {
     };
     let same = matches!((sample(a), sample(b)), (Some(x), Some(y)) if x == y);
     SEEN.lock()
-        .unwrap()
+        .expect("lock not poisoned")
         .get_or_insert_with(HashMap::new)
         .insert(key, same);
     same

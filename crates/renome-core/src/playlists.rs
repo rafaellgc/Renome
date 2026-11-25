@@ -78,7 +78,7 @@ fn list_path(path: &Path, backslash: bool) -> String {
 }
 
 static CUE_FILE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"^(\s*FILE\s+)(?:"([^"]+)"|(\S+))(.*)$"#).unwrap());
+    LazyLock::new(|| Regex::new(r#"^(\s*FILE\s+)(?:"([^"]+)"|(\S+))(.*)$"#).expect("valid regex"));
 
 /// The new form of a reference to a renamed file, or `None` to keep it.
 /// `was` is the folder the list was in, `now` the one it is in.
@@ -184,11 +184,11 @@ fn resolves(dir: &Path, reference: &str) -> bool {
 }
 
 static CUE_TRACK: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)^\s*TRACK\s+(\d+)\s+\S+").unwrap());
+    LazyLock::new(|| Regex::new(r"(?i)^\s*TRACK\s+(\d+)\s+\S+").expect("valid regex"));
 static CUE_INDEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)^\s*INDEX\s+(\d+)\s").unwrap());
+    LazyLock::new(|| Regex::new(r"(?i)^\s*INDEX\s+(\d+)\s").expect("valid regex"));
 static CUE_DISC: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)^\s*REM\s+DISCNUMBER\s+(\d+)").unwrap());
+    LazyLock::new(|| Regex::new(r"(?i)^\s*REM\s+DISCNUMBER\s+(\d+)").expect("valid regex"));
 
 /// Rebuilds a cue sheet whose files are gone (a whole-disc image later
 /// split into tracks) for the songs in its folder: each `TRACK n` gets the
