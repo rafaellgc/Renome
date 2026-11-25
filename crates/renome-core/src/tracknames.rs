@@ -847,75 +847,86 @@ fn read_name(name: &str) -> Said {
         .map(|w| fold(w.trim_matches(|c: char| !c.is_alphanumeric() && !"+&".contains(c))))
         .collect();
     let mut keep = vec![true; words.len()];
-    for (i, f) in folded.iter().enumerate() {
-        if f.is_empty() {
+    for i in 0..folded.len() {
+        if folded[i].is_empty() {
             keep[i] = false;
             continue;
         }
-        for (phrase, w) in PHRASES {
-            if folded[i..].len() >= phrase.len()
-                && folded[i..i + phrase.len()]
-                    .iter()
-                    .zip(*phrase)
-                    .all(|(a, b)| a == b)
-            {
-                said.details.push(*w);
-                for k in keep.iter_mut().skip(i).take(phrase.len()) {
-                    *k = false;
-                }
+        read_word(&mut said, i, &folded, &words, &mut keep);
+    }
+    said.rest = rest_of(&words, &keep);
+    said
+}
+
+/// What word `i` of a name says: a detail, a language, a region, or
+/// nothing (a plain word, a channel count). What it says is taken off
+/// `keep`: only the words that said nothing stay as the name's rest.
+fn read_word(said: &mut Said, i: usize, folded: &[String], words: &[&str], keep: &mut [bool]) {
+    let f = &folded[i];
+    for (phrase, w) in PHRASES {
+        if folded[i..].len() >= phrase.len()
+            && folded[i..i + phrase.len()]
+                .iter()
+                .zip(*phrase)
+                .all(|(a, b)| a == b)
+        {
+            said.details.push(*w);
+            for k in keep.iter_mut().skip(i).take(phrase.len()) {
+                *k = false;
             }
         }
-        if let Some(w) = detail_of(f) {
-            said.details.push(w);
-            keep[i] = false;
-            continue;
-        }
-        // "songs" with signs: part of "signs & songs".
-        if ["songs", "musicas", "canciones", "chansons"].contains(&f.as_str())
-            && folded.iter().any(|x| detail_of(x) == Some(Word::Signs))
-        {
-            keep[i] = false;
-            continue;
-        }
-        let word_lang = LANGUAGES.iter().find(|l| {
-            l.words.contains(&f.as_str())
-                || l.three == f
-                || l.others.contains(&f.as_str())
-                // Two letters only in capitals (`PT`, `EN`): in lower
-                // case they are words (`de`, `no`).
-                || (l.two == f && words[i].chars().all(|c| c.is_ascii_uppercase()))
-        });
-        if let Some(l) = word_lang {
-            said.lang.get_or_insert(l);
-            keep[i] = false;
-        }
-        for l in LANGUAGES {
-            if let Some(r) = region_of_word(l.two, f) {
-                said.regions.push((l.two, r));
-                keep[i] = false;
-            }
-        }
-        if ["br", "pt"].contains(&f.as_str()) && words[i].chars().all(|c| c.is_ascii_uppercase()) {
-            said.regions
-                .push(("pt", if f == "br" { "BR" } else { "PT" }));
-            keep[i] = false;
-        }
-        let channels = f.len() == 3
-            && f.as_bytes()[1] == b'.'
-            && f.as_bytes()[0].is_ascii_digit()
-            && f.as_bytes()[2].is_ascii_digit();
-        let digit = f.len() == 1 && f.as_bytes()[0].is_ascii_digit();
-        if PLAIN.contains(&f.as_str())
-            || channels
-            || digit
-            || f.chars().all(|c| !c.is_alphanumeric())
-        {
+    }
+    if let Some(w) = detail_of(f) {
+        said.details.push(w);
+        keep[i] = false;
+        return;
+    }
+    // "songs" with signs: part of "signs & songs".
+    if ["songs", "musicas", "canciones", "chansons"].contains(&f.as_str())
+        && folded.iter().any(|x| detail_of(x) == Some(Word::Signs))
+    {
+        keep[i] = false;
+        return;
+    }
+    let word_lang = LANGUAGES.iter().find(|l| {
+        l.words.contains(&f.as_str())
+            || l.three == f
+            || l.others.contains(&f.as_str())
+            // Two letters only in capitals (`PT`, `EN`): in lower case
+            // they are words (`de`, `no`).
+            || (l.two == f && words[i].chars().all(|c| c.is_ascii_uppercase()))
+    });
+    if let Some(l) = word_lang {
+        said.lang.get_or_insert(l);
+        keep[i] = false;
+    }
+    for l in LANGUAGES {
+        if let Some(r) = region_of_word(l.two, f) {
+            said.regions.push((l.two, r));
             keep[i] = false;
         }
     }
+    if ["br", "pt"].contains(&f.as_str()) && words[i].chars().all(|c| c.is_ascii_uppercase()) {
+        said.regions
+            .push(("pt", if f == "br" { "BR" } else { "PT" }));
+        keep[i] = false;
+    }
+    let channels = f.len() == 3
+        && f.as_bytes()[1] == b'.'
+        && f.as_bytes()[0].is_ascii_digit()
+        && f.as_bytes()[2].is_ascii_digit();
+    let digit = f.len() == 1 && f.as_bytes()[0].is_ascii_digit();
+    if PLAIN.contains(&f.as_str()) || channels || digit || f.chars().all(|c| !c.is_alphanumeric()) {
+        keep[i] = false;
+    }
+}
+
+/// The words that said nothing, as written, without joiners at the ends;
+/// empty when none has a letter.
+fn rest_of(words: &[&str], keep: &[bool]) -> String {
     let mut rest: Vec<&str> = words
         .iter()
-        .zip(&keep)
+        .zip(keep)
         .filter(|(_, k)| **k)
         .map(|(w, _)| {
             w.trim_matches(|c: char| !c.is_alphanumeric() && c != '\'' && c != '!' && c != '.')
@@ -934,11 +945,12 @@ fn read_name(name: &str) -> Said {
     {
         rest.pop();
     }
-    said.rest = rest.join(" ");
-    if !said.rest.chars().any(char::is_alphabetic) {
-        said.rest.clear();
+    let rest = rest.join(" ");
+    if rest.chars().any(char::is_alphabetic) {
+        rest
+    } else {
+        String::new()
     }
-    said
 }
 
 /// The channels as people say them: `Mono`, `2.0`, `5.1`, `7.1`.
