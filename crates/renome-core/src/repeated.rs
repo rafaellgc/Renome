@@ -124,84 +124,7 @@ fn keys(f: &FileEntry) -> Option<(Kind, Vec<String>)> {
     }
     let ext = f.ext.to_ascii_lowercase();
     if crate::tmdb::is_video(&ext) {
-        if is_extra(f) {
-            return None;
-        }
-        let folder = folder_name(&f.path);
-        let ep = crate::tv::parse(&f.stem, &folder);
-        // A bare number is an episode's only when it is not a year (a
-        // film's name has one).
-        let numbered = ep.number.is_some_and(|n| {
-            !(1900..=2100).contains(&n) && crate::tmdb::guess(&f.stem).year.is_none()
-        });
-        if !ep.episodes.is_empty() || ep.date.is_some() || numbered {
-            // The show: in the name, else the folder (above a season's).
-            let mut show = joined(&ep.show);
-            if show.is_empty() {
-                let up = f.path.parent();
-                let season = crate::tv::folder_season(&folder).is_some();
-                let dir = if season {
-                    up.and_then(Path::parent)
-                } else {
-                    up
-                };
-                show = dir
-                    .and_then(|d| d.file_name())
-                    .map(|n| joined(&crate::tmdb::guess(&n.to_string_lossy()).title))
-                    .unwrap_or_default();
-            }
-            if show.is_empty() {
-                return None;
-            }
-            let at = match (&ep.date, ep.season, ep.episodes.is_empty(), ep.number) {
-                (Some(d), ..) => format!("d{d}"),
-                (None, Some(s), false, _) => format!(
-                    "s{s}e{}",
-                    ep.episodes
-                        .iter()
-                        .map(u16::to_string)
-                        .collect::<Vec<_>>()
-                        .join("-")
-                ),
-                (None, None, false, _) => format!(
-                    "s1e{}",
-                    ep.episodes
-                        .iter()
-                        .map(u16::to_string)
-                        .collect::<Vec<_>>()
-                        .join("-")
-                ),
-                (None, _, true, Some(n)) if numbered => format!("n{n}"),
-                _ => return None,
-            };
-            // `Episode - Part 2`: another file of a two-part episode.
-            static PART: LazyLock<Regex> = LazyLock::new(|| {
-                Regex::new(r"(?i)\b(?:parte?|pt)\.?\s*(\d+|i{1,3}|iv)\b").expect("valid regex")
-            });
-            let part = PART
-                .captures(&ep.title)
-                .map(|c| c[1].to_lowercase())
-                .unwrap_or_default();
-            return Some((Kind::Episode, vec![format!("ep:{show}:{at}:{part}")]));
-        }
-        let g = crate::tmdb::guess(&f.stem);
-        // `Movie (2010) - Bonus Feature`: what follows the year after a
-        // dash is another thing of the same film.
-        let after = after_year(&f.stem);
-        let mut out = Vec::new();
-        if let Some(id) = g.id
-            && after.is_empty()
-        {
-            out.push(format!("tmdb:{id}"));
-        }
-        let title = joined(&g.title);
-        // Without a year, a title could be a remake's.
-        if let Some(y) = g.year
-            && !title.is_empty()
-        {
-            out.push(format!("movie:{title}:{y}:{after}"));
-        }
-        return (!out.is_empty()).then_some((Kind::Movie, out));
+        return video_keys(f);
     }
     let comic_file = matches!(ext.as_str(), "cbz" | "cbr" | "cb7" | "cbt");
     let book_file = crate::ebook::is_book(&ext);
@@ -209,49 +132,147 @@ fn keys(f: &FileEntry) -> Option<(Kind, Vec<String>)> {
         return None;
     }
     let mut out = Vec::new();
-    // A comic: series, volume and number, from inside or from its name.
+    if comic_file || ext == "pdf" || ext == "epub" {
+        out.extend(issue_keys(f, comic_file));
+    }
+    if comic_file {
+        return (!out.is_empty()).then_some((Kind::Comic, out));
+    }
+    out.extend(book_keys(f, &ext));
+    (!out.is_empty()).then_some((Kind::Book, out))
+}
+
+/// A video: an episode, else a movie.
+fn video_keys(f: &FileEntry) -> Option<(Kind, Vec<String>)> {
+    if is_extra(f) {
+        return None;
+    }
+    let folder = folder_name(&f.path);
+    let ep = crate::tv::parse(&f.stem, &folder);
+    // A bare number is an episode's only when it is not a year (a film's
+    // name has one).
+    let numbered = ep
+        .number
+        .is_some_and(|n| !(1900..=2100).contains(&n) && crate::tmdb::guess(&f.stem).year.is_none());
+    if !ep.episodes.is_empty() || ep.date.is_some() || numbered {
+        return episode_key(f, &folder, &ep, numbered).map(|k| (Kind::Episode, vec![k]));
+    }
+    let g = crate::tmdb::guess(&f.stem);
+    // `Movie (2010) - Bonus Feature`: what follows the year after a dash is
+    // another thing of the same film.
+    let after = after_year(&f.stem);
+    let mut out = Vec::new();
+    if let Some(id) = g.id
+        && after.is_empty()
+    {
+        out.push(format!("tmdb:{id}"));
+    }
+    let title = joined(&g.title);
+    // Without a year, a title could be a remake's.
+    if let Some(y) = g.year
+        && !title.is_empty()
+    {
+        out.push(format!("movie:{title}:{y}:{after}"));
+    }
+    (!out.is_empty()).then_some((Kind::Movie, out))
+}
+
+/// An episode's key: its show, its place in it, and its part.
+fn episode_key(
+    f: &FileEntry,
+    folder: &str,
+    ep: &crate::tv::EpisodeGuess,
+    numbered: bool,
+) -> Option<String> {
+    // The show: in the name, else the folder (above a season's).
+    let mut show = joined(&ep.show);
+    if show.is_empty() {
+        let up = f.path.parent();
+        let season = crate::tv::folder_season(folder).is_some();
+        let dir = if season {
+            up.and_then(Path::parent)
+        } else {
+            up
+        };
+        show = dir
+            .and_then(|d| d.file_name())
+            .map(|n| joined(&crate::tmdb::guess(&n.to_string_lossy()).title))
+            .unwrap_or_default();
+    }
+    if show.is_empty() {
+        return None;
+    }
+    let numbers = || {
+        ep.episodes
+            .iter()
+            .map(u16::to_string)
+            .collect::<Vec<_>>()
+            .join("-")
+    };
+    let at = match (&ep.date, ep.season, ep.episodes.is_empty(), ep.number) {
+        (Some(d), ..) => format!("d{d}"),
+        (None, Some(s), false, _) => format!("s{s}e{}", numbers()),
+        (None, None, false, _) => format!("s1e{}", numbers()),
+        (None, _, true, Some(n)) if numbered => format!("n{n}"),
+        _ => return None,
+    };
+    // `Episode - Part 2`: another file of a two-part episode.
+    static PART: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)\b(?:parte?|pt)\.?\s*(\d+|i{1,3}|iv)\b").expect("valid regex")
+    });
+    let part = PART
+        .captures(&ep.title)
+        .map(|c| c[1].to_lowercase())
+        .unwrap_or_default();
+    Some(format!("ep:{show}:{at}:{part}"))
+}
+
+/// A comic's keys (series, volume and number), from inside or from its
+/// name; also for a PDF or EPUB that is an issue.
+fn issue_keys(f: &FileEntry, comic_file: bool) -> Vec<String> {
+    let mut out = Vec::new();
     let issue = |series: &str, volume: &str, number: &str| {
         let series = joined(series);
         let number = number.trim().trim_start_matches('0');
         let number = if number.is_empty() { "0" } else { number };
         (!series.is_empty()).then(|| format!("comic:{series}:{volume}:{number}"))
     };
-    if comic_file || ext == "pdf" || ext == "epub" {
-        if let Some(info) = f
-            .comic_info()
-            .filter(|i| !i.series.is_empty() && !i.number.is_empty())
-        {
-            // `volume` holds a volume number or the series' first year.
-            let vol = info.volume.trim();
-            let vol = if vol.len() == 4 { "" } else { vol };
-            // Carried inside: as sure as an ISBN.
-            out.extend(issue(&info.series, vol, &info.number).map(|k| format!("{k}:inside")));
-        }
-        let g = crate::comics::parse_name(&f.stem, &folder_name(&f.path));
-        // A PDF's or EPUB's series must come from its own name, not its
-        // folder's (`Bills/2026-07/Tax.pdf` is no issue).
-        let own = comic_file || {
-            let stem = joined(&f.stem);
-            let series = joined(&g.series);
-            !series.is_empty() && stem.contains(&series)
-        };
-        if own && !g.number.is_empty() {
-            let vol = g.volume.map(|v| v.to_string()).unwrap_or_default();
-            // From a PDF's or EPUB's name: as weak as a book's name.
-            out.extend(
-                issue(&g.series, &vol, &g.number)
-                    .map(|k| if comic_file { k } else { format!("book:{k}") }),
-            );
-        }
+    if let Some(info) = f
+        .comic_info()
+        .filter(|i| !i.series.is_empty() && !i.number.is_empty())
+    {
+        // `volume` holds a volume number or the series' first year.
+        let vol = info.volume.trim();
+        let vol = if vol.len() == 4 { "" } else { vol };
+        // Carried inside: as sure as an ISBN.
+        out.extend(issue(&info.series, vol, &info.number).map(|k| format!("{k}:inside")));
     }
-    if comic_file {
-        return (!out.is_empty()).then_some((Kind::Comic, out));
+    let g = crate::comics::parse_name(&f.stem, &folder_name(&f.path));
+    // A PDF's or EPUB's series must come from its own name, not its
+    // folder's (`Bills/2026-07/Tax.pdf` is no issue).
+    let own = comic_file || {
+        let stem = joined(&f.stem);
+        let series = joined(&g.series);
+        !series.is_empty() && stem.contains(&series)
+    };
+    if own && !g.number.is_empty() {
+        let vol = g.volume.map(|v| v.to_string()).unwrap_or_default();
+        // From a PDF's or EPUB's name: as weak as a book's name.
+        out.extend(
+            issue(&g.series, &vol, &g.number)
+                .map(|k| if comic_file { k } else { format!("book:{k}") }),
+        );
     }
-    // A book: its ISBN, and the words of its name in any order (`Author -
-    // Title` and `Title - Author` are one book); a year in brackets is
-    // the edition's and left out.
-    // With its title: books with wrong details share an ISBN (a
-    // series', a publisher's) and are told apart by it.
+    out
+}
+
+/// A book's keys: its ISBN, and the words of its name in any order
+/// (`Author - Title` and `Title - Author` are one book); a year in
+/// brackets is the edition's and left out.
+fn book_keys(f: &FileEntry, ext: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    // With its title: books with wrong details share an ISBN (a series', a
+    // publisher's) and are told apart by it.
     if ext != "pdf" {
         out.extend(
             f.isbn_title()
@@ -264,7 +285,7 @@ fn keys(f: &FileEntry) -> Option<(Kind, Vec<String>)> {
     if w.iter().any(|w| w.chars().any(char::is_alphabetic)) && w.join("").chars().count() >= 3 {
         out.push(format!("book:{}", w.join(" ")));
     }
-    (!out.is_empty()).then_some((Kind::Book, out))
+    out
 }
 
 /// How usable a book's format is: EPUB (reflows, opens almost anywhere),
@@ -470,6 +491,46 @@ mod tests {
             .iter()
             .map(|i| i.path.file_name().unwrap().to_string_lossy().into_owned())
             .collect()
+    }
+
+    /// Pins the keys of many names, so `keys` can be taken apart.
+    #[test]
+    fn keys_do_not_change() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path();
+        let names = [
+            "Some.Movie.2010.1080p.BluRay.x264-GRP.mkv",
+            "Some Movie (2010) [tmdbid-77].mkv",
+            "Some Movie (2010) - Bonus Feature.mkv",
+            "Some Movie.mkv",
+            "Show.Name.S01E02.720p.mkv",
+            "Show Name - 1x03 - Title.mp4",
+            "Show Name - Part 2 - S02E05E06.mkv",
+            "Show Name 2024-03-15.mkv",
+            "Show Name - 125.mkv",
+            "Show/Season 2/05 - Title.mkv",
+            "Show/Season 1/S01E09.mkv",
+            "Making.Of.Extras.mkv",
+            "Capitão Aurora 002 (2016).cbz",
+            "Capitão Aurora v02 #003.cbr",
+            "Capitão Aurora 004.pdf",
+            "Bills/2026-07/Tax 07.pdf",
+            "Author - The Book Title (2019).epub",
+            "The Book Title - Author.epub",
+            "The Book Title.mobi",
+            "x.epub",
+            "notes.txt",
+            "Series Name 05.epub",
+            "Series Name v3.azw3",
+        ];
+        let mut all = Vec::new();
+        for n in names {
+            let f = file(p, n, 3);
+            all.push(format!("{n} => {:?}", keys(&f)));
+        }
+        let sum = xxhash_rust::xxh3::xxh3_64(all.join("\n").as_bytes());
+        println!("hash {sum:016x}");
+        assert_eq!(sum, 0x9d530fc47111f708, "the keys changed");
     }
 
     #[test]
