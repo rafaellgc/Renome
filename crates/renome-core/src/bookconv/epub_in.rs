@@ -20,38 +20,29 @@ struct Item {
     props: String,
 }
 
-pub fn read(path: &Path) -> Result<Book, String> {
-    let f = std::fs::File::open(path).map_err(|e| e.to_string())?;
-    let mut z = zip::ZipArchive::new(std::io::BufReader::new(f)).map_err(|_| "bookBroken")?;
-    let mut get = |name: &str| -> Option<Vec<u8>> {
-        let mut f = z.by_name(name).ok()?;
+/// An open EPUB: its files by name.
+struct Epub {
+    zip: zip::ZipArchive<std::io::BufReader<std::fs::File>>,
+}
+
+impl Epub {
+    fn open(path: &Path) -> Result<Self, String> {
+        let f = std::fs::File::open(path).map_err(|e| e.to_string())?;
+        let zip = zip::ZipArchive::new(std::io::BufReader::new(f)).map_err(|_| "bookBroken")?;
+        Ok(Epub { zip })
+    }
+
+    /// The file's bytes (it is cut at 256 MB: a zip bomb stops there).
+    fn get(&mut self, name: &str) -> Option<Vec<u8>> {
+        let mut f = self.zip.by_name(name).ok()?;
         let mut v = Vec::new();
         (&mut f).take(256 << 20).read_to_end(&mut v).ok()?;
         Some(v)
-    };
-    let container = get("META-INF/container.xml").ok_or("bookBroken")?;
-    let container = String::from_utf8_lossy(&container).into_owned();
-    let opf_path = parse(&container)
-        .and_then(|d| {
-            d.descendants()
-                .find(|n| n.has_tag_name("rootfile"))
-                .and_then(|n| n.attribute("full-path"))
-                .map(String::from)
-        })
-        .ok_or("bookBroken")?;
-    let opf = get(&opf_path).ok_or("bookBroken")?;
-    let opf = super::text_in::decode_bytes(&opf, true);
-    let doc = parse(&opf).ok_or("bookBroken")?;
-    let scrambled: Vec<String> = get("META-INF/encryption.xml")
-        .map(|e| super::drm::obfuscated(&String::from_utf8_lossy(&e)))
-        .unwrap_or_default();
+    }
+}
 
-    let mut book = Book {
-        css: String::new(),
-        ..Default::default()
-    };
-    meta_from_opf(&doc, &mut book.meta);
-
+/// The manifest: each item by id, and the ids in the manifest's order.
+fn manifest(doc: &roxmltree::Document, opf_path: &str) -> (HashMap<String, Item>, Vec<String>) {
     let mut items: HashMap<String, Item> = HashMap::new();
     let mut order: Vec<String> = Vec::new();
     for n in doc.descendants().filter(|n| n.has_tag_name("item")) {
@@ -62,33 +53,37 @@ pub fn read(path: &Path) -> Result<Book, String> {
         items.insert(
             id.to_string(),
             Item {
-                href: join_zip(&opf_path, href),
+                href: join_zip(opf_path, href),
                 media: n.attribute("media-type").unwrap_or_default().to_string(),
                 props: n.attribute("properties").unwrap_or_default().to_string(),
             },
         );
     }
-    let spine: Vec<String> = doc
-        .descendants()
+    (items, order)
+}
+
+/// The reading order: the files of the spine.
+fn spine_of(doc: &roxmltree::Document, items: &HashMap<String, Item>) -> Vec<String> {
+    doc.descendants()
         .filter(|n| n.has_tag_name("itemref"))
         .filter_map(|n| n.attribute("idref"))
         .filter_map(|id| items.get(id).map(|i| i.href.clone()))
-        .collect();
-    if spine.is_empty() {
-        return Err("bookBroken".into());
-    }
-    let spine_node = doc.descendants().find(|n| n.has_tag_name("spine"));
-    book.rtl = spine_node.and_then(|s| s.attribute("page-progression-direction")) == Some("rtl");
-    book.fixed = doc.descendants().any(|n| {
-        n.has_tag_name("meta")
-            && n.attribute("property") == Some("rendition:layout")
-            && n.text().map(str::trim) == Some("pre-paginated")
-    });
+        .collect()
+}
 
-    // Resources: pictures, fonts, style sheets (path in the zip → name).
+/// Pictures, fonts and the like added to the book (path in the zip →
+/// name); the style sheets' paths are returned. Fonts that are scrambled
+/// are left out.
+fn add_resources(
+    epub: &mut Epub,
+    book: &mut Book,
+    items: &HashMap<String, Item>,
+    order: &[String],
+    scrambled: &[String],
+) -> (HashMap<String, String>, Vec<String>) {
     let mut names: HashMap<String, String> = HashMap::new();
     let mut css_files = Vec::new();
-    for id in &order {
+    for id in order {
         let it = &items[id];
         if it.media == "application/xhtml+xml"
             || it.media.contains("ncx")
@@ -103,18 +98,28 @@ pub fn read(path: &Path) -> Result<Book, String> {
             css_files.push(it.href.clone());
             continue;
         }
-        if let Some(data) = get(&it.href)
+        if let Some(data) = epub.get(&it.href)
             && let Some(name) = book.add_file(data, &it.href.to_ascii_lowercase())
         {
             names.insert(it.href.clone(), name);
         }
     }
-    // The cover picture.
+    (names, css_files)
+}
+
+/// The cover picture: the item with the cover property, else the one the
+/// `cover` meta names.
+fn find_cover(
+    doc: &roxmltree::Document,
+    items: &HashMap<String, Item>,
+    order: &[String],
+    names: &HashMap<String, String>,
+) -> Option<String> {
     let cover_id = doc
         .descendants()
         .find(|n| n.has_tag_name("meta") && n.attribute("name") == Some("cover"))
         .and_then(|n| n.attribute("content"));
-    book.cover = order
+    order
         .iter()
         .find(|id| {
             items[*id]
@@ -123,29 +128,96 @@ pub fn read(path: &Path) -> Result<Book, String> {
                 .any(|p| p == "cover-image")
         })
         .or_else(|| cover_id.and_then(|c| order.iter().find(|id| id.as_str() == c)))
-        .and_then(|id| names.get(&items[id].href).cloned());
+        .and_then(|id| names.get(&items[id].href).cloned())
+}
 
-    // Chapters get new names; links between them follow.
-    let mut chapter_name: HashMap<String, String> = HashMap::new();
-    for (i, href) in spine.iter().enumerate() {
-        chapter_name
-            .entry(href.clone())
-            .or_insert_with(|| format!("c{:04}.xhtml", i + 1));
+/// What a link in the chapter file `href` points at, in the new book.
+fn chapter_link(
+    h: &str,
+    pic: bool,
+    href: &str,
+    names: &HashMap<String, String>,
+    chapter_name: &HashMap<String, String>,
+) -> Option<String> {
+    if h.starts_with("http:") || h.starts_with("https:") || h.starts_with("mailto:") {
+        return Some(h.to_string());
     }
-    // Style sheets, their `url()`s pointing at the new names.
-    for href in &css_files {
-        if let Some(data) = get(href) {
-            let css = super::text_in::decode_bytes(&data, false);
-            book.css.push_str(&rewrite_css(&css, href, &names));
-            book.css.push('\n');
+    if let Some(f) = h.strip_prefix('#') {
+        return Some(format!("#{f}"));
+    }
+    let target = join_zip(href, h);
+    let frag = h
+        .split_once('#')
+        .map(|(_, f)| format!("#{f}"))
+        .unwrap_or_default();
+    if pic {
+        return names.get(&target).cloned();
+    }
+    chapter_name
+        .get(&target)
+        .map(|c| format!("{c}{frag}"))
+        .or_else(|| names.get(&target).cloned())
+}
+
+/// The chapter's body as XHTML: the body's class and id (styles and links
+/// use them) go on a wrapper.
+fn body_html(
+    body: &[Node],
+    body_attrs: &[(String, String)],
+    link: &dyn Fn(&str, bool) -> Option<String>,
+) -> String {
+    let mut s = String::new();
+    let body_class = body_attrs
+        .iter()
+        .find(|(k, _)| k == "class")
+        .map(|(_, v)| v.clone());
+    let body_id = body_attrs
+        .iter()
+        .find(|(k, _)| k == "id")
+        .map(|(_, v)| v.clone())
+        .filter(|v| xhtml::valid_id(v));
+    let wrapped = body_class.is_some() || body_id.is_some();
+    if wrapped {
+        s.push_str("<div");
+        if let Some(i) = &body_id {
+            s.push_str(&format!(" id=\"{}\"", xhtml::esc_attr(i)));
         }
+        if let Some(c) = &body_class {
+            s.push_str(&format!(" class=\"{}\"", xhtml::esc_attr(c)));
+        }
+        s.push('>');
     }
+    xhtml::write(
+        body,
+        &Out {
+            href: link,
+            classes: true,
+        },
+        &mut s,
+    );
+    if wrapped {
+        s.push_str("</div>");
+    }
+    s
+}
+
+/// The chapters, one per file of the spine (a file listed twice is taken
+/// once), their styles added to the book's.
+fn add_chapters(
+    epub: &mut Epub,
+    book: &mut Book,
+    spine: &[String],
+    names: &HashMap<String, String>,
+    chapter_name: &HashMap<String, String>,
+) {
     let mut seen = std::collections::HashSet::new();
-    for href in &spine {
+    for href in spine {
         if !seen.insert(href.clone()) {
             continue;
         }
-        let Some(bytes) = get(href) else { continue };
+        let Some(bytes) = epub.get(href) else {
+            continue;
+        };
         let text = super::text_in::decode_bytes(&bytes, true);
         let nodes = xhtml::parse(&text);
         let title = xhtml::find(&nodes, "title")
@@ -155,7 +227,7 @@ pub fn read(path: &Path) -> Result<Book, String> {
         let mut styles = Vec::new();
         xhtml::find_all(&nodes, "style", &mut styles);
         for s in styles {
-            book.css.push_str(&rewrite_css(&s.plain(), href, &names));
+            book.css.push_str(&rewrite_css(&s.plain(), href, names));
             book.css.push('\n');
         }
         let page = if book.fixed {
@@ -179,63 +251,11 @@ pub fn read(path: &Path) -> Result<Book, String> {
             .unwrap_or_default();
         let (mut body, body_attrs) = xhtml::body_of(nodes);
         xhtml::tidy(&mut body);
-        let link = |h: &str, pic: bool| -> Option<String> {
-            if h.starts_with("http:") || h.starts_with("https:") || h.starts_with("mailto:") {
-                return Some(h.to_string());
-            }
-            if let Some(f) = h.strip_prefix('#') {
-                return Some(format!("#{f}"));
-            }
-            let target = join_zip(href, h);
-            let frag = h
-                .split_once('#')
-                .map(|(_, f)| format!("#{f}"))
-                .unwrap_or_default();
-            if pic {
-                return names.get(&target).cloned();
-            }
-            chapter_name
-                .get(&target)
-                .map(|c| format!("{c}{frag}"))
-                .or_else(|| names.get(&target).cloned())
-        };
-        let mut s = String::new();
-        // The body's class and id (styles and links use them) on a wrapper.
-        let body_class = body_attrs
-            .iter()
-            .find(|(k, _)| k == "class")
-            .map(|(_, v)| v.clone());
-        let body_id = body_attrs
-            .iter()
-            .find(|(k, _)| k == "id")
-            .map(|(_, v)| v.clone())
-            .filter(|v| xhtml::valid_id(v));
-        let wrapped = body_class.is_some() || body_id.is_some();
-        if wrapped {
-            s.push_str("<div");
-            if let Some(i) = &body_id {
-                s.push_str(&format!(" id=\"{}\"", xhtml::esc_attr(i)));
-            }
-            if let Some(c) = &body_class {
-                s.push_str(&format!(" class=\"{}\"", xhtml::esc_attr(c)));
-            }
-            s.push('>');
-        }
-        xhtml::write(
-            &body,
-            &Out {
-                href: &link,
-                classes: true,
-            },
-            &mut s,
-        );
-        if wrapped {
-            s.push_str("</div>");
-        }
+        let link = |h: &str, pic: bool| chapter_link(h, pic, href, names, chapter_name);
         book.chapters.push(Chapter {
             name: chapter_name[href].clone(),
             title,
-            body: s,
+            body: body_html(&body, &body_attrs, &link),
             lang: if lang == book.meta.language {
                 String::new()
             } else {
@@ -244,14 +264,22 @@ pub fn read(path: &Path) -> Result<Book, String> {
             page,
         });
     }
+}
 
-    // Table of contents: EPUB 3's nav, else the NCX.
+/// Table of contents: EPUB 3's nav, else the NCX.
+fn read_toc(
+    epub: &mut Epub,
+    book: &mut Book,
+    items: &HashMap<String, Item>,
+    order: &[String],
+    chapter_name: &HashMap<String, String>,
+) {
     let nav = order
         .iter()
         .find(|id| items[*id].props.split_whitespace().any(|p| p == "nav"))
         .map(|id| items[id].href.clone());
     if let Some(nav) = nav
-        && let Some(bytes) = get(&nav)
+        && let Some(bytes) = epub.get(&nav)
     {
         let nodes = xhtml::parse(&super::text_in::decode_bytes(&bytes, true));
         let mut navs = Vec::new();
@@ -262,25 +290,88 @@ pub fn read(path: &Path) -> Result<Book, String> {
             .or(navs.first())
             && let Some(ol) = xhtml::find(&toc.kids, "ol")
         {
-            book.toc = nav_entries(ol, &nav, &chapter_name);
+            book.toc = nav_entries(ol, &nav, chapter_name);
         }
     }
-    if book.toc.is_empty() {
-        let ncx = order
-            .iter()
-            .find(|id| items[*id].media.contains("ncx"))
-            .map(|id| items[id].href.clone());
-        if let Some(ncx) = ncx
-            && let Some(bytes) = get(&ncx)
+    if !book.toc.is_empty() {
+        return;
+    }
+    let ncx = order
+        .iter()
+        .find(|id| items[*id].media.contains("ncx"))
+        .map(|id| items[id].href.clone());
+    if let Some(ncx) = ncx
+        && let Some(bytes) = epub.get(&ncx)
+    {
+        let text = super::text_in::decode_bytes(&bytes, true);
+        if let Some(d) = parse(&text)
+            && let Some(map) = d.descendants().find(|n| n.has_tag_name("navMap"))
         {
-            let text = super::text_in::decode_bytes(&bytes, true);
-            if let Some(d) = parse(&text)
-                && let Some(map) = d.descendants().find(|n| n.has_tag_name("navMap"))
-            {
-                book.toc = ncx_entries(map, &ncx, &chapter_name);
-            }
+            book.toc = ncx_entries(map, &ncx, chapter_name);
         }
     }
+}
+
+pub fn read(path: &Path) -> Result<Book, String> {
+    let mut epub = Epub::open(path)?;
+    let container = epub.get("META-INF/container.xml").ok_or("bookBroken")?;
+    let container = String::from_utf8_lossy(&container).into_owned();
+    let opf_path = parse(&container)
+        .and_then(|d| {
+            d.descendants()
+                .find(|n| n.has_tag_name("rootfile"))
+                .and_then(|n| n.attribute("full-path"))
+                .map(String::from)
+        })
+        .ok_or("bookBroken")?;
+    let opf = epub.get(&opf_path).ok_or("bookBroken")?;
+    let opf = super::text_in::decode_bytes(&opf, true);
+    let doc = parse(&opf).ok_or("bookBroken")?;
+    let scrambled: Vec<String> = epub
+        .get("META-INF/encryption.xml")
+        .map(|e| super::drm::obfuscated(&String::from_utf8_lossy(&e)))
+        .unwrap_or_default();
+
+    let mut book = Book {
+        css: String::new(),
+        ..Default::default()
+    };
+    meta_from_opf(&doc, &mut book.meta);
+
+    let (items, order) = manifest(&doc, &opf_path);
+    let spine = spine_of(&doc, &items);
+    if spine.is_empty() {
+        return Err("bookBroken".into());
+    }
+    let spine_node = doc.descendants().find(|n| n.has_tag_name("spine"));
+    book.rtl = spine_node.and_then(|s| s.attribute("page-progression-direction")) == Some("rtl");
+    book.fixed = doc.descendants().any(|n| {
+        n.has_tag_name("meta")
+            && n.attribute("property") == Some("rendition:layout")
+            && n.text().map(str::trim) == Some("pre-paginated")
+    });
+
+    // Resources: pictures, fonts, style sheets (path in the zip → name).
+    let (names, css_files) = add_resources(&mut epub, &mut book, &items, &order, &scrambled);
+    book.cover = find_cover(&doc, &items, &order, &names);
+
+    // Chapters get new names; links between them follow.
+    let mut chapter_name: HashMap<String, String> = HashMap::new();
+    for (i, href) in spine.iter().enumerate() {
+        chapter_name
+            .entry(href.clone())
+            .or_insert_with(|| format!("c{:04}.xhtml", i + 1));
+    }
+    // Style sheets, their `url()`s pointing at the new names.
+    for href in &css_files {
+        if let Some(data) = epub.get(href) {
+            let css = super::text_in::decode_bytes(&data, false);
+            book.css.push_str(&rewrite_css(&css, href, &names));
+            book.css.push('\n');
+        }
+    }
+    add_chapters(&mut epub, &mut book, &spine, &names, &chapter_name);
+    read_toc(&mut epub, &mut book, &items, &order, &chapter_name);
     if book.css.trim().is_empty() {
         book.css = super::BASE_CSS.into();
     }
