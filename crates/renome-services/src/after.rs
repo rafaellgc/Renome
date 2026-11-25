@@ -1203,7 +1203,6 @@ pub async fn subtitle_tools(
     original: renome_core::convert::Original,
     extract_langs: String,
 ) -> Result<(SubToolsReport, Vec<PathBuf>), String> {
-    use renome_core::{mkvsubs, subtext};
     let mut report = SubToolsReport::default();
     let items: Vec<SubJob> = items.into_iter().filter(|j| j.fix || j.extract).collect();
     if items.is_empty() {
@@ -1214,19 +1213,23 @@ pub async fn subtitle_tools(
         Some(id) => id,
         None => history.record_files(&[])?,
     };
-    let store = history.files_dir(&id)?;
     let mut note = history.tagging(&id)?;
-    let langs = std::sync::Arc::new(renome_core::subtitles::langs(&extract_langs));
     let stop = host.stop_signal();
     let total = items.len();
     let send = host.sender();
-    let progress = |done: usize, part: f64| {
-        send(
-            "subtools-progress",
-            serde_json::json!({ "done": done, "total": total, "part": part }),
-        );
+    send(
+        "subtools-progress",
+        serde_json::json!({ "done": 0, "total": total, "part": 0.0 }),
+    );
+    let run = SubRun {
+        store: history.files_dir(&id)?,
+        langs: std::sync::Arc::new(renome_core::subtitles::langs(&extract_langs)),
+        tools,
+        original,
+        stop: stop.clone(),
+        send: send.clone(),
+        total,
     };
-    progress(0, 0.0);
     let mut backups = Vec::new();
     let mut created = Vec::new();
     let mut changed = Vec::new();
@@ -1241,14 +1244,7 @@ pub async fn subtitle_tools(
             .unwrap_or_default();
         if job.fix {
             note.start(&job.path);
-            let (path, store) = (job.path.clone(), store.clone());
-            let r = tokio::task::spawn_blocking(move || {
-                subtext::fix_file(&path, &tools, original, &store)
-            })
-            .await
-            .map_err(|e| e.to_string())
-            .and_then(|r| r);
-            match r {
+            match run.fix(&job).await {
                 Ok(f) => {
                     if let Some(why) = f.not_trashed {
                         report.errors.push((name.clone(), why));
@@ -1263,26 +1259,7 @@ pub async fn subtitle_tools(
             }
         }
         if job.extract {
-            let (path, langs, stop) = (job.path.clone(), langs.clone(), stop.clone());
-            let send = send.clone();
-            let r = tokio::task::spawn_blocking(move || {
-                let tell = |at: u64, size: u64| {
-                    let part = if size > 0 {
-                        at as f64 / size as f64
-                    } else {
-                        0.0
-                    };
-                    send(
-                        "subtools-progress",
-                        serde_json::json!({ "done": done, "total": total, "part": part }),
-                    );
-                };
-                mkvsubs::extract(&path, &tools, &langs, &|| stop(), &tell)
-            })
-            .await
-            .map_err(|e| e.to_string())
-            .and_then(|r| r);
-            match r {
+            match run.extract(&job, done).await {
                 Ok(x) => {
                     created.extend(x.created);
                     report.errors.extend(x.errors);
@@ -1291,7 +1268,10 @@ pub async fn subtitle_tools(
                 Err(e) => report.errors.push((name, e)),
             }
         }
-        progress(done + 1, 0.0);
+        send(
+            "subtools-progress",
+            serde_json::json!({ "done": done + 1, "total": total, "part": 0.0 }),
+        );
     }
     report.written = backups.len();
     report.created = created.len();
@@ -1312,4 +1292,57 @@ pub async fn subtitle_tools(
             .push((String::new(), format!("err.history: {e}"))),
     }
     Ok((report, changed))
+}
+
+/// What the subtitle tools of one run share.
+struct SubRun {
+    store: PathBuf,
+    langs: std::sync::Arc<Vec<renome_core::subtitles::Lang>>,
+    tools: renome_core::subtext::Tools,
+    original: renome_core::convert::Original,
+    stop: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
+    send: crate::Sender,
+    total: usize,
+}
+
+impl SubRun {
+    /// A subtitle changed where it is, or made into SubRip.
+    async fn fix(&self, job: &SubJob) -> Result<renome_core::subtext::Fixed, String> {
+        let (path, store) = (job.path.clone(), self.store.clone());
+        let (tools, original) = (self.tools, self.original);
+        tokio::task::spawn_blocking(move || {
+            renome_core::subtext::fix_file(&path, &tools, original, &store)
+        })
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|r| r)
+    }
+
+    /// The text tracks of a video, written beside it; `done` videos are
+    /// done before it.
+    async fn extract(
+        &self,
+        job: &SubJob,
+        done: usize,
+    ) -> Result<renome_core::mkvsubs::Extracted, String> {
+        let (path, langs, stop) = (job.path.clone(), self.langs.clone(), self.stop.clone());
+        let (send, total, tools) = (self.send.clone(), self.total, self.tools);
+        tokio::task::spawn_blocking(move || {
+            let tell = |at: u64, size: u64| {
+                let part = if size > 0 {
+                    at as f64 / size as f64
+                } else {
+                    0.0
+                };
+                send(
+                    "subtools-progress",
+                    serde_json::json!({ "done": done, "total": total, "part": part }),
+                );
+            };
+            renome_core::mkvsubs::extract(&path, &tools, &langs, &|| stop(), &tell)
+        })
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|r| r)
+    }
 }
