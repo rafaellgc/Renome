@@ -300,24 +300,7 @@ impl Reader<'_> {
     /// The main body: its title (a title page), then each top section a
     /// chapter.
     fn body(&mut self, body: &Elem, book: &mut Book) {
-        let mut lead = String::new();
-        let mut sections = Vec::new();
-        for k in &body.kids {
-            let Node::Elem(e) = k else { continue };
-            match e.name.as_str() {
-                "section" => sections.push(e),
-                "title" => {
-                    lead.push_str("<div class=\"title-page\">");
-                    for p in lines(e) {
-                        lead.push_str(&format!("<h1>{}</h1>", self.inline(&p)));
-                    }
-                    lead.push_str("</div>");
-                }
-                "image" => lead.push_str(&self.block_image(e)),
-                "epigraph" => lead.push_str(&self.block(e, 1)),
-                _ => lead.push_str(&self.block(e, 1)),
-            }
-        }
+        let (lead, mut sections) = self.lead(body);
         if !lead.is_empty() {
             book.chapters.push(Chapter {
                 name: book.next_name(),
@@ -340,86 +323,121 @@ impl Reader<'_> {
                 .count()
                 > 1;
         if unwrap {
-            let only = sections[0];
-            let mut head = String::new();
-            let mut subs = Vec::new();
-            for k in &only.kids {
-                if let Node::Elem(e) = k {
-                    if e.name == "section" {
-                        subs.push(e);
-                    } else {
-                        head.push_str(&self.block(e, 1));
-                    }
-                }
-            }
-            if !head.is_empty() {
-                book.chapters.push(Chapter {
-                    name: book.next_name(),
-                    title: only
-                        .kids
-                        .iter()
-                        .find_map(|k| match k {
-                            Node::Elem(e) if e.name == "title" => Some(clean_line(&e.plain())),
-                            _ => None,
-                        })
-                        .unwrap_or_default(),
-                    body: head,
-                    ..Default::default()
-                });
-            }
-            sections = subs;
+            sections = self.unwrap_only(sections[0], book);
         }
         for s in sections {
-            let title = s
-                .kids
-                .iter()
-                .find_map(|k| match k {
-                    Node::Elem(e) if e.name == "title" => Some(
-                        lines(e)
-                            .iter()
-                            .map(|l| clean_line(&l.plain()))
-                            .collect::<Vec<_>>()
-                            .join(" "),
-                    ),
-                    _ => None,
-                })
-                .unwrap_or_default();
-            let mut html = String::new();
-            self.section(s, 1, &mut html);
-            let name = book.next_name();
-            let mut toc = Toc {
-                title: title.clone(),
-                href: name.clone(),
-                kids: vec![],
-            };
-            // Titled subsections go in the table of contents.
-            for k in &s.kids {
-                if let Node::Elem(e) = k
-                    && e.name == "section"
-                    && let Some(id) = e.attr("id")
-                    && let Some(t) = e.kids.iter().find_map(|k| match k {
-                        Node::Elem(x) if x.name == "title" => Some(clean_line(&x.plain())),
-                        _ => None,
-                    })
-                    && !t.is_empty()
-                {
-                    toc.kids.push(Toc {
-                        title: t,
-                        href: format!("{name}#{id}"),
-                        kids: vec![],
-                    });
+            self.chapter(s, book);
+        }
+    }
+
+    /// What comes before the sections (a title page, an epigraph, a
+    /// picture), and the sections.
+    fn lead<'e>(&mut self, body: &'e Elem) -> (String, Vec<&'e Elem>) {
+        let mut lead = String::new();
+        let mut sections = Vec::new();
+        for k in &body.kids {
+            let Node::Elem(e) = k else { continue };
+            match e.name.as_str() {
+                "section" => sections.push(e),
+                "title" => {
+                    lead.push_str("<div class=\"title-page\">");
+                    for p in lines(e) {
+                        lead.push_str(&format!("<h1>{}</h1>", self.inline(&p)));
+                    }
+                    lead.push_str("</div>");
+                }
+                "image" => lead.push_str(&self.block_image(e)),
+                "epigraph" => lead.push_str(&self.block(e, 1)),
+                _ => lead.push_str(&self.block(e, 1)),
+            }
+        }
+        (lead, sections)
+    }
+
+    /// The only section's own text as a chapter (when it has any); its
+    /// sections are the chapters.
+    fn unwrap_only<'e>(&mut self, only: &'e Elem, book: &mut Book) -> Vec<&'e Elem> {
+        let mut head = String::new();
+        let mut subs = Vec::new();
+        for k in &only.kids {
+            if let Node::Elem(e) = k {
+                if e.name == "section" {
+                    subs.push(e);
+                } else {
+                    head.push_str(&self.block(e, 1));
                 }
             }
-            if !title.is_empty() {
-                book.toc.push(toc);
-            }
+        }
+        if !head.is_empty() {
             book.chapters.push(Chapter {
-                name,
-                title,
-                body: html,
+                name: book.next_name(),
+                title: only
+                    .kids
+                    .iter()
+                    .find_map(|k| match k {
+                        Node::Elem(e) if e.name == "title" => Some(clean_line(&e.plain())),
+                        _ => None,
+                    })
+                    .unwrap_or_default(),
+                body: head,
                 ..Default::default()
             });
         }
+        subs
+    }
+
+    /// A top section as a chapter, with its titled subsections in the
+    /// table of contents.
+    fn chapter(&mut self, s: &Elem, book: &mut Book) {
+        let title = s
+            .kids
+            .iter()
+            .find_map(|k| match k {
+                Node::Elem(e) if e.name == "title" => Some(
+                    lines(e)
+                        .iter()
+                        .map(|l| clean_line(&l.plain()))
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                ),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let mut html = String::new();
+        self.section(s, 1, &mut html);
+        let name = book.next_name();
+        let mut toc = Toc {
+            title: title.clone(),
+            href: name.clone(),
+            kids: vec![],
+        };
+        // Titled subsections go in the table of contents.
+        for k in &s.kids {
+            if let Node::Elem(e) = k
+                && e.name == "section"
+                && let Some(id) = e.attr("id")
+                && let Some(t) = e.kids.iter().find_map(|k| match k {
+                    Node::Elem(x) if x.name == "title" => Some(clean_line(&x.plain())),
+                    _ => None,
+                })
+                && !t.is_empty()
+            {
+                toc.kids.push(Toc {
+                    title: t,
+                    href: format!("{name}#{id}"),
+                    kids: vec![],
+                });
+            }
+        }
+        if !title.is_empty() {
+            book.toc.push(toc);
+        }
+        book.chapters.push(Chapter {
+            name,
+            title,
+            body: html,
+            ..Default::default()
+        });
     }
 
     fn section(&self, s: &Elem, depth: usize, out: &mut String) {
