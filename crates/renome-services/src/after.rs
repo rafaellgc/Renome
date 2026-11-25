@@ -256,7 +256,6 @@ pub async fn song_tags(
     clean: bool,
     cover_size: Option<u32>,
 ) -> Result<(TagReport, Vec<PathBuf>), String> {
-    use crate::musicbrainz;
     use renome_core::tagwrite;
     let mut out = TagReport::default();
     let items: Vec<TagJob> = items
@@ -281,58 +280,13 @@ pub async fn song_tags(
     let store = history.files_dir(&id)?;
     // Each song noted before and after, for a stop halfway.
     let mut note = history.tagging(&id)?;
-    // One cover per release: the archive's, else the album folder's own.
-    let mut covers: std::collections::HashMap<String, Option<Vec<u8>>> =
-        std::collections::HashMap::new();
-    let mut full: std::collections::HashMap<String, Option<renome_core::musicbrainz::Release>> =
-        std::collections::HashMap::new();
+    let mut albums = Albums::new(mb, dg, cover.then_some(cover_size.unwrap_or(1200)));
     let total = items.len();
-    report(
-        host,
-        "mb-progress",
-        serde_json::json!({ "done": 0, "total": total, "kind": "tags" }),
-    );
+    song_progress(host, 0, total);
     let mut backups = Vec::new();
     let mut written = Vec::new();
     for (done, job) in items.into_iter().enumerate() {
-        // Typed in: no release to ask (the folder's cover still counts).
-        let typed = job.song.typed || job.song.release.is_empty();
-        let image = if cover && typed {
-            job.path.parent().and_then(folder_cover)
-        } else if cover {
-            if !covers.contains_key(&job.song.release) {
-                let mut found =
-                    musicbrainz::front_cover(mb, dg, &job.song.release, cover_size.unwrap_or(1200))
-                        .await
-                        .ok()
-                        .flatten();
-                if found.is_none() {
-                    found = job.path.parent().and_then(folder_cover);
-                }
-                covers.insert(job.song.release.clone(), found);
-            }
-            covers[&job.song.release].clone()
-        } else {
-            None
-        };
-        if !typed && !full.contains_key(&job.song.release) {
-            let r = if renome_core::discogs::is_discogs(&job.song.release) {
-                dg.release(&job.song.release).await.ok()
-            } else {
-                mb.release_full(&job.song.release).await.ok()
-            };
-            full.insert(job.song.release.clone(), r);
-        }
-        let mut fields = tagwrite::fields_of(&job.song);
-        if let Some(Some(r)) = full.get(&job.song.release).filter(|_| !typed) {
-            // A genre typed in counts over the release's.
-            let typed_genre = !job.song.genre.is_empty();
-            fields.extend(
-                tagwrite::details(r, &job.song.track_id)
-                    .into_iter()
-                    .filter(|(f, _)| !(typed_genre && *f == tagwrite::Field::Genre)),
-            );
-        }
+        let (fields, image) = albums.for_song(&job).await;
         let (path, store) = (job.path.clone(), store.clone());
         note.start(&path);
         let result = tokio::task::spawn_blocking(move || {
@@ -350,11 +304,7 @@ pub async fn song_tags(
             Ok(None) => {}
             Err(e) => out.errors.push((job.path.display().to_string(), e)),
         }
-        report(
-            host,
-            "mb-progress",
-            serde_json::json!({ "done": done + 1, "total": total, "kind": "tags" }),
-        );
+        song_progress(host, done + 1, total);
     }
     out.written = backups.len();
     let saved = if backups.is_empty() {
@@ -373,6 +323,88 @@ pub async fn song_tags(
             .push((String::new(), format!("err.history: {e}"))),
     }
     Ok((out, written))
+}
+
+fn song_progress(host: &dyn Host, done: usize, total: usize) {
+    report(
+        host,
+        "mb-progress",
+        serde_json::json!({ "done": done, "total": total, "kind": "tags" }),
+    );
+}
+
+/// What is asked of the catalogues once per release for the songs that
+/// belong to it: its cover and its details.
+struct Albums<'a> {
+    mb: &'a crate::musicbrainz::Client,
+    dg: &'a crate::discogs::Client,
+    /// The cover's size when covers are written.
+    cover: Option<u32>,
+    covers: std::collections::HashMap<String, Option<Vec<u8>>>,
+    full: std::collections::HashMap<String, Option<renome_core::musicbrainz::Release>>,
+}
+
+impl<'a> Albums<'a> {
+    fn new(
+        mb: &'a crate::musicbrainz::Client,
+        dg: &'a crate::discogs::Client,
+        cover: Option<u32>,
+    ) -> Self {
+        Self {
+            mb,
+            dg,
+            cover,
+            covers: Default::default(),
+            full: Default::default(),
+        }
+    }
+
+    /// The fields to write for a song, and the cover to put in it.
+    async fn for_song(&mut self, job: &TagJob) -> (renome_core::tagwrite::Fields, Option<Vec<u8>>) {
+        use renome_core::tagwrite;
+        // Typed in: no release to ask (the folder's cover still counts).
+        let typed = job.song.typed || job.song.release.is_empty();
+        let image = self.cover_of(job, typed).await;
+        if !typed && !self.full.contains_key(&job.song.release) {
+            let r = if renome_core::discogs::is_discogs(&job.song.release) {
+                self.dg.release(&job.song.release).await.ok()
+            } else {
+                self.mb.release_full(&job.song.release).await.ok()
+            };
+            self.full.insert(job.song.release.clone(), r);
+        }
+        let mut fields = tagwrite::fields_of(&job.song);
+        if let Some(Some(r)) = self.full.get(&job.song.release).filter(|_| !typed) {
+            // A genre typed in counts over the release's.
+            let typed_genre = !job.song.genre.is_empty();
+            fields.extend(
+                tagwrite::details(r, &job.song.track_id)
+                    .into_iter()
+                    .filter(|(f, _)| !(typed_genre && *f == tagwrite::Field::Genre)),
+            );
+        }
+        (fields, image)
+    }
+
+    /// One cover per release: the archive's, else the album folder's own.
+    async fn cover_of(&mut self, job: &TagJob, typed: bool) -> Option<Vec<u8>> {
+        let size = self.cover?;
+        if typed {
+            return job.path.parent().and_then(folder_cover);
+        }
+        if !self.covers.contains_key(&job.song.release) {
+            let mut found =
+                crate::musicbrainz::front_cover(self.mb, self.dg, &job.song.release, size)
+                    .await
+                    .ok()
+                    .flatten();
+            if found.is_none() {
+                found = job.path.parent().and_then(folder_cover);
+            }
+            self.covers.insert(job.song.release.clone(), found);
+        }
+        self.covers[&job.song.release].clone()
+    }
 }
 
 /// What was written inside files, which files they are now, and the
