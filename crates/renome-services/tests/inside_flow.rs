@@ -133,7 +133,14 @@ async fn inside_does_not_change() {
     ] {
         all.push_str(&format!("{:?} {}\n{}\n", names(p), n, entry(p, n)));
     }
-    let all = all.replace(t.to_str().unwrap(), "T");
+    // The folder is a placeholder, and the separators are the same on every
+    // system (Windows writes `\`, escaped in what is printed).
+    let folder = t.to_str().unwrap();
+    let all = all
+        .replace(&folder.replace('\\', "\\\\"), "T")
+        .replace(folder, "T")
+        .replace("\\\\", "/")
+        .replace('\\', "/");
     if std::env::var_os("GOLDEN_PRINT").is_some() {
         println!("{all}");
     }
