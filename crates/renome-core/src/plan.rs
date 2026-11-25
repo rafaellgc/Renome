@@ -2755,7 +2755,16 @@ pub fn preview(
         .iter()
         .filter(|i| i.problem == Some(Problem::SameThere))
         .count();
-    let (left_folders, trash_folders) = left_folders(&items, view);
+    let (left_folders, trash_folders, emptied) = left_folders(&items, view);
+    // A folder that was added and holds nothing but the release is no
+    // longer a root to keep: it goes once empty.
+    for i in items.iter_mut() {
+        if let Some(w) = &i.within
+            && emptied.contains(w)
+        {
+            i.within = w.parent().map(Path::to_path_buf);
+        }
+    }
     // Where each advertisement is once its old folder is renamed.
     let trash = items
         .iter()
@@ -3198,7 +3207,10 @@ fn note_move(pairs: &mut Vec<(PathBuf, Option<PathBuf>)>, from: PathBuf, to: Opt
 ///
 /// Also the folders left with only the release's advertisements, when they
 /// go to the trash: sent there whole instead.
-fn left_folders(items: &[PreviewItem], view: &View) -> (Vec<LeftFolder>, Vec<PathBuf>) {
+fn left_folders(
+    items: &[PreviewItem],
+    view: &View,
+) -> (Vec<LeftFolder>, Vec<PathBuf>, Vec<PathBuf>) {
     let pairs = folder_moves(items, view);
     let suffix = match view.leftover_suffix.trim() {
         "" => "extras",
@@ -3206,6 +3218,7 @@ fn left_folders(items: &[PreviewItem], view: &View) -> (Vec<LeftFolder>, Vec<Pat
     };
     let mut left = Vec::new();
     let mut trash = Vec::new();
+    let mut emptied = Vec::new();
     let ads: HashSet<&Path> = items
         .iter()
         .filter(|i| i.to_trash)
@@ -3242,6 +3255,10 @@ fn left_folders(items: &[PreviewItem], view: &View) -> (Vec<LeftFolder>, Vec<Pat
                 .any(|i| i.to_trash && i.path.starts_with(&from))
             {
                 trash.push(from);
+            } else {
+                // Nothing left at all: the release's own folder goes with
+                // its files, even when it was the folder added.
+                emptied.push(from);
             }
             continue;
         }
@@ -3251,7 +3268,7 @@ fn left_folders(items: &[PreviewItem], view: &View) -> (Vec<LeftFolder>, Vec<Pat
             left.push(LeftFolder { from, to, files });
         }
     }
-    (left, trash)
+    (left, trash, emptied)
 }
 
 /// Sends the release's advertisements to the trash after the moves (see
@@ -4759,6 +4776,54 @@ mod tests {
         view.episodes.insert(files[1].path.clone(), other);
         let p = preview(&files, &series_steps(), &HashMap::new(), &view);
         assert!(p.left_folders.is_empty());
+    }
+
+    /// The release's own folder, added itself and sent away entirely, goes
+    /// too once empty; the folder a user adds that holds other things stays.
+    #[test]
+    fn the_added_release_folder_goes_when_it_is_left_empty() {
+        let d = tempfile::tempdir().unwrap();
+        let library = d.path().join("Series");
+        fs::create_dir_all(&library).unwrap();
+        let run = |name: &str, extra: &[&str]| {
+            let old = d.path().join("baixando").join(name);
+            fs::create_dir_all(&old).unwrap();
+            let mut files = entries(&old, &["Show.S01E01.1080p.mkv", "Show.S01E02.1080p.mkv"]);
+            // Not in the list: left where it is.
+            for n in extra {
+                fs::write(old.join(n), n).unwrap();
+            }
+            // The folder itself was added: it is where its files come from.
+            for f in &mut files {
+                f.base = old.clone();
+            }
+            let mut view = View {
+                send_to: Some(SendTo {
+                    dir: library.clone(),
+                    copy: false,
+                }),
+                ..View::default()
+            };
+            for (n, f) in files[..2].iter().enumerate() {
+                view.episodes.insert(f.path.clone(), episode(n as u16 + 1));
+            }
+            let p = preview(&files, &series_steps(), &HashMap::new(), &view);
+            let history = crate::apply::History::new(d.path().join(format!("history-{name}")));
+            let report = history.apply(&p.operations());
+            assert!(report.errors.is_empty(), "{:?}", report.errors);
+            old
+        };
+        // Only the show's episodes: nothing is left, so the folder goes.
+        assert!(!run("limpo", &[]).exists());
+        // Something of the user's besides: it is kept (renamed beside, with
+        // the file inside).
+        run("com-coisa", &["notas.pdf"]);
+        let notes = walkdir::WalkDir::new(d.path().join("baixando"))
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name() == "notas.pdf")
+            .count();
+        assert_eq!(notes, 1);
     }
 
     use crate::music::flac;
