@@ -959,119 +959,139 @@ fn undetermined(code: &str) -> bool {
     ["", "und", "zxx", "mis", "mul", "qaa"].contains(&code.to_ascii_lowercase().as_str())
 }
 
+/// What is worked out of one track while naming: its language (and
+/// region), what its name said and what tells it apart from the others.
+struct Work {
+    base: String,
+    details: Vec<String>,
+    rest: String,
+    apart: String,
+    new: NewName,
+    named: bool,
+}
+
 /// The new names (and flags) of `tracks`, in the same order.
 pub fn names(tracks: &[TrackInfo]) -> Vec<NewName> {
-    struct Work {
-        base: String,
-        details: Vec<String>,
-        rest: String,
-        apart: String,
-        new: NewName,
-        named: bool,
-    }
-    let mut work: Vec<Work> = tracks
-        .iter()
-        .map(|t| {
-            let mut new = NewName {
-                name: t.name.clone(),
-                forced: t.forced,
-                hearing: t.hearing,
-                commentary: t.commentary,
-                described: t.described,
-                ..Default::default()
-            };
-            if !matches!(t.kind, TrackKind::Audio | TrackKind::Subtitle) {
-                if t.kind == TrackKind::Video {
-                    new.name.clear();
-                }
-                return Work {
-                    base: String::new(),
-                    details: Vec::new(),
-                    rest: String::new(),
-                    apart: String::new(),
-                    new,
-                    named: false,
+    let mut work: Vec<Work> = tracks.iter().map(read_track).collect();
+    tell_apart(&mut work, tracks);
+    work.into_iter()
+        .map(|w| {
+            let mut new = w.new;
+            if w.named {
+                new.name = match (w.base.is_empty(), w.details.is_empty()) {
+                    (_, true) => w.base,
+                    (true, false) => w.details.join(", "),
+                    (false, false) => format!("{} – {}", w.base, w.details.join(", ")),
                 };
             }
-            let said = read_name(&t.name);
-            let (code, tag_region) = t.lang.split_once(['-', '_']).unwrap_or((&t.lang, ""));
-            let mut lang = language(code);
-            if lang.is_none() && undetermined(code) {
-                lang = said.lang;
-                new.lang = said.lang.map(|l| l.three);
-            }
-            let two = lang.map_or("", |l| l.two);
-            let region = region_of_tag(two, tag_region)
-                .or_else(|| {
-                    ["pob", "ptb"]
-                        .contains(&code.to_ascii_lowercase().as_str())
-                        .then_some("BR")
-                })
-                .or_else(|| (code.eq_ignore_ascii_case("spl")).then_some("419"))
-                .or_else(|| {
-                    said.regions
-                        .iter()
-                        .find(|(l, _)| *l == two)
-                        .map(|(_, r)| *r)
-                });
-            let mut base = lang.map(|l| l.own.to_string()).unwrap_or_default();
-            if let Some(r) = region {
-                let n = region_name(two, r);
-                if !n.is_empty() {
-                    base.push_str(&format!(" ({n})"));
-                }
-            }
-            let has = |w: Word| said.details.contains(&w);
-            let sub = t.kind == TrackKind::Subtitle;
-            new.forced |= sub && has(Word::Forced);
-            new.hearing |= sub && has(Word::Sdh);
-            new.commentary |= has(Word::Commentary);
-            new.described |= !sub && has(Word::Described);
-            let wl = if two.is_empty() { "en" } else { two };
-            let mut details = Vec::new();
-            if sub && new.forced {
-                details.push(word(wl, Word::Forced).to_string());
-            }
-            if sub && has(Word::Signs) {
-                details.push(word(wl, Word::Signs).to_string());
-            }
-            if sub && new.hearing {
-                details.push(word(wl, Word::Sdh).to_string());
-            }
-            if new.commentary {
-                details.push(word(wl, Word::Commentary).to_string());
-            }
-            if !sub && new.described {
-                details.push(word(wl, Word::Described).to_string());
-            }
-            // Without a language, what else the name said stays.
-            let rest = said.rest;
-            if base.is_empty() && !rest.is_empty() {
-                details.push(rest.clone());
-            }
-            let apart = if sub {
-                t.codec.clone()
-            } else {
-                [channels(t.channels), t.codec.clone()]
-                    .into_iter()
-                    .filter(|s| !s.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            };
-            Work {
-                base,
-                details,
-                rest: if lang.is_some() { rest } else { String::new() },
-                apart,
-                new,
-                named: true,
-            }
+            new
         })
-        .collect();
+        .collect()
+}
 
+/// A track's language, region and details as its tags and old name say
+/// them. Only audio and subtitles are named; a video's name goes.
+fn read_track(t: &TrackInfo) -> Work {
+    let mut new = NewName {
+        name: t.name.clone(),
+        forced: t.forced,
+        hearing: t.hearing,
+        commentary: t.commentary,
+        described: t.described,
+        ..Default::default()
+    };
+    if !matches!(t.kind, TrackKind::Audio | TrackKind::Subtitle) {
+        if t.kind == TrackKind::Video {
+            new.name.clear();
+        }
+        return Work {
+            base: String::new(),
+            details: Vec::new(),
+            rest: String::new(),
+            apart: String::new(),
+            new,
+            named: false,
+        };
+    }
+    let said = read_name(&t.name);
+    let (code, tag_region) = t.lang.split_once(['-', '_']).unwrap_or((&t.lang, ""));
+    let mut lang = language(code);
+    if lang.is_none() && undetermined(code) {
+        lang = said.lang;
+        new.lang = said.lang.map(|l| l.three);
+    }
+    let two = lang.map_or("", |l| l.two);
+    let region = region_of_tag(two, tag_region)
+        .or_else(|| {
+            ["pob", "ptb"]
+                .contains(&code.to_ascii_lowercase().as_str())
+                .then_some("BR")
+        })
+        .or_else(|| (code.eq_ignore_ascii_case("spl")).then_some("419"))
+        .or_else(|| {
+            said.regions
+                .iter()
+                .find(|(l, _)| *l == two)
+                .map(|(_, r)| *r)
+        });
+    let mut base = lang.map(|l| l.own.to_string()).unwrap_or_default();
+    if let Some(r) = region {
+        let n = region_name(two, r);
+        if !n.is_empty() {
+            base.push_str(&format!(" ({n})"));
+        }
+    }
+    let has = |w: Word| said.details.contains(&w);
+    let sub = t.kind == TrackKind::Subtitle;
+    new.forced |= sub && has(Word::Forced);
+    new.hearing |= sub && has(Word::Sdh);
+    new.commentary |= has(Word::Commentary);
+    new.described |= !sub && has(Word::Described);
+    let wl = if two.is_empty() { "en" } else { two };
+    let mut details = Vec::new();
+    if sub && new.forced {
+        details.push(word(wl, Word::Forced).to_string());
+    }
+    if sub && has(Word::Signs) {
+        details.push(word(wl, Word::Signs).to_string());
+    }
+    if sub && new.hearing {
+        details.push(word(wl, Word::Sdh).to_string());
+    }
+    if new.commentary {
+        details.push(word(wl, Word::Commentary).to_string());
+    }
+    if !sub && new.described {
+        details.push(word(wl, Word::Described).to_string());
+    }
+    // Without a language, what else the name said stays.
+    let rest = said.rest;
+    if base.is_empty() && !rest.is_empty() {
+        details.push(rest.clone());
+    }
+    let apart = if sub {
+        t.codec.clone()
+    } else {
+        [channels(t.channels), t.codec.clone()]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    Work {
+        base,
+        details,
+        rest: if lang.is_some() { rest } else { String::new() },
+        apart,
+        new,
+        named: true,
+    }
+}
+
+/// Tracks still sharing a name are told apart, step by step: by what their
+/// old names said, by channels and codec, then by number.
+fn tell_apart(work: &mut [Work], tracks: &[TrackInfo]) {
     let key = |w: &Work| format!("{}\u{1}{}", w.base, w.details.join("\u{2}"));
-    // Each step tells apart the tracks still sharing a name, when it
-    // gives them different words.
     for step in 0..3 {
         let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
         for (i, w) in work.iter().enumerate().filter(|(_, w)| w.named) {
@@ -1106,19 +1126,6 @@ pub fn names(tracks: &[TrackInfo]) -> Vec<NewName> {
             }
         }
     }
-    work.into_iter()
-        .map(|w| {
-            let mut new = w.new;
-            if w.named {
-                new.name = match (w.base.is_empty(), w.details.is_empty()) {
-                    (_, true) => w.base,
-                    (true, false) => w.details.join(", "),
-                    (false, false) => format!("{} – {}", w.base, w.details.join(", ")),
-                };
-            }
-            new
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -1288,5 +1295,54 @@ mod tests {
         for w in ["5.1", "Vol.2", "Dr.", "Ch.1", "St."] {
             assert!(!is_address(w), "{w}");
         }
+    }
+
+    /// Pins the names over a grid of tracks, so `names` can be taken apart.
+    #[test]
+    fn names_do_not_change() {
+        let kinds = [
+            TrackKind::Audio,
+            TrackKind::Subtitle,
+            TrackKind::Video,
+            TrackKind::Other,
+        ];
+        let langs = [
+            "por", "pt-BR", "eng", "und", "", "spa", "pob", "zxx", "chi", "fre",
+        ];
+        let said = [
+            "",
+            "English",
+            "Forced",
+            "SDH English",
+            "Portuguese (Brazil)",
+            "Director's Commentary",
+            "Audio Description",
+            "Signs & Songs",
+            "random words",
+            "Spanish (Latin America) 5.1",
+        ];
+        let mut all = Vec::new();
+        let mut n = 0usize;
+        for chunk in 0..60 {
+            let mut tracks = Vec::new();
+            for k in 0..7 {
+                n += 1;
+                tracks.push(TrackInfo {
+                    kind: kinds[(n + chunk) % kinds.len()],
+                    lang: langs[(n * 3 + k) % langs.len()].into(),
+                    name: said[(n * 7 + chunk) % said.len()].into(),
+                    codec: ["AC3", "SRT", "", "DTS"][(n + k) % 4].into(),
+                    channels: [0, 2, 6, 8][(n / 3) % 4],
+                    forced: n % 11 == 0,
+                    hearing: n % 13 == 0,
+                    commentary: n % 17 == 0,
+                    described: n % 19 == 0,
+                });
+            }
+            all.push(format!("{:?}", names(&tracks)));
+        }
+        let sum = xxhash_rust::xxh3::xxh3_64(all.join("\n").as_bytes());
+        println!("hash {sum:016x}");
+        assert_eq!(sum, 0xcc3ed087141cb70e, "the names changed");
     }
 }
