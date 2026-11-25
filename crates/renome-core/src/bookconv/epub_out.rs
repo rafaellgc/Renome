@@ -487,4 +487,63 @@ pub(crate) mod tests {
         assert_eq!(m.authors, vec!["Lia Marta"]);
         assert_eq!(m.series, "Ciclo");
     }
+
+    /// What `opf` writes for each golden book, with and without a cover
+    /// page (but for the date it stamps). A change here is a change in the
+    /// EPUBs people get: update these only when that is the point, never
+    /// for a refactor.
+    #[test]
+    fn opf_does_not_change() {
+        let mut books = super::super::azw3_out::tests::golden_books();
+        let mut full = sample();
+        full.meta.contributors = vec![
+            ("Tradutor Um".into(), "trl".into()),
+            ("Ilu \"Dois\"".into(), "ill".into()),
+        ];
+        full.meta.isbn = "9780306406157".into();
+        full.meta.id = "urn:uuid:abc".into();
+        full.meta.date = "2020-05".into();
+        full.meta.publisher = "Editora & Cia".into();
+        full.meta.description = "Um <resumo>.".into();
+        full.meta.subjects = vec!["x".into(), "y & z".into()];
+        full.rtl = true;
+        full.chapters.push(Chapter {
+            name: "c0002 b.xhtml".into(),
+            body: "<svg><image/></svg>".into(),
+            ..Default::default()
+        });
+        books.push(("full", full));
+        let stamp = regex::Regex::new(r#"<meta property="dcterms:modified">[^<]*</meta>"#).unwrap();
+        let mut got: Vec<(String, u64)> = Vec::new();
+        for (n, b) in &books {
+            for cover_page in [false, true] {
+                let out = stamp
+                    .replace(&super::opf(b, cover_page), "<stamp/>")
+                    .into_owned();
+                if std::env::var_os("GOLDEN_SHOW").is_some() {
+                    eprintln!("#### {n} {cover_page}\n{out}");
+                }
+                got.push((
+                    format!("{n}/{cover_page}"),
+                    xxhash_rust::xxh3::xxh3_64(out.as_bytes()),
+                ));
+            }
+        }
+        let want: Vec<u64> = vec![
+            15935326846438689278,
+            5849505244310559091,
+            11774886118101286519,
+            2915925354470651946,
+            8587409223012341784,
+            11604642216969772930,
+            16613511980305878066,
+            6825153647587506569,
+            5515701908908685214,
+            7576508364873139714,
+            10025083268116944506,
+            7315590066016567741,
+        ];
+        let hashes: Vec<u64> = got.iter().map(|g| g.1).collect();
+        assert_eq!(hashes, want, "{got:?}");
+    }
 }
