@@ -56,7 +56,16 @@ fn seeds() -> Vec<(String, Vec<u8>)> {
     // runs from a copy of the fixtures on another machine); a folder that
     // is not there only means fewer seeds.
     for dir in ["tests/fixtures", "../renome-archive/tests/data"] {
-        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let mut found: Vec<_> = std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .collect();
+        // In a fixed order: the damage comes from one generator, and a
+        // folder is read in whatever order the file system likes, so the
+        // same run would damage different bytes on another machine.
+        found.sort_by_key(|e| e.file_name());
+        for e in found {
             v.push((
                 e.file_name().to_string_lossy().into_owned(),
                 std::fs::read(e.path()).unwrap(),
@@ -295,7 +304,12 @@ fn damaged_files_never_panic_a_reader() {
     assert_eq!(PANICS.load(Ordering::SeqCst), before + 1);
     let dir = tempfile::tempdir().unwrap();
     let mut failures: Vec<String> = Vec::new();
-    let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+    // `ROBUSTNESS_SEED=n` damages the files in other ways, to hunt further.
+    let seed: u64 = std::env::var("ROBUSTNESS_SEED")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let mut rng = Rng(0x9E37_79B9_7F4A_7C15 ^ seed.wrapping_mul(0x2545_F491_4F6C_DD1D));
     for (name, seed) in seeds() {
         let ext = name.rsplit('.').next().unwrap_or("").to_string();
         for k in 0..KINDS {

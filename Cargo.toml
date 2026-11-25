@@ -10,6 +10,12 @@ opt-level = 3
 # damaged file gives an error instead of taking the program down.
 strip = true
 
+# Other people's crates are not held to overflow checks in tests either: the
+# shipped program does not check them (they wrap), and a test that panics
+# there (a damaged Opus file in `lofty`) says nothing about Renome.
+[profile.dev.package."*"]
+overflow-checks = false
+
 [workspace.lints.clippy]
 # A panic on a user's files is a failure: fallible calls return errors, and
 # an invariant is written as `expect("why")`.
