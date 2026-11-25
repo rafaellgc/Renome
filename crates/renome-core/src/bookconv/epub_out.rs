@@ -346,69 +346,12 @@ fn write_inner(book: &Book, to: &Path) -> std::io::Result<()> {
     z.start_file("OEBPS/content.opf", deflated)?;
     z.write_all(opf(book, cover_page.is_some()).as_bytes())?;
 
-    // Table of contents: the given one, else the chapters' titles, else
-    // the first chapter (a nav must have one link).
-    let mut toc = book.toc.clone();
-    if toc.is_empty() {
-        toc = book
-            .chapters
-            .iter()
-            .filter(|c| !c.title.trim().is_empty())
-            .map(|c| Toc {
-                title: c.title.clone(),
-                href: c.name.clone(),
-                kids: vec![],
-            })
-            .collect();
-    }
-    if toc.is_empty()
-        && let Some(f) = book.chapters.first()
-    {
-        toc.push(Toc {
-            title: if book.meta.title.is_empty() {
-                "Start".into()
-            } else {
-                book.meta.title.clone()
-            },
-            href: f.name.clone(),
-            kids: vec![],
-        });
-    }
-    let mut nav = String::from("<nav epub:type=\"toc\" id=\"toc\">\n");
-    nav.push_str(&format!("<h1>{}</h1>\n", esc(&book.meta.title)));
-    nav_list(&toc, &mut nav);
-    nav.push_str("</nav>\n");
-    if cover_page.is_some() || !book.chapters.is_empty() {
-        nav.push_str("<nav epub:type=\"landmarks\" hidden=\"\">\n<ol>\n");
-        if cover_page.is_some() {
-            nav.push_str("<li><a epub:type=\"cover\" href=\"cover.xhtml\">Cover</a></li>\n");
-        }
-        if let Some(f) = book.chapters.first() {
-            nav.push_str(&format!(
-                "<li><a epub:type=\"bodymatter\" href=\"{}\">Start</a></li>\n",
-                esc_attr(&f.name)
-            ));
-        }
-        nav.push_str("</ol>\n</nav>\n");
-    }
+    let toc = toc_of(book);
+    let nav = nav_of(book, &toc, cover_page.is_some());
     z.start_file("OEBPS/nav.xhtml", deflated)?;
     z.write_all(chapter_doc(book, &book.meta.title, &nav, "", None).as_bytes())?;
-
-    let mut points = String::new();
-    let mut n = 0;
-    ncx_points(&toc, &mut n, &mut points);
-    let ncx = format!(
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\" version=\"2005-1\">\n<head>\n<meta name=\"dtb:uid\" content=\"{uid}\"/>\n<meta name=\"dtb:depth\" content=\"{d}\"/>\n<meta name=\"dtb:totalPageCount\" content=\"0\"/>\n<meta name=\"dtb:maxPageNumber\" content=\"0\"/>\n</head>\n<docTitle><text>{t}</text></docTitle>\n<navMap>\n{points}</navMap>\n</ncx>\n",
-        uid = esc_attr(&if book.meta.isbn.is_empty() {
-            uuid_of(book)
-        } else {
-            format!("urn:isbn:{}", book.meta.isbn)
-        }),
-        d = depth(&toc).max(1),
-        t = esc(&book.meta.title),
-    );
     z.start_file("OEBPS/toc.ncx", deflated)?;
-    z.write_all(ncx.as_bytes())?;
+    z.write_all(ncx_of(book, &toc).as_bytes())?;
 
     let mut css = book.css.clone();
     if book.fixed {
@@ -443,6 +386,77 @@ fn write_inner(book: &Book, to: &Path) -> std::io::Result<()> {
     let f = w.into_inner().map_err(|e| e.into_error())?;
     f.sync_all()?;
     Ok(())
+}
+
+/// The table of contents: the given one, else the chapters' titles, else
+/// the first chapter (a nav must have one link).
+fn toc_of(book: &Book) -> Vec<Toc> {
+    let mut toc = book.toc.clone();
+    if toc.is_empty() {
+        toc = book
+            .chapters
+            .iter()
+            .filter(|c| !c.title.trim().is_empty())
+            .map(|c| Toc {
+                title: c.title.clone(),
+                href: c.name.clone(),
+                kids: vec![],
+            })
+            .collect();
+    }
+    if toc.is_empty()
+        && let Some(f) = book.chapters.first()
+    {
+        toc.push(Toc {
+            title: if book.meta.title.is_empty() {
+                "Start".into()
+            } else {
+                book.meta.title.clone()
+            },
+            href: f.name.clone(),
+            kids: vec![],
+        });
+    }
+    toc
+}
+
+/// The navigation: the table of contents and the landmarks (cover, start).
+fn nav_of(book: &Book, toc: &[Toc], cover_page: bool) -> String {
+    let mut nav = String::from("<nav epub:type=\"toc\" id=\"toc\">\n");
+    nav.push_str(&format!("<h1>{}</h1>\n", esc(&book.meta.title)));
+    nav_list(toc, &mut nav);
+    nav.push_str("</nav>\n");
+    if cover_page || !book.chapters.is_empty() {
+        nav.push_str("<nav epub:type=\"landmarks\" hidden=\"\">\n<ol>\n");
+        if cover_page {
+            nav.push_str("<li><a epub:type=\"cover\" href=\"cover.xhtml\">Cover</a></li>\n");
+        }
+        if let Some(f) = book.chapters.first() {
+            nav.push_str(&format!(
+                "<li><a epub:type=\"bodymatter\" href=\"{}\">Start</a></li>\n",
+                esc_attr(&f.name)
+            ));
+        }
+        nav.push_str("</ol>\n</nav>\n");
+    }
+    nav
+}
+
+/// The NCX, for readers that do not read the navigation.
+fn ncx_of(book: &Book, toc: &[Toc]) -> String {
+    let mut points = String::new();
+    let mut n = 0;
+    ncx_points(toc, &mut n, &mut points);
+    format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\" version=\"2005-1\">\n<head>\n<meta name=\"dtb:uid\" content=\"{uid}\"/>\n<meta name=\"dtb:depth\" content=\"{d}\"/>\n<meta name=\"dtb:totalPageCount\" content=\"0\"/>\n<meta name=\"dtb:maxPageNumber\" content=\"0\"/>\n</head>\n<docTitle><text>{t}</text></docTitle>\n<navMap>\n{points}</navMap>\n</ncx>\n",
+        uid = esc_attr(&if book.meta.isbn.is_empty() {
+            uuid_of(book)
+        } else {
+            format!("urn:isbn:{}", book.meta.isbn)
+        }),
+        d = depth(toc).max(1),
+        t = esc(&book.meta.title),
+    )
 }
 
 #[cfg(test)]
@@ -512,6 +526,45 @@ pub(crate) mod tests {
         assert_eq!(m.title, "Um Livro & Outro");
         assert_eq!(m.authors, vec!["Lia Marta"]);
         assert_eq!(m.series, "Ciclo");
+    }
+
+    /// What `write` makes of each golden book: every file in the EPUB, but
+    /// for the date `opf` stamps. A change here is a change in the EPUBs
+    /// people get: update this only when that is the point, never for a
+    /// refactor.
+    #[test]
+    fn written_epub_does_not_change() {
+        let d = tempfile::tempdir().unwrap();
+        let stamp = regex::Regex::new(r#"<meta property="dcterms:modified">[^<]*</meta>"#).unwrap();
+        let mut books = super::super::azw3_out::tests::golden_books();
+        let mut bare = sample();
+        bare.chapters.clear();
+        bare.toc.clear();
+        bare.cover = None;
+        books.push(("bare", bare));
+        let mut all = Vec::new();
+        for (n, b) in &books {
+            let p = d.path().join(format!("{n}.epub"));
+            super::write(b, &p).unwrap();
+            let mut z = zip::ZipArchive::new(std::fs::File::open(&p).unwrap()).unwrap();
+            for i in 0..z.len() {
+                let mut f = z.by_index(i).unwrap();
+                let name = f.name().unwrap().into_owned();
+                let mut data = Vec::new();
+                std::io::Read::read_to_end(&mut f, &mut data).unwrap();
+                let data = match String::from_utf8(data.clone()) {
+                    Ok(t) => stamp.replace(&t, "<stamp/>").into_owned().into_bytes(),
+                    Err(_) => data,
+                };
+                all.push(format!(
+                    "{n} {name} {:x}",
+                    xxhash_rust::xxh3::xxh3_64(&data)
+                ));
+            }
+        }
+        let sum = xxhash_rust::xxh3::xxh3_64(all.join("\n").as_bytes());
+        println!("hash {sum:016x} over {} files", all.len());
+        assert_eq!(sum, 0x64f18580afdab20d, "the EPUB written changed");
     }
 
     /// What `opf` writes for each golden book, with and without a cover
