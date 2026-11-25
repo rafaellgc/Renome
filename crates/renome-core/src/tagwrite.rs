@@ -1085,98 +1085,132 @@ pub fn write(
     let changed = edit(path, clean, |tag, rest| {
         let mut changed = false;
         if clean {
-            let tag_type = tag.tag_type();
-            // Kept too: what this write puts in (an audiobook's synopsis),
-            // and an MP3's label, read back as its publisher (`TPUB`).
-            let ours = |k: &ItemKey| {
-                kept(*k)
-                    || fields.iter().any(|(f, _)| f.key() == *k)
-                    || (tag_type == TagType::Id3v2 && *k == ItemKey::Publisher)
-            };
-            for item in tag.items().filter(|i| !ours(&i.key())) {
-                let Some(key) = item.key().map_key(tag_type) else {
-                    continue;
-                };
-                let mut s = SavedItem {
-                    key: key.to_string(),
-                    text: None,
-                    locator: false,
-                    file: None,
-                    lang: String::from_utf8_lossy(item.lang()).into_owned(),
-                    description: item.description().to_string(),
-                };
-                match item.value() {
-                    ItemValue::Text(t) => s.text = Some(t.clone()),
-                    ItemValue::Locator(t) => {
-                        s.text = Some(t.clone());
-                        s.locator = true;
-                    }
-                    ItemValue::Binary(b) => match keep(b, store) {
-                        Ok(f) => s.file = Some(f),
-                        Err(e) => saved = Err(e),
-                    },
-                }
-                backup.removed.push(s);
-            }
-            tag.retain(|i| ours(&i.key()));
-            let (kept, out): (Vec<_>, Vec<_>) = std::mem::take(&mut rest.raw)
-                .into_iter()
-                .partition(|(k, _)| KEEP_RAW.iter().any(|x| x.eq_ignore_ascii_case(k)));
-            rest.raw = kept;
-            changed = !backup.removed.is_empty() || !out.is_empty() || rest.more;
-            backup.raw = out;
-            backup.kept_text = std::mem::take(&mut rest.dropped_text);
+            changed = take_out_rest(tag, rest, fields, store, &mut backup, &mut saved);
         }
-        for (f, new) in fields {
-            let old = values(tag, *f);
-            // An MP3 keeps several values as one (see `one_value_each`).
-            let joined = old.len() == 1 && new.len() > 1 && old[0] == new.join(JOIN);
-            if old != *new && !joined {
-                changed = true;
-                backup.fields.push((*f, old));
-                set(tag, *f, new);
-            }
-        }
+        changed |= set_fields(tag, fields, &mut backup);
         if let Some(data) = cover {
-            // MP4 does not keep the picture's type: the data tells.
-            let same = tag.pictures().len() == 1 && tag.pictures()[0].data() == data;
-            if !same {
-                changed = true;
-                let kept: Result<Vec<SavedPicture>, String> = tag
-                    .pictures()
-                    .iter()
-                    .map(|p| {
-                        Ok(SavedPicture {
-                            kind: p.pic_type().as_u8(),
-                            mime: p
-                                .mime_type()
-                                .map(|m| m.as_str().to_string())
-                                .unwrap_or_default(),
-                            description: p.description().unwrap_or_default().to_string(),
-                            file: keep(p.data(), store)?,
-                        })
-                    })
-                    .collect();
-                match kept {
-                    Ok(p) => backup.pictures = Some(p),
-                    Err(e) => saved = Err(e),
-                }
-                while tag.picture_count() > 0 {
-                    tag.remove_picture(0);
-                }
-                tag.push_picture(
-                    Picture::unchecked(data.to_vec())
-                        .pic_type(PictureType::CoverFront)
-                        .mime_type(mime_of(data))
-                        .build(),
-                );
-            }
+            changed |= put_cover(tag, data, store, &mut backup, &mut saved);
         }
         // Without what it takes out saved, the file is not touched.
         changed && saved.is_ok()
     })?;
     saved?;
     Ok(changed.then_some(backup))
+}
+
+/// Takes out of a tag what a cleaning write does not keep, saving it in
+/// the backup (binary data in `store`). Whether anything went.
+fn take_out_rest(
+    tag: &mut Tag,
+    rest: &mut Rest,
+    fields: &Fields,
+    store: &Path,
+    backup: &mut Backup,
+    saved: &mut Result<(), String>,
+) -> bool {
+    let tag_type = tag.tag_type();
+    // Kept too: what this write puts in (an audiobook's synopsis), and an
+    // MP3's label, read back as its publisher (`TPUB`).
+    let ours = |k: &ItemKey| {
+        kept(*k)
+            || fields.iter().any(|(f, _)| f.key() == *k)
+            || (tag_type == TagType::Id3v2 && *k == ItemKey::Publisher)
+    };
+    for item in tag.items().filter(|i| !ours(&i.key())) {
+        let Some(key) = item.key().map_key(tag_type) else {
+            continue;
+        };
+        let mut s = SavedItem {
+            key: key.to_string(),
+            text: None,
+            locator: false,
+            file: None,
+            lang: String::from_utf8_lossy(item.lang()).into_owned(),
+            description: item.description().to_string(),
+        };
+        match item.value() {
+            ItemValue::Text(t) => s.text = Some(t.clone()),
+            ItemValue::Locator(t) => {
+                s.text = Some(t.clone());
+                s.locator = true;
+            }
+            ItemValue::Binary(b) => match keep(b, store) {
+                Ok(f) => s.file = Some(f),
+                Err(e) => *saved = Err(e),
+            },
+        }
+        backup.removed.push(s);
+    }
+    tag.retain(|i| ours(&i.key()));
+    let (kept, out): (Vec<_>, Vec<_>) = std::mem::take(&mut rest.raw)
+        .into_iter()
+        .partition(|(k, _)| KEEP_RAW.iter().any(|x| x.eq_ignore_ascii_case(k)));
+    rest.raw = kept;
+    let changed = !backup.removed.is_empty() || !out.is_empty() || rest.more;
+    backup.raw = out;
+    backup.kept_text = std::mem::take(&mut rest.dropped_text);
+    changed
+}
+
+/// Sets the fields that differ, saving the old values in the backup.
+/// Whether any did.
+fn set_fields(tag: &mut Tag, fields: &Fields, backup: &mut Backup) -> bool {
+    let mut changed = false;
+    for (f, new) in fields {
+        let old = values(tag, *f);
+        // An MP3 keeps several values as one (see `one_value_each`).
+        let joined = old.len() == 1 && new.len() > 1 && old[0] == new.join(JOIN);
+        if old != *new && !joined {
+            changed = true;
+            backup.fields.push((*f, old));
+            set(tag, *f, new);
+        }
+    }
+    changed
+}
+
+/// Puts the cover in place of the pictures, saving them in `store`.
+/// Whether it was not there already.
+fn put_cover(
+    tag: &mut Tag,
+    data: &[u8],
+    store: &Path,
+    backup: &mut Backup,
+    saved: &mut Result<(), String>,
+) -> bool {
+    // MP4 does not keep the picture's type: the data tells.
+    if tag.pictures().len() == 1 && tag.pictures()[0].data() == data {
+        return false;
+    }
+    let kept: Result<Vec<SavedPicture>, String> = tag
+        .pictures()
+        .iter()
+        .map(|p| {
+            Ok(SavedPicture {
+                kind: p.pic_type().as_u8(),
+                mime: p
+                    .mime_type()
+                    .map(|m| m.as_str().to_string())
+                    .unwrap_or_default(),
+                description: p.description().unwrap_or_default().to_string(),
+                file: keep(p.data(), store)?,
+            })
+        })
+        .collect();
+    match kept {
+        Ok(p) => backup.pictures = Some(p),
+        Err(e) => *saved = Err(e),
+    }
+    while tag.picture_count() > 0 {
+        tag.remove_picture(0);
+    }
+    tag.push_picture(
+        Picture::unchecked(data.to_vec())
+            .pic_type(PictureType::CoverFront)
+            .mime_type(mime_of(data))
+            .build(),
+    );
+    true
 }
 
 /// Puts back what [`write()`](fn@write) changed (pictures and data from `store`).
