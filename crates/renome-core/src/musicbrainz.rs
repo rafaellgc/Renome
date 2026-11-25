@@ -547,26 +547,7 @@ pub fn tracklist(release: &Release) -> Vec<ListedTrack> {
 /// once. A song that fits no track is left out (it keeps
 /// its tags). Returns the matches and how many agree in length.
 pub fn match_tracks(release: &Release, songs: &[Song]) -> (Vec<(PathBuf, SongMatch)>, usize) {
-    let album_artist = plain(&credit(&release.artist_credit));
-    let album_artist_ids = artist_ids(&release.artist_credit);
-    let album_artist_sort = plain(&sort_credit(&release.artist_credit));
-    let original_year = release
-        .release_group
-        .as_ref()
-        .and_then(|g| crate::tmdb::year_of(&g.first_release_date));
-    let label = release.label_info.iter().find_map(|l| {
-        l.label
-            .as_ref()
-            .map(|n| n.name.clone())
-            .filter(|n| !n.is_empty())
-    });
-    let catalog = release.label_info.iter().find_map(|l| {
-        l.catalog_number
-            .clone()
-            .filter(|c| !c.is_empty() && c != "[none]")
-    });
-    let discs = release.media.len().max(1) as u32;
-    let year = crate::tmdb::year_of(&release.date);
+    let facts = ReleaseFacts::of(release);
     let mut used = HashSet::new();
     let mut out = Vec::new();
     let mut agree = 0;
@@ -577,35 +558,7 @@ pub fn match_tracks(release: &Release, songs: &[Song]) -> (Vec<(PathBuf, SongMat
         .flat_map(|m| m.tracks.iter().map(move |t| (m, t)))
         .collect();
     for (path, t) in songs {
-        let disc = t.disc.unwrap_or(1);
-        let by_recording = || {
-            t.recordings.iter().find_map(|id| {
-                tracks.iter().position(|(m, tr)| {
-                    !used.contains(&(m.position, tr.position))
-                        && tr.recording.as_ref().is_some_and(|r| r.id == *id)
-                })
-            })
-        };
-        // Same number, but another song (another edition's track list).
-        let by_number = || {
-            tracks.iter().position(|(m, tr)| {
-                Some(tr.position) == t.track
-                    && m.position.max(1) == disc
-                    && !used.contains(&(m.position, tr.position))
-                    && (same_title(&t.title, &tr.title) || same_length(tr, t))
-            })
-        };
-        let by_title = || {
-            tracks
-                .iter()
-                .enumerate()
-                .filter(|(_, (m, tr))| !used.contains(&(m.position, tr.position)))
-                .map(|(i, (_, tr))| (i, similarity(&t.title, &tr.title)))
-                .filter(|(_, s)| *s >= 0.8)
-                .max_by(|a, b| a.1.total_cmp(&b.1))
-                .map(|(i, _)| i)
-        };
-        let Some(i) = by_recording().or_else(by_number).or_else(by_title) else {
+        let Some(i) = find_track(&tracks, &used, t) else {
             continue;
         };
         let (m, tr) = tracks[i];
@@ -613,11 +566,56 @@ pub fn match_tracks(release: &Release, songs: &[Song]) -> (Vec<(PathBuf, SongMat
         if same_length(tr, t) {
             agree += 1;
         }
+        out.push((path.clone(), facts.song(release, m, tr)));
+    }
+    (out, agree)
+}
+
+/// What a release says for all its songs.
+struct ReleaseFacts {
+    album_artist: String,
+    album_artist_ids: Vec<String>,
+    album_artist_sort: String,
+    original_year: Option<u16>,
+    label: Option<String>,
+    catalog: Option<String>,
+    discs: u32,
+    year: Option<u16>,
+}
+
+impl ReleaseFacts {
+    fn of(release: &Release) -> Self {
+        Self {
+            album_artist: plain(&credit(&release.artist_credit)),
+            album_artist_ids: artist_ids(&release.artist_credit),
+            album_artist_sort: plain(&sort_credit(&release.artist_credit)),
+            original_year: release
+                .release_group
+                .as_ref()
+                .and_then(|g| crate::tmdb::year_of(&g.first_release_date)),
+            label: release.label_info.iter().find_map(|l| {
+                l.label
+                    .as_ref()
+                    .map(|n| n.name.clone())
+                    .filter(|n| !n.is_empty())
+            }),
+            catalog: release.label_info.iter().find_map(|l| {
+                l.catalog_number
+                    .clone()
+                    .filter(|c| !c.is_empty() && c != "[none]")
+            }),
+            discs: release.media.len().max(1) as u32,
+            year: crate::tmdb::year_of(&release.date),
+        }
+    }
+
+    /// What a track of the release says of the song that is it.
+    fn song(&self, release: &Release, m: &Medium, tr: &Track) -> SongMatch {
         let (artist, artist_id, artist_sort) = if tr.artist_credit.is_empty() {
             (
-                album_artist.clone(),
-                album_artist_ids.clone(),
-                album_artist_sort.clone(),
+                self.album_artist.clone(),
+                self.album_artist_ids.clone(),
+                self.album_artist_sort.clone(),
             )
         } else {
             (
@@ -626,44 +624,78 @@ pub fn match_tracks(release: &Release, songs: &[Song]) -> (Vec<(PathBuf, SongMat
                 plain(&sort_credit(&tr.artist_credit)),
             )
         };
-        out.push((
-            path.clone(),
-            SongMatch {
-                release: release.id.clone(),
-                title: plain(&tr.title),
-                artist,
-                album_artist: album_artist.clone(),
-                album: plain(&release.title),
-                year,
-                track: tr.position,
-                track_total: m.track_count.max(m.tracks.len() as u32),
-                disc: m.position.max(1),
-                disc_total: discs,
-                date: release.date.clone().unwrap_or_default(),
-                recording: tr
-                    .recording
-                    .as_ref()
-                    .map(|r| r.id.clone())
-                    .unwrap_or_default(),
-                track_id: tr.id.clone(),
-                release_group: release
-                    .release_group
-                    .as_ref()
-                    .map(|g| g.id.clone())
-                    .unwrap_or_default(),
-                artist_ids: artist_id,
-                album_artist_ids: album_artist_ids.clone(),
-                original_year,
-                label: label.clone().unwrap_or_default(),
-                catalog: catalog.clone().unwrap_or_default(),
-                artist_sort,
-                album_artist_sort: album_artist_sort.clone(),
-                genre: String::new(),
-                typed: false,
-            },
-        ));
+        SongMatch {
+            release: release.id.clone(),
+            title: plain(&tr.title),
+            artist,
+            album_artist: self.album_artist.clone(),
+            album: plain(&release.title),
+            year: self.year,
+            track: tr.position,
+            track_total: m.track_count.max(m.tracks.len() as u32),
+            disc: m.position.max(1),
+            disc_total: self.discs,
+            date: release.date.clone().unwrap_or_default(),
+            recording: tr
+                .recording
+                .as_ref()
+                .map(|r| r.id.clone())
+                .unwrap_or_default(),
+            track_id: tr.id.clone(),
+            release_group: release
+                .release_group
+                .as_ref()
+                .map(|g| g.id.clone())
+                .unwrap_or_default(),
+            artist_ids: artist_id,
+            album_artist_ids: self.album_artist_ids.clone(),
+            original_year: self.original_year,
+            label: self.label.clone().unwrap_or_default(),
+            catalog: self.catalog.clone().unwrap_or_default(),
+            artist_sort,
+            album_artist_sort: self.album_artist_sort.clone(),
+            genre: String::new(),
+            typed: false,
+        }
     }
-    (out, agree)
+}
+
+/// The track of the release a song is: by its recording, by its number
+/// (when the title or length fits), else by the likest title.
+fn find_track(
+    tracks: &[(&Medium, &Track)],
+    used: &HashSet<(u32, u32)>,
+    t: &AudioTags,
+) -> Option<usize> {
+    let disc = t.disc.unwrap_or(1);
+    let by_recording = || {
+        t.recordings.iter().find_map(|id| {
+            tracks.iter().position(|(m, tr)| {
+                !used.contains(&(m.position, tr.position))
+                    && tr.recording.as_ref().is_some_and(|r| r.id == *id)
+            })
+        })
+    };
+    // Same number, but another song (another edition's track list).
+    let by_number = || {
+        tracks.iter().position(|(m, tr)| {
+            Some(tr.position) == t.track
+                && m.position.max(1) == disc
+                && !used.contains(&(m.position, tr.position))
+                && (same_title(&t.title, &tr.title) || same_length(tr, t))
+        })
+    };
+    let by_title = || {
+        tracks
+            .iter()
+            .enumerate()
+            .filter(|(_, (m, tr))| !used.contains(&(m.position, tr.position)))
+            .map(|(i, (_, tr))| (i, similarity(&t.title, &tr.title)))
+            .filter(|(_, s)| *s >= 0.8)
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(i, _)| i)
+    };
+    by_recording().or_else(by_number).or_else(by_title)
 }
 
 /// A release fits the songs without doubt: every song found its track (by
