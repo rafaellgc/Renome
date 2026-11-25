@@ -689,13 +689,32 @@ fn person_xml(tag: &str, name: &str) -> String {
 }
 
 pub fn to_fb2(book: &Book) -> String {
-    let m = &book.meta;
     let mut w = Writer {
         book,
         pics: Vec::new(),
         out: String::new(),
         depth: 0,
     };
+    let ti = title_info(book, &mut w.pics);
+    let pi = publish_info(&book.meta);
+    let di = document_info(&book.meta);
+    write_bodies(&mut w);
+    let bins = binaries(book, &w.pics);
+    format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<FictionBook xmlns=\"http://www.gribuser.ru/xml/fictionbook/2.0\" xmlns:l=\"http://www.w3.org/1999/xlink\">\n<description><title-info>{ti}</title-info>{di}{}</description>\n{}\n{bins}</FictionBook>\n",
+        if pi.is_empty() {
+            String::new()
+        } else {
+            format!("<publish-info>{pi}</publish-info>")
+        },
+        w.out
+    )
+}
+
+/// What the book is: genres, authors, title, annotation, keywords, date,
+/// cover (added to `pics`), language, translators and series.
+fn title_info(book: &Book, pics: &mut Vec<String>) -> String {
+    let m = &book.meta;
     let mut ti = String::new();
     // Genres come from the format's own list; the book's words go in its
     // keywords.
@@ -741,7 +760,7 @@ pub fn to_fb2(book: &Book) -> String {
             "<coverpage><image l:href=\"#{}\"/></coverpage>",
             esc_attr(c)
         ));
-        w.pics.push(c.clone());
+        pics.push(c.clone());
     }
     let lang = m.language.split('-').next().unwrap_or("und");
     ti.push_str(&format!(
@@ -767,6 +786,11 @@ pub fn to_fb2(book: &Book) -> String {
             num.map(|n| format!(" number=\"{n}\"")).unwrap_or_default()
         ));
     }
+    ti
+}
+
+/// The publisher, year and ISBN.
+fn publish_info(m: &super::Meta) -> String {
     let mut pi = String::new();
     if !m.publisher.is_empty() {
         pi.push_str(&format!("<publisher>{}</publisher>", esc(&m.publisher)));
@@ -781,23 +805,33 @@ pub fn to_fb2(book: &Book) -> String {
     if !m.isbn.is_empty() {
         pi.push_str(&format!("<isbn>{}</isbn>", esc(&m.isbn)));
     }
+    pi
+}
+
+/// Who made the FB2 file, when, and its id (the book's, else made of its
+/// title).
+fn document_info(m: &super::Meta) -> String {
     let id = if m.id.is_empty() {
         format!("{:016x}", xxhash_rust::xxh3::xxh3_64(m.title.as_bytes()))
     } else {
         m.id.clone()
     };
-    let di = format!(
+    format!(
         "<document-info><author><nickname>Renome</nickname></author><program-used>Renome</program-used><date value=\"{d}\">{d}</date><id>{}</id><version>1.0</version></document-info>",
         esc(&id),
         d = chrono::Utc::now().format("%Y-%m-%d")
-    );
+    )
+}
 
-    // Notes (asides marked as footnotes) go to their own body.
+/// The chapters as the main body, and the notes (asides marked as
+/// footnotes) as a body of their own.
+fn write_bodies(w: &mut Writer) {
+    let book = w.book;
     let mut notes = String::new();
     w.out.push_str("<body>");
-    if !m.title.is_empty() {
+    if !book.meta.title.is_empty() {
         w.out
-            .push_str(&format!("<title><p>{}</p></title>", esc(&m.title)));
+            .push_str(&format!("<title><p>{}</p></title>", esc(&book.meta.title)));
     }
     for c in &book.chapters {
         let (body, _) = xhtml::body_of(xhtml::parse(&c.body));
@@ -815,9 +849,13 @@ pub fn to_fb2(book: &Book) -> String {
         ));
     }
     w.out = valid_sections(&w.out);
+}
+
+/// The pictures used, each once, as `<binary>`.
+fn binaries(book: &Book, pics: &[String]) -> String {
     let mut bins = String::new();
     let mut seen = std::collections::HashSet::new();
-    for p in &w.pics {
+    for p in pics {
         if !seen.insert(p.clone()) {
             continue;
         }
@@ -830,15 +868,7 @@ pub fn to_fb2(book: &Book) -> String {
             ));
         }
     }
-    format!(
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<FictionBook xmlns=\"http://www.gribuser.ru/xml/fictionbook/2.0\" xmlns:l=\"http://www.w3.org/1999/xlink\">\n<description><title-info>{ti}</title-info>{di}{}</description>\n{}\n{bins}</FictionBook>\n",
-        if pi.is_empty() {
-            String::new()
-        } else {
-            format!("<publish-info>{pi}</publish-info>")
-        },
-        w.out
-    )
+    bins
 }
 
 /// FB2 genres and the words (folded) that mean them in subjects, the more
@@ -1735,5 +1765,26 @@ mod tests {
                 .any(|c| c.body.contains("Texto da nota."))
         );
         assert!(again.cover.is_some());
+    }
+
+    /// Pins what is written as FB2 and what reading it back gives, so the
+    /// writer and the reader can be taken apart.
+    #[test]
+    fn fb2_does_not_change() {
+        let mut all = Vec::new();
+        for (name, book) in super::super::azw3_out::tests::golden_books() {
+            // The document's own date is today's: left out.
+            let xml = to_fb2(&book);
+            let (head, rest) = xml.split_once("<document-info>").unwrap();
+            let (_, tail) = rest.split_once("</document-info>").unwrap();
+            all.push(format!("{name} {head}{tail}"));
+            match read(xml.as_bytes()) {
+                Ok(b) => all.push(format!("{name} {b:?}")),
+                Err(e) => all.push(format!("{name} error {e}")),
+            }
+        }
+        let sum = xxhash_rust::xxh3::xxh3_64(all.join("\n").as_bytes());
+        println!("hash {sum:016x}");
+        assert_eq!(sum, 0x80329ba493ff22a7, "FB2 changed");
     }
 }
