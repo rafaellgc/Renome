@@ -166,8 +166,6 @@ fn targets(items: &[Item], settled: &HashSet<PathBuf>) -> Vec<Item> {
         .collect()
 }
 
-/// Looks up the comics of `items` not `settled`. A series the flow is not
-/// sure of is asked ([`Question::ComicSeries`]).
 /// Why a catalogue cannot be asked with this key: Comic Vine and Metron
 /// take none (the text's key), the others need none.
 pub fn needs_key(source: &str, key: &str) -> Option<&'static str> {
@@ -178,6 +176,34 @@ pub fn needs_key(source: &str, key: &str) -> Option<&'static str> {
     }
 }
 
+/// What a stage of the search says to the next: go on, or the person asked
+/// to stop and what is found so far is the answer.
+#[derive(PartialEq)]
+enum Next {
+    On,
+    Stop,
+}
+
+/// What the stages share: who runs the work, the catalogues, the rule's
+/// options, the files and what each says of itself.
+struct Search<'a> {
+    host: &'a dyn Host,
+    sources: &'a Sources<'a>,
+    p: &'a Params,
+    files: Vec<Item>,
+    owns: Vec<Option<ComicMatch>>,
+    stop: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
+}
+
+/// The files that say the same series, by the name's folded text.
+struct Group {
+    key: String,
+    query: String,
+    members: Vec<usize>,
+}
+
+/// Looks up the comics of `items` not `settled`. A series the flow is not
+/// sure of is asked ([`Question::ComicSeries`]).
 pub async fn search(
     host: &dyn Host,
     sources: &Sources<'_>,
@@ -186,8 +212,7 @@ pub async fn search(
     settled: &HashSet<PathBuf>,
     picked: HashMap<String, Volume>,
 ) -> Result<Outcome, String> {
-    let source = p.source.as_str();
-    if let Some(why) = needs_key(source, &p.key) {
+    if let Some(why) = needs_key(&p.source, &p.key) {
         return Err(why.to_string());
     }
     let mut out = Outcome {
@@ -200,26 +225,53 @@ pub async fn search(
         return Ok(out);
     }
     progress(host, "reading", None, None);
-    let mut owns: Vec<Option<ComicMatch>> = tokio::task::spawn_blocking({
-        let files = files.clone();
-        let by_folder = p.by_folder;
-        move || {
-            files
-                .iter()
-                .map(|f| {
-                    let stem = f.lookup_name.as_ref().map(|_| f.read_stem());
-                    renome_core::comics::from_path(&f.path, stem.as_deref(), by_folder)
-                })
-                .collect()
+    let owns = read_owns(&files, p.by_folder).await;
+    let mut s = Search {
+        host,
+        sources,
+        p,
+        files,
+        owns,
+        stop: host.stop_signal(),
+    };
+    let mut coded: HashSet<PathBuf> = HashSet::new();
+    // On Metron, a barcode tells the issue itself.
+    if p.source == "metron" && s.by_barcodes(&mut out, &mut coded).await? == Next::Stop {
+        return Ok(out);
+    }
+    let groups = s.groups(&coded);
+    if groups.is_empty() {
+        out.empty = coded.is_empty();
+        return Ok(out);
+    }
+    for g in groups {
+        if (s.stop)() || s.series_group(&g, &mut out).await? == Next::Stop {
+            break;
         }
+    }
+    Ok(out)
+}
+
+/// What each file says of itself, read off the thread.
+async fn read_owns(files: &[Item], by_folder: bool) -> Vec<Option<ComicMatch>> {
+    let files = files.to_vec();
+    tokio::task::spawn_blocking(move || {
+        files
+            .iter()
+            .map(|f| {
+                let stem = f.lookup_name.as_ref().map(|_| f.read_stem());
+                renome_core::comics::from_path(&f.path, stem.as_deref(), by_folder)
+            })
+            .collect()
     })
     .await
-    .unwrap_or_default();
-    let stop = host.stop_signal();
-    // On Metron, a barcode tells the issue itself.
-    let mut coded: HashSet<PathBuf> = HashSet::new();
-    if source == "metron" {
-        let mut codes: Vec<Option<String>> = owns
+    .unwrap_or_default()
+}
+
+impl Search<'_> {
+    /// The digits of the barcode each file records, when it does.
+    fn recorded_codes(&self) -> Vec<Option<String>> {
+        self.owns
             .iter()
             .map(|o| {
                 o.as_ref()
@@ -227,60 +279,75 @@ pub async fn search(
                     .map(|c| c.chars().filter(char::is_ascii_digit).collect::<String>())
                     .filter(|c| !c.is_empty())
             })
+            .collect()
+    }
+
+    /// Reads the barcodes printed in the pages of the files that record
+    /// none, and notes them in what the files say.
+    async fn read_printed_codes(&mut self, codes: &mut [Option<String>]) -> Next {
+        progress(self.host, "barcodeReading", None, None);
+        let unread: Vec<usize> = (0..self.files.len())
+            .filter(|&i| codes[i].is_none() && self.owns[i].is_some())
             .collect();
-        if p.barcode && codes.iter().any(Option::is_none) {
-            progress(host, "barcodeReading", None, None);
-            let unread: Vec<usize> = (0..files.len())
-                .filter(|&i| codes[i].is_none() && owns[i].is_some())
-                .collect();
-            let paths: Vec<PathBuf> = unread.iter().map(|&i| files[i].path.clone()).collect();
-            let read = tokio::task::spawn_blocking(move || crate::comics::barcodes(&paths))
-                .await
-                .unwrap_or_default();
-            if stop() {
-                return Ok(out);
-            }
-            for (n, &i) in unread.iter().enumerate() {
-                if let (Some(Some(code)), Some(own)) = (read.get(n), owns[i].as_mut()) {
-                    codes[i] = Some(code.clone());
-                    // Written into the ComicInfo.xml with the rest.
-                    own.extra.insert("gtin".into(), code.clone());
-                }
+        let paths: Vec<PathBuf> = unread.iter().map(|&i| self.files[i].path.clone()).collect();
+        let read = tokio::task::spawn_blocking(move || crate::comics::barcodes(&paths))
+            .await
+            .unwrap_or_default();
+        if (self.stop)() {
+            return Next::Stop;
+        }
+        for (n, &i) in unread.iter().enumerate() {
+            if let (Some(Some(code)), Some(own)) = (read.get(n), self.owns[i].as_mut()) {
+                codes[i] = Some(code.clone());
+                // Written into the ComicInfo.xml with the rest.
+                own.extra.insert("gtin".into(), code.clone());
             }
         }
-        let with_code: Vec<usize> = (0..files.len())
-            .filter(|&i| codes[i].is_some() && owns[i].is_some())
+        Next::On
+    }
+
+    /// Each file with a barcode, asked of Metron: its issue and series.
+    async fn by_barcodes(
+        &mut self,
+        out: &mut Outcome,
+        coded: &mut HashSet<PathBuf>,
+    ) -> Result<Next, String> {
+        let mut codes = self.recorded_codes();
+        if self.p.barcode
+            && codes.iter().any(Option::is_none)
+            && self.read_printed_codes(&mut codes).await == Next::Stop
+        {
+            return Ok(Next::Stop);
+        }
+        let with_code: Vec<usize> = (0..self.files.len())
+            .filter(|&i| codes[i].is_some() && self.owns[i].is_some())
             .collect();
         for (n, &i) in with_code.iter().enumerate() {
-            if stop() {
-                return Ok(out);
+            if (self.stop)() {
+                return Ok(Next::Stop);
             }
-            progress(
-                host,
-                "barcodeLooking",
-                None,
-                Some(format!("{}/{}", n + 1, with_code.len())),
-            );
+            let step = Some(format!("{}/{}", n + 1, with_code.len()));
+            progress(self.host, "barcodeLooking", None, step);
             let code = codes[i].as_deref().unwrap_or_default();
-            let Some(found) = sources.mt.by_code(&p.key, code).await? else {
+            let Some(found) = self.sources.mt.by_code(&self.p.key, code).await? else {
                 continue;
             };
-            let vkey = format!("{source}:{}", found.volume.id);
+            let vkey = format!("{}:{}", self.p.source, found.volume.id);
             // The code tells the issue: its number too, when the name has none.
-            let mut own = owns[i].clone().unwrap_or_default();
+            let mut own = self.owns[i].clone().unwrap_or_default();
             if own.number.is_empty()
                 && let Some(x) = found.issues.iter().find(|x| x.id == found.issue)
             {
                 own.number = x.number.clone();
             }
             out.files.push(Found {
-                path: files[i].path.clone(),
+                path: self.files[i].path.clone(),
                 volume_key: vkey.clone(),
-                own: own.clone(),
+                read: read(&own),
+                own,
                 choice: found.issue.clone(),
                 sure: true,
                 status: super::Status::Auto,
-                read: read(&own),
             });
             out.volumes.insert(
                 vkey,
@@ -289,222 +356,310 @@ pub async fn search(
                     issues: found.issues,
                 },
             );
-            coded.insert(files[i].path.clone());
+            coded.insert(self.files[i].path.clone());
         }
+        Ok(Next::On)
     }
-    // The rest, by series.
-    let typed = p.series.trim();
-    let mut groups: Vec<(String, String, Vec<usize>)> = Vec::new();
-    for (i, f) in files.iter().enumerate() {
-        let Some(own) = &owns[i] else { continue };
-        if coded.contains(&f.path) {
-            continue;
+
+    /// The files not found by their barcode, grouped by the series they
+    /// say (the series typed, when there is one).
+    fn groups(&self, coded: &HashSet<PathBuf>) -> Vec<Group> {
+        let typed = self.p.series.trim();
+        let mut groups: Vec<Group> = Vec::new();
+        for (i, f) in self.files.iter().enumerate() {
+            let Some(own) = &self.owns[i] else { continue };
+            if coded.contains(&f.path) {
+                continue;
+            }
+            let query = if typed.is_empty() {
+                own.series.clone()
+            } else {
+                typed.to_string()
+            };
+            let key = fold(&query);
+            match groups.iter_mut().find(|g| g.key == key) {
+                Some(g) => g.members.push(i),
+                None => groups.push(Group {
+                    key,
+                    query,
+                    members: vec![i],
+                }),
+            }
         }
-        let query = if typed.is_empty() {
-            own.series.clone()
-        } else {
-            typed.to_string()
-        };
-        let k = fold(&query);
-        match groups.iter_mut().find(|g| g.0 == k) {
-            Some(g) => g.2.push(i),
-            None => groups.push((k, query, vec![i])),
-        }
+        groups
     }
-    if groups.is_empty() {
-        out.empty = coded.is_empty();
-        return Ok(out);
-    }
-    for (k, query, members) in groups {
-        if stop() {
-            break;
-        }
-        let gowns: Vec<ComicMatch> = members.iter().filter_map(|&i| owns[i].clone()).collect();
+
+    /// One series' files: the series picked or asked, then its issues.
+    async fn series_group(&self, g: &Group, out: &mut Outcome) -> Result<Next, String> {
+        let source = self.p.source.as_str();
+        let gowns: Vec<ComicMatch> = g
+            .members
+            .iter()
+            .filter_map(|&i| self.owns[i].clone())
+            .collect();
         // Loose chapters are no issues in the catalogues of issues.
         if !series_only(source)
             && gowns
                 .iter()
                 .all(|o| o.number.is_empty() && o.volume.is_none() && !o.chapter.is_empty())
         {
-            continue;
+            return Ok(Next::On);
         }
-        let picked_key = picked_key(source, &query);
+        let picked_key = picked_key(source, &g.query);
         let mut volume = out.picked.get(&picked_key).cloned();
-        // A `ComicInfo.xml` link to a Comic Vine issue tells the series.
-        if volume.is_none()
-            && source == "comicvine"
-            && let Some(linked) = gowns.iter().find(|o| !o.id.is_empty())
-            && let Ok(id) = sources.cv.volume_of(&p.key, &linked.id).await
-        {
-            volume = Some(Volume {
-                id,
-                name: query.clone(),
-                ..Default::default()
-            });
+        if volume.is_none() {
+            volume = self.linked_volume(g, &gowns).await;
         }
         if volume.is_none() {
-            progress(host, "searching", Some(&query), None);
-            let mut found = sources
-                .search(source, &p.key, &query, None, "", &p.lang, &p.skip)
-                .await?;
-            // `Series: Story` may be a story in `Series`: the series alone.
-            let head = query
-                .split([':', '–'])
-                .next()
-                .unwrap_or_default()
-                .split(" - ")
-                .next()
-                .unwrap_or_default()
-                .trim()
-                .to_string();
-            if found.is_empty() && !head.is_empty() && head != query.trim() {
-                found = sources
-                    .search(source, &p.key, &head, None, "", &p.lang, &p.skip)
-                    .await?;
-            }
-            if stop() {
-                break;
-            }
-            let year = gowns.iter().find_map(|o| o.series_year);
-            // A common name may leave the series out of what the catalogue
-            // answers: asked again with the files' year (theirs, or their
-            // issues'), whose series come first.
-            let dated = year.or_else(|| gowns.iter().find_map(|o| o.year));
-            if let Some(d) = dated
-                && !found.iter().any(|v| fold(&v.name) == k)
-            {
-                let more = sources
-                    .search(source, &p.key, &query, Some(d), "", &p.lang, &p.skip)
-                    .await
-                    .unwrap_or_default();
-                if stop() {
-                    break;
-                }
-                let mut merged = more.clone();
-                merged.extend(
-                    found
-                        .into_iter()
-                        .filter(|v| !more.iter().any(|m| m.id == v.id)),
-                );
-                found = merged;
-            }
-            // The highest number among the files: a series with fewer
-            // issues is not theirs.
-            let highest = gowns
-                .iter()
-                .filter_map(|o| {
-                    let n = if !o.number.is_empty() {
-                        o.number.clone()
-                    } else if o.chapter.is_empty() {
-                        o.volume.map(|v| v.to_string()).unwrap_or_default()
-                    } else {
-                        String::new()
-                    };
-                    n.parse::<f64>().ok()
-                })
-                .fold(0.0, f64::max);
-            let fits = |v: &Volume| fits(v, highest);
-            let sorted = by_fit(found.clone(), highest);
-            let same: Vec<&Volume> = sorted
-                .iter()
-                .filter(|v| {
-                    fold(&v.name) == k && (year.is_none() || v.start_year == year) && fits(v)
-                })
-                .collect();
-            // The same name in another language (a French edition for a
-            // Brazilian reader, when there is one in Portuguese) is not
-            // picked by itself.
-            let mine = |v: &Volume| {
-                v.language.is_empty() || v.language.to_lowercase().starts_with(&p.ui_lang)
+            progress(self.host, "searching", Some(&g.query), None);
+            let Some(picked) = self.pick_volume(g, &gowns).await? else {
+                return Ok(Next::Stop);
             };
-            let foreign = same.len() == 1 && !mine(same[0]) && found.iter().any(mine);
-            // Without the files' year, the name alone does not tell one run
-            // from another: asked when there is anything else to pick.
-            let sure = year.is_some() || found.len() == 1;
-            volume = if same.len() == 1 && !foreign && sure {
-                Some(same[0].clone())
-            } else {
-                // The file whose cover is compared: the first with a number.
-                let at = gowns
-                    .iter()
-                    .position(|o| !o.number.is_empty() || o.volume.is_some())
-                    .unwrap_or(0);
-                let q = Question::ComicSeries {
-                    source: source.into(),
-                    skip: p.skip.clone(),
-                    query: query.clone(),
-                    files: members.len(),
-                    highest,
-                    candidates: sorted,
-                    path: members.get(at).map(|&i| files[i].path.clone()),
-                    comic: gowns.get(at).cloned().map(Box::new),
-                };
-                host.ask(q)
-                    .await
-                    .and_then(|v| serde_json::from_value(v).ok())
-            };
+            volume = picked;
             if volume.is_none() {
-                continue;
+                return Ok(Next::On);
             }
         }
-        let Some(mut volume) = volume else { continue };
+        let Some(volume) = volume else {
+            return Ok(Next::On);
+        };
         out.picked.insert(picked_key, volume.clone());
         // The manga catalogues have series, not a publisher's volumes: the
-        // file's numbers stay. MangaUpdates tells a series' authors and
-        // volumes only when asked for it.
+        // file's numbers stay.
         if series_only(source) {
-            if source == "mangaupdates"
-                && let Ok(full) = sources.issues(source, &p.key, &volume.id, &gowns).await
-            {
-                volume = merge_volume(volume, full.volume);
+            return self.add_series_only(g, &gowns, volume, out).await;
+        }
+        if (self.stop)() {
+            return Ok(Next::Stop);
+        }
+        progress(self.host, "loading", Some(&volume.name), None);
+        self.add_issues(g, &gowns, volume, out).await
+    }
+
+    /// A `ComicInfo.xml` link to a Comic Vine issue tells the series.
+    async fn linked_volume(&self, g: &Group, gowns: &[ComicMatch]) -> Option<Volume> {
+        if self.p.source != "comicvine" {
+            return None;
+        }
+        let linked = gowns.iter().find(|o| !o.id.is_empty())?;
+        let id = self
+            .sources
+            .cv
+            .volume_of(&self.p.key, &linked.id)
+            .await
+            .ok()?;
+        Some(Volume {
+            id,
+            name: g.query.clone(),
+            ..Default::default()
+        })
+    }
+
+    /// The catalogue's series for a name (from `year`, when given).
+    async fn lookup(&self, name: &str, year: Option<u16>) -> Result<Vec<Volume>, String> {
+        let p = self.p;
+        self.sources
+            .search(&p.source, &p.key, name, year, "", &p.lang, &p.skip)
+            .await
+    }
+
+    /// The series the catalogue holds for a name: searched as typed, as its
+    /// head (`Series: Story` may be a story in `Series`), and with the
+    /// files' year when the name alone did not bring it.
+    /// `None`: the person asked to stop.
+    async fn search_names(
+        &self,
+        g: &Group,
+        gowns: &[ComicMatch],
+        year: Option<u16>,
+    ) -> Result<Option<Vec<Volume>>, String> {
+        let mut found = self.lookup(&g.query, None).await?;
+        let head = g
+            .query
+            .split([':', '–'])
+            .next()
+            .unwrap_or_default()
+            .split(" - ")
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        if found.is_empty() && !head.is_empty() && head != g.query.trim() {
+            found = self.lookup(&head, None).await?;
+        }
+        if (self.stop)() {
+            return Ok(None);
+        }
+        // A common name may leave the series out of what the catalogue
+        // answers: asked again with the files' year (theirs, or their
+        // issues'), whose series come first.
+        let dated = year.or_else(|| gowns.iter().find_map(|o| o.year));
+        if let Some(d) = dated
+            && !found.iter().any(|v| fold(&v.name) == g.key)
+        {
+            let more = self.lookup(&g.query, Some(d)).await.unwrap_or_default();
+            if (self.stop)() {
+                return Ok(None);
             }
-            if stop() {
-                break;
-            }
-            let vkey = format!("{source}:{}", volume.id);
-            for &i in &members {
-                if let Some(own) = &owns[i] {
-                    out.files.push(Found {
-                        path: files[i].path.clone(),
-                        volume_key: vkey.clone(),
-                        own: own.clone(),
-                        choice: String::new(),
-                        sure: true,
-                        status: super::Status::Auto,
-                        read: read(own),
-                    });
-                }
-            }
-            out.volumes.insert(
-                vkey,
-                Listed {
-                    volume,
-                    issues: Vec::new(),
-                },
+            let mut merged = more.clone();
+            merged.extend(
+                found
+                    .into_iter()
+                    .filter(|v| !more.iter().any(|m| m.id == v.id)),
             );
-            continue;
+            found = merged;
         }
-        if stop() {
-            break;
+        Ok(Some(found))
+    }
+
+    /// Searches the catalogue and picks the series by itself when only one
+    /// fits, else asks. `None`: the person asked to stop; a `None` series:
+    /// nothing was picked.
+    async fn pick_volume(
+        &self,
+        g: &Group,
+        gowns: &[ComicMatch],
+    ) -> Result<Option<Option<Volume>>, String> {
+        let year = gowns.iter().find_map(|o| o.series_year);
+        let Some(found) = self.search_names(g, gowns, year).await? else {
+            return Ok(None);
+        };
+        // The highest number among the files: a series with fewer issues is
+        // not theirs.
+        let highest = gowns
+            .iter()
+            .filter_map(|o| {
+                let n = if !o.number.is_empty() {
+                    o.number.clone()
+                } else if o.chapter.is_empty() {
+                    o.volume.map(|v| v.to_string()).unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                n.parse::<f64>().ok()
+            })
+            .fold(0.0, f64::max);
+        let sorted = by_fit(found.clone(), highest);
+        let same: Vec<&Volume> = sorted
+            .iter()
+            .filter(|v| {
+                fold(&v.name) == g.key
+                    && (year.is_none() || v.start_year == year)
+                    && fits(v, highest)
+            })
+            .collect();
+        // The same name in another language (a French edition for a
+        // Brazilian reader, when there is one in Portuguese) is not picked
+        // by itself.
+        let ui = &self.p.ui_lang;
+        let mine = |v: &Volume| {
+            v.language.is_empty() || v.language.to_lowercase().starts_with(ui.as_str())
+        };
+        let foreign = same.len() == 1 && !mine(same[0]) && found.iter().any(mine);
+        // Without the files' year, the name alone does not tell one run from
+        // another: asked when there is anything else to pick.
+        let sure = year.is_some() || found.len() == 1;
+        if same.len() == 1 && !foreign && sure {
+            return Ok(Some(Some(same[0].clone())));
         }
-        progress(host, "loading", Some(&volume.name), None);
-        let res = sources.issues(source, &p.key, &volume.id, &gowns).await?;
-        let vkey = format!("{source}:{}", res.volume.id);
+        // The file whose cover is compared: the first with a number.
+        let at = gowns
+            .iter()
+            .position(|o| !o.number.is_empty() || o.volume.is_some())
+            .unwrap_or(0);
+        let q = Question::ComicSeries {
+            source: self.p.source.clone(),
+            skip: self.p.skip.clone(),
+            query: g.query.clone(),
+            files: g.members.len(),
+            highest,
+            candidates: sorted,
+            path: g.members.get(at).map(|&i| self.files[i].path.clone()),
+            comic: gowns.get(at).cloned().map(Box::new),
+        };
+        let answer = self
+            .host
+            .ask(q)
+            .await
+            .and_then(|v| serde_json::from_value(v).ok());
+        Ok(Some(answer))
+    }
+
+    /// The series' files in a catalogue of series: the file's numbers stay.
+    /// MangaUpdates tells a series' authors and volumes only when asked.
+    async fn add_series_only(
+        &self,
+        g: &Group,
+        gowns: &[ComicMatch],
+        mut volume: Volume,
+        out: &mut Outcome,
+    ) -> Result<Next, String> {
+        let p = self.p;
+        if p.source == "mangaupdates"
+            && let Ok(full) = self
+                .sources
+                .issues(&p.source, &p.key, &volume.id, gowns)
+                .await
+        {
+            volume = merge_volume(volume, full.volume);
+        }
+        if (self.stop)() {
+            return Ok(Next::Stop);
+        }
+        let vkey = format!("{}:{}", p.source, volume.id);
+        for &i in &g.members {
+            if let Some(own) = &self.owns[i] {
+                out.files.push(Found {
+                    path: self.files[i].path.clone(),
+                    volume_key: vkey.clone(),
+                    own: own.clone(),
+                    choice: String::new(),
+                    sure: true,
+                    status: super::Status::Auto,
+                    read: read(own),
+                });
+            }
+        }
+        out.volumes.insert(
+            vkey,
+            Listed {
+                volume,
+                issues: Vec::new(),
+            },
+        );
+        Ok(Next::On)
+    }
+
+    /// The series' issues, and the issue of each file by its number.
+    async fn add_issues(
+        &self,
+        g: &Group,
+        gowns: &[ComicMatch],
+        volume: Volume,
+        out: &mut Outcome,
+    ) -> Result<Next, String> {
+        let p = self.p;
+        let res = self
+            .sources
+            .issues(&p.source, &p.key, &volume.id, gowns)
+            .await?;
+        let vkey = format!("{}:{}", p.source, res.volume.id);
         // The search's own details where the series' lack them (a cover).
         let volume = merge_volume(volume, res.volume);
         let mut n = 0;
-        for &i in &members {
-            let Some(own) = &owns[i] else { continue };
+        for &i in &g.members {
+            let Some(own) = &self.owns[i] else { continue };
             let found = res.found.get(n).cloned().flatten();
             n += 1;
             // A loose chapter is no issue there: the series is all there is.
             let chapter_only = own.number.is_empty() && !own.chapter.is_empty();
+            let sure = found.is_some() || chapter_only;
             out.files.push(Found {
-                path: files[i].path.clone(),
+                path: self.files[i].path.clone(),
                 volume_key: vkey.clone(),
                 own: own.clone(),
-                sure: found.is_some() || chapter_only,
-                status: if found.is_some() || chapter_only {
+                sure,
+                status: if sure {
                     super::Status::Auto
                 } else {
                     super::Status::Choose
@@ -522,8 +677,8 @@ pub async fn search(
                 issues: res.issues,
             },
         );
+        Ok(Next::On)
     }
-    Ok(out)
 }
 
 pub use renome_core::comics::with_issue;

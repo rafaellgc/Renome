@@ -110,7 +110,8 @@ fn params(series: &str) -> Params {
 
 fn item(name: &str) -> Item {
     serde_json::from_value(json!({"path": format!("/nowhere/{name}"), "original": name,
-        "lookupName": name})).unwrap()
+        "lookupName": name}))
+    .unwrap()
 }
 
 async fn run(_two: bool, p: &Params, names: &[&str]) -> String {
@@ -123,11 +124,25 @@ async fn run(_two: bool, p: &Params, names: &[&str]) -> String {
         anilist::Client::default(),
         mangaupdates::Client::default(),
     );
-    let sources = Sources { cv: &cv, mt: &mt, gcd: &gcd, md: &md, al: &al, mu: &mu };
+    let sources = Sources {
+        cv: &cv,
+        mt: &mt,
+        gcd: &gcd,
+        md: &md,
+        al: &al,
+        mu: &mu,
+    };
     let items: Vec<Item> = names.iter().map(|n| item(n)).collect();
-    let out = search(&host, &sources, p, &items, &HashSet::<PathBuf>::new(), HashMap::new())
-        .await
-        .unwrap();
+    let out = search(
+        &host,
+        &sources,
+        p,
+        &items,
+        &HashSet::<PathBuf>::new(),
+        HashMap::new(),
+    )
+    .await
+    .unwrap();
     let mut v = serde_json::to_value(&out).unwrap();
     v["_asked"] = Value::Array(host.asked.lock().unwrap().clone());
     v["_said"] = json!(host.said.lock().unwrap().clone());
@@ -145,7 +160,11 @@ async fn comic_search_does_not_change() {
     let one = run(
         true,
         &params(""),
-        &["Capitão Aurora 001 (2016).cbz", "Capitão Aurora 002 (2016).cbz", "Capitão Aurora 009 (2016).cbz"],
+        &[
+            "Capitão Aurora 001 (2016).cbz",
+            "Capitão Aurora 002 (2016).cbz",
+            "Capitão Aurora 009 (2016).cbz",
+        ],
     )
     .await;
     let none = run(true, &params(""), &["notes.txt"]).await;
