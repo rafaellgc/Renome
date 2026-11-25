@@ -978,15 +978,7 @@ impl Pipeline {
                 } => {
                     let limit = usize::from(*first_only);
                     on_target(&mut stem, &mut ext, *target, |s| {
-                        let mut out = String::with_capacity(s.len());
-                        let mut from = 0;
-                        for r in text::find_typed(s, find, *case_sensitive, limit) {
-                            out.push_str(&s[from..r.start]);
-                            out.push_str(replace);
-                            from = r.end;
-                        }
-                        out.push_str(&s[from..]);
-                        out
+                        replace_typed(s, find, replace, *case_sensitive, limit)
                     });
                 }
                 Compiled::Replace {
@@ -1008,101 +1000,8 @@ impl Pipeline {
                     }
                 }
                 Compiled::Plain(rule) => {
-                    // Folders themselves are renamed in place.
-                    if !ctx.file.is_dir
-                        && let Rule::Movie { folder: true, .. } = rule
-                        && ctx.movie.is_some()
-                    {
-                        moved = Some(Move::OwnFolder);
-                    } else if !ctx.file.is_dir
-                        && let Rule::Series {
-                            folders: true,
-                            folder_template,
-                            colon,
-                            ..
-                        } = rule
-                        && let Some(m) = ctx.episode
-                    {
-                        moved = Some(Move::Into {
-                            root: tv::library_root(&ctx.file.dir, m),
-                            folders: vec![
-                                tv::episode_name(folder_template, m, colon, None),
-                                tv::season_folder(m.season),
-                            ],
-                        });
-                    }
-                    if !ctx.file.is_dir
-                        && let Rule::Book {
-                            folders: true,
-                            folder_template,
-                            colon,
-                            ..
-                        } = rule
-                        && let Some(m) = ctx.book
-                    {
-                        let levels = books::folders(folder_template, m, colon);
-                        if !levels.is_empty() {
-                            // An audiobook's disc folders (`CD1`) are the
-                            // book's folder.
-                            let dir = crate::audiobook::book_dir(&ctx.file.dir);
-                            moved = Some(Move::Into {
-                                root: books::library_root(&dir, m, &levels),
-                                folders: levels,
-                            });
-                        }
-                    }
-                    if !ctx.file.is_dir
-                        && let Rule::Comic {
-                            folders: true,
-                            folder_template,
-                            colon,
-                            by_folder,
-                            ..
-                        } = rule
-                        && let Some(m) = comic_of(ctx, *by_folder, &stem)
-                    {
-                        let m = ctx.comic_folder.cloned().unwrap_or(m);
-                        let levels = comics::folders(folder_template, &m, colon);
-                        // Already in its series' folder: it stays.
-                        if !levels.is_empty() && !comics::in_place(&ctx.file.dir, &m) {
-                            moved = Some(Move::Into {
-                                root: comics::library_root(&ctx.file.dir, &m, &levels),
-                                folders: levels,
-                            });
-                        }
-                    }
-                    if !ctx.file.is_dir
-                        && let Rule::Photo {
-                            folders: true,
-                            folder_template,
-                            ..
-                        } = rule
-                        && let Some(p) = ctx.photo
-                    {
-                        let levels = crate::photos::folders(folder_template, &p.shot);
-                        if !levels.is_empty() {
-                            moved = Some(Move::Into {
-                                root: crate::photos::library_root(&ctx.file.base, levels.len()),
-                                folders: levels,
-                            });
-                        }
-                    }
-                    if let Rule::Music {
-                        folders: true,
-                        folder_template,
-                        colon,
-                        from_name,
-                        ..
-                    } = rule
-                        && let Some(t) = song_of(ctx, *from_name)
-                    {
-                        let levels = music::folders(folder_template, &t, colon);
-                        if !levels.is_empty() {
-                            moved = Some(Move::Into {
-                                root: music::library_root(&ctx.file.dir, &t, &levels),
-                                folders: levels,
-                            });
-                        }
+                    if let Some(m) = rule_move(rule, ctx, &stem) {
+                        moved = Some(m);
                     }
                     apply_plain(rule, &mut stem, &mut ext, ctx)
                 }
@@ -1116,6 +1015,122 @@ impl Pipeline {
         }
         (stem, ext, moved)
     }
+}
+
+/// `s` with up to `limit` (0: all) of the typed text `find` replaced.
+fn replace_typed(s: &str, find: &str, replace: &str, case_sensitive: bool, limit: usize) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut from = 0;
+    for r in text::find_typed(s, find, case_sensitive, limit) {
+        out.push_str(&s[from..r.start]);
+        out.push_str(replace);
+        from = r.end;
+    }
+    out.push_str(&s[from..]);
+    out
+}
+
+/// Where a lookup rule with folders moves the file: into its own folder
+/// (a movie), or into the library's folders (an episode, a book, a comic,
+/// a photo, a song). `None` when the rule does not move it. Folders
+/// themselves are renamed in place.
+fn rule_move(rule: &Rule, ctx: &Ctx, stem: &str) -> Option<Move> {
+    let mut moved = None;
+    if !ctx.file.is_dir
+        && let Rule::Movie { folder: true, .. } = rule
+        && ctx.movie.is_some()
+    {
+        moved = Some(Move::OwnFolder);
+    } else if !ctx.file.is_dir
+        && let Rule::Series {
+            folders: true,
+            folder_template,
+            colon,
+            ..
+        } = rule
+        && let Some(m) = ctx.episode
+    {
+        moved = Some(Move::Into {
+            root: tv::library_root(&ctx.file.dir, m),
+            folders: vec![
+                tv::episode_name(folder_template, m, colon, None),
+                tv::season_folder(m.season),
+            ],
+        });
+    }
+    if !ctx.file.is_dir
+        && let Rule::Book {
+            folders: true,
+            folder_template,
+            colon,
+            ..
+        } = rule
+        && let Some(m) = ctx.book
+    {
+        let levels = books::folders(folder_template, m, colon);
+        if !levels.is_empty() {
+            // An audiobook's disc folders (`CD1`) are the book's folder.
+            let dir = crate::audiobook::book_dir(&ctx.file.dir);
+            moved = Some(Move::Into {
+                root: books::library_root(&dir, m, &levels),
+                folders: levels,
+            });
+        }
+    }
+    if !ctx.file.is_dir
+        && let Rule::Comic {
+            folders: true,
+            folder_template,
+            colon,
+            by_folder,
+            ..
+        } = rule
+        && let Some(m) = comic_of(ctx, *by_folder, stem)
+    {
+        let m = ctx.comic_folder.cloned().unwrap_or(m);
+        let levels = comics::folders(folder_template, &m, colon);
+        // Already in its series' folder: it stays.
+        if !levels.is_empty() && !comics::in_place(&ctx.file.dir, &m) {
+            moved = Some(Move::Into {
+                root: comics::library_root(&ctx.file.dir, &m, &levels),
+                folders: levels,
+            });
+        }
+    }
+    if !ctx.file.is_dir
+        && let Rule::Photo {
+            folders: true,
+            folder_template,
+            ..
+        } = rule
+        && let Some(p) = ctx.photo
+    {
+        let levels = crate::photos::folders(folder_template, &p.shot);
+        if !levels.is_empty() {
+            moved = Some(Move::Into {
+                root: crate::photos::library_root(&ctx.file.base, levels.len()),
+                folders: levels,
+            });
+        }
+    }
+    if let Rule::Music {
+        folders: true,
+        folder_template,
+        colon,
+        from_name,
+        ..
+    } = rule
+        && let Some(t) = song_of(ctx, *from_name)
+    {
+        let levels = music::folders(folder_template, &t, colon);
+        if !levels.is_empty() {
+            moved = Some(Move::Into {
+                root: music::library_root(&ctx.file.dir, &t, &levels),
+                folders: levels,
+            });
+        }
+    }
+    moved
 }
 
 fn compile(rule: &Rule) -> Result<Option<Compiled>, (&'static str, String)> {
