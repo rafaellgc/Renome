@@ -38,7 +38,15 @@ fn entry(path: &Path, name: &str) -> String {
 
 fn names(path: &Path) -> Vec<String> {
     let mut z = zip::ZipArchive::new(std::fs::File::open(path).unwrap()).unwrap();
-    (0..z.len()).map(|i| z.by_index(i).unwrap().name().unwrap_or_default().to_string()).collect()
+    (0..z.len())
+        .map(|i| {
+            z.by_index(i)
+                .unwrap()
+                .name()
+                .unwrap_or_default()
+                .to_string()
+        })
+        .collect()
 }
 
 const OPF: &str = r#"<?xml version="1.0" encoding="utf-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">x</dc:identifier><dc:title>Old</dc:title><dc:language>pt</dc:language></metadata><manifest/><spine/></package>"#;
@@ -46,7 +54,9 @@ const CONTAINER: &str = r#"<?xml version="1.0"?><container version="1.0" xmlns="
 
 fn job(path: &Path, extra: serde_json::Value) -> InsideJob {
     let mut v = json!({"path": path});
-    v.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+    v.as_object_mut()
+        .unwrap()
+        .extend(extra.as_object().unwrap().clone());
     serde_json::from_value(v).unwrap()
 }
 
@@ -55,25 +65,57 @@ async fn inside_does_not_change() {
     let dir = tempfile::tempdir().unwrap();
     let t = dir.path();
     let hist = History::new(t.join("history"));
-    let comic = json!({"series": "Capitão Aurora", "number": "002", "year": 2016, "title": "A Volta"});
+    let comic =
+        json!({"series": "Capitão Aurora", "number": "002", "year": 2016, "title": "A Volta"});
     let a = t.join("a.cbz");
     zip_of(&a, &[("01.jpg", "x")]);
     let fresh = t.join("fresh.cbz");
-    zip_of(&fresh, &[("01.jpg", "x"), ("ComicInfo.xml", "<ComicInfo><Series>Old</Series></ComicInfo>")]);
+    zip_of(
+        &fresh,
+        &[
+            ("01.jpg", "x"),
+            (
+                "ComicInfo.xml",
+                "<ComicInfo><Series>Old</Series></ComicInfo>",
+            ),
+        ],
+    );
     let wipe = t.join("wipe.cbz");
-    zip_of(&wipe, &[("01.jpg", "x"), ("ComicInfo.xml", "<ComicInfo><Series>Old</Series></ComicInfo>")]);
+    zip_of(
+        &wipe,
+        &[
+            ("01.jpg", "x"),
+            (
+                "ComicInfo.xml",
+                "<ComicInfo><Series>Old</Series></ComicInfo>",
+            ),
+        ],
+    );
     let txt = t.join("notes.txt");
     std::fs::write(&txt, "x").unwrap();
     let gone = t.join("gone.cbz");
     let book = t.join("b.epub");
-    zip_of(&book, &[("mimetype", "application/epub+zip"), ("META-INF/container.xml", CONTAINER), ("content.opf", OPF)]);
+    zip_of(
+        &book,
+        &[
+            ("mimetype", "application/epub+zip"),
+            ("META-INF/container.xml", CONTAINER),
+            ("content.opf", OPF),
+        ],
+    );
     let jobs = vec![
-        job(&a, json!({"comic": comic, "web": "https://example.org/i/2"})),
+        job(
+            &a,
+            json!({"comic": comic, "web": "https://example.org/i/2"}),
+        ),
         job(&fresh, json!({"comic": comic, "fresh": true})),
         job(&wipe, json!({"fresh": true})),
         job(&txt, json!({"comic": comic})),
         job(&gone, json!({"comic": comic})),
-        job(&book, json!({"book": {"title": "Novo Título", "authors": ["Ana Mar"]}, "language": "pt"})),
+        job(
+            &book,
+            json!({"book": {"title": "Novo Título", "authors": ["Ana Mar"]}, "language": "pt"}),
+        ),
         job(&t.join("none.pdf"), json!({"book": {"title": "T"}})),
     ];
     let out = inside(&Quiet, &hist, None, jobs).await.unwrap();
@@ -83,7 +125,12 @@ async fn inside_does_not_change() {
         out.written,
         out.moved
     );
-    for (p, n) in [(&a, "ComicInfo.xml"), (&fresh, "ComicInfo.xml"), (&wipe, "ComicInfo.xml"), (&book, "content.opf")] {
+    for (p, n) in [
+        (&a, "ComicInfo.xml"),
+        (&fresh, "ComicInfo.xml"),
+        (&wipe, "ComicInfo.xml"),
+        (&book, "content.opf"),
+    ] {
         all.push_str(&format!("{:?} {}\n{}\n", names(p), n, entry(p, n)));
     }
     let all = all.replace(t.to_str().unwrap(), "T");

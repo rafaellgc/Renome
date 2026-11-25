@@ -623,9 +623,117 @@ pub async fn inside(
     history_id: Option<String>,
     items: Vec<InsideJob>,
 ) -> Result<InsideOutcome, String> {
-    use renome_core::{convert, inside};
     let mut report = TagReport::default();
-    let items: Vec<InsideJob> = items
+    let items = writable_jobs(items, &mut report);
+    if items.is_empty() {
+        return Ok(InsideOutcome {
+            report,
+            written: vec![],
+            moved: vec![],
+        });
+    }
+    let mut moved_ops = Vec::new();
+    let own_entry = history_id.is_none();
+    let id = match history_id {
+        Some(id) => id,
+        None => history.record_files(&[])?,
+    };
+    let store = history.files_dir(&id)?;
+    let mut note = history.tagging(&id)?;
+    let (items, volumes) = volume_groups(items);
+    let total = items.len() + volumes.len();
+    inside_progress(host, 0, total);
+    // Files made besides the renamed ones (a book's other parts, joined
+    // volumes): undo deletes them.
+    let made = std::sync::Arc::new(std::sync::Mutex::new(Vec::<PathBuf>::new()));
+    for (n, group) in volumes.into_iter().enumerate() {
+        match join_volume(history, &id, group, &mut moved_ops).await {
+            Ok(files) => {
+                report.written += 1;
+                made.locked().extend(files);
+            }
+            Err((file, e)) => report.errors.push((file, e)),
+        }
+        inside_progress(host, n + 1, total);
+    }
+    let joined = total - items.len();
+    let mut backups = Vec::new();
+    let mut written = Vec::new();
+    let pages = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    for (done, job) in items.into_iter().enumerate() {
+        let done = done + joined;
+        let job_path = job.path.clone();
+        let how = Conversion::of(&job);
+        note.start(&job_path);
+        let result = run_job(host, job, &store, &made, &pages).await;
+        let result = result.map(|(b, not_trashed)| {
+            if let Some(why) = not_trashed {
+                report.errors.push((job_path.display().to_string(), why));
+            }
+            b
+        });
+        match result {
+            Ok(Some(b)) => {
+                note.done(&b);
+                written.push(b.path.clone());
+                backups.push(b);
+            }
+            Ok(None) => {}
+            Err(e) => {
+                give_name_back(history, &id, &job_path, how, &mut moved_ops);
+                report.errors.push((job_path.display().to_string(), e));
+            }
+        }
+        inside_progress(host, done + 1, total);
+    }
+    report.written += backups.len();
+    report.drawn = pages.load(std::sync::atomic::Ordering::Relaxed);
+    let made = std::mem::take(&mut *made.locked());
+    if !made.is_empty()
+        && let Err(e) = history.add_created(&id, &made)
+    {
+        report
+            .errors
+            .push((String::new(), format!("err.history: {e}")));
+    }
+    let saved = if backups.is_empty() {
+        if own_entry && made.is_empty() {
+            let _ = history.delete(&id);
+        } else {
+            // Comics that could not be converted may have taken back the
+            // only renames.
+            let _ = history.drop_if_empty(&id);
+        }
+        Ok(())
+    } else {
+        history.add_tags(&id, backups)
+    };
+    match saved {
+        Ok(()) => note.finish(),
+        Err(e) => report
+            .errors
+            .push((String::new(), format!("err.history: {e}"))),
+    }
+    Ok(InsideOutcome {
+        report,
+        written,
+        moved: moved_ops,
+    })
+}
+
+fn inside_progress(host: &dyn Host, done: usize, total: usize) {
+    crate::report(
+        host,
+        "inside-progress",
+        serde_json::json!({ "done": done, "total": total }),
+    );
+}
+
+/// The jobs whose file can take what they bring; the others are reported
+/// (when they asked for something) as unsupported.
+fn writable_jobs(items: Vec<InsideJob>, report: &mut TagReport) -> Vec<InsideJob> {
+    use renome_core::{convert, inside};
+    items
         .into_iter()
         .map(|mut j| {
             // Already a zip (or not an archive): only its details.
@@ -662,223 +770,188 @@ pub async fn inside(
             }
             ok
         })
-        .collect();
-    if items.is_empty() {
-        return Ok(InsideOutcome {
-            report,
-            written: vec![],
-            moved: vec![],
-        });
-    }
-    let mut moved_ops = Vec::new();
-    let own_entry = history_id.is_none();
-    let id = match history_id {
-        Some(id) => id,
-        None => history.record_files(&[])?,
-    };
-    let store = history.files_dir(&id)?;
-    let mut note = history.tagging(&id)?;
-    let (items, volumes) = volume_groups(items);
-    let total = items.len() + volumes.len();
-    crate::report(
-        host,
-        "inside-progress",
-        serde_json::json!({ "done": 0, "total": total }),
-    );
-    // Files made besides the renamed ones (a book's other parts, joined
-    // volumes): undo deletes them.
-    let made = std::sync::Arc::new(std::sync::Mutex::new(Vec::<PathBuf>::new()));
-    for (n, group) in volumes.into_iter().enumerate() {
-        match join_volume(history, &id, group, &mut moved_ops).await {
-            Ok(files) => {
-                report.written += 1;
-                made.locked().extend(files);
-            }
-            Err((file, e)) => report.errors.push((file, e)),
+        .collect()
+}
+
+/// What a job was asked to convert, kept for when it fails: its name is
+/// then given back.
+#[derive(Clone, Copy)]
+struct Conversion {
+    /// Comic to an e-book.
+    comic_ebook: bool,
+    /// Book to another format.
+    book: bool,
+    /// Comic archive to CBZ.
+    comic_cbz: bool,
+}
+
+impl Conversion {
+    fn of(job: &InsideJob) -> Self {
+        Self {
+            comic_ebook: job.comic_to.is_some(),
+            book: job.book_to.is_some(),
+            comic_cbz: job.convert.is_some() && job.book_to.is_none() && job.comic_to.is_none(),
         }
-        crate::report(
-            host,
-            "inside-progress",
-            serde_json::json!({ "done": n + 1, "total": total }),
-        );
     }
-    let joined = total - items.len();
-    let mut backups = Vec::new();
-    let mut written = Vec::new();
-    let pages = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    for (done, job) in items.into_iter().enumerate() {
-        let done = done + joined;
-        let made = made.clone();
-        let (path, store) = (job.path.clone(), store.clone());
-        let job_path = job.path.clone();
-        let converting = job.convert.is_some() && job.book_to.is_none() && job.comic_to.is_none();
-        let comic_ebook = job.comic_to.is_some();
-        let book_converting = job.book_to.is_some();
-        let drawn = pages.clone();
-        note.start(&path);
-        // A book made into PDF: its page printed by the web view.
-        let result = if job.book_to == Some(renome_core::bookconv::Target::Pdf) {
-            print_book(host, job).await
+
+    /// The name a file was given for a conversion that did not happen: its
+    /// own extension.
+    fn own_name(self, path: &Path) -> Option<PathBuf> {
+        use renome_core::{bookconv, comicbook, convert};
+        if self.comic_ebook {
+            convert::kind(path).map(|k| comicbook::original_of(path, k))
+        } else if self.book {
+            bookconv::beside(path).filter(|b| b != path)
+        } else if self.comic_cbz {
+            convert::kind(path)
+                .filter(|k| *k != convert::Kind::Zip)
+                .map(|k| convert::beside(path, k))
         } else {
-            tokio::task::spawn_blocking(move || {
-                let values = || {
-                    job.comic
-                        .as_ref()
-                        .map(|c| inside::comic_values(c, &job.web, job.manga))
-                        .unwrap_or_default()
-                };
-                if let Some(to) = job.comic_to {
-                    let original = job.convert.unwrap_or(convert::Original::Keep);
-                    // An e-book needs a language (a Kindle refuses one
-                    // without); pictures have none: the system's, unless
-                    // the comic says its own.
-                    let mut v = values();
-                    if matches!(
-                        to,
-                        renome_core::comicbook::Format::Epub
-                            | renome_core::comicbook::Format::Kepub
-                            | renome_core::comicbook::Format::Azw3
-                    ) {
-                        v.push((
-                            renome_core::comicbook::FALLBACK_LANGUAGE,
-                            crate::system_language(),
-                        ));
-                    }
-                    return renome_core::comicbook::convert(
-                        &path, to, job.ebook, &v, job.manga, original, job.pdf, &store,
-                    )
-                    .map(|d| {
-                        made.locked().extend(d.parts);
-                        (Some(d.backup), d.not_trashed)
-                    });
-                }
-                if let Some(p) = job.polish {
-                    let values = job
-                        .book
-                        .as_ref()
-                        .map(|b| inside::book_values(b, &job.language));
-                    return renome_core::bookmeta::polish(&path, p, values.as_ref(), &store)
-                        .map(|d| (d.backup, None));
-                }
-                if let Some(to) = job.book_to {
-                    let values = job
-                        .book
-                        .as_ref()
-                        .map(|b| inside::book_values(b, &job.language));
-                    let original = job.convert.unwrap_or(convert::Original::Keep);
-                    return renome_core::bookconv::convert(&path, to, original, values.as_ref())
-                        .map(|d| (Some(d.backup), d.not_trashed));
-                }
-                match (job.convert, &job.comic, &job.book) {
-                    (Some(original), _, _) => {
-                        convert::convert_with(&path, &values(), original, job.pdf).map(|d| {
-                            drawn.fetch_add(d.drawn_pages, std::sync::atomic::Ordering::Relaxed);
-                            (Some(d.backup), d.not_trashed)
-                        })
-                    }
-                    (_, Some(_), _) => {
-                        inside::write_comic_with(&path, &values(), job.fresh, &store)
-                            .map(|b| (b, None))
-                    }
-                    (_, _, Some(b)) => {
-                        let v = inside::book_values(b, &job.language);
-                        if inside::book_writable(&path) {
-                            inside::write_book(&path, &v, &store).map(|b| (b, None))
-                        } else {
-                            renome_core::bookmeta::write(&path, &v, &store).map(|b| (b, None))
-                        }
-                    }
-                    _ if job.fresh => inside::remove_comic(&path, &store).map(|b| (b, None)),
-                    _ => Ok((None, None)),
-                }
-            })
-            .await
-            .map_err(|e| e.to_string())
-            .and_then(|r| r)
-        };
-        let result = result.map(|(b, not_trashed)| {
-            if let Some(why) = not_trashed {
-                report.errors.push((job_path.display().to_string(), why));
-            }
-            b
-        });
-        match result {
-            Ok(Some(b)) => {
-                note.done(&b);
-                written.push(b.path.clone());
-                backups.push(b);
-            }
-            Ok(None) => {}
-            Err(e) => {
-                // Named `.cbz` (or `.epub`…) to be converted, it could not
-                // be: its own extension back.
-                let back = if comic_ebook {
-                    convert::kind(&job_path)
-                        .map(|k| renome_core::comicbook::original_of(&job_path, k))
-                } else if book_converting {
-                    renome_core::bookconv::beside(&job_path).filter(|b| *b != job_path)
-                } else if converting {
-                    convert::kind(&job_path)
-                        .filter(|k| *k != convert::Kind::Zip)
-                        .map(|k| convert::beside(&job_path, k))
-                } else {
-                    None
-                };
-                if let Some(back) = back
-                    && std::fs::symlink_metadata(&back).is_err()
-                    && history.retarget(&id, &job_path, &back) == Ok(true)
-                {
-                    {
-                        moved_ops.push(renome_core::apply::Operation {
-                            from: job_path.clone(),
-                            to: back,
-                            copy: false,
-                            within: None,
-                        });
-                    }
-                }
-                report.errors.push((job_path.display().to_string(), e));
-            }
+            None
         }
-        crate::report(
-            host,
-            "inside-progress",
-            serde_json::json!({ "done": done + 1, "total": total }),
-        );
     }
-    report.written += backups.len();
-    report.drawn = pages.load(std::sync::atomic::Ordering::Relaxed);
-    let made = std::mem::take(&mut *made.locked());
-    if !made.is_empty()
-        && let Err(e) = history.add_created(&id, &made)
+}
+
+/// Named `.cbz` (or `.epub`…) to be converted, a file that could not be
+/// gets its own extension back, in the history too.
+fn give_name_back(
+    history: &History,
+    id: &str,
+    path: &Path,
+    how: Conversion,
+    moved: &mut Vec<renome_core::apply::Operation>,
+) {
+    if let Some(back) = how.own_name(path)
+        && std::fs::symlink_metadata(&back).is_err()
+        && history.retarget(id, path, &back) == Ok(true)
     {
-        report
-            .errors
-            .push((String::new(), format!("err.history: {e}")));
+        moved.push(renome_core::apply::Operation {
+            from: path.to_path_buf(),
+            to: back,
+            copy: false,
+            within: None,
+        });
     }
-    let saved = if backups.is_empty() {
-        if own_entry && made.is_empty() {
-            let _ = history.delete(&id);
-        } else {
-            // Comics that could not be converted may have taken back the
-            // only renames.
-            let _ = history.drop_if_empty(&id);
-        }
-        Ok(())
-    } else {
-        history.add_tags(&id, backups)
-    };
-    match saved {
-        Ok(()) => note.finish(),
-        Err(e) => report
-            .errors
-            .push((String::new(), format!("err.history: {e}"))),
+}
+
+/// What one job made of its file: the backup of what it replaced, and a
+/// reason the original could not be sent to the trash.
+type Done = (Option<renome_core::tagwrite::Backup>, Option<String>);
+
+/// Does one job: a book made into PDF is printed by the window's web
+/// view, the rest is work for a thread.
+async fn run_job(
+    host: &dyn Host,
+    job: InsideJob,
+    store: &Path,
+    made: &std::sync::Arc<std::sync::Mutex<Vec<PathBuf>>>,
+    pages: &std::sync::Arc<std::sync::atomic::AtomicUsize>,
+) -> Result<Done, String> {
+    if job.book_to == Some(renome_core::bookconv::Target::Pdf) {
+        return print_book(host, job).await;
     }
-    Ok(InsideOutcome {
-        report,
-        written,
-        moved: moved_ops,
+    let (store, made, pages) = (store.to_path_buf(), made.clone(), pages.clone());
+    tokio::task::spawn_blocking(move || work_on(&job, &store, &made, &pages))
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|r| r)
+}
+
+/// The comic's details as `ComicInfo.xml` values.
+fn comic_values(job: &InsideJob) -> Vec<(&'static str, String)> {
+    job.comic
+        .as_ref()
+        .map(|c| renome_core::inside::comic_values(c, &job.web, job.manga))
+        .unwrap_or_default()
+}
+
+/// The book's details as OPF values.
+fn book_values(job: &InsideJob) -> Option<renome_core::inside::BookValues> {
+    job.book
+        .as_ref()
+        .map(|b| renome_core::inside::book_values(b, &job.language))
+}
+
+fn work_on(
+    job: &InsideJob,
+    store: &Path,
+    made: &std::sync::Mutex<Vec<PathBuf>>,
+    pages: &std::sync::atomic::AtomicUsize,
+) -> Result<Done, String> {
+    if let Some(to) = job.comic_to {
+        return comic_to_ebook(job, to, store, made);
+    }
+    if let Some(p) = job.polish {
+        let values = book_values(job);
+        return renome_core::bookmeta::polish(&job.path, p, values.as_ref(), store)
+            .map(|d| (d.backup, None));
+    }
+    if let Some(to) = job.book_to {
+        let values = book_values(job);
+        let original = job.convert.unwrap_or(renome_core::convert::Original::Keep);
+        return renome_core::bookconv::convert(&job.path, to, original, values.as_ref())
+            .map(|d| (Some(d.backup), d.not_trashed));
+    }
+    details_in_place(job, store, pages)
+}
+
+/// A comic made into an e-book, its details in it.
+fn comic_to_ebook(
+    job: &InsideJob,
+    to: renome_core::comicbook::Format,
+    store: &Path,
+    made: &std::sync::Mutex<Vec<PathBuf>>,
+) -> Result<Done, String> {
+    use renome_core::comicbook;
+    let original = job.convert.unwrap_or(renome_core::convert::Original::Keep);
+    // An e-book needs a language (a Kindle refuses one without); pictures
+    // have none: the system's, unless the comic says its own.
+    let mut v = comic_values(job);
+    if matches!(
+        to,
+        comicbook::Format::Epub | comicbook::Format::Kepub | comicbook::Format::Azw3
+    ) {
+        v.push((comicbook::FALLBACK_LANGUAGE, crate::system_language()));
+    }
+    comicbook::convert(
+        &job.path, to, job.ebook, &v, job.manga, original, job.pdf, store,
+    )
+    .map(|d| {
+        made.locked().extend(d.parts);
+        (Some(d.backup), d.not_trashed)
     })
+}
+
+/// The details written into the file itself (a comic converted to CBZ on
+/// the way, a book's OPF, a `ComicInfo.xml` taken out).
+fn details_in_place(
+    job: &InsideJob,
+    store: &Path,
+    pages: &std::sync::atomic::AtomicUsize,
+) -> Result<Done, String> {
+    use renome_core::{convert, inside};
+    let path = &job.path;
+    match (job.convert, &job.comic, &job.book) {
+        (Some(original), _, _) => {
+            convert::convert_with(path, &comic_values(job), original, job.pdf).map(|d| {
+                pages.fetch_add(d.drawn_pages, std::sync::atomic::Ordering::Relaxed);
+                (Some(d.backup), d.not_trashed)
+            })
+        }
+        (_, Some(_), _) => {
+            inside::write_comic_with(path, &comic_values(job), job.fresh, store).map(|b| (b, None))
+        }
+        (_, _, Some(b)) => {
+            let v = inside::book_values(b, &job.language);
+            if inside::book_writable(path) {
+                inside::write_book(path, &v, store).map(|b| (b, None))
+            } else {
+                renome_core::bookmeta::write(path, &v, store).map(|b| (b, None))
+            }
+        }
+        _ if job.fresh => inside::remove_comic(path, store).map(|b| (b, None)),
+        _ => Ok((None, None)),
+    }
 }
 
 #[derive(serde::Deserialize)]
