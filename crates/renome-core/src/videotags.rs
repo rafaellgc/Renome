@@ -183,7 +183,14 @@ fn hash(b: &[u8]) -> u64 {
     xxhash_rust::xxh3::xxh3_64(b)
 }
 
+/// `len` bytes at `at`. The size comes from the file's own headers, which
+/// a damaged file gets wrong: a size beyond the end is an error, not an
+/// allocation of that size.
 fn read_at(f: &mut File, at: u64, len: usize) -> Result<Vec<u8>, String> {
+    let total = f.metadata().map_err(|e| e.to_string())?.len();
+    if at.checked_add(len as u64).is_none_or(|end| end > total) {
+        return Err("the file is shorter than its own sizes say".into());
+    }
     let mut b = vec![0u8; len];
     f.seek(SeekFrom::Start(at)).map_err(|e| e.to_string())?;
     f.read_exact(&mut b).map_err(|e| e.to_string())?;
@@ -2189,6 +2196,18 @@ fn read_mp4(path: &Path) -> Option<(VideoMeta, bool)> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_size_beyond_the_end_is_an_error_not_an_allocation() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("a.bin");
+        std::fs::write(&p, [1u8; 10]).unwrap();
+        let mut f = File::open(&p).unwrap();
+        assert_eq!(read_at(&mut f, 2, 8).unwrap(), vec![1u8; 8]);
+        assert!(read_at(&mut f, 2, 9).is_err());
+        assert!(read_at(&mut f, 0, usize::MAX / 2).is_err());
+        assert!(read_at(&mut f, u64::MAX, 1).is_err());
+    }
+
     use super::*;
 
     /// A small Matroska file: SeekHead (with room after it), Info, Tracks,
