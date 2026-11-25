@@ -1496,56 +1496,8 @@ pub fn tidy(nodes: &mut Vec<Node>) {
         match n {
             Node::Elem(mut e) => {
                 tidy(&mut e.kids);
-                let inline_only = matches!(
-                    e.name.as_str(),
-                    "p" | "h1"
-                        | "h2"
-                        | "h3"
-                        | "h4"
-                        | "h5"
-                        | "h6"
-                        | "span"
-                        | "a"
-                        | "em"
-                        | "i"
-                        | "b"
-                        | "strong"
-                        | "u"
-                        | "small"
-                        | "sub"
-                        | "sup"
-                        | "code"
-                        | "q"
-                        | "cite"
-                        | "font"
-                        | "s"
-                        | "strike"
-                        | "big"
-                        | "tt"
-                );
-                if inline_only && e.kids.iter().any(is_block_node) {
-                    // Split: runs of inline content keep the element.
-                    let mut run: Vec<Node> = Vec::new();
-                    let flush = |run: &mut Vec<Node>, nodes: &mut Vec<Node>, e: &Elem| {
-                        if run.iter().any(|n| !is_blank(n)) {
-                            nodes.push(Node::Elem(Elem {
-                                name: e.name.clone(),
-                                attrs: e.attrs.clone(),
-                                kids: std::mem::take(run),
-                            }));
-                        } else {
-                            run.clear();
-                        }
-                    };
-                    for k in std::mem::take(&mut e.kids) {
-                        if is_block_node(&k) {
-                            flush(&mut run, nodes, &e);
-                            nodes.push(k);
-                        } else {
-                            run.push(k);
-                        }
-                    }
-                    flush(&mut run, nodes, &e);
+                if inline_only(&e.name) && e.kids.iter().any(is_block_node) {
+                    split_around_blocks(e, nodes);
                     continue;
                 }
                 match e.name.as_str() {
@@ -1555,45 +1507,7 @@ pub fn tidy(nodes: &mut Vec<Node>) {
                     "dl" => e
                         .kids
                         .retain(|k| matches!(k, Node::Elem(x) if x.name == "dt" || x.name == "dd")),
-                    "table" => {
-                        // Rows straight in the table go in a `<tbody>`.
-                        let mut kids = Vec::new();
-                        let mut rows: Vec<Node> = Vec::new();
-                        for k in std::mem::take(&mut e.kids) {
-                            match &k {
-                                Node::Elem(x) if x.name == "tr" => rows.push(k),
-                                Node::Elem(x)
-                                    if matches!(
-                                        x.name.as_str(),
-                                        "thead"
-                                            | "tbody"
-                                            | "tfoot"
-                                            | "caption"
-                                            | "colgroup"
-                                            | "col"
-                                    ) =>
-                                {
-                                    if !rows.is_empty() {
-                                        kids.push(Node::Elem(Elem {
-                                            name: "tbody".into(),
-                                            attrs: vec![],
-                                            kids: std::mem::take(&mut rows),
-                                        }));
-                                    }
-                                    kids.push(k)
-                                }
-                                _ => {}
-                            }
-                        }
-                        if !rows.is_empty() {
-                            kids.push(Node::Elem(Elem {
-                                name: "tbody".into(),
-                                attrs: vec![],
-                                kids: rows,
-                            }));
-                        }
-                        e.kids = kids;
-                    }
+                    "table" => e.kids = table_in_order(std::mem::take(&mut e.kids)),
                     "thead" | "tbody" | "tfoot" => e
                         .kids
                         .retain(|k| matches!(k, Node::Elem(x) if x.name == "tr")),
@@ -1607,6 +1521,100 @@ pub fn tidy(nodes: &mut Vec<Node>) {
             t => nodes.push(t),
         }
     }
+}
+
+/// Elements that may hold only inline content.
+fn inline_only(name: &str) -> bool {
+    matches!(
+        name,
+        "p" | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "span"
+            | "a"
+            | "em"
+            | "i"
+            | "b"
+            | "strong"
+            | "u"
+            | "small"
+            | "sub"
+            | "sup"
+            | "code"
+            | "q"
+            | "cite"
+            | "font"
+            | "s"
+            | "strike"
+            | "big"
+            | "tt"
+    )
+}
+
+/// An inline element with a block inside, split around it: runs of inline
+/// content keep the element, the blocks stand beside them.
+fn split_around_blocks(mut e: Elem, nodes: &mut Vec<Node>) {
+    let mut run: Vec<Node> = Vec::new();
+    let flush = |run: &mut Vec<Node>, nodes: &mut Vec<Node>, e: &Elem| {
+        if run.iter().any(|n| !is_blank(n)) {
+            nodes.push(Node::Elem(Elem {
+                name: e.name.clone(),
+                attrs: e.attrs.clone(),
+                kids: std::mem::take(run),
+            }));
+        } else {
+            run.clear();
+        }
+    };
+    for k in std::mem::take(&mut e.kids) {
+        if is_block_node(&k) {
+            flush(&mut run, nodes, &e);
+            nodes.push(k);
+        } else {
+            run.push(k);
+        }
+    }
+    flush(&mut run, nodes, &e);
+}
+
+/// A table's children as XHTML wants them: rows straight in the table go
+/// in a `<tbody>`; whatever else is not a section, caption or column group
+/// goes.
+fn table_in_order(old: Vec<Node>) -> Vec<Node> {
+    let mut kids = Vec::new();
+    let mut rows: Vec<Node> = Vec::new();
+    for k in old {
+        match &k {
+            Node::Elem(x) if x.name == "tr" => rows.push(k),
+            Node::Elem(x)
+                if matches!(
+                    x.name.as_str(),
+                    "thead" | "tbody" | "tfoot" | "caption" | "colgroup" | "col"
+                ) =>
+            {
+                if !rows.is_empty() {
+                    kids.push(Node::Elem(Elem {
+                        name: "tbody".into(),
+                        attrs: vec![],
+                        kids: std::mem::take(&mut rows),
+                    }));
+                }
+                kids.push(k)
+            }
+            _ => {}
+        }
+    }
+    if !rows.is_empty() {
+        kids.push(Node::Elem(Elem {
+            name: "tbody".into(),
+            attrs: vec![],
+            kids: rows,
+        }));
+    }
+    kids
 }
 
 fn wrap_loose(kids: Vec<Node>, wrap: &str, ok: &[&str]) -> Vec<Node> {
@@ -1646,6 +1654,34 @@ fn is_block_node(n: &Node) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Pins what `tidy` makes of strict-XHTML mistakes, so it can be taken
+    /// apart.
+    #[test]
+    fn tidy_does_not_change() {
+        let cases = [
+            "<p>antes <div>bloco</div> depois</p>",
+            "<h1>título <ul><li>x</li></ul> fim</h1>",
+            "<p><em>a <p>b</p> c</em></p>",
+            "<p>   <div>só bloco</div>   </p>",
+            "<ul>solto<li>um</li>texto<b>b</b></ul><ol><li>x</li> </ol>",
+            "<dl><dt>t</dt>lixo<dd>d</dd><p>x</p></dl>",
+            "<table><tr><td>a</td></tr><thead><tr><th>h</th></tr></thead><tr><td>b</td></tr><caption>c</caption></table>",
+            "<table><tbody>solto<tr>texto<td>c</td><p>x</p><th>d</th></tr></tbody><tfoot>x<tr><td>f</td></tr></tfoot></table>",
+            "<div><p>a<table><tr><td><p>x<div>y</div></p></td></tr></table>b</p></div>",
+            "<span>s<blockquote>q</blockquote>t</span><a href=\"#x\">l<h2>h</h2></a>",
+            "<code>c<pre>p</pre></code><cite>c<hr/>d</cite><q>q</q>",
+        ];
+        let mut all = Vec::new();
+        for html in cases {
+            let mut nodes = parse(html);
+            tidy(&mut nodes);
+            all.push(format!("{nodes:?}"));
+        }
+        let sum = xxhash_rust::xxh3::xxh3_64(all.join("\n").as_bytes());
+        println!("hash {sum:016x}");
+        assert_eq!(sum, 0x47e432ab73b04c68, "what tidy makes changed");
+    }
 
     fn clean(html: &str) -> String {
         let (body, _) = body_of(parse(html));
