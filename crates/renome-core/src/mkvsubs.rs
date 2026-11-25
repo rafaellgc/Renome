@@ -592,6 +592,18 @@ fn group_track(head: &[u8]) -> Option<u64> {
 
 /// A track's lines as the text of a subtitle file in its own format.
 fn file_text(track: &Track, events: &[Event]) -> String {
+    let ev = timed_lines(track, events);
+    match track.codec {
+        Codec::Srt | Codec::Other => srt_text(&ev),
+        Codec::Vtt => vtt_text(track, &ev),
+        Codec::Ass => ass_text(track, &ev),
+    }
+}
+
+/// Each line with when it starts and ends (milliseconds), in order of
+/// start. A line without a length lasts until the next one (at most five
+/// seconds), or the track's default.
+fn timed_lines(track: &Track, events: &[Event]) -> Vec<(i64, i64, String)> {
     let mut ev: Vec<(i64, i64, String)> = Vec::with_capacity(events.len());
     let decoded: Vec<(i64, Option<i64>, String)> = events
         .iter()
@@ -616,98 +628,106 @@ fn file_text(track: &Track, events: &[Event]) -> String {
         let end = start + dur.filter(|d| *d > 0).unwrap_or(fallback);
         ev.push((start / 1_000_000, end / 1_000_000, t.clone()));
     }
-    let ms = |t: i64, sep: char| {
-        let t = t.max(0);
+    ev
+}
+
+/// Milliseconds as `HH:MM:SS<sep>mmm`.
+fn clock_ms(t: i64, sep: char) -> String {
+    let t = t.max(0);
+    format!(
+        "{:02}:{:02}:{:02}{sep}{:03}",
+        t / 3_600_000,
+        t / 60_000 % 60,
+        t / 1000 % 60,
+        t % 1000
+    )
+}
+
+fn srt_text(ev: &[(i64, i64, String)]) -> String {
+    let mut s = String::new();
+    let mut n = 0;
+    for (a, b, t) in ev {
+        let t = t.trim_matches('\n');
+        if t.trim().is_empty() {
+            continue;
+        }
+        n += 1;
+        s.push_str(&format!(
+            "{n}\n{} --> {}\n{t}\n\n",
+            clock_ms(*a, ','),
+            clock_ms(*b, ',')
+        ));
+    }
+    s
+}
+
+fn vtt_text(track: &Track, ev: &[(i64, i64, String)]) -> String {
+    let head = String::from_utf8_lossy(&track.private).replace("\r\n", "\n");
+    let head = head.trim();
+    let mut s = if head.starts_with("WEBVTT") {
+        head.to_string()
+    } else {
+        "WEBVTT".to_string()
+    };
+    s.push_str("\n\n");
+    for (a, b, t) in ev {
+        let t = t.trim_matches('\n');
+        if t.trim().is_empty() {
+            continue;
+        }
+        s.push_str(&format!(
+            "{} --> {}\n{t}\n\n",
+            clock_ms(*a, '.'),
+            clock_ms(*b, '.')
+        ));
+    }
+    s
+}
+
+fn ass_text(track: &Track, ev: &[(i64, i64, String)]) -> String {
+    let cs = |t: i64| {
+        let c = (t.max(0) + 5) / 10;
         format!(
-            "{:02}:{:02}:{:02}{sep}{:03}",
-            t / 3_600_000,
-            t / 60_000 % 60,
-            t / 1000 % 60,
-            t % 1000
+            "{}:{:02}:{:02}.{:02}",
+            c / 360_000,
+            c / 6000 % 60,
+            c / 100 % 60,
+            c % 100
         )
     };
-    match track.codec {
-        Codec::Srt | Codec::Other => {
-            let mut s = String::new();
-            let mut n = 0;
-            for (a, b, t) in &ev {
-                let t = t.trim_matches('\n');
-                if t.trim().is_empty() {
-                    continue;
-                }
-                n += 1;
-                s.push_str(&format!(
-                    "{n}\n{} --> {}\n{t}\n\n",
-                    ms(*a, ','),
-                    ms(*b, ',')
-                ));
-            }
-            s
-        }
-        Codec::Vtt => {
-            let head = String::from_utf8_lossy(&track.private).replace("\r\n", "\n");
-            let head = head.trim();
-            let mut s = if head.starts_with("WEBVTT") {
-                head.to_string()
-            } else {
-                "WEBVTT".to_string()
-            };
-            s.push_str("\n\n");
-            for (a, b, t) in &ev {
-                let t = t.trim_matches('\n');
-                if t.trim().is_empty() {
-                    continue;
-                }
-                s.push_str(&format!("{} --> {}\n{t}\n\n", ms(*a, '.'), ms(*b, '.')));
-            }
-            s
-        }
-        Codec::Ass => {
-            let cs = |t: i64| {
-                let c = (t.max(0) + 5) / 10;
-                format!(
-                    "{}:{:02}:{:02}.{:02}",
-                    c / 360_000,
-                    c / 6000 % 60,
-                    c / 100 % 60,
-                    c % 100
-                )
-            };
-            let mut head = String::from_utf8_lossy(&track.private)
-                .replace("\r\n", "\n")
-                .trim_end()
-                .to_string();
-            if !head.to_ascii_lowercase().contains("[events]") {
-                head.push_str(
-                    "\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-                );
-            }
-            // Each block: ReadOrder, Layer, Style, Name, margins, Effect,
-            // Text; written back in the order they were read in.
-            let mut lines: Vec<(i64, i64, String)> = ev
-                .iter()
-                .filter_map(|(a, b, t)| {
-                    let mut p = t.splitn(3, ',');
-                    let order: i64 = p.next()?.trim().parse().ok()?;
-                    let layer = p.next()?.trim();
-                    let rest = p.next()?.trim_end_matches('\n');
-                    Some((
-                        order,
-                        *a,
-                        format!("Dialogue: {layer},{},{},{rest}", cs(*a), cs(*b)),
-                    ))
-                })
-                .collect();
-            lines.sort_by_key(|l| (l.0, l.1));
-            let mut s = head;
-            s.push('\n');
-            for (_, _, l) in lines {
-                s.push_str(&l);
-                s.push('\n');
-            }
-            s
-        }
+    let mut head = String::from_utf8_lossy(&track.private)
+        .replace("\r\n", "\n")
+        .trim_end()
+        .to_string();
+    if !head.to_ascii_lowercase().contains("[events]") {
+        head.push_str(
+            "\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+        );
     }
+    // Each block: ReadOrder, Layer, Style, Name, margins, Effect, Text;
+    // written back in the order they were read in.
+    let mut lines: Vec<(i64, i64, String)> = ev
+        .iter()
+        .filter_map(|(a, b, t)| {
+            let mut p = t.splitn(3, ',');
+            let order: i64 = p.next()?.trim().parse().ok()?;
+            let layer = p.next()?.trim();
+            let rest = p.next()?.trim_end_matches('\n');
+            Some((
+                order,
+                *a,
+                format!("Dialogue: {layer},{},{},{rest}", cs(*a), cs(*b)),
+            ))
+        })
+        .collect();
+    lines.sort_by_key(|l| (l.0, l.1));
+    let mut s = head;
+    s.push('\n');
+    for (_, _, l) in lines {
+        s.push_str(&l);
+        s.push('\n');
+    }
+    s
 }
 
 /// The language tag a file taken out of a track gets: the usual one
@@ -831,6 +851,74 @@ pub fn extract(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    /// Pins the text a track is written as, so `file_text` can be taken
+    /// apart.
+    #[test]
+    fn file_text_does_not_change() {
+        let track = |codec, private: &[u8], coding, default_ns| Track {
+            number: 1,
+            codec,
+            lang: "por".into(),
+            name: String::new(),
+            forced: false,
+            hearing: false,
+            private: private.to_vec(),
+            coding,
+            private_zlib: false,
+            default_ns,
+        };
+        let ev = |start, duration, text: &str| Event {
+            start,
+            duration,
+            data: text.as_bytes().to_vec(),
+        };
+        let srt = [
+            ev(2_000_000_000, Some(1_500_000_000), "Olá, ação!\r\nSegunda"),
+            ev(500_000_000, None, "Primeira"),
+            ev(9_000_000_000, Some(0), "\n"),
+            ev(9_500_000_000, None, "Sem fim"),
+            ev(3_723_004_000_000, Some(1_000_000_000), "Hora"),
+        ];
+        let ass = [
+            ev(
+                1_000_000_000,
+                Some(2_000_000_000),
+                "0,0,Default,,0,0,0,,Texto um",
+            ),
+            ev(
+                1_000_000_000,
+                Some(2_500_000_000),
+                "1,1,Default,,0,0,0,,Texto, com vírgula\\Nlinha",
+            ),
+            ev(4_000_000_000, None, "not-a-number,x"),
+        ];
+        let mut all = Vec::new();
+        for codec in [Codec::Srt, Codec::Other, Codec::Vtt, Codec::Ass] {
+            for private in [
+                &b""[..],
+                b"WEBVTT\r\n\r\nSTYLE",
+                b"[Script Info]\r\nTitle: x\r\n[Events]\r\nFormat: Layer, Start",
+                b"[Script Info]",
+            ] {
+                for (coding, ns) in [
+                    (Coding::Plain, 0),
+                    (Coding::Plain, 3_000_000_000),
+                    (Coding::Stripped(b"0,0,".to_vec()), 0),
+                ] {
+                    for events in [&srt[..], &ass[..], &[][..]] {
+                        all.push(file_text(
+                            &track(codec, private, coding.clone(), ns),
+                            events,
+                        ));
+                    }
+                }
+            }
+        }
+        let sum = xxhash_rust::xxh3::xxh3_64(all.join("\u{0}").as_bytes());
+        println!("hash {sum:016x}");
+        assert_eq!(sum, 0xeca6bfda52d1ac3b, "the text of a track changed");
+    }
 
     /// An EBML element: id (with its marker) and content.
     pub fn el(id: u64, body: &[u8]) -> Vec<u8> {
