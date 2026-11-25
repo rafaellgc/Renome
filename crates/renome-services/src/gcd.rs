@@ -3,6 +3,7 @@
 //! 30 requests an hour, for testing; with one, about 25 a minute. The
 //! account comes from the options (kept in the system's password store).
 
+use renome_core::sync::MutexExt;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -85,7 +86,7 @@ impl Client {
     /// The account from the options; empty: none.
     pub fn set_account(&self, email: &str, password: &str) {
         let email = email.trim();
-        *self.login.lock().expect("lock not poisoned") =
+        *self.login.locked() =
             (!email.is_empty() && !password.is_empty()).then(|| (email.into(), password.into()));
     }
 
@@ -99,7 +100,7 @@ impl Client {
             self.cache.lock().await.insert(url.to_string(), v.clone());
             return Ok(v);
         }
-        let login = self.login.lock().expect("lock not poisoned").clone();
+        let login = self.login.locked().clone();
         let v = self.request(url, login.as_ref()).await?;
         if let Ok(body) = serde_json::to_vec(&v) {
             crate::ANSWERS.put("gcd", url, &body);

@@ -2,6 +2,7 @@
 //! issues fetched and matched to the files, barcodes read, for the window
 //! and the command line alike.
 
+use renome_core::sync::MutexExt;
 use std::path::PathBuf;
 
 use renome_core::comics::{ComicMatch, Issue, Volume};
@@ -122,9 +123,7 @@ pub fn barcodes(paths: &[PathBuf]) -> Vec<Option<String>> {
                     let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     let Some(p) = paths.get(i) else { break };
                     let code = renome_core::barcode::of_comic(p);
-                    if let Ok(mut o) = out.lock() {
-                        o[i] = code;
-                    }
+                    out.locked()[i] = code;
                 }
             });
         }

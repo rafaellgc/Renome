@@ -9,6 +9,7 @@
 //! Hashes are cached per path while the file's size and modification time
 //! on disk stay the same, so checking again only reads what changed.
 
+use crate::sync::MutexExt;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -240,12 +241,7 @@ pub fn same_content(a: &Path, b: &Path) -> bool {
         ma.modified().ok(),
         mb.modified().ok(),
     );
-    if let Some(&known) = SEEN
-        .lock()
-        .expect("lock not poisoned")
-        .as_ref()
-        .and_then(|m| m.get(&key))
-    {
+    if let Some(&known) = SEEN.locked().as_ref().and_then(|m| m.get(&key)) {
         return known;
     }
     let size = ma.len();
@@ -263,8 +259,7 @@ pub fn same_content(a: &Path, b: &Path) -> bool {
         Some(out)
     };
     let same = matches!((sample(a), sample(b)), (Some(x), Some(y)) if x == y);
-    SEEN.lock()
-        .expect("lock not poisoned")
+    SEEN.locked()
         .get_or_insert_with(HashMap::new)
         .insert(key, same);
     same

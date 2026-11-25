@@ -2,6 +2,7 @@
 //! a second, as the service allows 60 a minute. Releases fetched are kept
 //! for the session (the review, the covers and the tags ask again).
 
+use renome_core::sync::MutexExt;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -50,12 +51,12 @@ fn net_error(e: reqwest::Error) -> String {
 
 impl Client {
     pub fn set_token(&self, token: &str) {
-        *self.token.lock().expect("lock not poisoned") = token.trim().to_string();
+        *self.token.locked() = token.trim().to_string();
     }
 
     /// Whether the user gave a token.
     pub fn ready(&self) -> bool {
-        !self.token.lock().expect("lock not poisoned").is_empty()
+        !self.token.locked().is_empty()
     }
 
     /// A request at most every 1.1 seconds; when the service says it is
@@ -74,7 +75,7 @@ impl Client {
         }
         let token = match token {
             Some(t) => t.trim().to_string(),
-            None => self.token.lock().expect("lock not poisoned").clone(),
+            None => self.token.locked().clone(),
         };
         if token.is_empty() {
             return Err("dgNoKey".into());

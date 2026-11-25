@@ -2,6 +2,7 @@
 //! API key (sent as `api_key`) or a v4 read access token (sent as a bearer
 //! token); TMDB gives both on the same settings page.
 
+use renome_core::sync::MutexExt;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -837,10 +838,7 @@ pub async fn sidecars(
                         }
                         for (path, source) in files {
                             if std::fs::symlink_metadata(&path).is_ok()
-                                || !claimed
-                                    .lock()
-                                    .expect("lock not poisoned")
-                                    .insert(path.clone())
+                                || !claimed.locked().insert(path.clone())
                             {
                                 continue;
                             }

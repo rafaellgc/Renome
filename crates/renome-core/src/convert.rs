@@ -16,6 +16,7 @@
 //! comic's name. The original then stays there, or goes to the system's
 //! trash. Undo puts a kept original back in the comic's place.
 
+use crate::sync::MutexExt;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{BufWriter, Read, Write};
@@ -2171,7 +2172,7 @@ fn draw_all(data: &Arc<Vec<u8>>, jobs: &[(usize, f32)]) -> Vec<PageFile> {
                         Ok(pdf) => drawn(pdf, index, scale),
                         Err(e) => Err(e.clone()),
                     };
-                    results.lock().expect("no panic holds it")[k] = Some(r);
+                    results.locked()[k] = Some(r);
                 }
             });
         }

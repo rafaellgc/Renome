@@ -4,6 +4,7 @@
 //! no keeping of its answers beyond what its replies say, and they say
 //! none, so answers are kept only while the program is open.
 
+use renome_core::sync::MutexExt;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -60,13 +61,11 @@ fn words(s: &str) -> String {
 impl Client {
     /// The key from the options; empty: Google Books is not used.
     pub fn set_key(&self, key: &str) {
-        if let Ok(mut k) = self.key.lock() {
-            *k = key.trim().to_string();
-        }
+        *self.key.locked() = key.trim().to_string();
     }
 
     fn key(&self) -> String {
-        self.key.lock().map(|k| k.clone()).unwrap_or_default()
+        self.key.locked().clone()
     }
 
     pub fn enabled(&self) -> bool {

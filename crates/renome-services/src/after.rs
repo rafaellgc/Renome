@@ -3,6 +3,7 @@
 //! undo deletes them), details written inside videos (recorded with what
 //! they replaced, so undo puts it back).
 
+use renome_core::sync::MutexExt;
 use std::path::{Path, PathBuf};
 
 use renome_core::History;
@@ -691,7 +692,7 @@ pub async fn inside(
         match join_volume(history, &id, group, &mut moved_ops).await {
             Ok(files) => {
                 report.written += 1;
-                made.lock().expect("lock not poisoned").extend(files);
+                made.locked().extend(files);
             }
             Err((file, e)) => report.errors.push((file, e)),
         }
@@ -747,7 +748,7 @@ pub async fn inside(
                         &path, to, job.ebook, &v, job.manga, original, job.pdf, &store,
                     )
                     .map(|d| {
-                        made.lock().expect("lock not poisoned").extend(d.parts);
+                        made.locked().extend(d.parts);
                         (Some(d.backup), d.not_trashed)
                     });
                 }
@@ -847,7 +848,7 @@ pub async fn inside(
     }
     report.written += backups.len();
     report.drawn = pages.load(std::sync::atomic::Ordering::Relaxed);
-    let made = std::mem::take(&mut *made.lock().expect("lock not poisoned"));
+    let made = std::mem::take(&mut *made.locked());
     if !made.is_empty()
         && let Err(e) = history.add_created(&id, &made)
     {

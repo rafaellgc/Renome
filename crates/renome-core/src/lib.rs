@@ -68,6 +68,7 @@ pub mod scan;
 pub mod similar;
 pub mod subtext;
 pub mod subtitles;
+pub mod sync;
 pub mod tagwrite;
 pub mod text;
 pub mod tmdb;

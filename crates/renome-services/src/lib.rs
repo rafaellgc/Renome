@@ -28,6 +28,7 @@ pub mod secrets;
 pub mod subtitles;
 pub mod tmdb;
 
+use renome_core::sync::MutexExt;
 use serde::Serialize;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -261,7 +262,7 @@ pub fn load_secrets() -> Value {
         secrets::Read::Refused => return serde_json::json!({ "status": "refused" }),
         secrets::Read::Missing => return serde_json::json!({ "status": "missing" }),
     };
-    let _file = SETTINGS_FILE.lock().expect("lock not poisoned");
+    let _file = SETTINGS_FILE.locked();
     let mut file = read_settings_file();
     let old = file
         .as_ref()
@@ -294,7 +295,7 @@ pub fn load_secrets() -> Value {
 pub fn save_secrets(secrets: serde_json::Map<String, Value>) -> Result<bool, String> {
     let secrets = secrets::of(&secrets);
     let stored = secrets::write(&secrets);
-    let _file = SETTINGS_FILE.lock().expect("lock not poisoned");
+    let _file = SETTINGS_FILE.locked();
     let mut file = read_settings_file().unwrap_or_else(|| Value::Object(Default::default()));
     if let Some(obj) = file.as_object_mut() {
         // A store that refused keeps what it had; only what differs from

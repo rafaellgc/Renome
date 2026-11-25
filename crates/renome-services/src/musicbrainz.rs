@@ -2,6 +2,7 @@
 //! asks, with the program identified; and the album lookups built on it.
 //! Covers come from the Cover Art Archive.
 
+use renome_core::sync::MutexExt;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -435,10 +436,7 @@ async fn hear(
         };
         tags.recordings = h.recordings.clone();
         if !h.recordings.is_empty() {
-            s.heard
-                .lock()
-                .expect("lock not poisoned")
-                .insert(path.clone(), h.recordings.clone());
+            s.heard.locked().insert(path.clone(), h.recordings.clone());
         }
         heard.insert(path.clone(), h);
         progress(host, done + 1, total, Some("listen"));

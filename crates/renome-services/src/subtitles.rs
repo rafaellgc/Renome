@@ -6,6 +6,7 @@
 //! downloads count against a daily quota, so they happen only when the
 //! files are renamed, for the subtitles chosen.
 
+use renome_core::sync::MutexExt;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -130,7 +131,7 @@ impl Os {
             return Ok((base, None));
         }
         if !again
-            && let Some(l) = LOGIN.lock().expect("lock not poisoned").as_ref()
+            && let Some(l) = LOGIN.locked().as_ref()
             && l.who == who
         {
             return Ok((l.base.clone(), Some(l.token.clone())));
@@ -169,7 +170,7 @@ impl Os {
             }
             _ => base,
         };
-        *LOGIN.lock().expect("lock not poisoned") = Some(Login {
+        *LOGIN.locked() = Some(Login {
             who,
             token: token.clone(),
             base: base.clone(),
@@ -563,7 +564,7 @@ impl Subsource {
     /// SubSource's number for the item's movie or season.
     async fn movie(&self, item: &Item) -> Result<Option<u64>, String> {
         let key = (item.tmdb, item.season);
-        if let Some(id) = self.ids.lock().expect("lock not poisoned").get(&key) {
+        if let Some(id) = self.ids.locked().get(&key) {
             return Ok(*id);
         }
         let tv = item.season.is_some();
@@ -590,10 +591,7 @@ impl Subsource {
                     .and_then(|m| m["movieId"].as_u64())
             }
         };
-        self.ids
-            .lock()
-            .expect("lock not poisoned")
-            .insert(key, found);
+        self.ids.locked().insert(key, found);
         Ok(found)
     }
 
@@ -1108,7 +1106,7 @@ pub async fn check_os(auth: Auth) -> Result<Option<i64>, String> {
     if !auth.os() {
         return Err("osBadKey".into());
     }
-    *LOGIN.lock().expect("lock not poisoned") = None;
+    *LOGIN.locked() = None;
     let os = Os { http: http(), auth };
     // A search costs nothing and needs the key; with an account it logs
     // in first (LOGIN was cleared), so a wrong password shows there too.

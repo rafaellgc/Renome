@@ -2,6 +2,7 @@
 //! History, rule sets, the rules' options, the Options, keys and the
 //! answers cache.
 
+use renome_core::sync::MutexExt;
 use std::path::Path;
 
 use clap::ArgMatches;
@@ -202,9 +203,7 @@ pub(crate) fn settings_now() -> Value {
 }
 
 pub(crate) fn save_settings(settings: &Value) -> Result<(), String> {
-    let _file = renome_services::SETTINGS_FILE
-        .lock()
-        .expect("lock not poisoned");
+    let _file = renome_services::SETTINGS_FILE.locked();
     renome_services::write_settings_file(settings)
 }
 
