@@ -1233,6 +1233,37 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
         .map(|f| (f.path.as_path(), f.base.as_path()))
         .collect();
     let mut works = collect_works(items, view);
+    let added = added_with(items, &base, view);
+    keep_own_folders(&mut works, items, view);
+    let Works {
+        places,
+        audiobooks,
+        shows,
+        stems,
+        ..
+    } = works;
+    let homes = Homes { places, added };
+    for i in items.iter_mut() {
+        if i.is_dir || i.manual || is_work(i, view) || i.dest.is_some() {
+            continue;
+        }
+        let own_base = base.get(i.path.as_path()).copied();
+        if follow_work(i, own_base, &homes, &stems, &audiobooks, &shows) {
+            if i.status == Status::Unchanged {
+                i.status = Status::Ok;
+            }
+            i.windows_unsafe = windows_bad(&i.new_name);
+        }
+    }
+}
+
+/// Each movie, audiobook and show folder, and the folder its files were
+/// added with.
+fn added_with<'a>(
+    items: &[PreviewItem],
+    base: &HashMap<&Path, &'a Path>,
+    view: &View,
+) -> HashMap<PathBuf, &'a Path> {
     // Each movie folder's files were added with: the movie's.
     let mut added: HashMap<PathBuf, &Path> = items
         .iter()
@@ -1252,32 +1283,40 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
             added.insert(i.dir.clone(), b);
         }
     }
-    keep_own_folders(&mut works, items, view);
-    let Works {
-        places,
-        audiobooks,
-        shows,
-        stems,
-        ..
-    } = works;
-    // The movie folder a folder is in (two levels at most), where its movie
-    // goes, and the folder shown.
-    let home =
-        |dir: &Path, own_base: Option<&Path>| -> Option<(PathBuf, PathBuf, Option<String>)> {
-            let up = dir
-                .ancestors()
-                .take(3)
-                .find(|up| places.contains_key(*up))?;
-            if added.get(up).copied() != own_base {
-                return None;
-            }
-            let (Some(dest), folder) = places.get(up)?.clone()? else {
-                return None;
-            };
-            Some((up.to_path_buf(), dest, folder))
+    added
+}
+
+/// Where the works' folders go, and which folder each was added with.
+struct Homes<'a> {
+    places: HashMap<PathBuf, Option<WorkPlace>>,
+    added: HashMap<PathBuf, &'a Path>,
+}
+
+impl Homes<'_> {
+    /// The movie folder a folder is in (two levels at most), where its
+    /// movie goes, and the folder shown.
+    fn home(
+        &self,
+        dir: &Path,
+        own_base: Option<&Path>,
+    ) -> Option<(PathBuf, PathBuf, Option<String>)> {
+        let up = dir
+            .ancestors()
+            .take(3)
+            .find(|up| self.places.contains_key(*up))?;
+        if self.added.get(up).copied() != own_base {
+            return None;
+        }
+        let (Some(dest), folder) = self.places.get(up)?.clone()? else {
+            return None;
         };
-    let place = |dir: &Path, own_base: Option<&Path>| -> Option<(PathBuf, Option<String>)> {
-        let (up, dest, folder) = home(dir, own_base)?;
+        Some((up.to_path_buf(), dest, folder))
+    }
+
+    /// Where a folder's files go: its movie folder's place, and the part
+    /// of the way below it.
+    fn place(&self, dir: &Path, own_base: Option<&Path>) -> Option<(PathBuf, Option<String>)> {
+        let (up, dest, folder) = self.home(dir, own_base)?;
         if up == dir {
             return Some((dest, folder));
         }
@@ -1288,90 +1327,99 @@ fn follow_works(items: &mut [PreviewItem], files: &[FileEntry], view: &View) {
             None => shown,
         };
         Some((dest.join(rel), Some(folder)))
-    };
-    for i in items.iter_mut() {
-        if i.is_dir || i.manual || is_work(i, view) || i.dest.is_some() {
-            continue;
-        }
-        // Named after a work of its folder: the longest stem it starts with.
-        let named = stems
-            .get(&i.dir)
-            .into_iter()
-            .flatten()
-            .filter(|(old, new, (dest, _), _)| {
-                (old != new || dest.is_some())
-                    && i.original.len() > old.len()
-                    && i.original.starts_with(old.as_str())
-                    && i.original[old.len()..].starts_with(['.', '-', ' '])
-            })
-            .max_by_key(|(old, _, _, _)| old.len())
-            .cloned();
-        // Changed by a rule and named after no work: the rule's. Named
-        // after one, it keeps going with it (a text rule run on every file
-        // must not part a video from its .nfo and pictures).
-        if i.new_name != i.original && named.is_none() {
-            continue;
-        }
-        let own_base = base.get(i.path.as_path()).copied();
-        if i.release_junk {
-            // Stays in the old folder, with what else does not go.
-            continue;
-        } else if let Some((old, new, (dest, folder), work)) = named {
-            i.new_name = format!("{new}{}", &i.original[old.len()..]);
-            i.dest = dest;
-            i.folder = folder;
-            i.follows = Some(work);
-            i.companion = true;
-        } else if let Some(kind) = i.extra.clone() {
-            // In the extras folder next to the movie, whatever folder it
-            // was in.
-            let Some((_, dest, folder)) = home(&i.dir, own_base) else {
-                continue;
-            };
-            i.dest = Some(dest.join(&kind));
-            i.folder = Some(match folder {
-                Some(f) => format!("{f}/{kind}"),
-                None => kind,
-            });
-        } else if let Some((up, _, _)) = home(&i.dir, own_base)
-            && !audiobooks.contains_key(&up)
-            && !goes_along(i, &up)
-        {
-            i.stays_behind = true;
-            continue;
-        } else if let Some((up, _, _)) = home(&i.dir, own_base)
-            && let Some((dest, folder)) = place(&i.dir, own_base)
-        {
-            i.with_folder = Some(up);
-            // A season's folder: the show's own files go to the show's
-            // folder, the rest (season.nfo, its poster) to the season's.
-            let up = folder
-                .as_deref()
-                .and_then(|f| f.rsplit_once('/'))
-                .map(|(show, _)| show.to_string());
-            match (
-                shows.contains_key(&i.dir) && show_level(&i.original),
-                up,
-                dest.parent(),
-            ) {
-                (true, Some(show), Some(parent)) => {
-                    i.dest = Some(parent.to_path_buf());
-                    i.folder = Some(show);
-                }
-                _ => {
-                    i.dest = Some(dest);
-                    i.folder = folder;
-                }
-            }
-            i.companion = true;
-        } else {
-            continue;
-        }
-        if i.status == Status::Unchanged {
-            i.status = Status::Ok;
-        }
-        i.windows_unsafe = windows_bad(&i.new_name);
     }
+}
+
+/// Makes a file follow the work it goes with: named after it (the longest
+/// stem it starts with), an extra of its movie, or in its folder. Whether
+/// it follows anything.
+fn follow_work(
+    i: &mut PreviewItem,
+    own_base: Option<&Path>,
+    homes: &Homes,
+    stems: &HashMap<PathBuf, Vec<(String, String, WorkPlace, PathBuf)>>,
+    audiobooks: &HashMap<PathBuf, HashSet<String>>,
+    shows: &HashMap<PathBuf, HashSet<(String, u64)>>,
+) -> bool {
+    // Named after a work of its folder: the longest stem it starts with.
+    let named = stems
+        .get(&i.dir)
+        .into_iter()
+        .flatten()
+        .filter(|(old, new, (dest, _), _)| {
+            (old != new || dest.is_some())
+                && i.original.len() > old.len()
+                && i.original.starts_with(old.as_str())
+                && i.original[old.len()..].starts_with(['.', '-', ' '])
+        })
+        .max_by_key(|(old, _, _, _)| old.len())
+        .cloned();
+    // Changed by a rule and named after no work: the rule's. Named after
+    // one, it keeps going with it (a text rule run on every file must not
+    // part a video from its .nfo and pictures).
+    if i.new_name != i.original && named.is_none() {
+        return false;
+    }
+    if i.release_junk {
+        // Stays in the old folder, with what else does not go.
+        return false;
+    }
+    if let Some((old, new, (dest, folder), work)) = named {
+        i.new_name = format!("{new}{}", &i.original[old.len()..]);
+        i.dest = dest;
+        i.folder = folder;
+        i.follows = Some(work);
+        i.companion = true;
+        return true;
+    }
+    if let Some(kind) = i.extra.clone() {
+        // In the extras folder next to the movie, whatever folder it was in.
+        let Some((_, dest, folder)) = homes.home(&i.dir, own_base) else {
+            return false;
+        };
+        i.dest = Some(dest.join(&kind));
+        i.folder = Some(match folder {
+            Some(f) => format!("{f}/{kind}"),
+            None => kind,
+        });
+        return true;
+    }
+    if let Some((up, _, _)) = homes.home(&i.dir, own_base)
+        && !audiobooks.contains_key(&up)
+        && !goes_along(i, &up)
+    {
+        i.stays_behind = true;
+        return false;
+    }
+    let Some((up, _, _)) = homes.home(&i.dir, own_base) else {
+        return false;
+    };
+    let Some((dest, folder)) = homes.place(&i.dir, own_base) else {
+        return false;
+    };
+    i.with_folder = Some(up);
+    // A season's folder: the show's own files go to the show's folder, the
+    // rest (season.nfo, its poster) to the season's.
+    let up = folder
+        .as_deref()
+        .and_then(|f| f.rsplit_once('/'))
+        .map(|(show, _)| show.to_string());
+    match (
+        shows.contains_key(&i.dir) && show_level(&i.original),
+        up,
+        dest.parent(),
+    ) {
+        (true, Some(show), Some(parent)) => {
+            i.dest = Some(parent.to_path_buf());
+            i.folder = Some(show);
+        }
+        _ => {
+            i.dest = Some(dest);
+            i.folder = folder;
+        }
+    }
+    i.companion = true;
+    true
 }
 
 /// Files that go with songs, when no rule changed them:
