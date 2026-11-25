@@ -565,113 +565,8 @@ fn expand_as(
     disc_prefix: bool,
     folder: bool,
 ) -> String {
-    let safe = |s: &str| {
-        if folder {
-            safe_title(s, colon)
-        } else {
-            safe_text(s, colon)
-        }
-    };
-    let (title, artist, album_artist, album) = (
-        safe(&t.title),
-        safe(&t.artist),
-        safe(t.album_artist()),
-        safe(&t.album),
-    );
-    let (genre, composer) = (safe(&t.genre), safe(&t.composer));
-    // An album named with its date (`Show 12 (2025-05-04)`) needs no year
-    // again beside it.
-    let mut year = t.year.map(|y| y.to_string()).unwrap_or_default();
-    let names_album = ["album", "álbum"]
-        .iter()
-        .any(|k| crate::rules::uses_key(template, k));
-    if names_album && !year.is_empty() && YEAR_IN_NAME.is_match(&t.album) {
-        year.clear();
-    }
-    let mut original_year = t
-        .original_year
-        .or(t.year)
-        .map(|y| y.to_string())
-        .unwrap_or_default();
-    if names_album && YEAR_IN_NAME.is_match(&t.album) {
-        original_year.clear();
-    }
-    let number = |n: Option<u32>| n.map(|n| n.to_string()).unwrap_or_default();
-    let (track_total, disc_total) = (number(t.track_total), number(t.disc_total));
-    let (label, catalog) = (safe(&t.label), safe(&t.catalog));
-    let artist_sort = safe(if t.artist_sort.is_empty() {
-        &t.artist
-    } else {
-        &t.artist_sort
-    });
-    let album_artist_sort = t.album_artist_sort();
-    let letter = initial(album_artist_sort);
-    let album_artist_sort = safe(album_artist_sort);
-    let format = t.audio.format.clone();
-    let bitrate = number(t.audio.bitrate);
-    let sample_rate = t
-        .audio
-        .sample_rate
-        .map(|hz| {
-            format!("{:.2}", f64::from(hz) / 1000.0)
-                .trim_end_matches('0')
-                .trim_end_matches('.')
-                .to_string()
-        })
-        .unwrap_or_default();
-    let bits = t.audio.bits.map(|b| b.to_string()).unwrap_or_default();
-    let mut extra = crate::fields::Extra::new();
-    crate::fields::add_date(&mut extra, &t.date);
-    let several_discs = t.disc_total.is_some_and(|n| n > 1) || t.disc.is_some_and(|d| d > 1);
-    // An album of one disc has no disc to tell.
-    let disc = t
-        .disc
-        .filter(|_| several_discs)
-        .map(|d| d.to_string())
-        .unwrap_or_default();
-    let track = t
-        .track
-        .map(|n| {
-            let width = if t.track_total.is_some_and(|n| n > 99) || n > 99 {
-                3
-            } else {
-                2
-            };
-            match t.disc {
-                Some(d) if disc_prefix && several_discs => format!("{d}-{n:0width$}"),
-                _ => format!("{n:0width$}"),
-            }
-        })
-        .unwrap_or_default();
-    let out = crate::rules::expand(template, |key| match key {
-        "title" | "título" | "titulo" => Some(title.as_str()),
-        "artist" | "artista" => Some(artist.as_str()),
-        "album artist" | "albumartist" | "artista do álbum" | "artista do album"
-        | "artista del álbum" | "artista del album" => Some(album_artist.as_str()),
-        "album" | "álbum" => Some(album.as_str()),
-        "year" | "ano" | "año" => Some(year.as_str()),
-        "track" | "faixa" | "pista" => Some(track.as_str()),
-        "disc" | "disco" => Some(disc.as_str()),
-        "genre" | "gênero" | "genero" | "género" => Some(genre.as_str()),
-        "composer" | "compositor" => Some(composer.as_str()),
-        "total tracks" | "total de faixas" | "total de pistas" => Some(track_total.as_str()),
-        "total discs" | "total de discos" => Some(disc_total.as_str()),
-        "original year" | "ano original" | "año original" => Some(original_year.as_str()),
-        "label" | "gravadora" | "sello" => Some(label.as_str()),
-        "catalog" | "catálogo" | "catalogo" => Some(catalog.as_str()),
-        "artist sort" | "artista invertido" => Some(artist_sort.as_str()),
-        "album artist sort"
-        | "artista do álbum invertido"
-        | "artista do album invertido"
-        | "artista del álbum invertido"
-        | "artista del album invertido" => Some(album_artist_sort.as_str()),
-        "initial" | "inicial" => Some(letter.as_str()),
-        "format" | "formato" => Some(format.as_str()),
-        "bitrate" | "taxa de bits" | "tasa de bits" => Some(bitrate.as_str()),
-        "sample rate" | "amostragem" | "muestreo" => Some(sample_rate.as_str()),
-        "bits" => Some(bits.as_str()),
-        key => crate::fields::get(&extra, key),
-    });
+    let v = Values::of(template, t, colon, disc_prefix, folder);
+    let out = crate::rules::expand(template, |key| v.get(key));
     let out = out.replace("()", "").replace("[]", "");
     let out = text::collapse_spaces(&out);
     let out = REPEATED_DASH.replace_all(&out, " - ");
@@ -682,6 +577,166 @@ fn expand_as(
         out.trim_end_matches(|c: char| c.is_whitespace() || "-–_".contains(c))
     }
     .to_string()
+}
+
+/// What each key of a name's template stands for, for one song.
+struct Values {
+    title: String,
+    artist: String,
+    album_artist: String,
+    album: String,
+    year: String,
+    track: String,
+    disc: String,
+    genre: String,
+    composer: String,
+    track_total: String,
+    disc_total: String,
+    original_year: String,
+    label: String,
+    catalog: String,
+    artist_sort: String,
+    album_artist_sort: String,
+    letter: String,
+    format: String,
+    bitrate: String,
+    sample_rate: String,
+    bits: String,
+    extra: crate::fields::Extra,
+}
+
+impl Values {
+    fn of(template: &str, t: &AudioTags, colon: &str, disc_prefix: bool, folder: bool) -> Self {
+        let safe = |s: &str| {
+            if folder {
+                safe_title(s, colon)
+            } else {
+                safe_text(s, colon)
+            }
+        };
+        // An album named with its date (`Show 12 (2025-05-04)`) needs no
+        // year again beside it.
+        let mut year = t.year.map(|y| y.to_string()).unwrap_or_default();
+        let names_album = ["album", "álbum"]
+            .iter()
+            .any(|k| crate::rules::uses_key(template, k));
+        if names_album && !year.is_empty() && YEAR_IN_NAME.is_match(&t.album) {
+            year.clear();
+        }
+        let mut original_year = t
+            .original_year
+            .or(t.year)
+            .map(|y| y.to_string())
+            .unwrap_or_default();
+        if names_album && YEAR_IN_NAME.is_match(&t.album) {
+            original_year.clear();
+        }
+        let number = |n: Option<u32>| n.map(|n| n.to_string()).unwrap_or_default();
+        let artist_sort = safe(if t.artist_sort.is_empty() {
+            &t.artist
+        } else {
+            &t.artist_sort
+        });
+        let album_artist_sort = t.album_artist_sort();
+        let letter = initial(album_artist_sort);
+        let mut extra = crate::fields::Extra::new();
+        crate::fields::add_date(&mut extra, &t.date);
+        let (disc, track) = Self::place(t, disc_prefix);
+        Self {
+            title: safe(&t.title),
+            artist: safe(&t.artist),
+            album_artist: safe(t.album_artist()),
+            album: safe(&t.album),
+            year,
+            track,
+            disc,
+            genre: safe(&t.genre),
+            composer: safe(&t.composer),
+            track_total: number(t.track_total),
+            disc_total: number(t.disc_total),
+            original_year,
+            label: safe(&t.label),
+            catalog: safe(&t.catalog),
+            artist_sort,
+            album_artist_sort: safe(album_artist_sort),
+            letter,
+            format: t.audio.format.clone(),
+            bitrate: number(t.audio.bitrate),
+            sample_rate: t
+                .audio
+                .sample_rate
+                .map(|hz| {
+                    format!("{:.2}", f64::from(hz) / 1000.0)
+                        .trim_end_matches('0')
+                        .trim_end_matches('.')
+                        .to_string()
+                })
+                .unwrap_or_default(),
+            bits: t.audio.bits.map(|b| b.to_string()).unwrap_or_default(),
+            extra,
+        }
+    }
+
+    /// The disc (none for an album of one) and the track, with the disc
+    /// before it when asked and the album has several.
+    fn place(t: &AudioTags, disc_prefix: bool) -> (String, String) {
+        let several_discs = t.disc_total.is_some_and(|n| n > 1) || t.disc.is_some_and(|d| d > 1);
+        let disc = t
+            .disc
+            .filter(|_| several_discs)
+            .map(|d| d.to_string())
+            .unwrap_or_default();
+        let track = t
+            .track
+            .map(|n| {
+                let width = if t.track_total.is_some_and(|n| n > 99) || n > 99 {
+                    3
+                } else {
+                    2
+                };
+                match t.disc {
+                    Some(d) if disc_prefix && several_discs => format!("{d}-{n:0width$}"),
+                    _ => format!("{n:0width$}"),
+                }
+            })
+            .unwrap_or_default();
+        (disc, track)
+    }
+
+    /// The value of a key, in any of the languages.
+    fn get(&self, key: &str) -> Option<&str> {
+        match key {
+            "title" | "título" | "titulo" => Some(self.title.as_str()),
+            "artist" | "artista" => Some(self.artist.as_str()),
+            "album artist" | "albumartist" | "artista do álbum" | "artista do album"
+            | "artista del álbum" | "artista del album" => Some(self.album_artist.as_str()),
+            "album" | "álbum" => Some(self.album.as_str()),
+            "year" | "ano" | "año" => Some(self.year.as_str()),
+            "track" | "faixa" | "pista" => Some(self.track.as_str()),
+            "disc" | "disco" => Some(self.disc.as_str()),
+            "genre" | "gênero" | "genero" | "género" => Some(self.genre.as_str()),
+            "composer" | "compositor" => Some(self.composer.as_str()),
+            "total tracks" | "total de faixas" | "total de pistas" => {
+                Some(self.track_total.as_str())
+            }
+            "total discs" | "total de discos" => Some(self.disc_total.as_str()),
+            "original year" | "ano original" | "año original" => Some(self.original_year.as_str()),
+            "label" | "gravadora" | "sello" => Some(self.label.as_str()),
+            "catalog" | "catálogo" | "catalogo" => Some(self.catalog.as_str()),
+            "artist sort" | "artista invertido" => Some(self.artist_sort.as_str()),
+            "album artist sort"
+            | "artista do álbum invertido"
+            | "artista do album invertido"
+            | "artista del álbum invertido"
+            | "artista del album invertido" => Some(self.album_artist_sort.as_str()),
+            "initial" | "inicial" => Some(self.letter.as_str()),
+            "format" | "formato" => Some(self.format.as_str()),
+            "bitrate" | "taxa de bits" | "tasa de bits" => Some(self.bitrate.as_str()),
+            "sample rate" | "amostragem" | "muestreo" => Some(self.sample_rate.as_str()),
+            "bits" => Some(self.bits.as_str()),
+            key => crate::fields::get(&self.extra, key),
+        }
+    }
 }
 
 /// The folders for a song, one per `/` in the template (`{album artist}/
@@ -1332,5 +1387,66 @@ mod tests {
     fn audio_extensions() {
         assert!(is_audio("MP3") && is_audio("flac") && is_audio("m4a") && is_audio("opus"));
         assert!(!is_audio("mp4") && !is_audio("jpg") && !is_audio("lrc"));
+    }
+
+    /// Pins the names made from tags, so `expand_as` can be taken apart.
+    #[test]
+    fn expanding_does_not_change() {
+        let base = AudioTags {
+            title: "Song: One?".into(),
+            artist: "The Band".into(),
+            album_artist: "Various".into(),
+            album: "Live (2019-05-04)".into(),
+            year: Some(2019),
+            track: Some(7),
+            track_total: Some(12),
+            disc: Some(2),
+            disc_total: Some(2),
+            genre: "Rock".into(),
+            composer: "A. Writer".into(),
+            date: "2019-05-04".into(),
+            original_year: Some(1999),
+            label: "Label".into(),
+            catalog: "CAT 1".into(),
+            artist_sort: "Band, The".into(),
+            album_artist_sort: String::new(),
+            audio: AudioInfo {
+                format: "FLAC".into(),
+                bitrate: Some(900),
+                sample_rate: Some(44100),
+                bits: Some(16),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let plain = AudioTags {
+            title: "Plain".into(),
+            artist: "Solo".into(),
+            album: "Debut".into(),
+            year: Some(2001),
+            track: Some(105),
+            ..Default::default()
+        };
+        let templates = [
+            "{track} - {title}",
+            "{artist} - {album} ({year}) - {disc}-{track}/{total tracks}{total discs}",
+            "{album artist}/{album}/{genre}-{composer} [{label}] {catalog}",
+            "{original year} {artist sort} {album artist sort} {initial} {format} {bitrate} {sample rate} {bits}",
+            "{título} {faixa} {ano} {unknown} {date}",
+            "[{label}] ({genre}) {title}.",
+        ];
+        let mut all = Vec::new();
+        for t in [&base, &plain] {
+            for tpl in templates {
+                for (prefix, folder) in [(false, false), (true, false), (false, true)] {
+                    for colon in [" - ", ""] {
+                        all.push(expand_as(tpl, t, colon, prefix, folder));
+                    }
+                }
+            }
+        }
+        let sum = xxhash_rust::xxh3::xxh3_64(all.join("\n").as_bytes());
+        println!("hash {sum:016x}");
+        assert_eq!(sum, 0x0537cafc5b670162, "the names changed");
     }
 }
