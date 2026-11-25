@@ -316,36 +316,41 @@ pub fn parse_info(xml: &str) -> Option<ComicInfo> {
     (!info.series.is_empty() || !info.number.is_empty()).then_some(info)
 }
 
-/// The fields of a `MetronInfo.xml` text, as a `ComicInfo.xml`'s.
-pub fn parse_metron(xml: &str) -> Option<ComicInfo> {
-    use crate::fields::add;
-    let doc = roxmltree::Document::parse(xml.trim_start_matches('\u{feff}')).ok()?;
-    let root = doc.root_element();
-    if !root.tag_name().name().eq_ignore_ascii_case("MetronInfo") {
-        return None;
-    }
-    let tidy = |t: &str| text::nfc(&text::collapse_spaces(t.trim()));
-    fn child<'a, 'i>(n: roxmltree::Node<'a, 'i>, name: &str) -> Option<roxmltree::Node<'a, 'i>> {
+/// A `MetronInfo.xml` read: its elements by name, whatever their case.
+struct Metron<'a, 'i> {
+    root: roxmltree::Node<'a, 'i>,
+}
+
+impl<'a, 'i> Metron<'a, 'i> {
+    /// The first child element of `n` called `name`.
+    fn child(n: roxmltree::Node<'a, 'i>, name: &str) -> Option<roxmltree::Node<'a, 'i>> {
         n.children()
             .find(|c| c.is_element() && c.tag_name().name().eq_ignore_ascii_case(name))
     }
-    let text_of =
-        |n: Option<roxmltree::Node<'_, '_>>| n.and_then(|n| n.text()).map(tidy).unwrap_or_default();
-    let at = |path: &[&str]| {
-        let mut n = Some(root);
+
+    /// An element's text, tidy.
+    fn text_of(n: Option<roxmltree::Node<'_, '_>>) -> String {
+        n.and_then(|n| n.text()).map(tidy).unwrap_or_default()
+    }
+
+    /// The text of the element at `path` from the root.
+    fn at(&self, path: &[&str]) -> String {
+        let mut n = Some(self.root);
         for p in path {
-            n = n.and_then(|n| child(n, p));
+            n = n.and_then(|n| Self::child(n, p));
         }
-        text_of(n)
-    };
-    let all = |list: &str, item: &str| -> Vec<String> {
-        child(root, list)
+        Self::text_of(n)
+    }
+
+    /// The texts of the `item` elements of the `list` element (an arc's
+    /// name is a child of its own).
+    fn all(&self, list: &str, item: &str) -> Vec<String> {
+        Self::child(self.root, list)
             .map(|l| {
                 l.children()
                     .filter(|c| c.is_element() && c.tag_name().name().eq_ignore_ascii_case(item))
                     .map(|c| {
-                        // An arc's name is a child of its own.
-                        let named = child(c, "Name");
+                        let named = Self::child(c, "Name");
                         tidy(
                             named
                                 .and_then(|n| n.text())
@@ -357,123 +362,164 @@ pub fn parse_metron(xml: &str) -> Option<ComicInfo> {
                     .collect()
             })
             .unwrap_or_default()
-    };
-    // Who did what: each role's people, in order.
-    let mut roles: Vec<(String, String)> = Vec::new();
-    if let Some(credits) = child(root, "Credits") {
-        for c in credits.children().filter(|c| c.is_element()) {
-            let who = text_of(child(c, "Creator"));
-            if who.is_empty() {
-                continue;
+    }
+
+    /// Who did what: each role (lower case) and the person, in order.
+    fn roles(&self) -> Vec<(String, String)> {
+        let mut roles: Vec<(String, String)> = Vec::new();
+        if let Some(credits) = Self::child(self.root, "Credits") {
+            for c in credits.children().filter(|c| c.is_element()) {
+                let who = Self::text_of(Self::child(c, "Creator"));
+                if who.is_empty() {
+                    continue;
+                }
+                for r in Self::child(c, "Roles")
+                    .into_iter()
+                    .flat_map(|r| r.children().filter(|x| x.is_element()))
+                {
+                    roles.push((
+                        tidy(r.text().unwrap_or_default()).to_lowercase(),
+                        who.clone(),
+                    ));
+                }
             }
-            for r in child(c, "Roles")
-                .into_iter()
-                .flat_map(|r| r.children().filter(|x| x.is_element()))
-            {
-                roles.push((
-                    tidy(r.text().unwrap_or_default()).to_lowercase(),
-                    who.clone(),
-                ));
-            }
+        }
+        roles
+    }
+
+    /// The Comic Vine id, when the IDS has one.
+    fn comic_vine_id(&self) -> Option<String> {
+        Self::child(self.root, "IDS")
+            .into_iter()
+            .flat_map(|ids| ids.children().filter(|c| c.is_element()))
+            .find(|c| {
+                c.attribute("source")
+                    .is_some_and(|s| s.eq_ignore_ascii_case("Comic Vine"))
+            })
+            .and_then(|c| c.text())
+            .map(|id| id.trim().to_string())
+            .filter(|id| id.chars().all(|c| c.is_ascii_digit()) && !id.is_empty())
+    }
+}
+
+fn tidy(t: &str) -> String {
+    text::nfc(&text::collapse_spaces(t.trim()))
+}
+
+/// The people with any of the roles, once each, joined.
+fn people(roles: &[(String, String)], wanted: &[&str]) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    for (role, who) in roles {
+        if wanted.contains(&role.as_str()) && !out.contains(&who.as_str()) {
+            out.push(who);
         }
     }
-    let people = |wanted: &[&str]| {
-        let mut out: Vec<&str> = Vec::new();
-        for (role, who) in &roles {
-            if wanted.contains(&role.as_str()) && !out.contains(&who.as_str()) {
-                out.push(who);
-            }
-        }
-        out.join(", ")
-    };
-    let cover_date = at(&["CoverDate"]);
+    out.join(", ")
+}
+
+/// The fields a `ComicInfo.xml` has no element for.
+fn metron_extra(m: &Metron, roles: &[(String, String)], cover_date: &str) -> crate::fields::Extra {
+    use crate::fields::add;
     let mut extra = crate::fields::Extra::new();
-    crate::fields::add_date(&mut extra, &cover_date);
-    add(&mut extra, "story arc", &all("Arcs", "Arc").join(", "));
-    add(&mut extra, "imprint", &at(&["Publisher", "Imprint"]));
-    add(&mut extra, "format", &at(&["Series", "Format"]));
+    crate::fields::add_date(&mut extra, cover_date);
+    add(&mut extra, "story arc", &m.all("Arcs", "Arc").join(", "));
+    add(&mut extra, "imprint", &m.at(&["Publisher", "Imprint"]));
+    add(&mut extra, "format", &m.at(&["Series", "Format"]));
     add(
         &mut extra,
         "genre",
-        all("Genres", "Genre").first().map_or("", String::as_str),
+        m.all("Genres", "Genre").first().map_or("", String::as_str),
     );
     add(
         &mut extra,
         "inker",
-        &people(&["inker", "embellisher", "finishes"]),
+        &people(roles, &["inker", "embellisher", "finishes"]),
     );
     add(
         &mut extra,
         "colorist",
-        &people(&["colorist", "color separations"]),
+        &people(roles, &["colorist", "color separations"]),
     );
-    add(&mut extra, "letterer", &people(&["letterer"]));
-    add(&mut extra, "cover artist", &people(&["cover"]));
+    add(&mut extra, "letterer", &people(roles, &["letterer"]));
+    add(&mut extra, "cover artist", &people(roles, &["cover"]));
     add(
         &mut extra,
         "editor",
-        &people(&["editor", "editor in chief", "senior editor"]),
+        &people(roles, &["editor", "editor in chief", "senior editor"]),
     );
-    add(&mut extra, "translator", &people(&["translator"]));
-    let pages = at(&["PageCount"]);
+    add(&mut extra, "translator", &people(roles, &["translator"]));
+    let pages = m.at(&["PageCount"]);
     if pages != "0" {
         add(&mut extra, "pages", &pages);
     }
-    let rating = at(&["AgeRating"]);
+    let rating = m.at(&["AgeRating"]);
     if !rating.eq_ignore_ascii_case("unknown") {
         add(&mut extra, "age rating", &rating);
     }
     add(
         &mut extra,
         "language",
-        child(root, "Series")
+        Metron::child(m.root, "Series")
             .and_then(|s| s.attribute("lang"))
             .unwrap_or_default(),
     );
-    add(&mut extra, "alternate number", &at(&["AlternativeNumber"]));
-    let mut gtin = at(&["GTIN", "ISBN"]);
+    add(
+        &mut extra,
+        "alternate number",
+        &m.at(&["AlternativeNumber"]),
+    );
+    let mut gtin = m.at(&["GTIN", "ISBN"]);
     if gtin.is_empty() {
-        gtin = at(&["GTIN", "UPC"]);
+        gtin = m.at(&["GTIN", "UPC"]);
     }
     add(&mut extra, "gtin", &gtin);
+    extra
+}
+
+/// The fields of a `MetronInfo.xml` text, as a `ComicInfo.xml`'s.
+pub fn parse_metron(xml: &str) -> Option<ComicInfo> {
+    let doc = roxmltree::Document::parse(xml.trim_start_matches('\u{feff}')).ok()?;
+    let root = doc.root_element();
+    if !root.tag_name().name().eq_ignore_ascii_case("MetronInfo") {
+        return None;
+    }
+    let m = Metron { root };
+    let roles = m.roles();
+    let cover_date = m.at(&["CoverDate"]);
+    let extra = metron_extra(&m, &roles, &cover_date);
     // A Comic Vine id, as a link the rest already reads.
-    let comic_vine = child(root, "IDS")
-        .into_iter()
-        .flat_map(|ids| ids.children().filter(|c| c.is_element()))
-        .find(|c| {
-            c.attribute("source")
-                .is_some_and(|s| s.eq_ignore_ascii_case("Comic Vine"))
-        })
-        .and_then(|c| c.text())
-        .map(|id| id.trim().to_string())
-        .filter(|id| id.chars().all(|c| c.is_ascii_digit()) && !id.is_empty());
-    let stories = all("Stories", "Story");
+    let comic_vine = m.comic_vine_id();
+    let stories = m.all("Stories", "Story");
     let title = match stories.is_empty() {
-        true => at(&["CollectionTitle"]),
+        true => m.at(&["CollectionTitle"]),
         false => stories.join(" / "),
     };
     let info = ComicInfo {
-        series: at(&["Series", "Name"]),
-        number: at(&["Number"]),
-        count: at(&["Series", "IssueCount"])
+        series: m.at(&["Series", "Name"]),
+        number: m.at(&["Number"]),
+        count: m
+            .at(&["Series", "IssueCount"])
             .parse()
             .ok()
             .filter(|n| *n > 0),
-        volume: at(&["Series", "Volume"]),
+        volume: m.at(&["Series", "Volume"]),
         title,
         year: cover_date
             .get(..4)
             .and_then(|y| y.parse().ok())
             .filter(|y| is_year(u32::from(*y))),
-        publisher: at(&["Publisher", "Name"]),
-        writer: people(&["writer", "script", "story", "plot"]),
-        penciller: people(&[
-            "artist",
-            "penciller",
-            "illustrator",
-            "breakdowns",
-            "layouts",
-        ]),
+        publisher: m.at(&["Publisher", "Name"]),
+        writer: people(&roles, &["writer", "script", "story", "plot"]),
+        penciller: people(
+            &roles,
+            &[
+                "artist",
+                "penciller",
+                "illustrator",
+                "breakdowns",
+                "layouts",
+            ],
+        ),
         web: comic_vine
             .map(|id| format!("https://comicvine.gamespot.com/issue/4000-{id}/"))
             .unwrap_or_default(),
