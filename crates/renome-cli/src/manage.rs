@@ -530,23 +530,28 @@ pub fn rules(m: &ArgMatches) -> Result<Exit, String> {
     Ok(Exit::Done)
 }
 
+/// An option by the name typed.
+fn find_option(name: &str) -> Result<&'static renome_services::options::Setting, String> {
+    renome_services::options::setting(name).ok_or_else(|| t("unknownSetting", &[("name", &name)]))
+}
+
+/// An option's value as saved, else its default.
+fn value_of(settings: Option<&Value>, s: &renome_services::options::Setting) -> Value {
+    settings
+        .and_then(|v| v.get(s.name).cloned())
+        .unwrap_or_else(|| renome_services::options::default_of(s))
+}
+
 pub fn options(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> {
-    use renome_services::options::{self as opts, SETTINGS};
-    let find =
-        |name: &str| opts::setting(name).ok_or_else(|| t("unknownSetting", &[("name", &name)]));
-    let value_of = |s: &opts::Setting| -> Value {
-        settings
-            .as_ref()
-            .and_then(|v| v.get(s.name).cloned())
-            .unwrap_or_else(|| opts::default_of(s))
+    let option = |s: &ArgMatches| {
+        find_option(
+            s.get_one::<String>("option")
+                .expect("required by the argument parser"),
+        )
     };
     match m.subcommand() {
         Some(("get", s)) => {
-            let set = find(
-                s.get_one::<String>("option")
-                    .expect("required by the argument parser"),
-            )?;
-            let v = value_of(set);
+            let v = value_of(settings.as_ref(), option(s)?);
             println!(
                 "{}",
                 if out::json() {
@@ -557,40 +562,13 @@ pub fn options(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> 
             );
         }
         Some(("set", s)) => {
-            let set = find(
-                s.get_one::<String>("option")
-                    .expect("required by the argument parser"),
-            )?;
-            let (key, kind) = (&set.name, &set.kind);
             let raw = s
                 .get_one::<String>("value")
                 .expect("required by the argument parser");
-            let spec = catalog::RuleSpec {
-                kind: "options",
-                hint: None,
-                whole_name: false,
-                options: &[],
-            };
-            let opt = catalog::Opt {
-                name: key,
-                old: None,
-                kind: *kind,
-                default: catalog::Default::Text(""),
-                label: "",
-                hint: None,
-            };
-            let v = typed(&spec, &opt, raw)?;
-            let mut now = settings_now();
-            now[*key] = v.clone();
-            save_settings(&now)?;
-            out::note(&t("settingSaved", &[("name", key), ("value", &v)]));
+            set_option(option(s)?, raw)?;
         }
         Some(("reset", s)) => {
-            let key = &find(
-                s.get_one::<String>("option")
-                    .expect("required by the argument parser"),
-            )?
-            .name;
+            let key = &option(s)?.name;
             let mut now = settings_now();
             if let Some(obj) = now.as_object_mut() {
                 obj.remove(*key);
@@ -598,42 +576,71 @@ pub fn options(m: &ArgMatches, settings: Option<Value>) -> Result<Exit, String> 
             save_settings(&now)?;
             out::note(&t("settingSaved", &[("name", key), ("value", &"—")]));
         }
-        _ => {
-            let mut list = Vec::new();
-            for set in SETTINGS {
-                let (key, kind, label, window) =
-                    (&set.name, &set.kind, &set.label, &set.window_only);
-                let v = value_of(set);
-                if out::json() {
-                    list.push(json!({ "name": key, "value": v, "windowOnly": window, "label": t(label, &[]) }));
-                } else {
-                    let tag = if *window {
-                        out::dim(&format!(" ({})", t("windowOnly", &[])))
-                    } else {
-                        String::new()
-                    };
-                    println!(
-                        "{} = {}{}",
-                        out::bold(key),
-                        v.as_str().map_or(v.to_string(), str::to_string),
-                        tag
-                    );
-                    println!(
-                        "    {} · {}",
-                        out::dim(&t(label, &[])),
-                        out::dim(&rulespec::kind_text(kind))
-                    );
-                }
-            }
-            if out::json() {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&list).unwrap_or_default()
-                );
-            }
-        }
+        _ => list_options(settings.as_ref()),
     }
     Ok(Exit::Done)
+}
+
+/// Saves an option's value, typed as its kind says.
+fn set_option(set: &renome_services::options::Setting, raw: &str) -> Result<(), String> {
+    let (key, kind) = (&set.name, &set.kind);
+    let spec = catalog::RuleSpec {
+        kind: "options",
+        hint: None,
+        whole_name: false,
+        options: &[],
+    };
+    let opt = catalog::Opt {
+        name: key,
+        old: None,
+        kind: *kind,
+        default: catalog::Default::Text(""),
+        label: "",
+        hint: None,
+    };
+    let v = typed(&spec, &opt, raw)?;
+    let mut now = settings_now();
+    now[*key] = v.clone();
+    save_settings(&now)?;
+    out::note(&t("settingSaved", &[("name", key), ("value", &v)]));
+    Ok(())
+}
+
+/// Every option with its value, as JSON or as text.
+fn list_options(settings: Option<&Value>) {
+    let mut list = Vec::new();
+    for set in renome_services::options::SETTINGS {
+        let (key, kind, label, window) = (&set.name, &set.kind, &set.label, &set.window_only);
+        let v = value_of(settings, set);
+        if out::json() {
+            list.push(
+                json!({ "name": key, "value": v, "windowOnly": window, "label": t(label, &[]) }),
+            );
+        } else {
+            let tag = if *window {
+                out::dim(&format!(" ({})", t("windowOnly", &[])))
+            } else {
+                String::new()
+            };
+            println!(
+                "{} = {}{}",
+                out::bold(key),
+                v.as_str().map_or(v.to_string(), str::to_string),
+                tag
+            );
+            println!(
+                "    {} · {}",
+                out::dim(&t(label, &[])),
+                out::dim(&rulespec::kind_text(kind))
+            );
+        }
+    }
+    if out::json() {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&list).unwrap_or_default()
+        );
+    }
 }
 
 /// A value typed for an option, checked against its kind.

@@ -46,6 +46,11 @@ fn rule_sources(c: Command) -> Command {
     )
 }
 fn list_options(c: Command) -> Command {
+    list_choose(list_edit(list_filter(c)))
+}
+
+/// What of the list is shown, and in what order.
+fn list_filter(c: Command) -> Command {
     c.arg(
         Arg::new("filter")
             .long("filter")
@@ -82,7 +87,11 @@ fn list_options(c: Command) -> Command {
             .help(t("argFolders", &[]))
             .action(ArgAction::SetTrue),
     )
-    .arg(
+}
+
+/// The names and details typed in, and where files go.
+fn list_edit(c: Command) -> Command {
+    c.arg(
         Arg::new("name")
             .long("name")
             .help(t("argName", &[]))
@@ -119,7 +128,11 @@ fn list_options(c: Command) -> Command {
             .requires("to")
             .action(ArgAction::SetTrue),
     )
-    .arg(
+}
+
+/// What is looked up, how doubts are settled, and the lists written.
+fn list_choose(c: Command) -> Command {
+    c.arg(
         Arg::new("all")
             .long("all")
             .help(t("argAll", &[]))
