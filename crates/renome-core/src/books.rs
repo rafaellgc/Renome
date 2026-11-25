@@ -752,17 +752,51 @@ fn own_authors(g: &Guess, list: Vec<String>) -> Vec<String> {
 /// `lang` (`pt`) is the reader's language: a book with no edition in it is
 /// shown by its own title, not by one in a third language.
 pub fn rank(g: &Guess, docs: Vec<Doc>, isbn: Option<&str>, lang: &str) -> (Vec<Candidate>, bool) {
-    let lang3 = match lang.split('-').next().unwrap_or("") {
-        "pt" => "por",
-        "en" => "eng",
-        "es" => "spa",
-        _ => "",
-    };
     let mut pairs = vec![(g.title.clone(), g.author.clone())];
     pairs.extend(g.alts.iter().cloned());
     let any_author = pairs.iter().any(|(_, a)| !name_words(a).is_empty());
-    let mut out: Vec<(Candidate, f64, Option<f64>)> = Vec::new();
-    for (i, doc) in docs.into_iter().enumerate() {
+    let ctx = Ranking {
+        g,
+        pairs: &pairs,
+        any_author,
+        isbn,
+        lang3: match lang.split('-').next().unwrap_or("") {
+            "pt" => "por",
+            "en" => "eng",
+            "es" => "spa",
+            _ => "",
+        },
+    };
+    let mut out: Vec<(Candidate, f64, Option<f64>)> = docs
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, doc)| ctx.score(i, doc))
+        .collect();
+    // One work per result (Open Library repeats some).
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|(c, ..)| seen.insert(c.work.clone()));
+    out.sort_by(|a, b| b.0.score.total_cmp(&a.0.score));
+    let auto = ctx.is_sure(&out);
+    (out.into_iter().map(|(c, ..)| c).collect(), auto)
+}
+
+/// What ranking the books found reads of the search.
+struct Ranking<'a> {
+    g: &'a Guess,
+    /// The readings of the name: (title, author).
+    pairs: &'a [(String, String)],
+    any_author: bool,
+    isbn: Option<&'a str>,
+    /// The reader's language as Open Library writes it (`por`).
+    lang3: &'a str,
+}
+
+impl Ranking<'_> {
+    /// A book found, as a candidate with its score, the fit of its title
+    /// and that of its author; none when it has nothing to do with the
+    /// search.
+    fn score(&self, i: usize, doc: Doc) -> Option<(Candidate, f64, Option<f64>)> {
+        let (g, pairs, isbn) = (self.g, self.pairs, self.isbn);
         let ed = doc
             .editions
             .as_ref()
@@ -801,18 +835,18 @@ pub fn rank(g: &Guess, docs: Vec<Doc>, isbn: Option<&str>, lang: &str) -> (Vec<C
         // left out (`A regra do êxito` finds `Um sol no fim da serra`).
         let title_hit = pairs.iter().any(|(t, _)| {
             title_fit(t, &ed.title).max(title_fit(t, &doc.title))
-                >= if any_author { 0.85 } else { 0.6 }
+                >= if self.any_author { 0.85 } else { 0.6 }
         });
         let author_hit = pairs
             .iter()
             .any(|(_, a)| author_fit(a, &doc.author_name).is_some_and(|x| x >= 0.5));
         if !(by_isbn || title_hit || author_hit) {
-            continue;
+            return None;
         }
         // The book the search by title and author put first, when none of
         // the titles here fits what the book is called: another translation
-        // of the same work (`2077` for "Dois Mil e Setenta e Sete"),
-        // unless the guess is a short form of one (`Nina Torres`).
+        // of the same work (`2077` for "Dois Mil e Setenta e Sete"), unless
+        // the guess is a short form of one (`Nina Torres`).
         let translated = doc.top_by_title
             && afit.is_some_and(|a| a >= 0.5)
             && !guessed.is_empty()
@@ -827,21 +861,7 @@ pub fn rank(g: &Guess, docs: Vec<Doc>, isbn: Option<&str>, lang: &str) -> (Vec<C
         } else {
             ranked + popular + year_bonus - i as f64 * 0.01
         };
-        // The edition's title is the one in the reader's language; for
-        // another translation, the guessed title stays.
-        let title = if by_isbn || title_fit(&guessed, &ed.title) >= 0.8 {
-            ed.title.clone()
-        } else if title_fit(&guessed, &doc.title) >= 0.8 {
-            doc.title.clone()
-        } else if translated {
-            guessed.clone()
-        } else if !ed.title.is_empty()
-            && (lang3.is_empty() || ed.language.iter().any(|l| l == lang3))
-        {
-            ed.title.clone()
-        } else {
-            doc.title.clone()
-        };
+        let title = self.title_of(&doc, &ed, &guessed, by_isbn, translated);
         let names = own_authors(g, authors(&doc.author_name));
         let title = choose_title(g, &title, &names, by_isbn && plausible(g, &title, &names));
         let isbn_here = match isbn {
@@ -873,39 +893,64 @@ pub fn rank(g: &Guess, docs: Vec<Doc>, isbn: Option<&str>, lang: &str) -> (Vec<C
             exact: by_isbn,
             score,
         };
-        out.push((
+        Some((
             c,
             if by_isbn { 1.0 } else { tfit },
             if by_isbn { Some(1.0) } else { afit },
-        ));
+        ))
     }
-    // One work per result (Open Library repeats some).
-    let mut seen = std::collections::HashSet::new();
-    out.retain(|(c, ..)| seen.insert(c.work.clone()));
-    out.sort_by(|a, b| b.0.score.total_cmp(&a.0.score));
-    let auto = match out.as_slice() {
-        [] => false,
-        [(best, tfit, afit), rest @ ..] => {
-            if isbn.is_some() && best.score >= 2.0 {
-                // Without an author the name would lack one: the review asks.
-                !best.authors.is_empty()
-                    && (plausible(g, &best.title, &best.authors)
-                        || plausible(g, &best.original_title, &best.authors))
-            } else {
-                let author_ok = match afit {
-                    Some(a) => *a >= 0.5,
-                    None => *tfit >= 0.99,
-                };
-                // A close second that is the same book (Open Library has
-                // duplicates) does not make the choice doubtful.
-                let clear = rest.first().is_none_or(|(second, ..)| {
-                    second.score < best.score - 0.1 || same_book(best, second)
-                });
-                *tfit >= 0.95 && author_ok && clear
+
+    /// The title a book goes by: the edition's is the one in the reader's
+    /// language; for another translation, the guessed title stays.
+    fn title_of(
+        &self,
+        doc: &Doc,
+        ed: &Edition,
+        guessed: &str,
+        by_isbn: bool,
+        translated: bool,
+    ) -> String {
+        if by_isbn || title_fit(guessed, &ed.title) >= 0.8 {
+            ed.title.clone()
+        } else if title_fit(guessed, &doc.title) >= 0.8 {
+            doc.title.clone()
+        } else if translated {
+            guessed.to_string()
+        } else if !ed.title.is_empty()
+            && (self.lang3.is_empty() || ed.language.iter().any(|l| l == self.lang3))
+        {
+            ed.title.clone()
+        } else {
+            doc.title.clone()
+        }
+    }
+
+    /// Whether the best book can be picked without asking.
+    fn is_sure(&self, out: &[(Candidate, f64, Option<f64>)]) -> bool {
+        match out {
+            [] => false,
+            [(best, tfit, afit), rest @ ..] => {
+                if self.isbn.is_some() && best.score >= 2.0 {
+                    // Without an author the name would lack one: the review
+                    // asks.
+                    !best.authors.is_empty()
+                        && (plausible(self.g, &best.title, &best.authors)
+                            || plausible(self.g, &best.original_title, &best.authors))
+                } else {
+                    let author_ok = match afit {
+                        Some(a) => *a >= 0.5,
+                        None => *tfit >= 0.99,
+                    };
+                    // A close second that is the same book (Open Library has
+                    // duplicates) does not make the choice doubtful.
+                    let clear = rest.first().is_none_or(|(second, ..)| {
+                        second.score < best.score - 0.1 || same_book(best, second)
+                    });
+                    *tfit >= 0.95 && author_ok && clear
+                }
             }
         }
-    };
-    (out.into_iter().map(|(c, ..)| c).collect(), auto)
+    }
 }
 
 /// Each author once (`Ítalo Vieira Junior, Ítalo Vieira Júnior`), without
@@ -1827,6 +1872,119 @@ mod tests {
             Some(1.0)
         );
         assert_eq!(author_fit("", &["X".into()]), None);
+    }
+
+    /// Pins the ranking over several searches, so `rank` can be taken apart.
+    #[test]
+    fn rank_does_not_change() {
+        let docs = |list: &[(&str, &str, &str, u32, &str, u16, &str)]| -> Vec<Doc> {
+            list.iter()
+                .enumerate()
+                .map(|(n, (work, title, author, count, ed, year, lang))| {
+                    serde_json::from_value(serde_json::json!({
+                        "key": format!("/works/{work}"),
+                        "title": title,
+                        "author_name": [author, "[author not identified]"],
+                        "first_publish_year": year,
+                        "edition_count": count,
+                        "cover_i": n as i64 + 5,
+                        "number_of_pages_median": 100 + n as u32,
+                        "top_by_title": n == 1,
+                        "editions": {"docs": [{
+                            "key": format!("/books/{work}M"),
+                            "title": ed,
+                            "publish_date": [format!("{}", year + 3)],
+                            "publisher": ["Editora X"],
+                            "language": [lang],
+                            "isbn": ["9780306406157"],
+                            "number_of_pages": 200
+                        }]}
+                    }))
+                    .map(|mut d: Doc| {
+                        d.top_by_title = n == 1;
+                        d
+                    })
+                    .unwrap()
+                })
+                .collect()
+        };
+        let sets = [
+            docs(&[
+                (
+                    "OL1W",
+                    "The Lighthouse",
+                    "Helena Quintal",
+                    40,
+                    "O Farol",
+                    2019,
+                    "por",
+                ),
+                (
+                    "OL2W",
+                    "Another Tale",
+                    "Someone Else",
+                    3,
+                    "Another Tale",
+                    1990,
+                    "eng",
+                ),
+                ("OL3W", "Dois Mil", "Helena Quintal", 9, "2077", 2001, "por"),
+            ]),
+            docs(&[
+                ("OL4W", "Farol", "Helena Quintal", 2, "Farol", 2025, "por"),
+                ("OL4W", "Farol", "Helena Quintal", 2, "Farol", 2025, "por"),
+            ]),
+            docs(&[(
+                "OL5W",
+                "Nina Torres",
+                "Autor Desconhecido",
+                1,
+                "Nina Torres",
+                2010,
+                "spa",
+            )]),
+            Vec::new(),
+        ];
+        let guesses = [
+            Guess {
+                title: "O Farol".into(),
+                author: "Helena Quintal".into(),
+                year: Some(2019),
+                ..Guess::default()
+            },
+            Guess {
+                title: "Farol".into(),
+                author: String::new(),
+                year: None,
+                alts: vec![("Helena Quintal".into(), "Farol".into())],
+                ..Guess::default()
+            },
+            Guess {
+                title: "Dois Mil e Setenta e Sete".into(),
+                author: "Helena Quintal".into(),
+                year: Some(2001),
+                ..Guess::default()
+            },
+            Guess {
+                title: "Nina".into(),
+                author: "Torres".into(),
+                ..Guess::default()
+            },
+        ];
+        let mut all = Vec::new();
+        for set in &sets {
+            for g in &guesses {
+                for isbn in [None, Some("9780306406157")] {
+                    for lang in ["", "pt-BR", "en"] {
+                        let (c, auto) = rank(g, set.clone(), isbn, lang);
+                        all.push(format!("{c:?} {auto}"));
+                    }
+                }
+            }
+        }
+        let sum = xxhash_rust::xxh3::xxh3_64(all.join("\n").as_bytes());
+        println!("hash {sum:016x}");
+        assert_eq!(sum, 0x01bcb80c4d4d2832, "the ranking changed");
     }
 
     #[test]
