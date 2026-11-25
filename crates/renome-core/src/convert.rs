@@ -2009,20 +2009,8 @@ fn taken_out(
     page: &PdfPage,
     blank: (u32, u32),
 ) -> Result<(Vec<u8>, &'static str), String> {
-    let broken = |e: String| format!("archiveBroken: {e}");
     if page.pic == Pic::Blank {
-        let (w, h) = blank;
-        let row = vec![0xffu8; (w as usize).div_ceil(8)];
-        let rows = row.repeat(h as usize);
-        let png = write_png(
-            w,
-            h,
-            png::ColorType::Grayscale,
-            png::BitDepth::One,
-            None,
-            &rows,
-        )?;
-        return Ok((png, "png"));
+        return blank_page(blank);
     }
     if let Some(m) = page.smask
         && !opaque(doc, m)
@@ -2043,86 +2031,125 @@ fn taken_out(
             pre,
             colors,
             invert,
-        } => {
-            let data = unlayered(s, doc, pre)?;
-            let samples = match codec {
-                Codec::Jpeg => {
-                    if !data.starts_with(&[0xff, 0xd8]) {
-                        return Err(broken("not a JPEG".into()));
-                    }
-                    let cmyk = colors == Some(Colors::Cmyk);
-                    if page.turn == UPRIGHT && !cmyk && !invert {
-                        return Ok((data, "jpg"));
-                    }
-                    // Turned without decoding, when its size allows.
-                    if !cmyk
-                        && !invert
-                        && let Some(j) = jpeg_turned(&data, page.turn)
-                    {
-                        return Ok((j, "jpg"));
-                    }
-                    let mut s = decode_jpeg(&data)?;
-                    s.lossy = cmyk;
-                    s
-                }
-                Codec::Jpx => decode_jpx(&data)?,
-                Codec::Jbig2 => decode_jbig2(doc, &s.dict, &data)?,
-                Codec::Ccitt => decode_ccitt(doc, &s.dict, &data)?,
-            };
-            let (w, h) = size_of(doc, &s.dict);
-            if (w, h) != (samples.width as u64, samples.height as u64) {
-                return Err(broken("picture size".into()));
-            }
-            write_samples(samples, page.turn, invert)
-        }
+        } => taken_coded(doc, page, s, codec, pre, colors, invert),
         Pic::Pixels {
             width,
             height,
             colors,
             bits,
             invert,
-        } => {
-            let (w, h) = (width as usize, height as usize);
-            let row = (w * colors.channels() * bits as usize).div_ceil(8);
-            let mut data = if s.dict.has(b"Filter") {
-                s.decompressed_content_with_limit(row * h + 4096)
-                    .map_err(|e| broken(e.to_string()))?
-            } else {
-                s.content.clone()
-            };
-            if data.len() < row * h {
-                return Err(broken("picture cut short".into()));
-            }
-            data.truncate(row * h);
-            let (colors, palette, data) = match colors {
-                Colors::Indexed => {
-                    let p = palette(doc, s.dict.get(b"ColorSpace").ok())
-                        .ok_or_else(|| broken("palette".into()))?;
-                    (Colors::Indexed, Some(p), data)
-                }
-                // Made RGB, no loss beyond the colors.
-                Colors::Cmyk => {
-                    let rgb = data
-                        .chunks(4)
-                        .flat_map(|c| rgb_of_cmyk(c[0], c[1], c[2], c[3]))
-                        .collect();
-                    (Colors::Rgb, None, rgb)
-                }
-                c => (c, None, data),
-            };
-            let samples = Samples {
-                width: w,
-                height: h,
-                colors,
-                palette,
-                bits,
-                data,
-                lossy: false,
-            };
-            write_samples(samples, page.turn, invert)
-        }
+        } => taken_pixels(doc, page, s, (width, height), colors, bits, invert),
         Pic::Blank | Pic::Render { .. } => Err("drawn".into()),
     }
+}
+
+/// A white page, one bit a pixel, as a PNG.
+fn blank_page(blank: (u32, u32)) -> Result<(Vec<u8>, &'static str), String> {
+    let (w, h) = blank;
+    let row = vec![0xffu8; (w as usize).div_ceil(8)];
+    let rows = row.repeat(h as usize);
+    let png = write_png(
+        w,
+        h,
+        png::ColorType::Grayscale,
+        png::BitDepth::One,
+        None,
+        &rows,
+    )?;
+    Ok((png, "png"))
+}
+
+/// A picture kept in its own codec: a JPEG as it is (or turned without
+/// decoding), the rest decoded and written without loss.
+fn taken_coded(
+    doc: &lopdf::Document,
+    page: &PdfPage,
+    s: &lopdf::Stream,
+    codec: Codec,
+    pre: usize,
+    colors: Option<Colors>,
+    invert: bool,
+) -> Result<(Vec<u8>, &'static str), String> {
+    let data = unlayered(s, doc, pre)?;
+    let samples = match codec {
+        Codec::Jpeg => {
+            if !data.starts_with(&[0xff, 0xd8]) {
+                return Err(broken("not a JPEG".into()));
+            }
+            let cmyk = colors == Some(Colors::Cmyk);
+            if page.turn == UPRIGHT && !cmyk && !invert {
+                return Ok((data, "jpg"));
+            }
+            // Turned without decoding, when its size allows.
+            if !cmyk
+                && !invert
+                && let Some(j) = jpeg_turned(&data, page.turn)
+            {
+                return Ok((j, "jpg"));
+            }
+            let mut s = decode_jpeg(&data)?;
+            s.lossy = cmyk;
+            s
+        }
+        Codec::Jpx => decode_jpx(&data)?,
+        Codec::Jbig2 => decode_jbig2(doc, &s.dict, &data)?,
+        Codec::Ccitt => decode_ccitt(doc, &s.dict, &data)?,
+    };
+    let (w, h) = size_of(doc, &s.dict);
+    if (w, h) != (samples.width as u64, samples.height as u64) {
+        return Err(broken("picture size".into()));
+    }
+    write_samples(samples, page.turn, invert)
+}
+
+/// A picture of raw pixels, written as a PNG (CMYK made RGB).
+fn taken_pixels(
+    doc: &lopdf::Document,
+    page: &PdfPage,
+    s: &lopdf::Stream,
+    (width, height): (u32, u32),
+    colors: Colors,
+    bits: u8,
+    invert: bool,
+) -> Result<(Vec<u8>, &'static str), String> {
+    let (w, h) = (width as usize, height as usize);
+    let row = (w * colors.channels() * bits as usize).div_ceil(8);
+    let mut data = if s.dict.has(b"Filter") {
+        s.decompressed_content_with_limit(row * h + 4096)
+            .map_err(|e| broken(e.to_string()))?
+    } else {
+        s.content.clone()
+    };
+    if data.len() < row * h {
+        return Err(broken("picture cut short".into()));
+    }
+    data.truncate(row * h);
+    let (colors, palette, data) = match colors {
+        Colors::Indexed => {
+            let p = palette(doc, s.dict.get(b"ColorSpace").ok())
+                .ok_or_else(|| broken("palette".into()))?;
+            (Colors::Indexed, Some(p), data)
+        }
+        // Made RGB, no loss beyond the colors.
+        Colors::Cmyk => {
+            let rgb = data
+                .chunks(4)
+                .flat_map(|c| rgb_of_cmyk(c[0], c[1], c[2], c[3]))
+                .collect();
+            (Colors::Rgb, None, rgb)
+        }
+        c => (c, None, data),
+    };
+    let samples = Samples {
+        width: w,
+        height: h,
+        colors,
+        palette,
+        bits,
+        data,
+        lossy: false,
+    };
+    write_samples(samples, page.turn, invert)
 }
 
 /// Draws page `index` with hayro, `scale` pixels per point, on white: a
