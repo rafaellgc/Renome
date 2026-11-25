@@ -52,12 +52,11 @@ fn zip_of(files: &[(&str, &[u8])]) -> Vec<u8> {
 /// (file name, bytes) of every seed: the fixtures on disk and made-up ones.
 fn seeds() -> Vec<(String, Vec<u8>)> {
     let mut v: Vec<(String, Vec<u8>)> = Vec::new();
-    let here = Path::new(env!("CARGO_MANIFEST_DIR"));
-    for dir in [
-        here.join("tests/fixtures"),
-        here.join("../renome-archive/tests/data"),
-    ] {
-        for e in std::fs::read_dir(dir).unwrap().flatten() {
+    // Relative to the crate, as the other tests are (so the same test
+    // runs from a copy of the fixtures on another machine); a folder that
+    // is not there only means fewer seeds.
+    for dir in ["tests/fixtures", "../renome-archive/tests/data"] {
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
             v.push((
                 e.file_name().to_string_lossy().into_owned(),
                 std::fs::read(e.path()).unwrap(),
