@@ -1038,59 +1038,14 @@ pub async fn audiobook_tags(
     };
     let store = history.files_dir(&id)?;
     let mut note = history.tagging(&id)?;
-    let mut covers: std::collections::HashMap<String, Option<Vec<u8>>> =
-        std::collections::HashMap::new();
-    let mut synopses: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut books = Books::new(ol, cover);
     let total = items.len();
-    crate::report(
-        host,
-        "book-progress",
-        serde_json::json!({ "done": 0, "total": total }),
-    );
+    book_progress(host, 0, total);
     let mut backups = Vec::new();
     let mut written = Vec::new();
     for (done, job) in items.into_iter().enumerate() {
-        let image = if cover {
-            let key = match job.cover {
-                Some(c) => format!("ol:{c}"),
-                None if !job.cover_url.is_empty() => job.cover_url.clone(),
-                // None: the book's folder's own cover, below.
-                None => String::new(),
-            };
-            if !key.is_empty() && !covers.contains_key(&key) {
-                let got = match job.cover {
-                    Some(c) => ol.cover(c).await,
-                    None => {
-                        ol.gb
-                            .cover(&renome_core::books::google_cover(&job.cover_url, 0))
-                            .await
-                    }
-                };
-                covers.insert(key.clone(), got.ok());
-            }
-            covers
-                .get(&key)
-                .cloned()
-                .flatten()
-                .or_else(|| job.path.parent().and_then(folder_cover))
-                .and_then(|b| tagwrite::embeddable_cover(&b, 1200))
-        } else {
-            None
-        };
-        let mut description = job.description.trim().to_string();
-        if description.is_empty() && !job.book.work.is_empty() {
-            if !synopses.contains_key(&job.book.work) {
-                let text = ol
-                    .work(&job.book.work)
-                    .await
-                    .ok()
-                    .and_then(|w| w.description)
-                    .map(|t| t.as_str().trim().to_string())
-                    .unwrap_or_default();
-                synopses.insert(job.book.work.clone(), text);
-            }
-            description = synopses[&job.book.work].clone();
-        }
+        let image = books.cover_of(&job).await;
+        let description = books.description_of(&job).await;
         let fields = tagwrite::audiobook_fields(&job.book, &description, &job.language);
         let (path, store) = (job.path.clone(), store.clone());
         note.start(&path);
@@ -1109,11 +1064,7 @@ pub async fn audiobook_tags(
             Ok(None) => {}
             Err(e) => report.errors.push((job.path.display().to_string(), e)),
         }
-        crate::report(
-            host,
-            "book-progress",
-            serde_json::json!({ "done": done + 1, "total": total }),
-        );
+        book_progress(host, done + 1, total);
     }
     report.written = backups.len();
     let saved = if backups.is_empty() {
@@ -1131,6 +1082,87 @@ pub async fn audiobook_tags(
             .push((String::new(), format!("err.history: {e}"))),
     }
     Ok((report, written))
+}
+
+fn book_progress(host: &dyn Host, done: usize, total: usize) {
+    crate::report(
+        host,
+        "book-progress",
+        serde_json::json!({ "done": done, "total": total }),
+    );
+}
+
+/// What is asked of Open Library once per book for the files of its parts:
+/// its cover and its synopsis.
+struct Books<'a> {
+    ol: &'a crate::openlibrary::Client,
+    /// Whether covers are written.
+    cover: bool,
+    covers: std::collections::HashMap<String, Option<Vec<u8>>>,
+    synopses: std::collections::HashMap<String, String>,
+}
+
+impl<'a> Books<'a> {
+    fn new(ol: &'a crate::openlibrary::Client, cover: bool) -> Self {
+        Self {
+            ol,
+            cover,
+            covers: Default::default(),
+            synopses: Default::default(),
+        }
+    }
+
+    /// The book's cover as it goes into the tags: the catalogue's, else the
+    /// book's folder's own.
+    async fn cover_of(&mut self, job: &AudiobookTagJob) -> Option<Vec<u8>> {
+        if !self.cover {
+            return None;
+        }
+        let key = match job.cover {
+            Some(c) => format!("ol:{c}"),
+            None if !job.cover_url.is_empty() => job.cover_url.clone(),
+            // None: the book's folder's own cover, below.
+            None => String::new(),
+        };
+        if !key.is_empty() && !self.covers.contains_key(&key) {
+            let got = match job.cover {
+                Some(c) => self.ol.cover(c).await,
+                None => {
+                    self.ol
+                        .gb
+                        .cover(&renome_core::books::google_cover(&job.cover_url, 0))
+                        .await
+                }
+            };
+            self.covers.insert(key.clone(), got.ok());
+        }
+        self.covers
+            .get(&key)
+            .cloned()
+            .flatten()
+            .or_else(|| job.path.parent().and_then(folder_cover))
+            .and_then(|b| renome_core::tagwrite::embeddable_cover(&b, 1200))
+    }
+
+    /// The synopsis: the one given, else the work's, fetched once.
+    async fn description_of(&mut self, job: &AudiobookTagJob) -> String {
+        let mut description = job.description.trim().to_string();
+        if description.is_empty() && !job.book.work.is_empty() {
+            if !self.synopses.contains_key(&job.book.work) {
+                let text = self
+                    .ol
+                    .work(&job.book.work)
+                    .await
+                    .ok()
+                    .and_then(|w| w.description)
+                    .map(|t| t.as_str().trim().to_string())
+                    .unwrap_or_default();
+                self.synopses.insert(job.book.work.clone(), text);
+            }
+            description = self.synopses[&job.book.work].clone();
+        }
+        description
+    }
 }
 
 #[derive(Default, serde::Serialize)]
