@@ -876,30 +876,40 @@ pub struct Written {
 /// How many to try per language before giving up on it.
 const TRIES: usize = 3;
 
-/// Downloads the subtitles beside the renamed videos (a name taken is
-/// never replaced). When OpenSubtitles' quota runs out, SubDL's are tried.
-pub async fn write(
-    host: &dyn Host,
-    auth: Auth,
-    items: Vec<Write>,
-    stop: impl Fn() -> bool,
-) -> Written {
-    let http = http();
-    let os = auth.os().then(|| Os {
-        http: http.clone(),
-        auth: auth.clone(),
-    });
-    let subdl = auth.subdl().then(|| Subdl {
-        http: http.clone(),
-        key: auth.subdl_key.clone(),
-    });
-    let subsource = auth
-        .subsource()
-        .then(|| Subsource::new(http.clone(), &auth));
-    let (mut os_ok, mut subdl_ok, mut subsource_ok) = (true, true, true);
-    let mut out = Written::default();
-    let mut items = items;
-    if let Some(os) = &os {
+/// The services subtitles come from, and which of them still answer: one
+/// out of downloads or with a wrong key is done for the rest.
+struct Sources {
+    os: Option<Os>,
+    subdl: Option<Subdl>,
+    subsource: Option<Subsource>,
+    os_ok: bool,
+    subdl_ok: bool,
+    subsource_ok: bool,
+}
+
+impl Sources {
+    fn new(auth: &Auth) -> Self {
+        let http = http();
+        Self {
+            os: auth.os().then(|| Os {
+                http: http.clone(),
+                auth: auth.clone(),
+            }),
+            subdl: auth.subdl().then(|| Subdl {
+                http: http.clone(),
+                key: auth.subdl_key.clone(),
+            }),
+            subsource: auth.subsource().then(|| Subsource::new(http.clone(), auth)),
+            os_ok: true,
+            subdl_ok: true,
+            subsource_ok: true,
+        }
+    }
+
+    /// OpenSubtitles' downloads left today, and the subtitles taken from
+    /// the other services first to keep them for those only it has.
+    async fn spare_quota(&self, items: &mut [Write], out: &mut Written) {
+        let Some(os) = &self.os else { return };
         let first_os =
             |l: &Vec<Candidate>| l.first().is_some_and(|c| c.source == Source::OpenSubtitles);
         let need = items
@@ -912,13 +922,93 @@ pub async fn write(
         {
             out.remaining = Some(left);
             spare_quota(
-                &mut items,
+                items,
                 left.max(0) as usize,
-                subdl.is_some(),
-                subsource.is_some(),
+                self.subdl.is_some(),
+                self.subsource.is_some(),
             );
         }
     }
+
+    /// The candidate's file and its extension; `None`: its service is off
+    /// (not given a key, or done for), so it is not tried.
+    async fn fetch(
+        &self,
+        c: &Candidate,
+        item: &Write,
+        out: &mut Written,
+    ) -> Option<Result<(Vec<u8>, String), String>> {
+        Some(match c.source {
+            Source::OpenSubtitles => {
+                let os = self.os.as_ref().filter(|_| self.os_ok)?;
+                os.download(c).await.map(|(b, ext, left)| {
+                    if left.is_some() {
+                        out.remaining = left;
+                    }
+                    (b, ext)
+                })
+            }
+            Source::Subdl => {
+                let sd = self.subdl.as_ref().filter(|_| self.subdl_ok)?;
+                sd.download(c)
+                    .await
+                    .and_then(|b| unpack(&b, item))
+                    .map(|(ext, b)| (b, ext))
+            }
+            Source::Subsource => {
+                let sd = self.subsource.as_ref().filter(|_| self.subsource_ok)?;
+                sd.download(c)
+                    .await
+                    .and_then(|b| unpack(&b, item))
+                    .map(|(ext, b)| (b, ext))
+            }
+        })
+    }
+
+    /// Out of downloads or a wrong key: that service is done for the rest.
+    fn failed(&mut self, e: &str, out: &mut Written) {
+        match e {
+            "osQuota" | "osBadKey" | "osBadLogin" => self.os_ok = false,
+            "subdlQuota" | "subdlBadKey" => self.subdl_ok = false,
+            "subsourceQuota" | "subsourceBadKey" => self.subsource_ok = false,
+            _ => {}
+        }
+        if e == "osQuota" {
+            out.remaining = Some(0);
+        }
+    }
+}
+
+/// The subtitle of the video's episode in an archive a service sent.
+fn unpack(archive: &[u8], item: &Write) -> Result<(String, Vec<u8>), String> {
+    let ep = item.season.zip(item.episode);
+    let video = item
+        .path
+        .file_stem()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    subs::from_archive(archive, ep, &video).ok_or_else(|| "subsEmpty".to_string())
+}
+
+/// What is known of a video that tells a subtitle made for another cut or
+/// frame rate.
+struct VideoFacts {
+    length: Option<f64>,
+    fps: Option<f64>,
+}
+
+/// Downloads the subtitles beside the renamed videos (a name taken is
+/// never replaced). When OpenSubtitles' quota runs out, SubDL's are tried.
+pub async fn write(
+    host: &dyn Host,
+    auth: Auth,
+    items: Vec<Write>,
+    stop: impl Fn() -> bool,
+) -> Written {
+    let mut sources = Sources::new(&auth);
+    let mut out = Written::default();
+    let mut items = items;
+    sources.spare_quota(&mut items, &mut out).await;
     let total = items.iter().map(|i| i.langs.len()).sum();
     let mut done = 0;
     crate::report(host, "subs-progress", Progress { done, total });
@@ -928,117 +1018,15 @@ pub async fn write(
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        // How long the video plays, to tell a subtitle made for another
-        // cut or frame rate.
-        let length = renome_core::video::length(&item.path);
-        let fps = renome_core::video::frame_rate(&item.path);
+        let facts = VideoFacts {
+            length: renome_core::video::length(&item.path),
+            fps: renome_core::video::frame_rate(&item.path),
+        };
         for list in &item.langs {
             if stop() {
                 break 'items;
             }
-            let mut last_err = None;
-            let mut tried = 0;
-            // The first one that did not fit the video's length: written
-            // when none of the others does (it cost a download).
-            let mut unfit: Option<(PathBuf, Vec<u8>)> = None;
-            for c in list {
-                if tried == TRIES {
-                    break;
-                }
-                let got = match c.source {
-                    Source::OpenSubtitles => match os.as_ref().filter(|_| os_ok) {
-                        Some(os) => os.download(c).await.map(|(b, ext, left)| {
-                            if left.is_some() {
-                                out.remaining = left;
-                            }
-                            (b, ext)
-                        }),
-                        None => continue,
-                    },
-                    Source::Subdl => match subdl.as_ref().filter(|_| subdl_ok) {
-                        Some(sd) => sd
-                            .download(c)
-                            .await
-                            .and_then(|b| {
-                                let ep = item.season.zip(item.episode);
-                                let video = item
-                                    .path
-                                    .file_stem()
-                                    .map(|n| n.to_string_lossy().into_owned())
-                                    .unwrap_or_default();
-                                subs::from_archive(&b, ep, &video)
-                                    .ok_or_else(|| "subsEmpty".to_string())
-                            })
-                            .map(|(ext, b)| (b, ext)),
-                        None => continue,
-                    },
-                    Source::Subsource => match subsource.as_ref().filter(|_| subsource_ok) {
-                        Some(sd) => sd
-                            .download(c)
-                            .await
-                            .and_then(|b| {
-                                let ep = item.season.zip(item.episode);
-                                let video = item
-                                    .path
-                                    .file_stem()
-                                    .map(|n| n.to_string_lossy().into_owned())
-                                    .unwrap_or_default();
-                                subs::from_archive(&b, ep, &video)
-                                    .ok_or_else(|| "subsEmpty".to_string())
-                            })
-                            .map(|(ext, b)| (b, ext)),
-                        None => continue,
-                    },
-                };
-                tried += 1;
-                match got {
-                    Ok((bytes, ext)) => {
-                        let to = subs::target(&item.path, &c.lang, c.hearing_impaired, &ext);
-                        let text = ["srt", "ass", "ssa", "vtt", "sub"]
-                            .contains(&ext.to_lowercase().as_str());
-                        let fit = match length {
-                            Some(secs) if text => subs::fits(&bytes, Some(&c.lang), secs, fps),
-                            _ => None,
-                        };
-                        let bytes = if text {
-                            renome_core::subtext::to_utf8(&bytes, Some(&c.lang))
-                        } else {
-                            bytes
-                        };
-                        if fit == Some(false) {
-                            if unfit.is_none() {
-                                unfit = Some((to, bytes));
-                            }
-                            last_err = Some("subsLength".to_string());
-                            continue;
-                        }
-                        save(&mut out, &to, &bytes);
-                        unfit = None;
-                        last_err = None;
-                        break;
-                    }
-                    Err(e) => {
-                        // Out of downloads or a wrong key: that source is
-                        // done for the rest.
-                        match e.as_str() {
-                            "osQuota" | "osBadKey" | "osBadLogin" => os_ok = false,
-                            "subdlQuota" | "subdlBadKey" => subdl_ok = false,
-                            "subsourceQuota" | "subsourceBadKey" => subsource_ok = false,
-                            _ => {}
-                        }
-                        if e == "osQuota" {
-                            out.remaining = Some(0);
-                        }
-                        last_err = Some(e);
-                    }
-                }
-            }
-            if let Some((to, bytes)) = unfit {
-                // Kept, with a word that it may be out of time.
-                save(&mut out, &to, &bytes);
-                last_err = Some("subsLengthKept".to_string());
-            }
-            if let Some(e) = last_err {
+            if let Some(e) = write_language(&mut sources, &item, list, &facts, &mut out).await {
                 out.errors.push((
                     format!(
                         "{name} ({})",
@@ -1052,6 +1040,68 @@ pub async fn write(
         }
     }
     out
+}
+
+/// One language of one video: the candidates tried in order, up to
+/// [`TRIES`], until one is written. The reason none was, if so.
+async fn write_language(
+    sources: &mut Sources,
+    item: &Write,
+    list: &[Candidate],
+    facts: &VideoFacts,
+    out: &mut Written,
+) -> Option<String> {
+    let mut last_err = None;
+    let mut tried = 0;
+    // The first one that did not fit the video's length: written when none
+    // of the others does (it cost a download).
+    let mut unfit: Option<(PathBuf, Vec<u8>)> = None;
+    for c in list {
+        if tried == TRIES {
+            break;
+        }
+        let Some(got) = sources.fetch(c, item, out).await else {
+            continue;
+        };
+        tried += 1;
+        match got {
+            Ok((bytes, ext)) => {
+                let to = subs::target(&item.path, &c.lang, c.hearing_impaired, &ext);
+                let text =
+                    ["srt", "ass", "ssa", "vtt", "sub"].contains(&ext.to_lowercase().as_str());
+                let fit = match facts.length {
+                    Some(secs) if text => subs::fits(&bytes, Some(&c.lang), secs, facts.fps),
+                    _ => None,
+                };
+                let bytes = if text {
+                    renome_core::subtext::to_utf8(&bytes, Some(&c.lang))
+                } else {
+                    bytes
+                };
+                if fit == Some(false) {
+                    if unfit.is_none() {
+                        unfit = Some((to, bytes));
+                    }
+                    last_err = Some("subsLength".to_string());
+                    continue;
+                }
+                save(out, &to, &bytes);
+                unfit = None;
+                last_err = None;
+                break;
+            }
+            Err(e) => {
+                sources.failed(&e, out);
+                last_err = Some(e);
+            }
+        }
+    }
+    if let Some((to, bytes)) = unfit {
+        // Kept, with a word that it may be out of time.
+        save(out, &to, &bytes);
+        last_err = Some("subsLengthKept".to_string());
+    }
+    last_err
 }
 
 /// When OpenSubtitles has fewer downloads left today than the subtitles
