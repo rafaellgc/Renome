@@ -397,144 +397,165 @@ fn each_file(
     drawn_pages: &mut usize,
     opts: PdfOptions,
 ) -> Result<(), String> {
-    let broken = |e: String| format!("archiveBroken: {e}");
     match kind {
-        Kind::Rar => renome_archive::read(path, |e, data| {
-            if e.dir || e.other {
-                return Ok(true);
-            }
-            if e.encrypted {
-                return Err("archiveLocked".into());
-            }
-            each(
-                &Page {
-                    name: e.name.clone(),
-                    modified: e.modified,
-                },
-                data,
-            )?;
-            Ok(true)
-        })
+        Kind::Rar => rar_files(path, &mut each),
+        Kind::SevenZip => sevenz_files(path, &mut each),
+        Kind::Tar => tar_files(path, &mut each),
+        Kind::Pdf => pdf_files(path, &mut each, drawn_pages, opts),
+        Kind::Epub => epub_files(path, &mut each),
+        Kind::Kindle => kindle_files(path, &mut each),
+        Kind::Folder => folder_files(path, &mut each),
+        Kind::Zip => Err("comicUnsupported".into()),
+    }
+}
+
+/// What reading an archive is called when it fails.
+fn broken(e: String) -> String {
+    format!("archiveBroken: {e}")
+}
+
+/// What `each_file` hands each file to.
+type Each<'a> = &'a mut dyn FnMut(&Page, &mut dyn Read) -> Result<(), String>;
+
+fn rar_files(path: &Path, each: Each) -> Result<(), String> {
+    renome_archive::read(path, |e, data| {
+        if e.dir || e.other {
+            return Ok(true);
+        }
+        if e.encrypted {
+            return Err("archiveLocked".into());
+        }
+        each(
+            &Page {
+                name: e.name.clone(),
+                modified: e.modified,
+            },
+            data,
+        )?;
+        Ok(true)
+    })
+    .map_err(|e| {
+        if e == "archiveLocked" || e.starts_with("archiveBroken") {
+            e
+        } else if e.to_lowercase().contains("encrypt") || e.to_lowercase().contains("password") {
+            "archiveLocked".into()
+        } else {
+            broken(e)
+        }
+    })
+}
+
+fn sevenz_files(path: &Path, each: Each) -> Result<(), String> {
+    let mut reader = sevenz_rust2::ArchiveReader::open(path, sevenz_rust2::Password::empty())
         .map_err(|e| {
-            if e == "archiveLocked" || e.starts_with("archiveBroken") {
-                e
-            } else if e.to_lowercase().contains("encrypt") || e.to_lowercase().contains("password")
-            {
-                "archiveLocked".into()
+            let e = e.to_string();
+            if e.to_lowercase().contains("password") {
+                "archiveLocked".to_string()
             } else {
                 broken(e)
             }
-        }),
-        Kind::SevenZip => {
-            let mut reader =
-                sevenz_rust2::ArchiveReader::open(path, sevenz_rust2::Password::empty()).map_err(
-                    |e| {
-                        let e = e.to_string();
-                        if e.to_lowercase().contains("password") {
-                            "archiveLocked".to_string()
-                        } else {
-                            broken(e)
-                        }
-                    },
-                )?;
-            let mut failed = None;
-            reader
-                .for_each_entries(|entry, data| {
-                    if entry.is_directory() {
-                        return Ok(true);
-                    }
-                    let page = Page {
-                        name: entry.name().to_string(),
-                        modified: None,
-                    };
-                    match each(&page, data) {
-                        Ok(()) => Ok(true),
-                        Err(e) => {
-                            failed = Some(e);
-                            Ok(false)
-                        }
-                    }
-                })
-                .map_err(|e| broken(e.to_string()))?;
-            failed.map_or(Ok(()), Err)
-        }
-        Kind::Tar => {
-            let mut archive = tar::Archive::new(File::open(path).map_err(|e| e.to_string())?);
-            for entry in archive.entries().map_err(|e| broken(e.to_string()))? {
-                let mut entry = entry.map_err(|e| broken(e.to_string()))?;
-                if !entry.header().entry_type().is_file() {
-                    continue;
+        })?;
+    let mut failed = None;
+    reader
+        .for_each_entries(|entry, data| {
+            if entry.is_directory() {
+                return Ok(true);
+            }
+            let page = Page {
+                name: entry.name().to_string(),
+                modified: None,
+            };
+            match each(&page, data) {
+                Ok(()) => Ok(true),
+                Err(e) => {
+                    failed = Some(e);
+                    Ok(false)
                 }
-                let name = entry
-                    .path()
-                    .map_err(|e| broken(e.to_string()))?
-                    .to_string_lossy()
-                    .into_owned();
-                let modified = entry.header().mtime().ok().map(|t| t as i64);
-                each(&Page { name, modified }, &mut entry)?;
             }
-            Ok(())
+        })
+        .map_err(|e| broken(e.to_string()))?;
+    failed.map_or(Ok(()), Err)
+}
+
+fn tar_files(path: &Path, each: Each) -> Result<(), String> {
+    let mut archive = tar::Archive::new(File::open(path).map_err(|e| e.to_string())?);
+    for entry in archive.entries().map_err(|e| broken(e.to_string()))? {
+        let mut entry = entry.map_err(|e| broken(e.to_string()))?;
+        if !entry.header().entry_type().is_file() {
+            continue;
         }
-        Kind::Pdf => pdf_files(path, &mut each, drawn_pages, opts),
-        Kind::Epub => {
-            let comic = crate::pages::epub(path)?;
-            let mut zip = zip::ZipArchive::new(std::io::BufReader::new(
-                File::open(path).map_err(|e| e.to_string())?,
-            ))
-            .map_err(|e| broken(e.to_string()))?;
-            let digits = comic.pages.len().to_string().len().max(3);
-            for (i, page) in comic.pages.iter().enumerate() {
-                let mut entry = zip
-                    .by_name(&page.entry)
-                    .map_err(|e| broken(e.to_string()))?;
-                let modified = entry.last_modified().and_then(zip_secs);
-                let name = format!("{:0digits$}.{}", i + 1, page.ext);
-                each(&Page { name, modified }, &mut entry)?;
-            }
-            if let Some(info) = comic.info {
-                let mut entry = zip.by_name(&info).map_err(|e| broken(e.to_string()))?;
-                let page = Page {
-                    name: "ComicInfo.xml".into(),
-                    modified: None,
-                };
-                each(&page, &mut entry)?;
-            }
-            Ok(())
-        }
-        Kind::Kindle => {
-            let pages = crate::pages::kindle(path)?;
-            let mut file = File::open(path).map_err(|e| e.to_string())?;
-            let digits = pages.len().to_string().len().max(3);
-            for (i, page) in pages.iter().enumerate() {
-                use std::io::Seek;
-                file.seek(std::io::SeekFrom::Start(page.start))
-                    .map_err(|e| broken(e.to_string()))?;
-                let name = format!("{:0digits$}.{}", i + 1, page.ext);
-                let mut data = (&mut file).take(page.len);
-                each(
-                    &Page {
-                        name,
-                        modified: None,
-                    },
-                    &mut data,
-                )?;
-            }
-            Ok(())
-        }
-        Kind::Folder => {
-            for (file, name) in folder_pages(path)? {
-                let modified = fs::metadata(&file)
-                    .and_then(|m| m.modified())
-                    .ok()
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs() as i64);
-                let mut f = File::open(&file).map_err(|e| e.to_string())?;
-                each(&Page { name, modified }, &mut f)?;
-            }
-            Ok(())
-        }
-        Kind::Zip => Err("comicUnsupported".into()),
+        let name = entry
+            .path()
+            .map_err(|e| broken(e.to_string()))?
+            .to_string_lossy()
+            .into_owned();
+        let modified = entry.header().mtime().ok().map(|t| t as i64);
+        each(&Page { name, modified }, &mut entry)?;
     }
+    Ok(())
+}
+
+/// A comic EPUB's pages, then its `ComicInfo.xml`.
+fn epub_files(path: &Path, each: Each) -> Result<(), String> {
+    let comic = crate::pages::epub(path)?;
+    let mut zip = zip::ZipArchive::new(std::io::BufReader::new(
+        File::open(path).map_err(|e| e.to_string())?,
+    ))
+    .map_err(|e| broken(e.to_string()))?;
+    let digits = comic.pages.len().to_string().len().max(3);
+    for (i, page) in comic.pages.iter().enumerate() {
+        let mut entry = zip
+            .by_name(&page.entry)
+            .map_err(|e| broken(e.to_string()))?;
+        let modified = entry.last_modified().and_then(zip_secs);
+        let name = format!("{:0digits$}.{}", i + 1, page.ext);
+        each(&Page { name, modified }, &mut entry)?;
+    }
+    if let Some(info) = comic.info {
+        let mut entry = zip.by_name(&info).map_err(|e| broken(e.to_string()))?;
+        let page = Page {
+            name: "ComicInfo.xml".into(),
+            modified: None,
+        };
+        each(&page, &mut entry)?;
+    }
+    Ok(())
+}
+
+/// A Kindle comic's pages.
+fn kindle_files(path: &Path, each: Each) -> Result<(), String> {
+    use std::io::Seek;
+    let pages = crate::pages::kindle(path)?;
+    let mut file = File::open(path).map_err(|e| e.to_string())?;
+    let digits = pages.len().to_string().len().max(3);
+    for (i, page) in pages.iter().enumerate() {
+        file.seek(std::io::SeekFrom::Start(page.start))
+            .map_err(|e| broken(e.to_string()))?;
+        let name = format!("{:0digits$}.{}", i + 1, page.ext);
+        let mut data = (&mut file).take(page.len);
+        each(
+            &Page {
+                name,
+                modified: None,
+            },
+            &mut data,
+        )?;
+    }
+    Ok(())
+}
+
+/// A folder's pictures.
+fn folder_files(path: &Path, each: Each) -> Result<(), String> {
+    for (file, name) in folder_pages(path)? {
+        let modified = fs::metadata(&file)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64);
+        let mut f = File::open(&file).map_err(|e| e.to_string())?;
+        each(&Page { name, modified }, &mut f)?;
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------- PDF
