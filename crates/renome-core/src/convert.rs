@@ -1065,29 +1065,7 @@ fn pic_of(doc: &lopdf::Document, d: &lopdf::Dictionary) -> Option<(Pic, Option<l
     } else {
         int(b"BitsPerComponent").unwrap_or(8)
     };
-    // A `Decode` that changes nothing is fine; one value the other way
-    // round turns the picture over (black for white).
-    let mut invert = ink;
-    if let Ok(dec) = d.get(b"Decode") {
-        let dec: Vec<f64> = deref(doc, dec)
-            .as_array()
-            .ok()?
-            .iter()
-            .filter_map(|o| num(deref(doc, o)))
-            .collect();
-        let n = colors.map_or(dec.len() / 2, Colors::channels);
-        let plain: Vec<f64> = if colors == Some(Colors::Indexed) {
-            vec![0.0, ((1i64 << bits.clamp(1, 8)) - 1) as f64]
-        } else {
-            [0.0, 1.0].repeat(n)
-        };
-        if dec == plain {
-        } else if n == 1 && colors != Some(Colors::Indexed) && dec == [1.0, 0.0] {
-            invert = !invert;
-        } else {
-            return None;
-        }
-    }
+    let invert = decode_invert(doc, d, colors, bits, ink)?;
     let (last, before) = filters
         .split_last()
         .map_or((None, &[][..]), |(l, b)| (Some(l), b));
@@ -1099,27 +1077,7 @@ fn pic_of(doc: &lopdf::Document, d: &lopdf::Dictionary) -> Option<(Pic, Option<l
         _ => None,
     };
     if let Some(codec) = codec {
-        if !before.iter().all(|f| plain_filter(f)) {
-            return None;
-        }
-        // Black and white: one value of one bit.
-        let bilevel = matches!(codec, Codec::Jbig2 | Codec::Ccitt);
-        if bilevel && !matches!(colors, Some(Colors::Gray) | None) {
-            return None;
-        }
-        // The JPEG's own colors would come the other way round.
-        if codec == Codec::Jpeg && invert && colors != Some(Colors::Gray) {
-            return None;
-        }
-        return Some((
-            Pic::Coded {
-                codec,
-                pre: before.len(),
-                colors,
-                invert,
-            },
-            smask,
-        ));
+        return coded_pic(codec, before, colors, invert).map(|pic| (pic, smask));
     }
     if !filters.iter().all(|f| plain_filter(f)) {
         return None;
@@ -1143,6 +1101,70 @@ fn pic_of(doc: &lopdf::Document, d: &lopdf::Dictionary) -> Option<(Pic, Option<l
         },
         smask,
     ))
+}
+
+/// Whether the picture is drawn turned over (black for white): its inks,
+/// or a `Decode` that turns one value the other way round. `None`: a
+/// `Decode` that cannot be taken out as it is.
+fn decode_invert(
+    doc: &lopdf::Document,
+    d: &lopdf::Dictionary,
+    colors: Option<Colors>,
+    bits: i64,
+    ink: bool,
+) -> Option<bool> {
+    // A `Decode` that changes nothing is fine; one value the other way
+    // round turns the picture over (black for white).
+    let mut invert = ink;
+    if let Ok(dec) = d.get(b"Decode") {
+        let dec: Vec<f64> = deref(doc, dec)
+            .as_array()
+            .ok()?
+            .iter()
+            .filter_map(|o| num(deref(doc, o)))
+            .collect();
+        let n = colors.map_or(dec.len() / 2, Colors::channels);
+        let plain: Vec<f64> = if colors == Some(Colors::Indexed) {
+            vec![0.0, ((1i64 << bits.clamp(1, 8)) - 1) as f64]
+        } else {
+            [0.0, 1.0].repeat(n)
+        };
+        if dec == plain {
+        } else if n == 1 && colors != Some(Colors::Indexed) && dec == [1.0, 0.0] {
+            invert = !invert;
+        } else {
+            return None;
+        }
+    }
+    Some(invert)
+}
+
+/// A picture kept in its own codec (JPEG, JPEG 2000, JBIG2, CCITT), when
+/// what comes before it is plain and its colors fit.
+fn coded_pic(
+    codec: Codec,
+    before: &[Vec<u8>],
+    colors: Option<Colors>,
+    invert: bool,
+) -> Option<Pic> {
+    if !before.iter().all(|f| plain_filter(f)) {
+        return None;
+    }
+    // Black and white: one value of one bit.
+    let bilevel = matches!(codec, Codec::Jbig2 | Codec::Ccitt);
+    if bilevel && !matches!(colors, Some(Colors::Gray) | None) {
+        return None;
+    }
+    // The JPEG's own colors would come the other way round.
+    if codec == Codec::Jpeg && invert && colors != Some(Colors::Gray) {
+        return None;
+    }
+    Some(Pic::Coded {
+        codec,
+        pre: before.len(),
+        colors,
+        invert,
+    })
 }
 
 /// A transformation: `[a b c d e f]`, as PDF writes them.
