@@ -6,12 +6,13 @@ members = ["crates/renome-archive", "crates/renome-cli", "crates/renome-core", "
 codegen-units = 1
 lto = true
 opt-level = 3
-panic = "abort"
+# Not "abort": the readers wrap third-party decoders in `catch_unwind` so a
+# damaged file gives an error instead of taking the program down.
 strip = true
 
 [workspace.lints.clippy]
-# A panic on a user's files is a crash (the release build aborts): fallible
-# calls return errors, and an invariant is written as `expect("why")`.
+# A panic on a user's files is a failure: fallible calls return errors, and
+# an invariant is written as `expect("why")`.
 unwrap_used = "deny"
 dbg_macro = "deny"
 todo = "deny"
