@@ -340,6 +340,187 @@ fn frames(data: &[u8]) -> Option<(u64, i16, Vec<&[u8]>)> {
     Some((track, rel, out))
 }
 
+/// A header: id, size (`None`: unknown), header length.
+type Head = (u64, Option<u64>, u64);
+
+/// What the walk of a file has found so far.
+struct Scan {
+    /// The events of each track asked for.
+    out: HashMap<u64, Vec<Event>>,
+    /// How many bytes of each track were taken.
+    kept: HashMap<u64, usize>,
+    /// The time of the cluster being read.
+    cluster_ts: i64,
+    /// Nanoseconds in a time unit of the file.
+    scale: i64,
+}
+
+/// Where the walk goes on after an element of a cluster.
+enum Next {
+    Go,
+    /// The file is damaged from here: the cluster, and the walk, end.
+    End,
+}
+
+/// The time unit (nanoseconds) of the file.
+fn time_scale(f: &mut BufReader<File>) -> i64 {
+    matroska_element(f, INFO)
+        .and_then(|info| {
+            ebml(&info)
+                .find(|(id, _)| *id == 0x2a_d7b1)
+                .map(|(_, d)| ebml_uint(d))
+        })
+        .filter(|s| *s > 0)
+        .unwrap_or(1_000_000) as i64
+}
+
+/// Reads the EBML header and the segment's: where the segment's content
+/// starts and ends.
+fn segment_range(f: &mut BufReader<File>, size: u64) -> Result<(u64, u64), String> {
+    let mut pos = 0u64;
+    let (id, len, h) = header(f).ok_or("subMkv")?;
+    if id != 0x1a45_dfa3 {
+        return Err("subMkv".into());
+    }
+    pos += h + len.ok_or("subMkv")?;
+    f.seek(SeekFrom::Start(pos)).map_err(|e| e.to_string())?;
+    let (id, len, h) = header(f).ok_or("subMkv")?;
+    if id != SEGMENT {
+        return Err("subMkv".into());
+    }
+    pos += h;
+    let end = len.map_or(size, |l| (pos + l).min(size));
+    Ok((pos, end))
+}
+
+/// A block (simple, or in a group) of the tracks asked for is kept.
+fn read_block(f: &mut BufReader<File>, cid: u64, clen: u64, st: &mut Scan) -> Next {
+    let simple = cid == 0xa3;
+    // The track number comes first (inside the Block of a BlockGroup,
+    // after its header).
+    let mut peek = [0u8; 16];
+    let n = clen.min(16) as usize;
+    if f.read_exact(&mut peek[..n]).is_err() {
+        return Next::End;
+    }
+    let track = if simple {
+        vint(&peek[..n], false).map(|t| t.0)
+    } else {
+        group_track(&peek[..n])
+    };
+    let want = track.is_some_and(|t| st.out.contains_key(&t));
+    if !want || clen > MAX_BLOCK {
+        return match f.seek_relative(clen as i64 - n as i64) {
+            Ok(()) => Next::Go,
+            Err(_) => Next::End,
+        };
+    }
+    let mut data = peek[..n].to_vec();
+    data.resize(clen as usize, 0);
+    if f.read_exact(&mut data[n..]).is_err() {
+        return Next::End;
+    }
+    let (block, duration) = if simple {
+        (Some(data.as_slice()), None)
+    } else {
+        let mut b = None;
+        let mut d = None;
+        for (id, v) in ebml(&data) {
+            match id {
+                0xa1 => b = Some(v),
+                0x9b => d = Some(ebml_uint(v) as i64),
+                _ => {}
+            }
+        }
+        (b, d)
+    };
+    let Some((t, rel, parts)) = block.and_then(frames) else {
+        return Next::Go;
+    };
+    let Some(list) = st.out.get_mut(&t) else {
+        return Next::Go;
+    };
+    let used = st.kept.entry(t).or_default();
+    for p in parts {
+        if *used > MAX_TRACK {
+            break;
+        }
+        *used += p.len();
+        list.push(Event {
+            // A damaged file's numbers can be anything: saturate.
+            start: st
+                .cluster_ts
+                .saturating_add(i64::from(rel))
+                .saturating_mul(st.scale),
+            duration: duration.map(|d| d.saturating_mul(st.scale)),
+            data: p.to_vec(),
+        });
+    }
+    Next::Go
+}
+
+/// One element of a cluster: its time, a block to keep, or another to skip.
+fn cluster_element(f: &mut BufReader<File>, cid: u64, clen: u64, st: &mut Scan) -> Next {
+    match cid {
+        0xe7 => {
+            let mut b = vec![0u8; clen.min(8) as usize];
+            if f.read_exact(&mut b).is_err() {
+                return Next::End;
+            }
+            st.cluster_ts = ebml_uint(&b) as i64;
+            if clen > 8 {
+                let _ = f.seek_relative((clen - 8) as i64);
+            }
+            Next::Go
+        }
+        0xa3 | 0xa0 => read_block(f, cid, clen, st),
+        _ => match f.seek_relative(clen as i64) {
+            Ok(()) => Next::Go,
+            Err(_) => Next::End,
+        },
+    }
+}
+
+/// Reads the elements of a cluster from `pos`: where the cluster ended,
+/// and a header read ahead (the element after a cluster of unknown size).
+fn walk_cluster(
+    f: &mut BufReader<File>,
+    st: &mut Scan,
+    mut pos: u64,
+    cluster_end: Option<u64>,
+    end: u64,
+) -> (u64, Option<Head>) {
+    let mut pending = None;
+    loop {
+        if cluster_end.is_some_and(|e| pos >= e) || pos >= end {
+            break;
+        }
+        let Some((cid, clen, ch)) = header(f) else {
+            pos = end;
+            break;
+        };
+        // A cluster of unknown size ends at the next element that is not
+        // one of its own.
+        if cluster_end.is_none()
+            && !matches!(cid, 0xe7 | 0xa7 | 0xab | 0xa3 | 0xa0 | 0xaf | 0xbf | 0xec)
+        {
+            pending = Some((cid, clen, ch));
+            break;
+        }
+        let Some(clen) = clen else {
+            pos = end;
+            break;
+        };
+        let body_at = pos + ch;
+        pos = body_at + clen;
+        if let Next::End = cluster_element(f, cid, clen, st) {
+            pos = end;
+            break;
+        }
+    }
+    (pos, pending)
+}
+
 /// Walks the file's clusters and keeps the blocks of the tracks in
 /// `wanted`. `stop` is asked between clusters; `progress` is told the
 /// bytes walked.
@@ -352,34 +533,19 @@ fn scan(
     let file = File::open(path).map_err(|e| e.to_string())?;
     let size = file.metadata().map_err(|e| e.to_string())?.len();
     let mut f = BufReader::with_capacity(1 << 20, file);
-    let scale = matroska_element(&mut f, INFO)
-        .and_then(|info| {
-            ebml(&info)
-                .find(|(id, _)| *id == 0x2a_d7b1)
-                .map(|(_, d)| ebml_uint(d))
-        })
-        .filter(|s| *s > 0)
-        .unwrap_or(1_000_000) as i64;
+    let scale = time_scale(&mut f);
     f.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
-    let mut out: HashMap<u64, Vec<Event>> = wanted.iter().map(|n| (*n, Vec::new())).collect();
-    let mut kept: HashMap<u64, usize> = HashMap::new();
-    let mut pos = 0u64;
+    let mut st = Scan {
+        out: wanted.iter().map(|n| (*n, Vec::new())).collect(),
+        kept: HashMap::new(),
+        cluster_ts: 0,
+        scale,
+    };
     // The EBML header, then the segment's.
-    let (id, len, h) = header(&mut f).ok_or("subMkv")?;
-    if id != 0x1a45_dfa3 {
-        return Err("subMkv".into());
-    }
-    pos += h + len.ok_or("subMkv")?;
-    f.seek(SeekFrom::Start(pos)).map_err(|e| e.to_string())?;
-    let (id, len, h) = header(&mut f).ok_or("subMkv")?;
-    if id != SEGMENT {
-        return Err("subMkv".into());
-    }
-    pos += h;
-    let end = len.map_or(size, |l| (pos + l).min(size));
+    let (mut pos, end) = segment_range(&mut f, size)?;
     let mut told = 0u64;
     // A header read ahead (an element after a cluster of unknown size).
-    let mut pending: Option<(u64, Option<u64>, u64)> = None;
+    let mut pending: Option<Head> = None;
     while pos < end {
         if stop() {
             return Err("stopped".into());
@@ -401,115 +567,8 @@ fn scan(
             continue;
         }
         let cluster_end = len.map(|l| (start + l).min(end));
-        pos = start;
-        let mut cluster_ts = 0i64;
-        loop {
-            if cluster_end.is_some_and(|e| pos >= e) || pos >= end {
-                break;
-            }
-            let Some((cid, clen, ch)) = header(&mut f) else {
-                pos = end;
-                break;
-            };
-            // A cluster of unknown size ends at the next element that is
-            // not one of its own.
-            if cluster_end.is_none()
-                && !matches!(cid, 0xe7 | 0xa7 | 0xab | 0xa3 | 0xa0 | 0xaf | 0xbf | 0xec)
-            {
-                pending = Some((cid, clen, ch));
-                break;
-            }
-            let Some(clen) = clen else {
-                pos = end;
-                break;
-            };
-            let body_at = pos + ch;
-            pos = body_at + clen;
-            match cid {
-                0xe7 => {
-                    let mut b = vec![0u8; clen.min(8) as usize];
-                    if f.read_exact(&mut b).is_err() {
-                        pos = end;
-                        break;
-                    }
-                    cluster_ts = ebml_uint(&b) as i64;
-                    if clen > 8 {
-                        let _ = f.seek_relative((clen - 8) as i64);
-                    }
-                }
-                0xa3 | 0xa0 => {
-                    let simple = cid == 0xa3;
-                    // The track number comes first (inside the Block of a
-                    // BlockGroup, after its header).
-                    let mut peek = [0u8; 16];
-                    let n = clen.min(16) as usize;
-                    if f.read_exact(&mut peek[..n]).is_err() {
-                        pos = end;
-                        break;
-                    }
-                    let track = if simple {
-                        vint(&peek[..n], false).map(|t| t.0)
-                    } else {
-                        group_track(&peek[..n])
-                    };
-                    let want = track.is_some_and(|t| out.contains_key(&t));
-                    if !want || clen > MAX_BLOCK {
-                        if f.seek_relative(clen as i64 - n as i64).is_err() {
-                            pos = end;
-                            break;
-                        }
-                        continue;
-                    }
-                    let mut data = peek[..n].to_vec();
-                    data.resize(clen as usize, 0);
-                    if f.read_exact(&mut data[n..]).is_err() {
-                        pos = end;
-                        break;
-                    }
-                    let (block, duration) = if simple {
-                        (Some(data.as_slice()), None)
-                    } else {
-                        let mut b = None;
-                        let mut d = None;
-                        for (id, v) in ebml(&data) {
-                            match id {
-                                0xa1 => b = Some(v),
-                                0x9b => d = Some(ebml_uint(v) as i64),
-                                _ => {}
-                            }
-                        }
-                        (b, d)
-                    };
-                    let Some((t, rel, parts)) = block.and_then(frames) else {
-                        continue;
-                    };
-                    let Some(list) = out.get_mut(&t) else {
-                        continue;
-                    };
-                    let used = kept.entry(t).or_default();
-                    for p in parts {
-                        if *used > MAX_TRACK {
-                            break;
-                        }
-                        *used += p.len();
-                        list.push(Event {
-                            // A damaged file's numbers can be anything: saturate.
-                            start: cluster_ts
-                                .saturating_add(i64::from(rel))
-                                .saturating_mul(scale),
-                            duration: duration.map(|d| d.saturating_mul(scale)),
-                            data: p.to_vec(),
-                        });
-                    }
-                }
-                _ => {
-                    if f.seek_relative(clen as i64).is_err() {
-                        pos = end;
-                        break;
-                    }
-                }
-            }
-        }
+        st.cluster_ts = 0;
+        (pos, pending) = walk_cluster(&mut f, &mut st, start, cluster_end, end);
         if let Some(end) = cluster_end.filter(|&e| pos != e) {
             pos = end;
             if f.seek(SeekFrom::Start(pos)).is_err() {
@@ -518,7 +577,7 @@ fn scan(
         }
     }
     progress(size, size);
-    Ok(out)
+    Ok(st.out)
 }
 
 /// The track number of a BlockGroup's Block, from the group's first bytes.
