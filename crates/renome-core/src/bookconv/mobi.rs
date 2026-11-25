@@ -461,29 +461,21 @@ struct Frag {
     at: usize,
 }
 
-fn kf8(r: &Records, p: &crate::pages::Part, at: usize, book: &mut Book) -> Result<(), String> {
-    let head = r.read(at, 64 << 10).ok_or("bookBroken")?;
-    let field = |o: usize| {
-        be32(&head, o)
-            .filter(|v| *v != u32::MAX)
-            .map(|v| v as usize)
-    };
-    let huff = if p.compression == 17480 {
-        huff_of(r, at)
-    } else {
-        None
-    };
-    let text = text_bytes(
-        r,
-        at,
-        p.text_records,
-        p.compression,
-        p.trailing,
-        huff.as_ref(),
-    )?;
-    // Flows: the HTML first, then style sheets and the like.
+/// The `kindle:pos:fid:F:off:O` address: fragment and offset.
+fn pos_link(s: &str) -> Option<(u32, u32)> {
+    let rest = s.strip_prefix("kindle:pos:fid:")?;
+    let (f, o) = rest.split_once(":off:")?;
+    Some((base32(f)?, base32(o.split(['?', '"']).next()?)?))
+}
+
+/// The flows' places in the text: the HTML first, then style sheets and
+/// the like.
+fn flow_places(r: &Records, at: usize, head: &[u8], text_len: usize) -> Vec<(usize, usize)> {
     let mut flows: Vec<(usize, usize)> = Vec::new();
-    if let Some(f) = field(0xC0)
+    let fdst = be32(head, 0xC0)
+        .filter(|v| *v != u32::MAX)
+        .map(|v| v as usize);
+    if let Some(f) = fdst
         && let Some(rec) = r.read(at + f, 1 << 20)
         && rec.starts_with(b"FDST")
     {
@@ -495,22 +487,18 @@ fn kf8(r: &Records, p: &crate::pages::Part, at: usize, book: &mut Book) -> Resul
         }
     }
     if flows.is_empty() {
-        flows.push((0, text.len()));
+        flows.push((0, text_len));
     }
-    let flow = |i: usize| -> &[u8] {
-        flows
-            .get(i)
-            .and_then(|(a, b)| text.get(*a..(*b).min(text.len())))
-            .unwrap_or(&[])
-    };
-    let main = flow(0);
-    let skel = field(0xFC)
-        .and_then(|i| read_index(r, at + i))
-        .ok_or("bookBroken")?;
-    let frag = field(0xF8)
-        .and_then(|i| read_index(r, at + i))
-        .ok_or("bookBroken")?;
-    // Files: each skeleton with its fragments put in.
+    flows
+}
+
+/// Files: each skeleton with its fragments put in, and where each
+/// fragment went.
+fn assemble_files(
+    skel: &Index,
+    frag: &Index,
+    main: &[u8],
+) -> Result<(Vec<Vec<u8>>, Vec<Frag>), String> {
     let mut files: Vec<Vec<u8>> = Vec::new();
     let mut frags: Vec<Frag> = Vec::new();
     let mut fi = 0;
@@ -547,15 +535,14 @@ fn kf8(r: &Records, p: &crate::pages::Part, at: usize, book: &mut Book) -> Resul
     if files.is_empty() {
         return Err("bookBroken".into());
     }
-    // Places links point at: `kindle:pos:fid:F:off:O`, marked in their
-    // files.
+    Ok((files, frags))
+}
+
+/// Puts an anchor in each place the links and the table of contents point
+/// at: `kindle:pos:fid:F:off:O`, marked in its file as `kpF_O`.
+fn mark_link_targets(files: &mut [Vec<u8>], frags: &[Frag], ncx: Option<&Index>) {
     let mut marks: Vec<Vec<(usize, String)>> = vec![Vec::new(); files.len()];
-    let pos_link = |s: &str| -> Option<(u32, u32)> {
-        let rest = s.strip_prefix("kindle:pos:fid:")?;
-        let (f, o) = rest.split_once(":off:")?;
-        Some((base32(f)?, base32(o.split(['?', '"']).next()?)?))
-    };
-    for f in &files {
+    for f in files.iter() {
         let s = String::from_utf8_lossy(f);
         let mut i = 0;
         while let Some(a) = s[i..].find("kindle:pos:fid:") {
@@ -570,8 +557,7 @@ fn kf8(r: &Records, p: &crate::pages::Part, at: usize, book: &mut Book) -> Resul
         }
     }
     // And places the table of contents points at.
-    let ncx = field(0xF4).and_then(|i| read_index(r, at + i));
-    if let Some(ncx) = &ncx {
+    if let Some(ncx) = ncx {
         for (_, t) in &ncx.entries {
             if let Some([fid, off, ..]) = t.get(&6).map(|v| v.as_slice())
                 && let Some(fr) = frags.get(*fid as usize)
@@ -599,15 +585,30 @@ fn kf8(r: &Records, p: &crate::pages::Part, at: usize, book: &mut Book) -> Resul
             f.splice(at..at, format!("<a id=\"{id}\"></a>").into_bytes());
         }
     }
-    // Pictures and style sheets.
-    let first = p.first_picture;
+}
+
+/// The text of flow `i` (empty when there is none).
+fn flow_of<'a>(text: &'a [u8], flows: &[(usize, usize)], i: usize) -> &'a [u8] {
+    flows
+        .get(i)
+        .and_then(|(a, b)| text.get(*a..(*b).min(text.len())))
+        .unwrap_or(&[])
+}
+
+/// The pictures the files use (added to the book, by their `kindle:embed:`
+/// address) and the style sheets they link (flows, joined).
+fn pictures_and_css(
+    r: &Records,
+    first: usize,
+    files: &[Vec<u8>],
+    text: &[u8],
+    flows: &[(usize, usize)],
+    book: &mut Book,
+) -> (HashMap<String, String>, String) {
     let mut pics: HashMap<String, String> = HashMap::new();
     let mut css = String::new();
     let mut css_done = std::collections::HashSet::new();
-    let names: Vec<String> = (0..files.len())
-        .map(|i| format!("c{:04}.xhtml", i + 1))
-        .collect();
-    for f in &files {
+    for f in files {
         let s = String::from_utf8_lossy(f);
         let mut i = 0;
         while let Some(a) = s[i..].find("kindle:") {
@@ -630,38 +631,47 @@ fn kf8(r: &Records, p: &crate::pages::Part, at: usize, book: &mut Book) -> Resul
                 && let Some(n) = base32(rest.get(..4).unwrap_or(rest))
                 && css_done.insert(n)
             {
-                css.push_str(&String::from_utf8_lossy(flow(n as usize)));
+                css.push_str(&String::from_utf8_lossy(flow_of(text, flows, n as usize)));
                 css.push('\n');
             }
             i = end.max(st + 1);
         }
     }
-    // Pictures named in the style sheets.
-    let css = {
-        let mut out = String::new();
-        let mut rest = css.as_str();
-        while let Some(a) = rest.find("kindle:embed:") {
-            out.push_str(&rest[..a]);
-            let tail = &rest[a..];
-            let end = tail.find(['"', '\'', ')']).unwrap_or(tail.len());
-            let link = &tail[..end];
-            let n = base32(link["kindle:embed:".len()..].get(..4).unwrap_or(""));
-            let name = n
-                .filter(|n| *n > 0)
-                .and_then(|n| picture(r, first + n as usize - 1))
-                .and_then(|d| book.add_file(d, ""));
-            out.push_str(name.as_deref().unwrap_or(""));
-            rest = &tail[end..];
-        }
-        out.push_str(rest);
-        out
-    };
-    // Fonts are left out: what used them falls back to the reader's.
-    book.css = if css.trim().is_empty() {
-        super::BASE_CSS.into()
-    } else {
-        strip_font_faces(&css)
-    };
+    (pics, css)
+}
+
+/// The style sheet with the pictures it names added to the book and their
+/// addresses made names.
+fn css_pictures(r: &Records, first: usize, css: &str, book: &mut Book) -> String {
+    let mut out = String::new();
+    let mut rest = css;
+    while let Some(a) = rest.find("kindle:embed:") {
+        out.push_str(&rest[..a]);
+        let tail = &rest[a..];
+        let end = tail.find(['"', '\'', ')']).unwrap_or(tail.len());
+        let link = &tail[..end];
+        let n = base32(link["kindle:embed:".len()..].get(..4).unwrap_or(""));
+        let name = n
+            .filter(|n| *n > 0)
+            .and_then(|n| picture(r, first + n as usize - 1))
+            .and_then(|d| book.add_file(d, ""));
+        out.push_str(name.as_deref().unwrap_or(""));
+        rest = &tail[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The files as the book's chapters, their links made `file#id`.
+fn add_chapters(
+    files: &[Vec<u8>],
+    frags: &[Frag],
+    pics: &HashMap<String, String>,
+    book: &mut Book,
+) -> Vec<String> {
+    let names: Vec<String> = (0..files.len())
+        .map(|i| format!("c{:04}.xhtml", i + 1))
+        .collect();
     for (k, f) in files.iter().enumerate() {
         let s = String::from_utf8_lossy(f).into_owned();
         let nodes = xhtml::parse(&s);
@@ -714,79 +724,133 @@ fn kf8(r: &Records, p: &crate::pages::Part, at: usize, book: &mut Book) -> Resul
             ..Default::default()
         });
     }
-    // The table of contents.
-    if let Some(ncx) = ncx {
-        let mut flat: Vec<(usize, Toc)> = Vec::new();
-        // Entries by number, with their first and last child's: books
-        // made by Kindle's own tools list them level by level, the
-        // children found by these, not by the order.
-        let mut by_no: Vec<Option<Toc>> = Vec::new();
-        let mut kids_of: Vec<Option<(usize, usize)>> = Vec::new();
-        let mut is_kid: Vec<bool> = Vec::new();
-        for (_, t) in &ncx.entries {
-            let first = |tag: u8| t.get(&tag).and_then(|v| v.first()).map(|v| *v as usize);
-            kids_of.push(first(22).zip(first(23)));
-            is_kid.push(first(21).is_some());
-            by_no.push(None);
-            let label = t
-                .get(&3)
-                .and_then(|v| v.first())
-                .and_then(|o| ncx.strings.get(o))
-                .cloned()
-                .unwrap_or_default();
-            let depth = t.get(&4).and_then(|v| v.first()).copied().unwrap_or(0) as usize;
-            let href = match t.get(&6).map(|v| v.as_slice()) {
-                Some([fid, off, ..]) => frags
-                    .get(*fid as usize)
-                    .map(|fr| format!("{}#kp{fid}_{off}", names[fr.file])),
-                _ => None,
-            };
-            if let Some(href) = href
-                && !label.trim().is_empty()
-            {
-                // The place is marked if it was linked; else the file.
-                let file = href.split('#').next().unwrap_or_default().to_string();
-                let marked = book.chapters.iter().any(|c| {
-                    c.name == file
-                        && c.body
-                            .contains(&format!("id=\"{}\"", href.split('#').nth(1).unwrap_or("")))
-                });
-                let toc = Toc {
-                    title: label.trim().to_string(),
-                    href: if marked { href } else { file },
-                    kids: vec![],
-                };
-                *by_no.last_mut().expect("the list is never empty here") = Some(toc.clone());
-                flat.push((depth, toc));
-            }
-        }
-        book.toc = if kids_of.iter().any(Option::is_some) {
-            fn tree(
-                i: usize,
-                by_no: &[Option<Toc>],
-                kids_of: &[Option<(usize, usize)>],
-                seen: &mut Vec<bool>,
-            ) -> Option<Toc> {
-                if seen.get(i).copied().unwrap_or(true) {
-                    return None;
-                }
-                seen[i] = true;
-                let mut t = by_no[i].clone()?;
-                if let Some((a, b)) = kids_of[i] {
-                    t.kids = (a..=b.min(by_no.len().saturating_sub(1)))
-                        .filter_map(|k| tree(k, by_no, kids_of, seen))
-                        .collect();
-                }
-                Some(t)
-            }
-            let mut seen = vec![false; by_no.len()];
-            (0..by_no.len())
-                .filter(|&i| !is_kid[i])
-                .filter_map(|i| tree(i, &by_no, &kids_of, &mut seen))
-                .collect()
-        } else {
-            nest(flat)
+    names
+}
+
+/// The contents' entry `i` with its children, by the numbers of their
+/// first and last (each entry taken once).
+fn contents_tree(
+    i: usize,
+    by_no: &[Option<Toc>],
+    kids_of: &[Option<(usize, usize)>],
+    seen: &mut Vec<bool>,
+) -> Option<Toc> {
+    if seen.get(i).copied().unwrap_or(true) {
+        return None;
+    }
+    seen[i] = true;
+    let mut t = by_no[i].clone()?;
+    if let Some((a, b)) = kids_of[i] {
+        t.kids = (a..=b.min(by_no.len().saturating_sub(1)))
+            .filter_map(|k| contents_tree(k, by_no, kids_of, seen))
+            .collect();
+    }
+    Some(t)
+}
+
+/// The table of contents from the index: entries whose place is marked
+/// point there, the others at their file.
+fn read_contents(ncx: &Index, frags: &[Frag], names: &[String], book: &mut Book) {
+    let mut flat: Vec<(usize, Toc)> = Vec::new();
+    // Entries by number, with their first and last child's: books made by
+    // Kindle's own tools list them level by level, the children found by
+    // these, not by the order.
+    let mut by_no: Vec<Option<Toc>> = Vec::new();
+    let mut kids_of: Vec<Option<(usize, usize)>> = Vec::new();
+    let mut is_kid: Vec<bool> = Vec::new();
+    for (_, t) in &ncx.entries {
+        let first = |tag: u8| t.get(&tag).and_then(|v| v.first()).map(|v| *v as usize);
+        kids_of.push(first(22).zip(first(23)));
+        is_kid.push(first(21).is_some());
+        by_no.push(None);
+        let label = t
+            .get(&3)
+            .and_then(|v| v.first())
+            .and_then(|o| ncx.strings.get(o))
+            .cloned()
+            .unwrap_or_default();
+        let depth = t.get(&4).and_then(|v| v.first()).copied().unwrap_or(0) as usize;
+        let href = match t.get(&6).map(|v| v.as_slice()) {
+            Some([fid, off, ..]) => frags
+                .get(*fid as usize)
+                .map(|fr| format!("{}#kp{fid}_{off}", names[fr.file])),
+            _ => None,
         };
+        if let Some(href) = href
+            && !label.trim().is_empty()
+        {
+            // The place is marked if it was linked; else the file.
+            let file = href.split('#').next().unwrap_or_default().to_string();
+            let marked = book.chapters.iter().any(|c| {
+                c.name == file
+                    && c.body
+                        .contains(&format!("id=\"{}\"", href.split('#').nth(1).unwrap_or("")))
+            });
+            let toc = Toc {
+                title: label.trim().to_string(),
+                href: if marked { href } else { file },
+                kids: vec![],
+            };
+            *by_no.last_mut().expect("the list is never empty here") = Some(toc.clone());
+            flat.push((depth, toc));
+        }
+    }
+    book.toc = if kids_of.iter().any(Option::is_some) {
+        let mut seen = vec![false; by_no.len()];
+        (0..by_no.len())
+            .filter(|&i| !is_kid[i])
+            .filter_map(|i| contents_tree(i, &by_no, &kids_of, &mut seen))
+            .collect()
+    } else {
+        nest(flat)
+    };
+}
+
+fn kf8(r: &Records, p: &crate::pages::Part, at: usize, book: &mut Book) -> Result<(), String> {
+    let head = r.read(at, 64 << 10).ok_or("bookBroken")?;
+    let field = |o: usize| {
+        be32(&head, o)
+            .filter(|v| *v != u32::MAX)
+            .map(|v| v as usize)
+    };
+    let huff = if p.compression == 17480 {
+        huff_of(r, at)
+    } else {
+        None
+    };
+    let text = text_bytes(
+        r,
+        at,
+        p.text_records,
+        p.compression,
+        p.trailing,
+        huff.as_ref(),
+    )?;
+    let flows = flow_places(r, at, &head, text.len());
+    let main = flow_of(&text, &flows, 0);
+    let skel = field(0xFC)
+        .and_then(|i| read_index(r, at + i))
+        .ok_or("bookBroken")?;
+    let frag = field(0xF8)
+        .and_then(|i| read_index(r, at + i))
+        .ok_or("bookBroken")?;
+    let (mut files, frags) = assemble_files(&skel, &frag, main)?;
+    let ncx = field(0xF4).and_then(|i| read_index(r, at + i));
+    mark_link_targets(&mut files, &frags, ncx.as_ref());
+
+    // Pictures and style sheets.
+    let first = p.first_picture;
+    let (pics, css) = pictures_and_css(r, first, &files, &text, &flows, book);
+    let css = css_pictures(r, first, &css, book);
+    // Fonts are left out: what used them falls back to the reader's.
+    book.css = if css.trim().is_empty() {
+        super::BASE_CSS.into()
+    } else {
+        strip_font_faces(&css)
+    };
+    let names = add_chapters(&files, &frags, &pics, book);
+    if let Some(ncx) = &ncx {
+        read_contents(ncx, &frags, &names, book);
     }
     Ok(())
 }
