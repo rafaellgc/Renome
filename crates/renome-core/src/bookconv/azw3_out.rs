@@ -357,53 +357,92 @@ pub fn write(book: &Book, to: &Path) -> Result<(), String> {
     f.sync_all().map_err(|e| e.to_string())
 }
 
-pub fn build(book: &Book) -> Result<Vec<u8>, String> {
-    // Pictures: their number as resources.
-    let pics: Vec<&super::Res> = book
-        .files
-        .iter()
-        .filter(|r| r.media.starts_with("image/") && r.media != "image/svg+xml")
-        .collect();
-    let pic_no: HashMap<&str, u32> = pics
-        .iter()
-        .enumerate()
-        .map(|(i, r)| (r.name.as_str(), i as u32 + 1))
-        .collect();
-    let mime: HashMap<&str, &str> = pics
-        .iter()
-        .map(|r| (r.name.as_str(), r.media.as_str()))
-        .collect();
+/// The book's pictures and the numbers they have as Kindle resources.
+struct Pictures<'a> {
+    list: Vec<&'a super::Res>,
+    /// Name → resource number (from 1).
+    no: HashMap<&'a str, u32>,
+    mime: HashMap<&'a str, &'a str>,
+}
 
-    // Each chapter's body, with `kindle:` addresses; where its ids are.
-    // Every element gets its `aid` (the Kindle finds places, and turns
-    // pages, by them), numbered through the book.
-    let mut bodies: Vec<String> = Vec::new();
-    // Numbered as Kindle's own tools do: a file's body is its number
-    // times a million, its elements the numbers after it.
-    for (i, c) in book.chapters.iter().enumerate() {
-        let mut aid = i as u32 * 1_000_000 + 1;
-        let mut body = c.body.clone();
-        for (name, n) in &pic_no {
+impl<'a> Pictures<'a> {
+    fn of(book: &'a Book) -> Self {
+        let list: Vec<&super::Res> = book
+            .files
+            .iter()
+            .filter(|r| r.media.starts_with("image/") && r.media != "image/svg+xml")
+            .collect();
+        let no = list
+            .iter()
+            .enumerate()
+            .map(|(i, r)| (r.name.as_str(), i as u32 + 1))
+            .collect();
+        let mime = list
+            .iter()
+            .map(|r| (r.name.as_str(), r.media.as_str()))
+            .collect();
+        Pictures { list, no, mime }
+    }
+
+    /// `kindle:embed:` address of the picture numbered `n`, named `name`.
+    fn address(&self, name: &str, n: u32) -> String {
+        format!("kindle:embed:{}?mime={}", base32(n, 4), self.mime[name])
+    }
+
+    /// A chapter's body with its pictures as resources.
+    fn in_body(&self, mut body: String) -> String {
+        for (name, n) in &self.no {
             body = body.replace(
                 &format!("src=\"{}\"", esc_attr(name)),
-                &format!("src=\"kindle:embed:{}?mime={}\"", base32(*n, 4), mime[name]),
+                &format!("src=\"{}\"", self.address(name, *n)),
             );
         }
-        // A fixed page's picture fills it, its size in pixels said too
-        // (as Kindle's own tools write it).
-        if book.fixed
-            && let Some((w, h)) = c.page
-        {
-            body = body.replace(
-                "style=\"width: 100%; height: 100%\"/>",
-                &format!("style=\"width: 100%; height: 100%\" width=\"{w}\" height=\"{h}\"/>"),
-            );
-        }
-        bodies.push(with_aids(&body, &mut aid));
+        body
     }
-    // Ids: (chapter, id) → offset of their element in the fragment.
+
+    /// The style sheet with its pictures as resources.
+    fn in_css(&self, mut css: String) -> String {
+        for (name, n) in &self.no {
+            css = css.replace(
+                &format!("url(\"{name}\")"),
+                &format!("url({})", self.address(name, *n)),
+            );
+        }
+        css
+    }
+}
+
+/// Each chapter's body, with `kindle:` addresses for its pictures. Every
+/// element gets its `aid` (the Kindle finds places, and turns pages, by
+/// them), numbered as Kindle's own tools do: a file's body is its number
+/// times a million, its elements the numbers after it.
+fn chapter_bodies(book: &Book, pics: &Pictures) -> Vec<String> {
+    book.chapters
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let mut aid = i as u32 * 1_000_000 + 1;
+            let mut body = pics.in_body(c.body.clone());
+            // A fixed page's picture fills it, its size in pixels said too
+            // (as Kindle's own tools write it).
+            if book.fixed
+                && let Some((w, h)) = c.page
+            {
+                body = body.replace(
+                    "style=\"width: 100%; height: 100%\"/>",
+                    &format!("style=\"width: 100%; height: 100%\" width=\"{w}\" height=\"{h}\"/>"),
+                );
+            }
+            with_aids(&body, &mut aid)
+        })
+        .collect()
+}
+
+/// Where each element with an id is: (chapter, id) → offset of its element
+/// in the fragment.
+fn element_ids(bodies: &[String]) -> HashMap<(usize, String), usize> {
     let id_re = regex::Regex::new(r#"<[^<>]*\sid="([^"]+)""#).expect("valid regex");
-    let mut ids: HashMap<(usize, String), usize> = HashMap::new();
+    let mut ids = HashMap::new();
     for (i, b) in bodies.iter().enumerate() {
         for m in id_re.captures_iter(b) {
             ids.insert(
@@ -412,14 +451,25 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
             );
         }
     }
-    let file_no: HashMap<&str, usize> = book
-        .chapters
+    ids
+}
+
+/// The number of each chapter file, by its name.
+fn file_numbers(book: &Book) -> HashMap<&str, usize> {
+    book.chapters
         .iter()
         .enumerate()
         .map(|(i, c)| (c.name.as_str(), i))
-        .collect();
-    // Links: `file#id` → `kindle:pos:fid:F:off:O`. Offsets do not move,
-    // as each address has the same length.
+        .collect()
+}
+
+/// The bodies with their links as `file#id` → `kindle:pos:fid:F:off:O`.
+/// Offsets do not move, as each address has the same length.
+fn link_bodies(
+    bodies: &[String],
+    ids: &HashMap<(usize, String), usize>,
+    file_no: &HashMap<&str, usize>,
+) -> Vec<String> {
     let href_re = regex::Regex::new(r##"href="([^"#]*)(?:#([^"]*))?""##).expect("valid regex");
     let place = |file: usize, id: Option<&str>| -> String {
         let off = id
@@ -432,7 +482,7 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
             base32(off as u32, 10)
         )
     };
-    let bodies: Vec<String> = bodies
+    bodies
         .iter()
         .enumerate()
         .map(|(i, b)| {
@@ -454,19 +504,17 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
                 })
                 .into_owned()
         })
-        .collect();
+        .collect()
+}
 
-    // Skeletons and fragments.
-    let lang = if book.meta.language.is_empty() {
-        "und".to_string()
-    } else {
-        book.meta.language.clone()
-    };
-    // Each file's body has its own `aid` (its number times a million): its
-    // fragment is put in by it, so two files must never share one.
+/// Each chapter's skeleton and fragment, and the selectors that tell the
+/// fragments' files apart. Each file's body has its own `aid` (its number
+/// times a million): its fragment is put in by it, so two files must never
+/// share one.
+fn skeletons(book: &Book, bodies: &[String], lang: &str) -> (Vec<File>, Vec<String>) {
     let mut selectors = Vec::new();
     let mut files = Vec::new();
-    for (i, (c, body)) in book.chapters.iter().zip(&bodies).enumerate() {
+    for (i, (c, body)) in book.chapters.iter().zip(bodies).enumerate() {
         let body_aid = aid_of(i as u32 * 1_000_000);
         selectors.push(format!("P-//*[@aid='{body_aid}']"));
         let title = if c.title.is_empty() {
@@ -481,7 +529,7 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
             .unwrap_or_default();
         let head = format!(
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"{l}\" lang=\"{l}\">\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\"/>\n{viewport}<title>{t}</title>\n<link href=\"kindle:flow:0001?mime=text/css\" rel=\"stylesheet\" type=\"text/css\"/>\n</head>\n<body aid=\"{body_aid}\">",
-            l = esc_attr(if c.lang.is_empty() { &lang } else { &c.lang }),
+            l = esc_attr(if c.lang.is_empty() { lang } else { &c.lang }),
             t = esc(title)
         );
         let tail = "</body>\n</html>\n";
@@ -494,56 +542,85 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
             fragment: body.clone().into_bytes(),
         });
     }
-    if files.is_empty() {
-        return Err("bookBroken".into());
-    }
-    let (frag_strings, selector_offs) = strings_of(&selectors);
-    let mut text: Vec<u8> = Vec::new();
-    let mut skel_entries = Vec::new();
-    let mut frag_entries = Vec::new();
-    let mut frag_starts = Vec::new();
-    for (i, f) in files.iter().enumerate() {
-        let start = text.len() as u32;
-        text.extend_from_slice(&f.skeleton);
-        frag_starts.push(text.len());
-        text.extend_from_slice(&f.fragment);
-        // As Kindle's own files have it: a ten-digit key and every value
-        // given twice (the count in the control byte is 2); a skeleton
-        // index written the plain way leaves Kindles on a blank page.
-        let len = f.skeleton.len() as u32;
-        skel_entries.push((
-            format!("SKEL{i:010}"),
-            vec![(1u8, vec![1u32, 1]), (6, vec![start, len, start, len])],
-        ));
-        frag_entries.push((
-            format!("{:010}", start as usize + f.insert),
-            vec![
-                (2u8, vec![selector_offs[i]]),
-                (3, vec![i as u32]),
-                (4, vec![i as u32]),
-                (6, vec![0, f.fragment.len() as u32]),
-            ],
-        ));
-    }
-    let flow0 = text.len();
+    (files, selectors)
+}
+
+/// The book's style sheet as the Kindle gets it.
+fn style_sheet(book: &Book, pics: &Pictures) -> String {
     let mut css = book.css.clone();
     // Fixed pages fill the screen: no margin around the picture.
     if book.fixed {
         css.push_str("\nbody { margin: 0; padding: 0; }\n.page { margin: 0; padding: 0; }\n.page img { display: block; margin: 0; padding: 0; }\n");
     }
-    // Pictures in the style sheet.
-    for (name, n) in &pic_no {
-        css = css.replace(
-            &format!("url(\"{name}\")"),
-            &format!("url(kindle:embed:{}?mime={})", base32(*n, 4), mime[name]),
-        );
-    }
-    text.extend_from_slice(css.as_bytes());
-    let flows = vec![(0usize, flow0), (flow0, text.len())];
+    pics.in_css(css)
+}
 
-    // Text records: 4096 bytes each, compressed; a character cut at the
-    // end is completed after it, with how many bytes that took.
-    let mut text_recs: Vec<Vec<u8>> = Vec::new();
+/// The text of the book (skeletons and fragments, then the style sheet as
+/// a second flow) and the index entries that say where things are in it.
+struct TextLayout {
+    text: Vec<u8>,
+    /// Where each file's fragment starts in `text`.
+    frag_starts: Vec<usize>,
+    skel_entries: Vec<Entry>,
+    frag_entries: Vec<Entry>,
+    frag_strings: Vec<u8>,
+    /// Where the style sheet (the second flow) starts.
+    flow0: usize,
+}
+
+impl TextLayout {
+    fn new(files: &[File], selectors: &[String], css: &str) -> Self {
+        let (frag_strings, selector_offs) = strings_of(selectors);
+        let mut text: Vec<u8> = Vec::new();
+        let mut skel_entries = Vec::new();
+        let mut frag_entries = Vec::new();
+        let mut frag_starts = Vec::new();
+        for (i, f) in files.iter().enumerate() {
+            let start = text.len() as u32;
+            text.extend_from_slice(&f.skeleton);
+            frag_starts.push(text.len());
+            text.extend_from_slice(&f.fragment);
+            // As Kindle's own files have it: a ten-digit key and every
+            // value given twice (the count in the control byte is 2); a
+            // skeleton index written the plain way leaves Kindles on a
+            // blank page.
+            let len = f.skeleton.len() as u32;
+            skel_entries.push((
+                format!("SKEL{i:010}"),
+                vec![(1u8, vec![1u32, 1]), (6, vec![start, len, start, len])],
+            ));
+            frag_entries.push((
+                format!("{:010}", start as usize + f.insert),
+                vec![
+                    (2u8, vec![selector_offs[i]]),
+                    (3, vec![i as u32]),
+                    (4, vec![i as u32]),
+                    (6, vec![0, f.fragment.len() as u32]),
+                ],
+            ));
+        }
+        let flow0 = text.len();
+        text.extend_from_slice(css.as_bytes());
+        TextLayout {
+            text,
+            frag_starts,
+            skel_entries,
+            frag_entries,
+            frag_strings,
+            flow0,
+        }
+    }
+
+    /// The flows: where each starts and ends in the text.
+    fn flows(&self) -> Vec<(usize, usize)> {
+        vec![(0, self.flow0), (self.flow0, self.text.len())]
+    }
+}
+
+/// Text records: 4096 bytes each, compressed; a character cut at the end
+/// is completed after it, with how many bytes that took.
+fn text_records(text: &[u8]) -> Vec<Vec<u8>> {
+    let mut recs: Vec<Vec<u8>> = Vec::new();
     let mut at = 0;
     while at < text.len() {
         let end = (at + 4096).min(text.len());
@@ -554,22 +631,36 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
         }
         rec.extend_from_slice(&text[end..end + extra]);
         rec.push(extra as u8);
-        text_recs.push(rec);
+        recs.push(rec);
         at = end;
     }
+    recs
+}
 
-    // The table of contents: its entries' labels, places and depths.
+/// An entry of the table of contents in the book's order: label, place,
+/// file, offset, depth, parent.
+struct Point {
+    title: String,
+    pos: u32,
+    file: u32,
+    off: u32,
+    depth: u32,
+    parent: Option<usize>,
+}
+
+/// The table of contents' entries flattened: label, place, depth.
+fn toc_list(book: &Book) -> Vec<(String, String, u32)> {
     fn walk(t: &[Toc], d: u32, out: &mut Vec<(String, String, u32)>) {
         for e in t {
             out.push((e.title.clone(), e.href.clone(), d));
             walk(&e.kids, d + 1, out);
         }
     }
-    let mut toc_list = Vec::new();
-    walk(&book.toc, 0, &mut toc_list);
-    if toc_list.is_empty() {
+    let mut list = Vec::new();
+    walk(&book.toc, 0, &mut list);
+    if list.is_empty() {
         for c in &book.chapters {
-            toc_list.push((
+            list.push((
                 if c.title.is_empty() {
                     book.meta.title.clone()
                 } else {
@@ -580,19 +671,20 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
             ));
         }
     }
-    // In the book's order: label, place, file, offset, depth, parent (an
-    // entry whose place is not found is left out, its children moved up).
-    struct Point {
-        title: String,
-        pos: u32,
-        file: u32,
-        off: u32,
-        depth: u32,
-        parent: Option<usize>,
-    }
+    list
+}
+
+/// The contents' entries with their places (an entry whose place is not
+/// found is left out, its children moved up).
+fn toc_points(
+    book: &Book,
+    ids: &HashMap<(usize, String), usize>,
+    file_no: &HashMap<&str, usize>,
+    frag_starts: &[usize],
+) -> Vec<Point> {
     let mut points: Vec<Point> = Vec::new();
     let mut open: Vec<(u32, usize)> = Vec::new();
-    for (title, href, depth) in toc_list {
+    for (title, href, depth) in toc_list(book) {
         let (file, id) = match href.split_once('#') {
             Some((f, i)) => (f.to_string(), Some(i.to_string())),
             None => (href.clone(), None),
@@ -615,184 +707,176 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
         });
         open.push((depth, points.len() - 1));
     }
-    // Each entry runs to the nearest place, further on in the text, of an
-    // entry not deeper than it (in the text's order, not the contents'
-    // own: entries can point back), or to the text's end.
-    let lengths: Vec<u32> = (0..points.len())
-        .map(|i| {
-            let p = &points[i];
+    points
+}
+
+/// Each entry runs to the nearest place, further on in the text, of an
+/// entry not deeper than it (in the text's order, not the contents' own:
+/// entries can point back), or to the text's end.
+fn point_lengths(points: &[Point], text_end: u32) -> Vec<u32> {
+    points
+        .iter()
+        .map(|p| {
             let end = points
                 .iter()
                 .filter(|q| q.depth <= p.depth && q.pos > p.pos)
                 .map(|q| q.pos)
                 .min()
-                .unwrap_or(flow0 as u32);
+                .unwrap_or(text_end);
             end.saturating_sub(p.pos)
         })
-        .collect();
-    // Listed level by level (as Kindle's own tools do), children found by
-    // their first and last numbers.
-    let mut order: Vec<usize> = (0..points.len()).collect();
-    order.sort_by_key(|&i| (points[i].depth, i));
-    let mut no = vec![0u32; points.len()];
-    for (k, &i) in order.iter().enumerate() {
-        no[i] = k as u32;
-    }
-    let nested = points.iter().any(|p| p.parent.is_some());
-    let labels: Vec<String> = order.iter().map(|&i| points[i].title.clone()).collect();
-    let (ncx_strings, label_offs) = strings_of(&labels);
-    let width = format!("{:X}", points.len().saturating_sub(1)).len().max(2);
-    let ncx_entries: Vec<Entry> = order
-        .iter()
-        .enumerate()
-        .map(|(k, &i)| {
-            let p = &points[i];
-            let mut tags = vec![
-                (1u8, vec![p.pos]),
-                (2, vec![lengths[i]]),
-                (3, vec![label_offs[k]]),
-                (4, vec![p.depth]),
-            ];
-            if let Some(parent) = p.parent {
-                tags.push((21, vec![no[parent]]));
-            }
-            let kids: Vec<u32> = (0..points.len())
-                .filter(|&j| points[j].parent == Some(i))
-                .map(|j| no[j])
-                .collect();
-            if let (Some(a), Some(b)) = (kids.iter().min(), kids.iter().max()) {
-                tags.push((22, vec![*a]));
-                tags.push((23, vec![*b]));
-            }
-            tags.push((6, vec![p.file, p.off]));
-            (format!("{k:0width$X}"), tags)
-        })
-        .collect();
+        .collect()
+}
 
-    let skel_idx = index(
-        &[(1, 1, 0x03, 0), (6, 2, 0x0C, 0), (0, 0, 0, 1)],
-        1,
-        &skel_entries,
-        None,
-    );
-    let frag_idx = index(
-        &[
-            (2, 1, 0x01, 0),
-            (3, 1, 0x02, 0),
-            (4, 1, 0x04, 0),
-            (6, 2, 0x08, 0),
-            (0, 0, 0, 1),
-        ],
-        1,
-        &frag_entries,
-        Some(&frag_strings),
-    );
-    // Each text record ends with which entries of the contents touch it
-    // (as Kindle's own tools write it), for a contents of one level; a
-    // nested one is left without.
-    let tbs = !nested && !points.is_empty();
-    if tbs {
-        for (r, rec) in text_recs.iter_mut().enumerate() {
-            let (a, b) = ((r * 4096) as u32, ((r + 1) * 4096).min(text.len()) as u32);
-            let touching: Vec<usize> = (0..points.len())
-                .filter(|&i| points[i].pos < b && points[i].pos + lengths[i] > a)
-                .collect();
-            let mut t = Vec::new();
-            match touching.as_slice() {
-                [] => {}
-                [i] => {
-                    let p = &points[*i];
-                    if p.pos < a && p.pos + lengths[*i] > b {
-                        varlen((*i as u32) << 3 | 3, &mut t);
-                        t.extend_from_slice(&[0x88, 0x80]);
-                    } else {
-                        varlen((*i as u32) << 3 | 2, &mut t);
-                        t.push(0x88);
-                    }
+/// The contents' index: entries listed level by level (as Kindle's own
+/// tools do), children found by their first and last numbers; and the
+/// strings of their labels.
+struct Contents {
+    entries: Vec<Entry>,
+    strings: Vec<u8>,
+    nested: bool,
+}
+
+impl Contents {
+    fn new(points: &[Point], lengths: &[u32]) -> Self {
+        let mut order: Vec<usize> = (0..points.len()).collect();
+        order.sort_by_key(|&i| (points[i].depth, i));
+        let mut no = vec![0u32; points.len()];
+        for (k, &i) in order.iter().enumerate() {
+            no[i] = k as u32;
+        }
+        let nested = points.iter().any(|p| p.parent.is_some());
+        let labels: Vec<String> = order.iter().map(|&i| points[i].title.clone()).collect();
+        let (strings, label_offs) = strings_of(&labels);
+        let width = format!("{:X}", points.len().saturating_sub(1)).len().max(2);
+        let entries: Vec<Entry> = order
+            .iter()
+            .enumerate()
+            .map(|(k, &i)| {
+                let p = &points[i];
+                let mut tags = vec![
+                    (1u8, vec![p.pos]),
+                    (2, vec![lengths[i]]),
+                    (3, vec![label_offs[k]]),
+                    (4, vec![p.depth]),
+                ];
+                if let Some(parent) = p.parent {
+                    tags.push((21, vec![no[parent]]));
                 }
-                [first, ..] => {
-                    varlen((*first as u32) << 3 | 6, &mut t);
-                    t.push(0x88);
-                    t.push(touching.len().min(127) as u8);
+                let kids: Vec<u32> = (0..points.len())
+                    .filter(|&j| points[j].parent == Some(i))
+                    .map(|j| no[j])
+                    .collect();
+                if let (Some(a), Some(b)) = (kids.iter().min(), kids.iter().max()) {
+                    tags.push((22, vec![*a]));
+                    tags.push((23, vec![*b]));
                 }
-            }
-            rec.extend_from_slice(&t);
-            rec.push(0x80 | (t.len() as u8 + 1));
+                tags.push((6, vec![p.file, p.off]));
+                (format!("{k:0width$X}"), tags)
+            })
+            .collect();
+        Contents {
+            entries,
+            strings,
+            nested,
         }
     }
-    let flat_tags = [
-        (1, 1, 0x01, 0),
-        (2, 1, 0x02, 0),
-        (3, 1, 0x04, 0),
-        (4, 1, 0x08, 0),
-        (6, 2, 0x10, 0),
-        (0, 0, 0, 1),
-    ];
-    let nested_tags = [
-        (1, 1, 0x01, 0),
-        (2, 1, 0x02, 0),
-        (3, 1, 0x04, 0),
-        (4, 1, 0x08, 0),
-        (21, 1, 0x10, 0),
-        (22, 1, 0x20, 0),
-        (23, 1, 0x40, 0),
-        (6, 2, 0x80, 0),
-        (0, 0, 0, 1),
-    ];
-    let ncx_idx = index(
-        if nested { &nested_tags } else { &flat_tags },
-        1,
-        &ncx_entries,
-        Some(&ncx_strings),
-    );
 
-    // Records in the order Kindle books have them: the text, its indexes,
-    // the pictures, then the flows' table and the closing records.
-    let mut records: Vec<Vec<u8>> = vec![Vec::new()];
-    records.extend(text_recs.iter().cloned());
-    // The guide: where reading starts (the first file's start).
+    /// The contents' index records.
+    fn index(&self) -> Vec<Vec<u8>> {
+        let flat_tags = [
+            (1, 1, 0x01, 0),
+            (2, 1, 0x02, 0),
+            (3, 1, 0x04, 0),
+            (4, 1, 0x08, 0),
+            (6, 2, 0x10, 0),
+            (0, 0, 0, 1),
+        ];
+        let nested_tags = [
+            (1, 1, 0x01, 0),
+            (2, 1, 0x02, 0),
+            (3, 1, 0x04, 0),
+            (4, 1, 0x08, 0),
+            (21, 1, 0x10, 0),
+            (22, 1, 0x20, 0),
+            (23, 1, 0x40, 0),
+            (6, 2, 0x80, 0),
+            (0, 0, 0, 1),
+        ];
+        index(
+            if self.nested {
+                &nested_tags
+            } else {
+                &flat_tags
+            },
+            1,
+            &self.entries,
+            Some(&self.strings),
+        )
+    }
+}
+
+/// Each text record ends with which entries of the contents touch it (as
+/// Kindle's own tools write it), for a contents of one level.
+fn mark_touching_entries(
+    text_recs: &mut [Vec<u8>],
+    points: &[Point],
+    lengths: &[u32],
+    text_len: usize,
+) {
+    for (r, rec) in text_recs.iter_mut().enumerate() {
+        let (a, b) = ((r * 4096) as u32, ((r + 1) * 4096).min(text_len) as u32);
+        let touching: Vec<usize> = (0..points.len())
+            .filter(|&i| points[i].pos < b && points[i].pos + lengths[i] > a)
+            .collect();
+        let mut t = Vec::new();
+        match touching.as_slice() {
+            [] => {}
+            [i] => {
+                let p = &points[*i];
+                if p.pos < a && p.pos + lengths[*i] > b {
+                    varlen((*i as u32) << 3 | 3, &mut t);
+                    t.extend_from_slice(&[0x88, 0x80]);
+                } else {
+                    varlen((*i as u32) << 3 | 2, &mut t);
+                    t.push(0x88);
+                }
+            }
+            [first, ..] => {
+                varlen((*first as u32) << 3 | 6, &mut t);
+                t.push(0x88);
+                t.push(touching.len().min(127) as u8);
+            }
+        }
+        rec.extend_from_slice(&t);
+        rec.push(0x80 | (t.len() as u8 + 1));
+    }
+}
+
+/// The guide's index: where reading starts (the first file's start).
+fn guide_index() -> Vec<Vec<u8>> {
     let (guide_strings, _) = strings_of(&["Start".to_string()]);
-    let guide_idx = index(
+    index(
         &[(1, 1, 0x01, 0), (6, 2, 0x02, 0), (0, 0, 0, 1)],
         1,
         &[("text".to_string(), vec![(1, vec![0]), (6, vec![0, 0])])],
         Some(&guide_strings),
-    );
-    // In the order Kindle's own files have them: fragments, skeletons,
-    // guide, contents.
-    let first_nonbook = records.len();
-    let frag_at = records.len();
-    records.extend(frag_idx);
-    let skel_at = records.len();
-    records.extend(skel_idx);
-    let guide_at = records.len();
-    records.extend(guide_idx);
-    let ncx_at = records.len();
-    records.extend(ncx_idx);
-    let first_res = records.len();
-    for p in &pics {
-        records.push(p.data.clone());
-    }
-    // The cover small, as the library shows it, after the pictures.
-    let cover_no = book
-        .cover
-        .as_ref()
-        .and_then(|c| pic_no.get(c.as_str()))
-        .copied();
-    let thumb = cover_no.and_then(|n| thumbnail(&pics[n as usize - 1].data));
-    if let Some(t) = &thumb {
-        records.push(t.clone());
-    }
-    let fdst_at = records.len();
+    )
+}
+
+/// The flows' table: where each flow starts and ends.
+fn fdst_record(flows: &[(usize, usize)]) -> Vec<u8> {
     let mut fdst = b"FDST".to_vec();
     put32(&mut fdst, 12);
     put32(&mut fdst, flows.len() as u32);
-    for (a, b) in &flows {
+    for (a, b) in flows {
         put32(&mut fdst, *a as u32);
         put32(&mut fdst, *b as u32);
     }
-    records.push(fdst);
-    let flis_at = records.len();
+    fdst
+}
+
+fn flis_record() -> Vec<u8> {
     let mut flis = b"FLIS".to_vec();
     // 36 bytes: the two fields after the length are 16-bit.
     put32(&mut flis, 8);
@@ -805,19 +889,28 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
     put32(&mut flis, 3);
     put32(&mut flis, 1);
     put32(&mut flis, u32::MAX);
-    records.push(flis);
-    let fcis_at = records.len();
+    flis
+}
+
+fn fcis_record(text_len: usize) -> Vec<u8> {
     let mut fcis = b"FCIS".to_vec();
-    for v in [0x14u32, 0x10, 2, 0, text.len() as u32, 0, 0x28, 0, 0x28, 8] {
+    for v in [0x14u32, 0x10, 2, 0, text_len as u32, 0, 0x28, 0, 0x28, 8] {
         put32(&mut fcis, v);
     }
     put16(&mut fcis, 1);
     put16(&mut fcis, 1);
     put32(&mut fcis, 0);
-    records.push(fcis);
-    records.push(vec![0xe9, 0x8e, 0x0d, 0x0a]);
+    fcis
+}
 
-    // Record 0: the PalmDOC and MOBI headers, the details, the title.
+/// The EXTH record: the book's details and how the Kindle should treat it.
+fn exth_record(
+    book: &Book,
+    lang: &str,
+    pics: &Pictures,
+    has_thumb: bool,
+    cover_no: Option<u32>,
+) -> Vec<u8> {
     let m = &book.meta;
     let mut exth: Vec<(u32, Vec<u8>)> = Vec::new();
     for a in &m.authors {
@@ -840,7 +933,7 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
     }
     exth.push((503, m.title.as_bytes().to_vec()));
     // How many resources (pictures) the book has, and none of another kind.
-    let resources = pics.len() as u32 + u32::from(thumb.is_some());
+    let resources = pics.list.len() as u32 + u32::from(has_thumb);
     exth.push((125, resources.to_be_bytes().to_vec()));
     exth.push((131, 0u32.to_be_bytes().to_vec()));
     exth.push((524, lang.as_bytes().to_vec()));
@@ -864,8 +957,8 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
     }
     if let Some(n) = cover_no {
         exth.push((201, (n - 1).to_be_bytes().to_vec()));
-        if thumb.is_some() {
-            exth.push((202, (pics.len() as u32).to_be_bytes().to_vec()));
+        if has_thumb {
+            exth.push((202, (pics.list.len() as u32).to_be_bytes().to_vec()));
         }
         exth.push((203, 0u32.to_be_bytes().to_vec()));
         exth.push((129, format!("kindle:embed:{}", base32(n, 4)).into_bytes()));
@@ -882,18 +975,47 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
         ex.extend_from_slice(v);
     }
     let pad = (4 - ex.len() % 4) % 4;
-    let mut exth_rec = b"EXTH".to_vec();
-    put32(&mut exth_rec, (12 + ex.len()) as u32);
-    put32(&mut exth_rec, exth.len() as u32);
-    exth_rec.extend_from_slice(&ex);
-    exth_rec.extend(std::iter::repeat_n(0u8, pad));
+    let mut rec = b"EXTH".to_vec();
+    put32(&mut rec, (12 + ex.len()) as u32);
+    put32(&mut rec, exth.len() as u32);
+    rec.extend_from_slice(&ex);
+    rec.extend(std::iter::repeat_n(0u8, pad));
+    rec
+}
 
+/// Where things are among the records, for the MOBI header.
+struct Places {
+    first_nonbook: usize,
+    first_res: usize,
+    frag_at: usize,
+    skel_at: usize,
+    guide_at: usize,
+    ncx_at: usize,
+    fdst_at: usize,
+    flis_at: usize,
+    fcis_at: usize,
+    /// How many flows the text has.
+    flows: usize,
+    /// The records end with which contents entries they touch.
+    tbs: bool,
+}
+
+/// Record 0: the PalmDOC and MOBI headers, the details, the title.
+fn record_zero(
+    book: &Book,
+    lang: &str,
+    at: &Places,
+    exth_rec: &[u8],
+    text_len: usize,
+    text_records: usize,
+) -> Vec<u8> {
+    let m = &book.meta;
     let header_len = 264usize;
     let mut r0 = vec![0u8; 16 + header_len];
     // PalmDOC.
     r0[0..2].copy_from_slice(&2u16.to_be_bytes());
-    set32(&mut r0, 4, text.len() as u32);
-    r0[8..10].copy_from_slice(&(text_recs.len() as u16).to_be_bytes());
+    set32(&mut r0, 4, text_len as u32);
+    r0[8..10].copy_from_slice(&(text_records as u16).to_be_bytes());
     r0[10..12].copy_from_slice(&4096u16.to_be_bytes());
     // MOBI.
     r0[16..20].copy_from_slice(b"MOBI");
@@ -909,33 +1031,33 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
     for o in (0x28..0x50).step_by(4) {
         set32(&mut r0, o, u32::MAX);
     }
-    set32(&mut r0, 0x50, first_nonbook as u32);
+    set32(&mut r0, 0x50, at.first_nonbook as u32);
     let name_at = 16 + header_len + exth_rec.len();
     set32(&mut r0, 0x54, name_at as u32);
     set32(&mut r0, 0x58, m.title.len() as u32);
-    set32(&mut r0, 0x5C, locale(&lang));
+    set32(&mut r0, 0x5C, locale(lang));
     set32(&mut r0, 0x68, 8);
-    set32(&mut r0, 0x6C, first_res as u32);
+    set32(&mut r0, 0x6C, at.first_res as u32);
     set32(&mut r0, 0x80, 0x50);
     set32(&mut r0, 0xA4, u32::MAX);
     set32(&mut r0, 0xA8, u32::MAX);
-    set32(&mut r0, 0xC0, fdst_at as u32);
-    set32(&mut r0, 0xC4, flows.len() as u32);
-    set32(&mut r0, 0xC8, fcis_at as u32);
+    set32(&mut r0, 0xC0, at.fdst_at as u32);
+    set32(&mut r0, 0xC4, at.flows as u32);
+    set32(&mut r0, 0xC8, at.fcis_at as u32);
     set32(&mut r0, 0xCC, 1);
-    set32(&mut r0, 0xD0, flis_at as u32);
+    set32(&mut r0, 0xD0, at.flis_at as u32);
     set32(&mut r0, 0xD4, 1);
     set32(&mut r0, 0xE0, u32::MAX);
     set32(&mut r0, 0xE8, u32::MAX);
     set32(&mut r0, 0xEC, u32::MAX);
     // Trailing entries: the cut character's bytes, and (with `tbs`)
     // which contents entries each record touches.
-    set32(&mut r0, 0xF0, if tbs { 3 } else { 1 });
-    set32(&mut r0, 0xF4, ncx_at as u32);
-    set32(&mut r0, 0xF8, frag_at as u32);
-    set32(&mut r0, 0xFC, skel_at as u32);
+    set32(&mut r0, 0xF0, if at.tbs { 3 } else { 1 });
+    set32(&mut r0, 0xF4, at.ncx_at as u32);
+    set32(&mut r0, 0xF8, at.frag_at as u32);
+    set32(&mut r0, 0xFC, at.skel_at as u32);
     set32(&mut r0, 0x100, u32::MAX);
-    set32(&mut r0, 0x104, guide_at as u32);
+    set32(&mut r0, 0x104, at.guide_at as u32);
     for o in (0x108..16 + header_len).step_by(4) {
         set32(&mut r0, o, u32::MAX);
     }
@@ -945,20 +1067,21 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
             set32(&mut r0, o, 0);
         }
     }
-    r0.extend_from_slice(&exth_rec);
+    r0.extend_from_slice(exth_rec);
     r0.extend_from_slice(m.title.as_bytes());
     // Room after the title, as Kindle books leave it.
     r0.extend(std::iter::repeat_n(0u8, 8192));
     while !r0.len().is_multiple_of(4) {
         r0.push(0);
     }
-    records[0] = r0;
+    r0
+}
 
-    // The Palm database around them.
+/// The Palm database around the records.
+fn palm_database(title: &str, records: &[Vec<u8>]) -> Vec<u8> {
     let n = records.len();
     let mut out = Vec::new();
-    let mut name: Vec<u8> = m
-        .title
+    let mut name: Vec<u8> = title
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == ' ')
         .collect::<String>()
@@ -991,10 +1114,114 @@ pub fn build(book: &Book) -> Result<Vec<u8>, String> {
         offset += r.len();
     }
     put16(&mut out, 0);
-    for r in &records {
+    for r in records {
         out.extend_from_slice(r);
     }
-    Ok(out)
+    out
+}
+
+/// The book as an AZW3 file's bytes.
+pub fn build(book: &Book) -> Result<Vec<u8>, String> {
+    let pics = Pictures::of(book);
+    let bodies = chapter_bodies(book, &pics);
+    let ids = element_ids(&bodies);
+    let file_no = file_numbers(book);
+    let bodies = link_bodies(&bodies, &ids, &file_no);
+
+    // Skeletons and fragments, and the text they and the style sheet make.
+    let lang = if book.meta.language.is_empty() {
+        "und".to_string()
+    } else {
+        book.meta.language.clone()
+    };
+    let (files, selectors) = skeletons(book, &bodies, &lang);
+    if files.is_empty() {
+        return Err("bookBroken".into());
+    }
+    let layout = TextLayout::new(&files, &selectors, &style_sheet(book, &pics));
+    let mut text_recs = text_records(&layout.text);
+
+    // The table of contents.
+    let points = toc_points(book, &ids, &file_no, &layout.frag_starts);
+    let lengths = point_lengths(&points, layout.flow0 as u32);
+    let contents = Contents::new(&points, &lengths);
+    // A nested contents is left without which entries each record touches.
+    let tbs = !contents.nested && !points.is_empty();
+    if tbs {
+        mark_touching_entries(&mut text_recs, &points, &lengths, layout.text.len());
+    }
+
+    // Records in the order Kindle books have them: the text, its indexes
+    // (fragments, skeletons, guide, contents), the pictures, then the
+    // flows' table and the closing records.
+    let skel_idx = index(
+        &[(1, 1, 0x03, 0), (6, 2, 0x0C, 0), (0, 0, 0, 1)],
+        1,
+        &layout.skel_entries,
+        None,
+    );
+    let frag_idx = index(
+        &[
+            (2, 1, 0x01, 0),
+            (3, 1, 0x02, 0),
+            (4, 1, 0x04, 0),
+            (6, 2, 0x08, 0),
+            (0, 0, 0, 1),
+        ],
+        1,
+        &layout.frag_entries,
+        Some(&layout.frag_strings),
+    );
+    let mut records: Vec<Vec<u8>> = vec![Vec::new()];
+    records.extend(text_recs.iter().cloned());
+    let first_nonbook = records.len();
+    let frag_at = records.len();
+    records.extend(frag_idx);
+    let skel_at = records.len();
+    records.extend(skel_idx);
+    let guide_at = records.len();
+    records.extend(guide_index());
+    let ncx_at = records.len();
+    records.extend(contents.index());
+    let first_res = records.len();
+    for p in &pics.list {
+        records.push(p.data.clone());
+    }
+    // The cover small, as the library shows it, after the pictures.
+    let cover_no = book
+        .cover
+        .as_ref()
+        .and_then(|c| pics.no.get(c.as_str()))
+        .copied();
+    let thumb = cover_no.and_then(|n| thumbnail(&pics.list[n as usize - 1].data));
+    if let Some(t) = &thumb {
+        records.push(t.clone());
+    }
+    let flows = layout.flows();
+    let fdst_at = records.len();
+    records.push(fdst_record(&flows));
+    let flis_at = records.len();
+    records.push(flis_record());
+    let fcis_at = records.len();
+    records.push(fcis_record(layout.text.len()));
+    records.push(vec![0xe9, 0x8e, 0x0d, 0x0a]);
+
+    let exth = exth_record(book, &lang, &pics, thumb.is_some(), cover_no);
+    let at = Places {
+        first_nonbook,
+        first_res,
+        frag_at,
+        skel_at,
+        guide_at,
+        ncx_at,
+        fdst_at,
+        flis_at,
+        fcis_at,
+        flows: flows.len(),
+        tbs,
+    };
+    records[0] = record_zero(book, &lang, &at, &exth, layout.text.len(), text_recs.len());
+    Ok(palm_database(&book.meta.title, &records))
 }
 
 #[cfg(test)]
