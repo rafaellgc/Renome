@@ -243,6 +243,21 @@ fn identical_copies_are_found() {
 }
 
 #[test]
+fn duplicates_are_listed_as_text() {
+    let w = Place::new("dups-text");
+    w.touch("a.bin", b"same content here");
+    w.touch("b.bin", b"same content here");
+    w.touch("c.bin", b"other");
+    let (code, out, _) = w.run(&["duplicates", s(&w.files())]);
+    assert_eq!(code, 0);
+    let out = out.replace(w.files().to_str().unwrap(), "<dir>");
+    assert_eq!(
+        out,
+        "2 files with an identical copy\n  1\n    <dir>/a.bin (17 B)\n    <dir>/b.bin (17 B)\n"
+    );
+}
+
+#[test]
 fn the_manual_and_help_are_there_in_each_language() {
     let w = Place::new("manual");
     let (code, out, _) = w.run(&["manual", "cli"]);
