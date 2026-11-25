@@ -72,6 +72,7 @@ jobs:
         with:
           tool: cargo-llvm-cov,cargo-machete
       - run: cargo machete --with-metadata
+      - run: cargo bench -p renome-core --no-run
       - run: cargo llvm-cov -p renome-core -p renome-services -p renome-cli --fail-under-lines 70 --summary-only
 
   # The same tests on Windows and macOS (renaming works differently there);

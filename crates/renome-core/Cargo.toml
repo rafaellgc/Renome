@@ -46,7 +46,12 @@ zip = { version = "9", default-features = false, features = ["deflate"] }
 libc = "0.2"
 
 [dev-dependencies]
+criterion = { version = "0.8", default-features = false }
 tempfile = "3"
+
+[[bench]]
+name = "preview"
+harness = false
 
 [lints]
 workspace = true
