@@ -1251,29 +1251,27 @@ pub fn write(nodes: &[Node], out: &Out, s: &mut String) {
     }
 }
 
-fn write_elem(e: &Elem, out: &Out, s: &mut String) {
+/// What an element becomes in the book.
+enum Tag<'a> {
+    /// A tag of the present markup, and a style the old one stands for.
+    Name(&'a str, Option<String>),
+    /// Written already (or left out): nothing more to do.
+    Done,
+}
+
+/// Old markup → its present form (what has none is written as its
+/// content, or as the pictures it holds).
+fn modern_tag<'a>(e: &'a Elem, out: &Out, s: &mut String) -> Tag<'a> {
     let name = e.name.as_str();
-    if dropped(name) {
-        return;
-    }
-    // What the book hides (landmarks, page lists) stays hidden.
-    if e.attr("hidden").is_some()
-        || (name == "nav"
-            && e.attr("epub:type")
-                .is_some_and(|t| t.contains("landmarks") || t.contains("page-list")))
-    {
-        return;
-    }
-    // Old markup → its present form.
-    let (name, extra_style): (&str, Option<String>) = match name {
-        "center" => ("div", Some("text-align: center".into())),
-        "font" => ("span", None),
-        "strike" => ("s", None),
-        "tt" => ("code", None),
-        "big" => ("span", Some("font-size: larger".into())),
-        "listing" | "xmp" | "plaintext" => ("pre", None),
-        "mbp:pagebreak" => ("div", Some("page-break-before: always".into())),
-        "image" => ("img", None),
+    match name {
+        "center" => Tag::Name("div", Some("text-align: center".into())),
+        "font" => Tag::Name("span", None),
+        "strike" => Tag::Name("s", None),
+        "tt" => Tag::Name("code", None),
+        "big" => Tag::Name("span", Some("font-size: larger".into())),
+        "listing" | "xmp" | "plaintext" => Tag::Name("pre", None),
+        "mbp:pagebreak" => Tag::Name("div", Some("page-break-before: always".into())),
+        "image" => Tag::Name("img", None),
         "svg" => {
             // A picture wrapped in SVG (common for covers): the picture.
             let mut imgs = Vec::new();
@@ -1287,119 +1285,161 @@ fn write_elem(e: &Elem, out: &Out, s: &mut String) {
                     s.push_str(&format!("<img src=\"{}\" alt=\"\"/>", esc_attr(&src)));
                 }
             }
-            return;
+            Tag::Done
         }
         n if n.starts_with("epub:") || n.starts_with("mbp:") => {
             write(&e.kids, out, s);
-            return;
+            Tag::Done
         }
-        n => (n, None),
+        n => Tag::Name(n, None),
+    }
+}
+
+/// An attribute that tells the style (alignment, an old paragraph's
+/// indent and the space above it, a picture's width): adds to `style`.
+fn style_attribute(name: &str, k: &str, v: &str, style: &mut String) {
+    match k {
+        "align" => match v.to_ascii_lowercase().as_str() {
+            a @ ("center" | "left" | "right" | "justify") if name != "img" => {
+                style.push_str(&format!("text-align: {a}; "))
+            }
+            _ => {}
+        },
+        "style" => {
+            let c = clean_style(v);
+            if !c.is_empty() {
+                style.push_str(&c);
+                style.push_str("; ");
+            }
+        }
+        // Old Kindle books: a paragraph's first-line indent and the space
+        // above it.
+        "width" if name == "p" => {
+            let v = v.trim();
+            if v.ends_with("em") || v.ends_with('%') {
+                if !v.starts_with('-') {
+                    style.push_str(&format!("text-indent: {v}; "));
+                }
+            } else if v.parse::<f32>().is_ok_and(|n| n > 0.0) {
+                style.push_str("text-indent: 1.5em; ");
+            } else if v.parse::<f32>().is_ok_and(|n| n <= 0.0) {
+                style.push_str("text-indent: 0; ");
+            }
+        }
+        "height" if name == "p" => {
+            let v = v.trim();
+            if (v.ends_with("em") || v.ends_with('%')) && !v.starts_with('-') {
+                style.push_str(&format!("margin-top: {v}; "));
+            } else if v.parse::<f32>().is_ok_and(|n| n > 0.0) {
+                style.push_str("margin-top: 1em; ");
+            }
+        }
+        "width" if name == "img" || name == "hr" => {
+            if let Some(p) = v.strip_suffix('%') {
+                style.push_str(&format!("width: {p}%; "));
+            }
+        }
+        _ => {}
+    }
+}
+
+/// An attribute a clean element keeps: added to `attrs`.
+fn copy_attribute(name: &str, k: &str, v: &str, out: &Out, attrs: &mut Vec<(String, String)>) {
+    match k {
+        "id" if valid_id(v) => attrs.push(("id".into(), v.to_string())),
+        "class" if out.classes && !v.trim().is_empty() => {
+            attrs.push(("class".into(), v.trim().into()))
+        }
+        "lang" | "xml:lang" if !v.is_empty() => {
+            if !attrs.iter().any(|(k, _)| k == "xml:lang") {
+                attrs.push(("xml:lang".into(), v.to_string()));
+            }
+        }
+        "dir" if v == "rtl" || v == "ltr" => attrs.push(("dir".into(), v.to_string())),
+        "epub:type" if !v.trim().is_empty() => attrs.push(("epub:type".into(), v.trim().into())),
+        "title" if !v.is_empty() => attrs.push(("title".into(), v.to_string())),
+        "colspan" | "rowspan" if matches!(name, "td" | "th") && v.parse::<u32>().is_ok() => {
+            attrs.push((k.to_string(), v.to_string()))
+        }
+        "start" if name == "ol" && v.parse::<i64>().is_ok() => {
+            attrs.push((k.to_string(), v.to_string()))
+        }
+        "value" if name == "li" && v.parse::<i64>().is_ok() => {
+            attrs.push((k.to_string(), v.to_string()))
+        }
+        "type" if name == "ol" && matches!(v, "1" | "a" | "A" | "i" | "I") => {
+            attrs.push((k.to_string(), v.to_string()))
+        }
+        "href" | "filepos" if name == "a" => {
+            if let Some(h) = (out.href)(v, false) {
+                attrs.retain(|(k, _)| k != "href");
+                attrs.push(("href".into(), h));
+            }
+        }
+        "src" | "recindex" | "href" | "xlink:href" if name == "img" => {
+            if !attrs.iter().any(|(k, _)| k == "src")
+                && let Some(h) = (out.href)(v, true)
+            {
+                attrs.push(("src".into(), h));
+            }
+        }
+        "alt" if name == "img" => attrs.push(("alt".into(), v.to_string())),
+        _ => {}
+    }
+}
+
+/// The attributes an element keeps and the style its attributes tell.
+fn element_attrs(e: &Elem, name: &str, out: &Out) -> (Vec<(String, String)>, String) {
+    let mut attrs: Vec<(String, String)> = Vec::new();
+    let mut style = String::new();
+    for (k, v) in &e.attrs {
+        match k.as_str() {
+            "align" | "style" | "width" | "height" => style_attribute(name, k, v, &mut style),
+            _ => copy_attribute(name, k, v, out, &mut attrs),
+        }
+    }
+    (attrs, style)
+}
+
+/// An old `<font size>` as a font size.
+fn font_size_style(e: &Elem) -> Option<&'static str> {
+    if e.name != "font" {
+        return None;
+    }
+    match e.attr("size")?.trim() {
+        "1" | "-2" => Some("0.7em"),
+        "2" | "-1" => Some("0.85em"),
+        "4" | "+1" => Some("1.15em"),
+        "5" | "+2" => Some("1.4em"),
+        "6" | "7" | "+3" | "+4" => Some("1.8em"),
+        _ => None,
+    }
+}
+
+fn write_elem(e: &Elem, out: &Out, s: &mut String) {
+    let name = e.name.as_str();
+    if dropped(name) {
+        return;
+    }
+    // What the book hides (landmarks, page lists) stays hidden.
+    if e.attr("hidden").is_some()
+        || (name == "nav"
+            && e.attr("epub:type")
+                .is_some_and(|t| t.contains("landmarks") || t.contains("page-list")))
+    {
+        return;
+    }
+    let (name, extra_style) = match modern_tag(e, out, s) {
+        Tag::Name(name, extra) => (name, extra),
+        Tag::Done => return,
     };
     if !kept(name) && name != "img" {
         write(&e.kids, out, s);
         return;
     }
-    let mut attrs: Vec<(String, String)> = Vec::new();
-    let mut style = String::new();
-    for (k, v) in &e.attrs {
-        match k.as_str() {
-            "id" if valid_id(v) => attrs.push(("id".into(), v.clone())),
-            "class" if out.classes && !v.trim().is_empty() => {
-                attrs.push(("class".into(), v.trim().into()))
-            }
-            "lang" | "xml:lang" if !v.is_empty() => {
-                if !attrs.iter().any(|(k, _)| k == "xml:lang") {
-                    attrs.push(("xml:lang".into(), v.clone()));
-                }
-            }
-            "dir" if v == "rtl" || v == "ltr" => attrs.push(("dir".into(), v.clone())),
-            "epub:type" if !v.trim().is_empty() => {
-                attrs.push(("epub:type".into(), v.trim().into()))
-            }
-            "title" if !v.is_empty() => attrs.push(("title".into(), v.clone())),
-            "colspan" | "rowspan" if matches!(name, "td" | "th") && v.parse::<u32>().is_ok() => {
-                attrs.push((k.clone(), v.clone()))
-            }
-            "start" if name == "ol" && v.parse::<i64>().is_ok() => {
-                attrs.push((k.clone(), v.clone()))
-            }
-            "value" if name == "li" && v.parse::<i64>().is_ok() => {
-                attrs.push((k.clone(), v.clone()))
-            }
-            "type" if name == "ol" && matches!(v.as_str(), "1" | "a" | "A" | "i" | "I") => {
-                attrs.push((k.clone(), v.clone()))
-            }
-            "href" | "filepos" if name == "a" => {
-                if let Some(h) = (out.href)(v, false) {
-                    attrs.retain(|(k, _)| k != "href");
-                    attrs.push(("href".into(), h));
-                }
-            }
-            "src" | "recindex" | "href" | "xlink:href" if name == "img" => {
-                if !attrs.iter().any(|(k, _)| k == "src")
-                    && let Some(h) = (out.href)(v, true)
-                {
-                    attrs.push(("src".into(), h));
-                }
-            }
-            "alt" if name == "img" => attrs.push(("alt".into(), v.clone())),
-            "align" => match v.to_ascii_lowercase().as_str() {
-                a @ ("center" | "left" | "right" | "justify") if name != "img" => {
-                    style.push_str(&format!("text-align: {a}; "))
-                }
-                _ => {}
-            },
-            "style" => {
-                let c = clean_style(v);
-                if !c.is_empty() {
-                    style.push_str(&c);
-                    style.push_str("; ");
-                }
-            }
-            // Old Kindle books: a paragraph's first-line indent and the
-            // space above it.
-            "width" if name == "p" => {
-                let v = v.trim();
-                if v.ends_with("em") || v.ends_with('%') {
-                    if !v.starts_with('-') {
-                        style.push_str(&format!("text-indent: {v}; "));
-                    }
-                } else if v.parse::<f32>().is_ok_and(|n| n > 0.0) {
-                    style.push_str("text-indent: 1.5em; ");
-                } else if v.parse::<f32>().is_ok_and(|n| n <= 0.0) {
-                    style.push_str("text-indent: 0; ");
-                }
-            }
-            "height" if name == "p" => {
-                let v = v.trim();
-                if (v.ends_with("em") || v.ends_with('%')) && !v.starts_with('-') {
-                    style.push_str(&format!("margin-top: {v}; "));
-                } else if v.parse::<f32>().is_ok_and(|n| n > 0.0) {
-                    style.push_str("margin-top: 1em; ");
-                }
-            }
-            "width" if name == "img" || name == "hr" => {
-                if let Some(p) = v.strip_suffix('%') {
-                    style.push_str(&format!("width: {p}%; "));
-                }
-            }
-            _ => {}
-        }
-    }
-    if e.name == "font"
-        && let Some(sz) = e.attr("size")
-    {
-        let em = match sz.trim() {
-            "1" | "-2" => Some("0.7em"),
-            "2" | "-1" => Some("0.85em"),
-            "4" | "+1" => Some("1.15em"),
-            "5" | "+2" => Some("1.4em"),
-            "6" | "7" | "+3" | "+4" => Some("1.8em"),
-            _ => None,
-        };
-        if let Some(em) = em {
-            style.push_str(&format!("font-size: {em}; "));
-        }
+    let (mut attrs, mut style) = element_attrs(e, name, out);
+    if let Some(em) = font_size_style(e) {
+        style.push_str(&format!("font-size: {em}; "));
     }
     if let Some(x) = extra_style {
         style.push_str(&x);
@@ -1432,14 +1472,7 @@ fn write_elem(e: &Elem, out: &Out, s: &mut String) {
         return;
     }
     s.push('>');
-    // Blocks inside a `<p>` are not allowed: a `<p>` holding one becomes
-    // a `<div>`.
-    if name == "pre" {
-        // Raw text, its first newline kept.
-        write(&e.kids, out, s);
-    } else {
-        write(&e.kids, out, s);
-    }
+    write(&e.kids, out, s);
     s.push_str("</");
     s.push_str(name);
     s.push('>');
