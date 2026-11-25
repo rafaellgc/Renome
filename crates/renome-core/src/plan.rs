@@ -3115,16 +3115,8 @@ fn place_movie_folders(items: &mut [PreviewItem], view: &View) {
     }
 }
 
-/// The folders files leave for a new one next to them (a show's, movie's,
-/// album's, author's or series' folder named anew by the rules) that still
-/// hold files afterwards (extras, a file in conflict, one hidden by the
-/// filter): renamed `<new folder> (<suffix>)`, next to the new one. Without
-/// anything left, the old folder is removed after the move instead.
-///
-/// Also the folders left with only the release's advertisements, when they
-/// go to the trash: sent there whole instead.
-fn left_folders(items: &[PreviewItem], view: &View) -> (Vec<LeftFolder>, Vec<PathBuf>) {
-    // Each old folder and the new one its files go to (None: several).
+/// Each old folder and the new one its files go to (none: several).
+fn folder_moves(items: &[PreviewItem], view: &View) -> Vec<(PathBuf, Option<PathBuf>)> {
     let mut pairs: Vec<(PathBuf, Option<PathBuf>)> = Vec::new();
     for i in items.iter().filter(|i| i.status == Status::Ok && !i.is_dir) {
         let (Some(folder), Some(dest)) = (&i.folder, &i.dest) else {
@@ -3157,11 +3149,7 @@ fn left_folders(items: &[PreviewItem], view: &View) -> (Vec<LeftFolder>, Vec<Pat
             };
             if let Some(to) = to {
                 let to = Some(to);
-                match pairs.iter_mut().find(|p| p.0 == i.dir) {
-                    Some(p) if p.1 != to => p.1 = None,
-                    Some(_) => {}
-                    None => pairs.push((i.dir.clone(), to)),
-                }
+                note_move(&mut pairs, i.dir.clone(), to);
             }
             continue;
         }
@@ -3187,12 +3175,31 @@ fn left_folders(items: &[PreviewItem], view: &View) -> (Vec<LeftFolder>, Vec<Pat
         let lower =
             |c: &std::path::Component| text::nfc(&c.as_os_str().to_string_lossy().to_lowercase());
         let to = (lower(&old[k]) != lower(&new[k])).then_some(to);
-        match pairs.iter_mut().find(|p| p.0 == from) {
-            Some(p) if p.1 != to => p.1 = None,
-            Some(_) => {}
-            None => pairs.push((from, to)),
-        }
+        note_move(&mut pairs, from, to);
     }
+    pairs
+}
+
+/// Notes that a folder's files go to `to`; to none, when others of its
+/// files go elsewhere.
+fn note_move(pairs: &mut Vec<(PathBuf, Option<PathBuf>)>, from: PathBuf, to: Option<PathBuf>) {
+    match pairs.iter_mut().find(|p| p.0 == from) {
+        Some(p) if p.1 != to => p.1 = None,
+        Some(_) => {}
+        None => pairs.push((from, to)),
+    }
+}
+
+/// The folders files leave for a new one next to them (a show's, movie's,
+/// album's, author's or series' folder named anew by the rules) that still
+/// hold files afterwards (extras, a file in conflict, one hidden by the
+/// filter): renamed `<new folder> (<suffix>)`, next to the new one. Without
+/// anything left, the old folder is removed after the move instead.
+///
+/// Also the folders left with only the release's advertisements, when they
+/// go to the trash: sent there whole instead.
+fn left_folders(items: &[PreviewItem], view: &View) -> (Vec<LeftFolder>, Vec<PathBuf>) {
+    let pairs = folder_moves(items, view);
     let suffix = match view.leftover_suffix.trim() {
         "" => "extras",
         s => s,
