@@ -1601,113 +1601,16 @@ fn number_shots(
 ) {
     let mut keys = PathKeys::default();
     let in_batch: HashSet<PathBuf> = items.iter().map(|i| keys.key(&i.path)).collect();
-    // The name before its kept part (`.CR2`) and extension, where it goes.
-    let base_of = |i: &PreviewItem, kept: &str| -> Option<(PathBuf, String, String)> {
-        let (stem, ext) = split_name(&i.new_name);
-        let base = stem.strip_suffix(kept)?;
-        Some((
-            i.dest.clone().unwrap_or_else(|| i.dir.clone()),
-            base.to_string(),
-            ext.to_string(),
-        ))
-    };
-    // Each place and name: the groups going there, and their files.
-    let mut places: HashMap<PathBuf, Vec<(usize, Vec<usize>)>> = HashMap::new();
-    for (n, i) in items.iter().enumerate() {
-        if i.manual || i.status == Status::Conflict {
-            continue;
-        }
-        let (Some(_), Some((group, kept))) =
-            (names.get(i.path.as_path()), groups.get(i.path.as_path()))
-        else {
-            continue;
-        };
-        let Some((dir, base, _)) = base_of(i, kept) else {
-            continue;
-        };
-        let units = places.entry(keys.key(&dir.join(&base))).or_default();
-        match units.iter_mut().find(|(g, _)| g == group) {
-            Some((_, files)) => files.push(n),
-            None => units.push((*group, vec![n])),
-        }
-    }
+    let mut places = shot_places(items, names, groups, &mut keys);
     let mut taken: HashSet<PathBuf> = HashSet::new();
     let mut changes: Vec<(usize, PathBuf)> = Vec::new();
+    let ctx = Shots {
+        groups,
+        identical,
+        in_batch: &in_batch,
+    };
     for units in places.values_mut() {
-        let target = |i: &PreviewItem, number: Option<usize>| -> Option<PathBuf> {
-            let kept = &groups.get(i.path.as_path())?.1;
-            let (dir, base, ext) = base_of(i, kept)?;
-            let stem = match number {
-                Some(k) => format!("{base}-{k}{kept}"),
-                None => format!("{base}{kept}"),
-            };
-            Some(dir.join(join_name(&stem, &ext)))
-        };
-        // On disk already, by a file that is not in the list.
-        let foreign = |keys: &mut PathKeys, p: &Path| {
-            p.symlink_metadata().is_ok() && !in_batch.contains(&keys.key(p))
-        };
-        // Identical copies are one photo here: the duplicate check tells them.
-        let mut kinds: Vec<Option<usize>> = Vec::new();
-        let mut distinct = 0;
-        for (_, files) in units.iter() {
-            let copy = files
-                .iter()
-                .find_map(|&n| identical.get(&items[n].path).copied());
-            if copy.is_none() || !kinds.contains(&copy) {
-                distinct += 1;
-                kinds.push(copy);
-            }
-        }
-        let crowded = distinct > 1
-            || units[0].1.iter().any(|&n| {
-                target(&items[n], None)
-                    .is_some_and(|t| foreign(&mut keys, &t) && t != items[n].path)
-            });
-        if !crowded {
-            continue;
-        }
-        let first_name = |files: &Vec<usize>| {
-            files
-                .iter()
-                .map(|&n| items[n].original.clone())
-                .min_by(|a, b| natural_cmp(a, b))
-                .unwrap_or_default()
-        };
-        units.sort_by(|a, b| natural_cmp(&first_name(&a.1), &first_name(&b.1)));
-        let copy_of = |files: &Vec<usize>| {
-            files
-                .iter()
-                .find_map(|&n| identical.get(&items[n].path).copied())
-        };
-        let mut given: Vec<(Option<usize>, usize)> = Vec::new();
-        let mut next = 1;
-        for (_, files) in units.iter() {
-            let copy = copy_of(files);
-            let number = match given.iter().find(|(c, _)| c.is_some() && *c == copy) {
-                Some(&(_, k)) => k,
-                None => loop {
-                    let k = next;
-                    next += 1;
-                    let free = files.iter().all(|&n| {
-                        target(&items[n], Some(k)).is_some_and(|t| {
-                            let key = keys.key(&t);
-                            !taken.contains(&key) && (!foreign(&mut keys, &t) || t == items[n].path)
-                        })
-                    });
-                    if free {
-                        break k;
-                    }
-                },
-            };
-            given.push((copy, number));
-            for &n in files {
-                if let Some(t) = target(&items[n], Some(number)) {
-                    taken.insert(keys.key(&t));
-                    changes.push((n, t));
-                }
-            }
-        }
+        ctx.number_place(units, items, &mut keys, &mut taken, &mut changes);
     }
     for (n, t) in changes {
         let i = &mut items[n];
@@ -1722,6 +1625,145 @@ fn number_shots(
         } else {
             Status::Ok
         };
+    }
+}
+
+/// What numbering photos reads: their groups (one photo's files), the
+/// identical copies, and the files in the batch.
+struct Shots<'a> {
+    groups: &'a HashMap<&'a Path, (usize, String)>,
+    identical: &'a HashMap<PathBuf, usize>,
+    in_batch: &'a HashSet<PathBuf>,
+}
+
+/// The name before its kept part (`.CR2`) and extension, where it goes.
+fn shot_base(i: &PreviewItem, kept: &str) -> Option<(PathBuf, String, String)> {
+    let (stem, ext) = split_name(&i.new_name);
+    let base = stem.strip_suffix(kept)?;
+    Some((
+        i.dest.clone().unwrap_or_else(|| i.dir.clone()),
+        base.to_string(),
+        ext.to_string(),
+    ))
+}
+
+/// Each place and name: the groups going there, and their files.
+fn shot_places(
+    items: &[PreviewItem],
+    names: &HashMap<&Path, crate::photos::Named>,
+    groups: &HashMap<&Path, (usize, String)>,
+    keys: &mut PathKeys,
+) -> HashMap<PathBuf, Vec<(usize, Vec<usize>)>> {
+    let mut places: HashMap<PathBuf, Vec<(usize, Vec<usize>)>> = HashMap::new();
+    for (n, i) in items.iter().enumerate() {
+        if i.manual || i.status == Status::Conflict {
+            continue;
+        }
+        let (Some(_), Some((group, kept))) =
+            (names.get(i.path.as_path()), groups.get(i.path.as_path()))
+        else {
+            continue;
+        };
+        let Some((dir, base, _)) = shot_base(i, kept) else {
+            continue;
+        };
+        let units = places.entry(keys.key(&dir.join(&base))).or_default();
+        match units.iter_mut().find(|(g, _)| g == group) {
+            Some((_, files)) => files.push(n),
+            None => units.push((*group, vec![n])),
+        }
+    }
+    places
+}
+
+impl Shots<'_> {
+    /// A photo's file with a number after its name (none: without).
+    fn target(&self, i: &PreviewItem, number: Option<usize>) -> Option<PathBuf> {
+        let kept = &self.groups.get(i.path.as_path())?.1;
+        let (dir, base, ext) = shot_base(i, kept)?;
+        let stem = match number {
+            Some(k) => format!("{base}-{k}{kept}"),
+            None => format!("{base}{kept}"),
+        };
+        Some(dir.join(join_name(&stem, &ext)))
+    }
+
+    /// On disk already, by a file that is not in the list.
+    fn foreign(&self, keys: &mut PathKeys, p: &Path) -> bool {
+        p.symlink_metadata().is_ok() && !self.in_batch.contains(&keys.key(p))
+    }
+
+    /// The copy a group's files are of (identical copies are one photo
+    /// here: the duplicate check tells them).
+    fn copy_of(&self, items: &[PreviewItem], files: &[usize]) -> Option<usize> {
+        files
+            .iter()
+            .find_map(|&n| self.identical.get(&items[n].path).copied())
+    }
+
+    /// Numbers the groups of one place when they would share a name (or one
+    /// is on disk already), in the order of their first names.
+    fn number_place(
+        &self,
+        units: &mut [(usize, Vec<usize>)],
+        items: &[PreviewItem],
+        keys: &mut PathKeys,
+        taken: &mut HashSet<PathBuf>,
+        changes: &mut Vec<(usize, PathBuf)>,
+    ) {
+        let mut kinds: Vec<Option<usize>> = Vec::new();
+        let mut distinct = 0;
+        for (_, files) in units.iter() {
+            let copy = self.copy_of(items, files);
+            if copy.is_none() || !kinds.contains(&copy) {
+                distinct += 1;
+                kinds.push(copy);
+            }
+        }
+        let crowded = distinct > 1
+            || units[0].1.iter().any(|&n| {
+                self.target(&items[n], None)
+                    .is_some_and(|t| self.foreign(keys, &t) && t != items[n].path)
+            });
+        if !crowded {
+            return;
+        }
+        let first_name = |files: &Vec<usize>| {
+            files
+                .iter()
+                .map(|&n| items[n].original.clone())
+                .min_by(|a, b| natural_cmp(a, b))
+                .unwrap_or_default()
+        };
+        units.sort_by(|a, b| natural_cmp(&first_name(&a.1), &first_name(&b.1)));
+        let mut given: Vec<(Option<usize>, usize)> = Vec::new();
+        let mut next = 1;
+        for (_, files) in units.iter() {
+            let copy = self.copy_of(items, files);
+            let number = match given.iter().find(|(c, _)| c.is_some() && *c == copy) {
+                Some(&(_, k)) => k,
+                None => loop {
+                    let k = next;
+                    next += 1;
+                    let free = files.iter().all(|&n| {
+                        self.target(&items[n], Some(k)).is_some_and(|t| {
+                            let key = keys.key(&t);
+                            !taken.contains(&key) && (!self.foreign(keys, &t) || t == items[n].path)
+                        })
+                    });
+                    if free {
+                        break k;
+                    }
+                },
+            };
+            given.push((copy, number));
+            for &n in files {
+                if let Some(t) = self.target(&items[n], Some(number)) {
+                    taken.insert(keys.key(&t));
+                    changes.push((n, t));
+                }
+            }
+        }
     }
 }
 
