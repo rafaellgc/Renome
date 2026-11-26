@@ -849,6 +849,14 @@ pub fn find_in(show: &Show, g: &EpisodeGuess, dir: &Path, typed: &str) -> Option
         _ => {}
     }
     let mut found = find(show, g);
+    // The name has the show's name, but a title that is nothing like the
+    // episode's: the numbers may be of another edition; the user chooses.
+    if !g.show.is_empty() && !found.choice.is_empty() {
+        let title = without_show(&g.title, show);
+        if !title.is_empty() && title_sim(show, &title, &found.choice) < 0.3 {
+            found.choice.clear();
+        }
+    }
     if g.show.is_empty() && g.id.is_none() && !found.choice.is_empty() {
         let name = dir.file_name().unwrap_or_default().to_string_lossy();
         let folder = if folder_season(&name).is_some() {
@@ -1846,6 +1854,11 @@ mod tests {
         let x = at("05 - Unrelated Words", "/dl").unwrap();
         assert!(x.choice.is_empty());
         assert_eq!(x.alternatives[0], vec![(2, 8)]);
+        // The show's name with a title that is not the episode's: the
+        // user chooses among the numbered ones.
+        let x = at("Breaking Bad S01E02 Volume 1 Unrelated Words", "/tv").unwrap();
+        assert!(x.choice.is_empty());
+        assert_eq!(x.alternatives[0], vec![(1, 2)]);
         assert_eq!(
             at("05 - Better Call Saul", "/dl").unwrap().choice,
             vec![(2, 8)]
