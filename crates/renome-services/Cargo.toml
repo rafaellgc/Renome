@@ -1,6 +1,6 @@
 [package]
 name = "renome-services"
-version = "0.38.1"
+version = "0.39.0"
 edition = "2024"
 license = "MIT"
 description = "Renome services: online catalogues, keys, kept answers and data folders, shared by the window and the command line"

@@ -3,7 +3,15 @@
 Release notes are written for each GitHub release. This file lists what
 changed in the code between releases and is kept for the unreleased work.
 
-## Unreleased
+## 0.39.0
+
+### Fixes
+- Moving a release's own folder into a library no longer leaves the empty
+  folder behind: when nothing is left in it, it is removed (otherwise it is
+  renamed beside with the "extras" suffix).
+- Series: a file that carries the show's name but a title nothing like the
+  episode's with that number (another edition of the cartoons) is no longer
+  matched on its numbers alone; the options are offered to choose from.
 
 ### Security
 - Fixed two vulnerable dependencies (`url` RUSTSEC-2026-0592, `cookie`
