@@ -1,4 +1,4 @@
-import { ex, type Section } from "./types";
+import { cmd, ex, type Section } from "./types";
 
 export const es: Section[] = [
   {
@@ -1017,6 +1017,7 @@ ${ex("Serie.S01E02.720p.WEB.mkv", "Serie S01E02.mkv")}
     title: "Línea de comandos",
     html: `
 <p>Todo lo que hace la ventana también se puede hacer desde la terminal, con <code>renome-cli</code>: las mismas reglas, las mismas búsquedas, las mismas Opciones, claves, conjuntos guardados y el mismo Historial. Lo renombrado desde la terminal se puede deshacer en la ventana, y al revés.</p>
+<p>Este capítulo también es para quien nunca ha usado una terminal. Tiene cuatro partes: esta (cómo abrir el programa y dar los primeros pasos), <b>Línea de comandos: renombrar</b> (las reglas y todas las opciones de <code>preview</code> y <code>apply</code>, cada una con un ejemplo), <b>Línea de comandos: los otros comandos</b> (Historial, conjuntos, Opciones, claves y el resto, con todos los subcomandos) y <b>Línea de comandos: scripts y limitaciones</b>.</p>
 <h4>Dónde está</h4>
 <ul>
   <li><b>Linux, paquete .deb o .rpm</b>: <code>renome-cli</code>, ya en la ruta del sistema.</li>
@@ -1025,38 +1026,355 @@ ${ex("Serie.S01E02.720p.WEB.mkv", "Serie S01E02.mkv")}
   <li><b>Windows</b>: <code>renome-cli.exe</code>, en la carpeta donde se instaló Renome (normalmente <code>%LOCALAPPDATA%\\Renome</code>). Al instalar, el instalador pregunta si añadir esa carpeta al <code>PATH</code> del usuario, para llamarlo desde cualquier carpeta (vale para las terminales abiertas después); las actualizaciones mantienen la respuesta y desinstalar quita la carpeta de nuevo. Para cambiar de idea, instale de nuevo y responda otra vez.</li>
   <li><b>macOS</b>: <code>/Applications/Renome.app/Contents/MacOS/renome-cli</code>. Para llamarlo solo por el nombre: <code>sudo mkdir -p /usr/local/bin &amp;&amp; sudo ln -s /Applications/Renome.app/Contents/MacOS/renome-cli /usr/local/bin/renome-cli</code>.</li>
 </ul>
-<h4>Ver antes, renombrar después</h4>
-<p><code>renome-cli preview CARPETAS -r REGLA</code> muestra el nombre actual y el nuevo, sin cambiar nada. <code>renome-cli apply …</code>, con los mismos argumentos, muestra la lista y pregunta antes de renombrar (<code>--yes</code> no pregunta, pero avisa, como la ventana, de las carpetas antiguas que quedan con sobras y de la publicidad que va a la Papelera; también avisa cuando el lector elegido no abre el formato del e-book). Las reglas se aplican en el orden en que se escriben:</p>
+<h4>Cómo leer los ejemplos</h4>
+<ul>
+  <li>La línea que empieza con <code>$</code> es lo que usted escribe (sin el <code>$</code>) y termina con <kbd>Enter</kbd>. Las líneas de abajo, con sangría, son la respuesta del programa, copiada de una ejecución real.</li>
+  <li>En los ejemplos el programa se llama <code>renome-cli</code>. Si el suyo es el AppImage, el Flatpak o el de macOS, cambie ese nombre por la forma de la lista de arriba.</li>
+  <li><code>.</code> significa "la carpeta donde está la terminal". Para ir a una carpeta, use <code>cd</code>: <code>cd ~/Fotos</code> (en Windows PowerShell: <code>cd $HOME\\Fotos</code>). Un nombre con espacio va entre comillas: <code>cd "Mis Fotos"</code>. Consejo: escriba el comienzo de un nombre y pulse <kbd>Tab</kbd> para que la terminal lo complete; <kbd>↑</kbd> trae de vuelta el comando anterior.</li>
+  <li>Las reglas van entre comillas simples (<code>-r 'replace:find=_,replace= '</code>) para que la terminal no toque <code>$</code>, <code>*</code> ni <code>\\</code>. En Windows, use <b>PowerShell</b>, donde las comillas simples también valen (en el antiguo Símbolo del sistema, no).</li>
+  <li>Para abreviar, los ejemplos usan pocos archivos de prueba y muestran la lista entera que escribió el programa. La suya tendrá sus archivos.</li>
+</ul>
+<h4>Primer paseo: ver, renombrar, deshacer</h4>
+<p><b>1. Ver qué pasaría.</b> <code>preview</code> muestra el nombre actual y el nuevo y <b>no cambia nada</b>. Aquí la regla cambia el <code>_</code> por un espacio:</p>
+${cmd("renome-cli preview . -r 'replace:find=_,replace= '", "~/Fotos\n  IMG_0001.jpg → IMG 0001.jpg\n  IMG_0002.jpg → IMG 0002.jpg\n  informe_final_v2.txt → informe final v2.txt\n4 archivos · 3 modificados · 1 sin cambio")}
+<p>La última línea cuenta: 4 archivos en la carpeta, 3 cambiarían y 1 ya está bien. Los que no cambian quedan ocultos; <code>--all</code> los muestra todos:</p>
+${cmd("renome-cli preview . -r 'replace:find=_,replace= ' --all", "~/Fotos\n  IMG_0001.jpg → IMG 0001.jpg\n  IMG_0002.jpg → IMG 0002.jpg\n  ficha.pdf\n  informe_final_v2.txt → informe final v2.txt\n4 archivos · 3 modificados")}
+<p><b>2. Renombrar de verdad.</b> <code>apply</code> usa los mismos argumentos, muestra la lista y <b>pregunta</b> antes. Responda <code>s</code> y <kbd>Enter</kbd> para renombrar; solo <kbd>Enter</kbd> (o <code>n</code>) cancela:</p>
+${cmd("renome-cli apply . -r 'replace:find=_,replace= '", "~/Fotos\n  IMG_0001.jpg → IMG 0001.jpg\n  IMG_0002.jpg → IMG 0002.jpg\n  informe_final_v2.txt → informe final v2.txt\n4 archivos · 3 modificados · 1 sin cambio\n¿Renombrar? [s/N] s\n3 archivos renombrados")}
+<p><b>3. Revisar el Historial.</b> Cada renombrado queda registrado. El primer número es el <b>ID</b> de la entrada; después vienen la fecha, cuántos archivos y, si es el caso, <code>deshecho</code>:</p>
+${cmd("renome-cli history", "20261127-093015-482-31207  2026-11-27 09:30:15  3 archivos  ")}
+<p><b>4. Deshacer.</b> <code>undo</code> solo deshace el último renombrado:</p>
+${cmd("renome-cli undo", "3 archivos restaurados")}
+${cmd("renome-cli history", "20261127-093015-482-31207  2026-11-27 09:30:15  3 archivos  deshecho")}
+<p>Listo: ya sabe lo esencial. El resto del capítulo explica cada regla, cada opción y cada comando.</p>
+<h4>Consejos para quien empieza</h4>
+<ul>
+  <li><b>Solo tres comandos tocan sus archivos</b>: <code>apply</code>, <code>undo</code> y <code>duplicates --trash</code> (que envía a la Papelera). Todos los demás solo leen o cambian los ajustes de Renome. <code>preview</code> siempre es seguro: úselo sin miedo hasta que la lista quede como usted quiere.</li>
+  <li>¿Escribió algo mal? El programa dice qué, y no se renombra nada. Vea <b>Cuando el comando da error</b>, en la parte "renombrar".</li>
+  <li><code>renome-cli --help</code> lista los comandos; <code>renome-cli COMANDO --help</code> (por ejemplo <code>renome-cli history --help</code>) lista las opciones del comando; <code>renome-cli history show --help</code> las del subcomando.</li>
+  <li><kbd>Ctrl</kbd>+<kbd>C</kbd> detiene lo que esté corriendo (vea "Búsquedas en línea" en la próxima parte).</li>
+  <li><code>renome-cli manual</code> muestra el índice de este manual en la terminal; <code>renome-cli manual cli</code> abre este capítulo; <code>renome-cli manual r-number</code> (o <code>number</code>), la regla de numerar.</li>
+</ul>
+<h4>Los comandos, en resumen</h4>
 <table>
-  <tr><td><code>-r 'replace:find=_,replace= '</code></td><td>una regla: el tipo, dos puntos, opciones separadas por comas</td></tr>
-  <tr><td><code>-r case</code></td><td>solo el tipo: las opciones quedan con su valor por defecto</td></tr>
-  <tr><td><code>--set "Mis series"</code></td><td>un conjunto guardado en la ventana</td></tr>
-  <tr><td><code>--rules reglas.json</code></td><td>un archivo exportado por la ventana</td></tr>
+  <tr><td><code>preview</code>, <code>apply</code></td><td>muestran / hacen el renombrado, el movimiento o la copia. Parte "renombrar".</td></tr>
+  <tr><td><code>rules</code></td><td>lista los tipos de regla y las opciones de cada una</td></tr>
+  <tr><td><code>undo [ID]</code></td><td>deshace el último renombrado, o el del ID</td></tr>
+  <tr><td><code>history</code></td><td>lista (<code>list</code>), muestra (<code>show ID</code>), borra una (<code>delete ID</code>) o todas (<code>clear</code>) las entradas del Historial</td></tr>
+  <tr><td><code>sets</code></td><td>conjuntos de reglas guardados: <code>list</code>, <code>show</code>, <code>save</code>, <code>export</code>, <code>import</code>, <code>rename</code>, <code>delete</code></td></tr>
+  <tr><td><code>options</code></td><td>lee y cambia las Opciones: <code>list</code>, <code>get</code>, <code>set</code>, <code>reset</code></td></tr>
+  <tr><td><code>keys</code></td><td>claves y cuentas de los servicios, en el almacén de contraseñas: <code>list</code>, <code>set</code>, <code>delete</code>, <code>test</code></td></tr>
+  <tr><td><code>servers</code></td><td>servidores de medios: <code>list</code>, <code>add</code>, <code>remove</code>, <code>libraries</code>, <code>pair</code>, <code>on</code>, <code>off</code>, <code>test</code></td></tr>
+  <tr><td><code>duplicates CARPETAS</code></td><td>copias idénticas, la misma canción u obra repetida, fotos parecidas</td></tr>
+  <tr><td><code>update</code></td><td>busca la versión nueva (<code>check</code>) o la instala (<code>install</code>)</td></tr>
+  <tr><td><code>manual [CAPÍTULO]</code></td><td>este manual, en la terminal</td></tr>
+  <tr><td><code>cache</code></td><td>tamaño (<code>size</code>) y limpieza (<code>clear</code>) de las respuestas guardadas</td></tr>
+  <tr><td><code>completions SHELL</code></td><td>el complemento con <kbd>Tab</kbd> para bash, zsh, fish, PowerShell o elvish</td></tr>
+</table>
+<p>Los mensajes siguen el idioma de las Opciones; <code>--lang pt</code> (o <code>en</code>, <code>es</code>) lo cambia solo esta vez.</p>`,
+  },
+  {
+    id: "cli-rename",
+    title: "Línea de comandos: renombrar",
+    sub: true,
+    html: `
+<p>Es lo que hace la ventana con la lista de archivos y las reglas: <code>renome-cli preview RUTAS… -r REGLA</code> muestra, <code>renome-cli apply RUTAS… -r REGLA</code> renombra. Las <b>rutas</b> son archivos y carpetas (una carpeta entra con sus subcarpetas). <code>apply</code> muestra la lista y pregunta antes; <code>--yes</code> no pregunta, pero avisa, como la ventana, de las carpetas viejas que quedan con restos y de los anuncios que van a la Papelera (y también cuando el lector elegido no abre el formato del libro electrónico).</p>
+<h4>Escribir una regla</h4>
+<p>Cada <code>-r</code> es una regla: <code>-r TIPO:opción=valor,opción=valor</code>. El <b>tipo</b> va primero, luego dos puntos, luego las opciones separadas por comas. Vea los tipos con <code>renome-cli rules</code>:</p>
+${cmd("renome-cli rules", "Reglas (renome-cli rules TIPO muestra las opciones):\n  replace      Reemplazar texto\n  regex        Expresión regular\n  rearrange    Reorganizar partes\n  list         Nombres de una lista\n  case         Mayúsculas / minúsculas\n  insert       Insertar\n  number       Numerar\n  remove       Quitar caracteres\n  convert      Convertir caracteres\n  removeRange  Quitar fragmento\n  charAt       Carácter en posición\n  extension    Extensión\n  movie        Película\n  series       Serie\n  music        Música\n  book         Libro\n  comic        Cómic\n  photo        Foto\n  subtitle     Subtítulo")}
+<p>Y las opciones de un tipo con <code>renome-cli rules TIPO</code>; cada opción trae el nombre (en inglés, igual en cualquier idioma), lo que hace, los valores aceptados y el <b>valor por defecto</b>, que vale cuando no la escribe:</p>
+${cmd("renome-cli rules number", "Numerar (number)\n\nOpciones:\n  template\n      Plantilla\n      {n} número · {nombre} nombre actual · {carpeta} nombre de la carpeta\n      plantilla con {claves} · por defecto: {nombre} {n}\n  start\n      Inicio\n      número entero · por defecto: 1\n  step\n      Paso\n      número entero · por defecto: 1\n  digits\n      Dígitos\n      número entero 0…12 · por defecto: 2\n  perFolder\n      Reiniciar la numeración en cada carpeta\n      sí/no · por defecto: no\n  pairs\n      Mismo nombre con otra extensión cuenta como uno\n      Un video y sus subtítulos (pelicula.mkv, pelicula.es.srt) o una foto y su RAW reciben el mismo número o la misma línea.\n      sí/no · por defecto: yes\n\nToda regla acepta también only=FILTRO (solo en archivos) y off (desactivada).")}
+<ul>
+  <li><b>Solo el tipo</b> usa todo por defecto: <code>-r case</code> es "mayúsculas / minúsculas" en el modo por defecto (Título inteligente).</li>
+  <li><b>Sí/no</b>: escriba <code>yes</code> o <code>no</code> (también valen <code>sí</code>, <code>true</code>, <code>false</code>, <code>1</code> y <code>0</code>).</li>
+  <li><b>Texto con coma, o con espacio al principio o al final</b>: póngalo entre comillas dobles <i>dentro</i> de la regla, como <code>find="a,b"</code>. Un espacio en medio del texto no necesita comillas.</li>
+</ul>
+${cmd("renome-cli preview . -r 'replace:find=\"a,b\",replace=x'", "~/Fotos\n  a,b.txt → x.txt\n1 archivo · 1 modificado")}
+${cmd("renome-cli preview . -r 'replace:find=\" \",replace=_'", "~/Fotos\n  uno dos tres.txt → uno_dos_tres.txt\n1 archivo · 1 modificado")}
+<p>Varias reglas: repita el <code>-r</code>. Corren <b>en el orden en que las escribe</b>, y cada una ve el resultado de la anterior. Aquí la primera cambia <code>_</code> por espacio y la segunda arregla las mayúsculas:</p>
+${cmd("renome-cli preview . -r 'replace:find=_,replace= ' -r case", "~/Fotos\n  IMG_0001.jpg → Img 0001.jpg\n  IMG_0002.jpg → Img 0002.jpg\n  ficha.pdf → Ficha.pdf\n  informe_final_v2.txt → Informe Final V2.txt\n4 archivos · 4 modificados")}
+<p>Todo tipo de regla acepta además dos opciones extra:</p>
+<ul>
+  <li><code>only=FILTRO</code>: la regla solo actúa en los archivos que coinciden con el filtro (el mismo de la lista de la ventana: <code>*.mp4</code>, <code>&gt;40MB</code>, <code>-trailer</code>…). Los otros pasan por ella sin cambiar.</li>
+  <li><code>off</code>: deja la regla apagada, como el interruptor de la ventana. Útil para guardar una regla en un conjunto sin usarla.</li>
+</ul>
+${cmd("renome-cli preview . -r 'replace:find=Clase,replace=Lección,only=*.mp4'", "~/Clases\n  Clase 01 - Intro.mp4 → Lección 01 - Intro.mp4\n  Clase 02 - Basico.mp4 → Lección 02 - Basico.mp4\n  Clase 03 - Final.mp4 → Lección 03 - Final.mp4\n4 archivos · 3 modificados · 1 sin cambio")}
+${cmd("renome-cli preview . -r 'replace:find=Clase,replace=Lección,off'", "3 archivos · 0 modificados")}
+<p>De dónde vienen las reglas (use una forma o combínelas; valen en el orden en que aparecen):</p>
+<table>
+  <tr><td><code>-r 'replace:find=_,replace= '</code></td><td>una regla escrita en el momento (repetible)</td></tr>
+  <tr><td><code>--set "Mis series"</code></td><td>un conjunto guardado (vea <code>sets</code>, en la próxima parte)</td></tr>
+  <tr><td><code>--rules reglas.json</code></td><td>un archivo de reglas exportado por la ventana; <code>-</code> lee de la entrada de la terminal</td></tr>
   <tr><td><code>--saved</code></td><td>las reglas que la ventana recordó al cerrarse</td></tr>
 </table>
-<p><code>renome-cli rules</code> lista los tipos; <code>renome-cli rules number</code> muestra las opciones de una regla, cada una con su valor por defecto. Toda regla acepta también <code>only=FILTRO</code> (solo en los archivos que muestra el filtro) y <code>off</code>. Los nombres de las opciones están en inglés y son los mismos en cualquier idioma.</p>
-<p>También como en la ventana: <code>--filter</code> (el filtro de la lista), <code>--sort</code> y <code>--desc</code> (el orden, que la numeración sigue), <code>--to CARPETA</code> (mover) y <code>--copy</code> (copiar), <code>--name RUTA=NOMBRE</code> (el nombre escrito a mano), <code>--folders</code> (renombrar las propias carpetas), <code>--hidden</code>, <code>--all</code> (lista también los que no cambian), <code>--csv ARCHIVO</code> (Exportar lista, con las columnas extra elegidas en las opciones) y <code>--missing-csv ARCHIVO</code> (Exportar lo que falta).</p>
-<h4>Búsquedas en línea</h4>
-<p>Las reglas de película, serie, música, libro y cómic buscan en los mismos catálogos y eligen solas lo que elegiría la ventana. En los casos dudosos, <code>--choose</code> decide: <code>ask</code> (el valor por defecto en una terminal) muestra los candidatos numerados y espera el número; <code>auto</code> se queda solo con lo seguro; <code>skip</code> ni siquiera busca los dudosos. En lugar del número, se puede escribir otra búsqueda, como en las ventanas de elección: un enlace o ID del catálogo, o el nombre, con <code>Título 1999</code> en una película, <code>título / autor</code> en un libro, <code>artista / álbum</code> en un álbum y <code>nombre 1999 / editorial</code> en una serie de cómics. <code>--pick RUTA=ID</code> fuerza una elección (<code>tmdb:603</code>, un enlace del catálogo o un título). <code>--edit RUTA:CAMPO=VALOR,…</code> hace lo que hace <b>Editar los datos</b> en la ventana, por ejemplo <code>--edit "libro.epub:title=El Título,authors=Fulano; Mengano"</code> o, con la regla de foto, <code>--edit "IMG_1.jpg:date=2018-03-27 14:30"</code>; <code>--help</code> lista los campos de cada regla. <code>--missing</code> lista lo que falta (episodios, números, pistas, películas de la colección, volúmenes), como las filas atenuadas de la ventana.</p>
-<p><kbd>Ctrl</kbd>+<kbd>C</kbd> durante las búsquedas hace de botón Detener: lo ya encontrado queda elegido, y el programa pregunta si sigue con eso. Durante el renombrado, se detiene donde está: lo ya renombrado queda en el Historial (y se puede deshacer), y los pasos siguientes no se hacen. Un segundo <kbd>Ctrl</kbd>+<kbd>C</kbd>, o uno mientras una pregunta espera respuesta, termina en el acto.</p>
-<p>Después de renombrar, el resto ocurre como en la ventana: etiquetas y portadas grabadas, archivos <code>.nfo</code>, listas de reproducción, subtítulos descargados, libros convertidos y los servidores multimedia avisados (<code>--no-server</code> no avisa).</p>
-<h4>Los demás comandos</h4>
+<h4>Cuando el comando da error</h4>
+<p>Un error de escritura nunca renombra nada: el programa dice qué no entendió y sale con el código <code>3</code>.</p>
+${cmd("renome-cli preview . -r replace_text:find=a", "Error: Regla desconocida: replace_text (vea renome-cli rules)")}
+${cmd("renome-cli preview . -r replace:search=a", "Error: La regla replace no tiene la opción search (vea renome-cli rules replace)")}
+${cmd("renome-cli preview . -r number:digits=many", "Error: Valor inválido para number.digits: many (se esperaba: número entero 0…12)")}
+${cmd("renome-cli preview .", "Error: Ninguna regla: use -r, --set, --rules o --saved.")}
+<h4>Las reglas de texto, una por una</h4>
+<p>Cada regla de abajo tiene un ejemplo; el capítulo de la regla (<code>renome-cli manual replace</code>, por ejemplo) explica las opciones con más calma. Todas aceptan <code>target=name</code> (solo el nombre, el valor por defecto), <code>target=ext</code> (solo la extensión) o <code>target=full</code> (nombre y extensión), cuando la regla tiene esa opción.</p>
+<p><b>Sustituir texto</b> (<code>replace</code>): <code>find</code> es lo que buscar, <code>replace</code> lo que poner en su lugar, <code>caseSensitive=yes</code> distingue mayúsculas, <code>firstOnly=yes</code> cambia solo la primera aparición.</p>
+${cmd("renome-cli preview . -r 'replace:find=_,replace= '", "~/Fotos\n  informe_final_v2.txt → informe final v2.txt\n2 archivos · 1 modificado · 1 sin cambio")}
+${cmd("renome-cli preview . -r replace:find=jpg,replace=jpeg,target=ext", "~/Fotos\n  Foto Playa.jpg → Foto Playa.jpeg\n1 archivo · 1 modificado")}
+${cmd("renome-cli preview . -r replace:find=A,replace=x,caseSensitive=yes,firstOnly=yes", "~/Fotos\n  ARQ2.txt → xRQ2.txt\n2 archivos · 1 modificado · 1 sin cambio")}
+<p><b>Expresión regular</b> (<code>regex</code>): como la anterior, pero <code>pattern</code> es un patrón. En el texto nuevo, <code>$1</code>, <code>$2</code>… son los trozos entre paréntesis (y no <code>\\1</code>). Entre comillas simples, la terminal no toca el <code>$</code>.</p>
+${cmd("renome-cli preview . -r 'regex:pattern=^Clase (\\d+) - (.*)$,replace=$2 ($1)'", "~/Clases\n  Clase 01 - Intro.mp4 → Intro (01).mp4\n  Clase 02 - Basico.mp4 → Basico (02).mp4\n  Clase 03 - Final.mp4 → Final (03).mp4\n3 archivos · 3 modificados")}
+${cmd("renome-cli preview . -r 'regex:pattern=\\d+,replace=#'", "~/Clases\n  Clase 01 - Intro.mp4 → Clase # - Intro.mp4\n  Clase 02 - Basico.mp4 → Clase # - Basico.mp4\n  Clase 03 - Final.mp4 → Clase # - Final.mp4\n3 archivos · 3 modificados")}
+<p><b>Reorganizar partes</b> (<code>rearrange</code>): corta el nombre en las partes separadas por <code>separator</code> y las monta en el orden de <code>order</code> (números de las partes).</p>
+${cmd("renome-cli preview . -r 'rearrange:separator= - ,order=2 1'", "~/Clases\n  Clase 01 - Intro.mp4 → Intro Clase 01.mp4\n  Clase 02 - Basico.mp4 → Basico Clase 02.mp4\n  Clase 03 - Final.mp4 → Final Clase 03.mp4\n3 archivos · 3 modificados")}
+<p><b>Nombres de una lista</b> (<code>list</code>): el 1.er archivo recibe la 1.ª línea de <code>names</code>, el 2.º la 2.ª, y así sucesivamente. Separe las líneas con <code>\\n</code>. Vale el orden de la lista (vea <code>--sort</code>).</p>
+${cmd("renome-cli preview . -r 'list:names=Introducción\\nPrimeros pasos\\nCierre'", "~/Clases\n  Clase 01 - Intro.mp4 → Introducción.mp4\n  Clase 02 - Basico.mp4 → Primeros pasos.mp4\n  Clase 03 - Final.mp4 → Cierre.mp4\n3 archivos · 3 modificados\n3 nombres para 3 archivos")}
+<p><b>Mayúsculas / minúsculas</b> (<code>case</code>), con <code>mode</code>: <code>lower</code>, <code>upper</code>, <code>sentence</code> (solo la 1.ª letra), <code>title</code> (cada palabra) o <code>titleSmart</code> (el valor por defecto: como <code>title</code>, pero las palabras cortas de enlace — de, la, y, of, the… — quedan en minúsculas, salvo al comienzo del nombre). En cualquier modo, <code>keepWords=SWAT,USA</code> mantiene esas palabras como están escritas.</p>
+${cmd("renome-cli preview . -r case:mode=upper", "~/Fotos\n  informe económico.txt → INFORME ECONÓMICO.txt\n1 archivo · 1 modificado")}
+${cmd("renome-cli preview . -r case:mode=lower", "~/Fotos\n  INFORME ECONÓMICO.TXT → informe económico.TXT\n1 archivo · 1 modificado")}
+${cmd("renome-cli preview . -r case:mode=sentence", "~/Fotos\n  uno dos tres.txt → Uno dos tres.txt\n1 archivo · 1 modificado")}
+${cmd("renome-cli preview . -r case:mode=title", "~/Fotos\n  uno dos tres.txt → Uno Dos Tres.txt\n1 archivo · 1 modificado")}
+${cmd("renome-cli preview . -r case:mode=upper,target=ext", "~/Fotos\n  Foto Playa.jpg → Foto Playa.JPG\n1 archivo · 1 modificado")}
+<p><b>Insertar</b> (<code>insert</code>): pone un texto (<code>source=text</code>, con <code>text=</code>) o una fecha/nombre (<code>source=now</code> la fecha de hoy, <code>modified</code> la de modificación del archivo, <code>taken</code> la de la foto, <code>folder</code> el nombre de la carpeta) en el lugar dado por <code>at</code>: <code>start</code>, <code>end</code> (antes de la extensión), <code>index</code> (en la posición <code>position</code>, contando desde el comienzo) o <code>fromEnd</code> (contando desde el final). <code>dateFormat</code> elige el formato de la fecha (<code>%Y</code> año, <code>%m</code> mes, <code>%d</code> día, <code>%H</code> hora, <code>%M</code> minuto, <code>%S</code> segundo).</p>
+${cmd("renome-cli preview . -r 'insert:text=Curso ,at=start'", "~/Clases\n  Clase 01 - Intro.mp4 → Curso Clase 01 - Intro.mp4\n  Clase 02 - Basico.mp4 → Curso Clase 02 - Basico.mp4\n  Clase 03 - Final.mp4 → Curso Clase 03 - Final.mp4\n3 archivos · 3 modificados")}
+${cmd("renome-cli preview . -r insert:text=_v2,at=end", "~/Fotos\n  a1.txt → a1_v2.txt\n1 archivo · 1 modificado")}
+${cmd("renome-cli preview . -r insert:text=X,at=index,position=2", "~/Fotos\n  a1.txt → aX1.txt\n1 archivo · 1 modificado")}
+${cmd("renome-cli preview . -r insert:text=-,at=fromEnd,position=2", "~/Fotos\n  uno dos tres.txt → uno dos tr-es.txt\n1 archivo · 1 modificado")}
+${cmd("renome-cli preview . -r 'insert:source=now,dateFormat=%Y-%m-%d ,at=start'", "~/Fotos\n  a1.txt → 2026-11-27 a1.txt\n1 archivo · 1 modificado")}
+<p><b>Numerar</b> (<code>number</code>): <code>template</code> usa <code>{n}</code> (el número), <code>{nombre}</code> (el nombre actual) y <code>{carpeta}</code>; <code>start</code>, <code>step</code> y <code>digits</code> (cuántos dígitos, con ceros a la izquierda); <code>perFolder=yes</code> reinicia la cuenta en cada carpeta. La numeración sigue el orden de la lista (<code>--sort</code>, <code>--desc</code>).</p>
+${cmd("renome-cli preview . -r 'number:template={n}. {nombre}'", "~/Clases\n  Clase 01 - Intro.mp4 → 01. Clase 01 - Intro.mp4\n  Clase 02 - Basico.mp4 → 02. Clase 02 - Basico.mp4\n  Clase 03 - Final.mp4 → 03. Clase 03 - Final.mp4\n3 archivos · 3 modificados")}
+${cmd("renome-cli preview . -r 'number:template=Clase {n},start=10,step=5,digits=3'", "~/Clases\n  Clase 01 - Intro.mp4 → Clase 010.mp4\n  Clase 02 - Basico.mp4 → Clase 015.mp4\n  Clase 03 - Final.mp4 → Clase 020.mp4\n3 archivos · 3 modificados")}
+<p><b>Quitar caracteres</b> (<code>remove</code>): <code>extraSpaces</code> (espacios repetidos y en los extremos), <code>allSpaces</code>, <code>accents</code>, <code>digits</code>, <code>leadingNumber</code> (el número de pista del comienzo), <code>chars</code> (una lista de caracteres que quitar) y <code>maxLength</code> (corta el nombre a ese tamaño).</p>
+${cmd("renome-cli preview . -r remove:extraSpaces=yes", "~/Fotos\n    espacios   de más .txt → espacios de más.txt\n1 archivo · 1 modificado")}
+${cmd("renome-cli preview . -r remove:accents=yes", "~/Fotos\n  informe económico.txt → informe economico.txt\n1 archivo · 1 modificado")}
+${cmd("renome-cli preview . -r remove:chars=-", "~/Clases\n  Clase 01 - Intro.mp4 → Clase 01 Intro.mp4\n  Clase 02 - Basico.mp4 → Clase 02 Basico.mp4\n  Clase 03 - Final.mp4 → Clase 03 Final.mp4\n3 archivos · 3 modificados")}
+${cmd("renome-cli preview . -r remove:digits=yes", "~/Clases\n  Clase 01 - Intro.mp4 → Clase - Intro.mp4\n  Clase 02 - Basico.mp4 → Clase - Basico.mp4\n  Clase 03 - Final.mp4 → Clase - Final.mp4\n3 archivos · 3 modificados")}
+${cmd("renome-cli preview . -r remove:maxLength=12", "~/Fotos\n  un nombre muy largo de verdad.txt → un nombre mu.txt\n1 archivo · 1 modificado")}
+<p><b>Convertir caracteres</b> (<code>convert</code>): <code>mojibake</code> (arregla acentos rotos; activado por defecto), <code>transliterate</code> (otros alfabetos en letras latinas), <code>splitWords</code> (separa palabras pegadas) y <code>webSafe</code> (<code>dash</code> o <code>underscore</code>: solo letras sin acento, números y puntos).</p>
+${cmd("renome-cli preview . -r convert:mojibake=yes", "~/Fotos\n  SÃ£o Paulo.txt → São Paulo.txt\n1 archivo · 1 modificado")}
+${cmd("renome-cli preview . -r convert:webSafe=dash", "~/Fotos\n  Café Negro.txt → Cafe-Negro.txt\n1 archivo · 1 modificado")}
+${cmd("renome-cli preview . -r convert:splitWords=yes", "~/Fotos\n  MiViajeDeVacaciones.txt → Mi Viaje De Vacaciones.txt\n1 archivo · 1 modificado")}
+<p><b>Quitar tramo</b> (<code>removeRange</code>): desde el punto <code>from</code> (<code>start</code>, <code>position</code> con <code>fromPosition</code>, o <code>text</code> con <code>fromText</code>) hasta el punto <code>to</code> (<code>end</code>, <code>position</code> con <code>toPosition</code>, o <code>text</code> con <code>toText</code>); <code>inclusive=yes</code> se lleva también los textos que delimitan.</p>
+${cmd("renome-cli preview . -r 'removeRange:from=text,fromText=Clase ,to=text,toText= - ,inclusive=yes'", "~/Clases\n  Clase 01 - Intro.mp4 → Intro.mp4\n  Clase 02 - Basico.mp4 → Basico.mp4\n  Clase 03 - Final.mp4 → Final.mp4\n3 archivos · 3 modificados")}
+${cmd("renome-cli preview . -r removeRange:from=start,to=position,toPosition=6", "~/Clases\n  Clase 01 - Intro.mp4 → 01 - Intro.mp4\n  Clase 02 - Basico.mp4 → 02 - Basico.mp4\n  Clase 03 - Final.mp4 → 03 - Final.mp4\n3 archivos · 3 modificados")}
+<p><b>Carácter en posición</b> (<code>charAt</code>): cambia (<code>replace</code>), o quita si <code>replace</code> queda vacío, el carácter de la posición <code>position</code> (<code>fromEnd=yes</code> cuenta desde el final); <code>onlyIf</code> lo hace solo si el carácter es ese.</p>
+${cmd("renome-cli preview . -r 'charAt:position=1,replace=#'", "~/Fotos\n  a1.txt → #1.txt\n1 archivo · 1 modificado")}
+${cmd("renome-cli preview . -r charAt:position=1,fromEnd=yes", "~/Fotos\n  uno dos tres.txt → uno dos tre.txt\n1 archivo · 1 modificado")}
+<p><b>Extensión</b> (<code>extension</code>), con <code>mode</code>: <code>lower</code>, <code>upper</code>, <code>set</code> (la extensión de <code>value</code>), <code>remove</code> o <code>content</code> (la que el archivo realmente es: un <code>.jpg</code> que es PNG pasa a <code>.png</code>).</p>
+${cmd("renome-cli preview . -r extension:mode=lower", "~/Fotos\n  Note.TXT → Note.txt\n  Photo.JPG → Photo.jpg\n2 archivos · 2 modificados")}
+${cmd("renome-cli preview . -r extension:mode=set,value=jpg", "~/Fotos\n  other.JPG → other.jpg\n  photo.jpeg → photo.jpg\n2 archivos · 2 modificados")}
+${cmd("renome-cli preview . -r extension:mode=remove", "~/Fotos\n  leeme.txt → leeme\n1 archivo · 1 modificado")}
+${cmd("renome-cli preview . -r extension:mode=content", "~/Fotos\n  figura.jpg → figura.png\n1 archivo · 1 modificado")}
+<h4>Las reglas que buscan en internet o leen el archivo</h4>
+<p>Las de <b>película, serie, música, libro y cómic</b> buscan en los catálogos (TMDB, MusicBrainz, Open Library, Grand Comics Database…) y necesitan las claves que la ventana también pide (<code>renome-cli keys</code>, en la próxima parte). <b>Foto</b> y <b>subtítulo</b> trabajan solo con lo que hay en el archivo y en el nombre, sin internet. En todas, <code>renome-cli rules TIPO</code> lista las opciones con su valor por defecto, y <code>renome-cli manual TIPO</code> trae el capítulo de la regla. Ejemplos de partida:</p>
+<ul>
+  <li><code>renome-cli preview . -r movie</code>: películas, en la plantilla <code>{título} ({año}) [tmdbid-{id}]</code>. Cambie la plantilla con <code>-r 'movie:template={título} ({año})'</code> (los nombres entre llaves siguen el idioma; <code>renome-cli rules movie</code> muestra cuáles hay).</li>
+  <li><code>renome-cli preview . -r 'series:folders=yes'</code>: episodios de serie, con las carpetas de la serie ordenadas.</li>
+  <li><code>renome-cli preview . -r music</code>: canciones, por sus etiquetas (y, si el archivo no las tiene, por el sonido).</li>
+  <li><code>renome-cli preview . -r book</code>, <code>-r comic</code>: libros y cómics.</li>
+  <li><code>renome-cli preview . -r subtitle</code>: subtítulos (convertir, quitar anuncios, ajustar el tiempo).</li>
+</ul>
+<p>La regla de foto da nombre por la fecha en que se tomó la foto (la del archivo, si no la del nombre) y funciona sin internet:</p>
+${cmd("renome-cli preview . -r photo", "~/Fotos\n  IMG_20240315_101530.jpg → 2024-03-15 10.15.30.jpg\n  Screenshot_2023-12-01-08-05-00.png → 2023-12-01 08.05.00.png\n2 archivos · 2 modificados")}
+<h4>Todas las opciones de preview y apply</h4>
+<p>Las opciones valen para los dos comandos. En cada una, el ejemplo muestra el efecto.</p>
+<p><b><code>--filter EXPRESIÓN</code></b>: el filtro de la lista de la ventana; solo lo que muestra se renombra. Acepta nombres (<code>*.mp4</code>), tamaño (<code>&gt;40MB</code>), fecha (<code>=2024</code>, <code>&gt;=2024-06</code>), antigüedad (<code>&lt;7d</code>), carpeta (<code>carpeta:Temporada</code> o <code>folder:…</code>) y <code>-</code> delante para ocultar (<code>-trailer</code>). Vea el capítulo "Lista de archivos". La última línea dice cuántos archivos entraron en el filtro.</p>
+${cmd("renome-cli preview . -r case:mode=upper --filter '>1MB'", "~/Fotos\n  grande.bin → GRANDE.bin\n1 de 2 archivos (filtro) · 1 modificado")}
+${cmd("renome-cli preview . -r case:mode=upper --filter '*.mp4 -notas'", "~/Fotos\n  Clase 01.mp4 → CLASE 01.mp4\n1 de 3 archivos (filtro) · 1 modificado")}
+<p><b><code>--sort ORDEN</code></b> y <b><code>--desc</code></b>: el orden de los archivos (<code>name</code>, <code>new</code>, <code>ext</code>, <code>dir</code>, <code>size</code>, <code>modified</code>), que la numeración y la regla de lista siguen; <code>--desc</code> lo invierte.</p>
+${cmd("renome-cli preview . -r 'number:template={n} {nombre}' --sort name --desc", "~/Clases\n  Clase 03 - Final.mp4 → 01 Clase 03 - Final.mp4\n  Clase 02 - Basico.mp4 → 02 Clase 02 - Basico.mp4\n  Clase 01 - Intro.mp4 → 03 Clase 01 - Intro.mp4\n3 archivos · 3 modificados")}
+<p><b><code>--hidden</code></b> incluye los archivos ocultos (nombres que empiezan con punto). <b><code>--no-recursive</code></b> no entra en las subcarpetas. Sin él, entran las subcarpetas de las carpetas dadas:</p>
+${cmd("renome-cli preview . -r case:mode=upper", "~/Fotos\n  a.txt → A.txt\n~/Fotos/sub\n  b.txt → B.txt\n2 archivos · 2 modificados")}
+${cmd("renome-cli preview . -r case:mode=upper --no-recursive", "~/Fotos\n  a.txt → A.txt\n1 archivo · 1 modificado")}
+${cmd("renome-cli preview . -r case:mode=upper --hidden", "~/Fotos\n  .secreto.txt → .SECRETO.txt\n  a.txt → A.txt\n2 archivos · 2 modificados")}
+<p><b><code>--folders</code></b>: las carpetas dadas entran ellas mismas, para renombrarlas (en vez de lo que hay dentro).</p>
+${cmd("renome-cli preview vacaciones --folders -r case:mode=upper", "~/Fotos\n  vacaciones → VACACIONES\n1 archivo · 1 modificado")}
+<p><b><code>--name RUTA=NOMBRE</code></b>: da un nombre a mano a un archivo, como escribir en la columna Nombre nuevo. Repetible. Necesita al menos una regla (use <code>off</code> si solo quiere el nombre a mano).</p>
+${cmd("renome-cli preview . -r case:mode=upper --name a1.txt=primero.txt", "~/Fotos\n  a1.txt → primero.txt  (a mano)\n  a2.txt → A2.txt\n2 archivos · 2 modificados")}
+<p><b><code>--to CARPETA</code></b> mueve los archivos (ya con el nombre nuevo) a la carpeta; <b><code>--copy</code></b>, junto, copia en vez de mover. La carpeta se crea si no existe.</p>
+${cmd("renome-cli preview . -r case:mode=upper --to ~/Organizado", "~/Fotos\n  a.txt → ~/Organizado/A.txt\n  b.txt → ~/Organizado/B.txt\n2 archivos · 2 modificados")}
+${cmd("renome-cli apply a.txt --to ~/Copias --copy -r case:mode=upper --yes", "~/Fotos\n  a.txt → ~/Copias/A.txt\n1 archivo · 1 modificado\n1 archivo copiado")}
+<p><b><code>--all</code></b> lista también los archivos que no cambian (que normalmente quedan ocultos):</p>
+${cmd("renome-cli preview . -r case:mode=upper --all", "~/Fotos\n  B.txt\n  a.txt → A.txt\n2 archivos · 1 modificado")}
+<p><b><code>--csv ARCHIVO</code></b> graba la lista en un archivo CSV (el <b>Exportar lista</b> de la ventana), que abre cualquier hoja de cálculo. <b><code>--missing</code></b> lista también lo que falta (episodios, números, pistas, películas de la colección, volúmenes) y <b><code>--missing-csv ARCHIVO</code></b> lo graba en un CSV.</p>
+${cmd("renome-cli preview . -r case:mode=upper --csv list.csv", "~/Fotos\n  a.txt → A.txt\nLista exportada\n2 archivos · 1 modificado · 1 sin cambio")}
+<p><b><code>--yes</code></b> (<code>-y</code>) no pregunta antes de renombrar. En un script, sin terminal para responder, <code>apply</code> exige <code>--yes</code>:</p>
+${cmd("renome-cli apply . -r case:mode=upper", "~/Fotos\n  a.txt → A.txt\n1 archivo · 1 modificado\nError: Sin terminal para preguntar: use --yes para renombrar.")}
+<p><b><code>--strict</code></b>: si queda cualquier conflicto (dos archivos con el mismo nombre, un nombre que ya existe…), no renombra <b>nada</b>. Sin él, renombra lo que está bien y deja solo los conflictos. Aquí <code>a1.txt</code> choca con el <code>arq.txt</code> que ya existe:</p>
+${cmd("renome-cli apply . -r replace:find=a1,replace=arq -r 'insert:text=_,at=end,only=b1*' --yes", "~/Fotos\n  a1.txt → arq.txt  (Ya existe un archivo con ese nombre)\n  b1.txt → b1_.txt\n3 archivos · 1 modificado · 1 conflicto · 1 sin cambio\n1 archivo renombrado")}
+${cmd("renome-cli apply . -r replace:find=a1,replace=arq -r 'insert:text=_,at=end,only=b1*' --strict --yes", "~/Fotos\n  a1.txt → arq.txt  (Ya existe un archivo con ese nombre)\n  b1.txt → b1_.txt\n3 archivos · 1 modificado · 1 conflicto · 1 sin cambio\n1 conflicto: no se renombró nada (--strict).")}
+<p><b>Búsquedas dudosas</b>: <code>--choose ask</code> (el valor por defecto en la terminal) muestra los candidatos numerados y espera el número; <code>auto</code> se queda solo con lo que es seguro; <code>skip</code> ni siquiera busca los dudosos. En vez del número, se puede escribir otra búsqueda, como en las ventanas de elección: un enlace o ID del catálogo, o el nombre, con <code>Título 1999</code> en una película, <code>título / autor</code> en un libro, <code>artista / álbum</code> en un álbum y <code>nombre 1999 / editorial</code> en una serie de cómics. <code>--pick RUTA=ID</code> fuerza una elección (<code>tmdb:603</code>, un enlace del catálogo o un título).</p>
+<p><b><code>--edit RUTA:CAMPO=VALOR,…</code></b> hace lo que hace la ventana <b>Editar los datos</b>: corrige a mano los datos que la regla lee de un archivo. Los campos cambian con la regla (<code>renome-cli preview --help</code> los lista todos): música <code>title</code>, <code>artist</code>, <code>album</code>, <code>year</code>, <code>track</code>…; libro <code>title</code>, <code>authors</code>, <code>year</code>, <code>isbn</code>…; cómic <code>series</code>, <code>volume</code>, <code>number</code>…; foto <code>date</code>, <code>day</code>, <code>month</code>, <code>year</code>, <code>hour</code>, <code>minute</code>. Ejemplo para un libro: <code>--edit "libro.epub:title=El Título,authors=Fulano; Mengano"</code>. Una foto con la fecha equivocada:</p>
+${cmd("renome-cli preview . -r photo --edit 'IMG_20240315_101530.jpg:date=2018-03-27 14:30'", "~/Fotos\n  IMG_20240315_101530.jpg → 2018-03-27 14.30.00.jpg\n1 archivo · 1 modificado")}
+<p><b>Parar con <kbd>Ctrl</kbd>+<kbd>C</kbd></b>: durante las búsquedas hace el papel del botón Parar: lo que ya se encontró queda elegido, y el programa pregunta si sigue con eso. Durante el renombrado, se detiene donde está: lo que ya se renombró queda en el Historial (y se puede deshacer), y los pasos siguientes no se hacen. Un segundo <kbd>Ctrl</kbd>+<kbd>C</kbd>, o uno mientras una pregunta espera respuesta, termina en el acto.</p>
+<p>Después de renombrar, el resto ocurre como en la ventana: etiquetas y portadas grabadas, archivos <code>.nfo</code>, listas de reproducción, subtítulos descargados, libros convertidos y los servidores de medios avisados (<code>--no-server</code> no avisa).</p>
+<h4>Opciones que valen para todos los comandos</h4>
 <table>
-  <tr><td><code>undo [ID]</code></td><td>deshace el último renombrado, o el de ese ID</td></tr>
-  <tr><td><code>history</code></td><td>lista, muestra o borra entradas del Historial</td></tr>
-  <tr><td><code>sets</code></td><td>lista, muestra, guarda, exporta, importa, renombra y borra conjuntos</td></tr>
-  <tr><td><code>options</code></td><td>lee y cambia las Opciones (<code>options set lang en</code>)</td></tr>
-  <tr><td><code>keys</code></td><td>guarda las claves de los servicios en el almacén de contraseñas, sin mostrarlas en pantalla; <code>keys test tmdb</code> prueba una, como el botón Probar</td></tr>
-  <tr><td><code>servers</code></td><td>servidores multimedia: añadir, leer las bibliotecas, emparejar carpetas, probar</td></tr>
-  <tr><td><code>duplicates CARPETAS</code></td><td>copias idénticas, la misma canción u obra repetida (la mejor marcada), <code>--similar</code> fotos parecidas; <code>--trash</code> envía a la Papelera</td></tr>
-  <tr><td><code>update</code></td><td>busca la versión nueva; <code>update install</code> la instala (AppImage, Windows, macOS)</td></tr>
-  <tr><td><code>manual [CAPÍTULO]</code></td><td>este manual, en la terminal</td></tr>
-  <tr><td><code>cache</code></td><td>tamaño y limpieza de las respuestas guardadas</td></tr>
-  <tr><td><code>completions bash</code></td><td>autocompletado con Tab para bash, zsh, fish o PowerShell</td></tr>
+  <tr><td><code>--lang pt|en|es</code></td><td>idioma de los mensajes, solo esta vez (el valor por defecto es el de las Opciones)</td></tr>
+  <tr><td><code>--json</code></td><td>escribe el resultado en JSON, para scripts (parte "scripts y limitaciones")</td></tr>
+  <tr><td><code>--color auto|always|never</code></td><td>colores; <code>never</code> (o la variable <code>NO_COLOR</code>) los quita todos</td></tr>
+  <tr><td><code>-q</code>, <code>--quiet</code></td><td>menos mensajes: solo los errores</td></tr>
+  <tr><td><code>--no-server</code></td><td>no avisa a los servidores de medios después de renombrar</td></tr>
+  <tr><td><code>-h</code>, <code>--help</code></td><td>la ayuda del comando</td></tr>
+  <tr><td><code>-V</code>, <code>--version</code></td><td>la versión del programa</td></tr>
+</table>`,
+  },
+  {
+    id: "cli-commands",
+    title: "Línea de comandos: los otros comandos",
+    sub: true,
+    html: `
+<p>Los ejemplos de esta parte se ejecutaron de verdad, en una carpeta de prueba. Los ID y las horas del Historial son solo de ejemplo: los suyos serán otros.</p>
+<h4>undo e history: el Historial</h4>
+<p>Cada renombrado hecho por <code>apply</code> (o por la ventana) se convierte en una <b>entrada</b> del Historial, con un <b>ID</b> como <code>20261127-093015-482-31207</code> (fecha, hora y un sufijo). Con ella se puede ver lo que se hizo y deshacerlo. Para los ejemplos, dos renombrados seguidos en la misma carpeta:</p>
+${cmd("renome-cli apply . -r 'replace:find=_,replace= ' --yes", "~/Fotos\n  IMG_0001.jpg → IMG 0001.jpg\n  IMG_0002.jpg → IMG 0002.jpg\n  informe_final_v2.txt → informe final v2.txt\n4 archivos · 3 modificados · 1 sin cambio\n3 archivos renombrados")}
+${cmd("renome-cli apply . -r case:mode=upper,target=ext --yes", "~/Fotos\n  IMG 0001.jpg → IMG 0001.JPG\n  IMG 0002.jpg → IMG 0002.JPG\n  ficha.pdf → ficha.PDF\n  informe final v2.txt → informe final v2.TXT\n4 archivos · 4 modificados\n4 archivos renombrados")}
+<p><b><code>renome-cli history</code></b> (o <code>history list</code>, que es lo mismo): lista las entradas, de la más nueva a la más vieja. Cada línea tiene el ID, la fecha, cuántos archivos y, si es el caso, <code>deshecho</code>. Es de donde se copia el ID para los otros comandos.</p>
+${cmd("renome-cli history", "20261127-101244-097-31544  2026-11-27 10:12:44  4 archivos  \n20261127-093015-482-31207  2026-11-27 09:30:15  3 archivos  ")}
+${cmd("renome-cli history list", "20261127-101244-097-31544  2026-11-27 10:12:44  4 archivos  \n20261127-093015-482-31207  2026-11-27 09:30:15  3 archivos  ")}
+<p><b><code>renome-cli history show ID</code></b>: muestra lo que renombró esa entrada, nombre antiguo → nuevo. <b>El ID tiene que ser entero</b>, como aparece en la lista: selecciónelo con el ratón, cópielo y péguelo en el comando. Un número como <code>1</code> no vale:</p>
+${cmd("renome-cli history show 20261127-093015-482-31207", "~/Fotos\n  IMG_0001.jpg → IMG 0001.jpg\n  IMG_0002.jpg → IMG 0002.jpg\n  informe_final_v2.txt → informe final v2.txt")}
+${cmd("renome-cli history show 1", "Error: No hay ninguna entrada 1 en el Historial.")}
+<p><b><code>renome-cli undo</code></b>: deshace el <b>último</b> renombrado que aún no se haya deshecho, devolviendo los nombres antiguos (y devolviendo a su sitio lo que se movió).</p>
+${cmd("renome-cli undo", "4 archivos restaurados")}
+${cmd("renome-cli history", "20261127-101244-097-31544  2026-11-27 10:12:44  4 archivos  deshecho\n20261127-093015-482-31207  2026-11-27 09:30:15  3 archivos  ")}
+<p><b><code>renome-cli undo ID</code></b>: deshace una entrada concreta (copie el ID de la lista). Aquí, la más vieja, después de que la más nueva ya se deshizo:</p>
+${cmd("renome-cli undo 20261127-093015-482-31207", "3 archivos restaurados")}
+${cmd("renome-cli history", "20261127-101244-097-31544  2026-11-27 10:12:44  4 archivos  deshecho\n20261127-093015-482-31207  2026-11-27 09:30:15  3 archivos  deshecho")}
+<p>Sin nada que deshacer, <code>undo</code> solo lo avisa:</p>
+${cmd("renome-cli undo", "Nada que deshacer")}
+<p><b>Cuidado con el orden.</b> Deshaga primero la más nueva y después las más viejas. Si una entrada más nueva tocó los mismos archivos y aún no se deshizo, deshacer la más vieja falla, porque los archivos ya no tienen el nombre que ella espera. Aquí, de nuevo dos renombrados seguidos (como al comienzo de esta sección), sin ninguno deshecho:</p>
+${cmd("renome-cli history", "20261127-101244-097-31544  2026-11-27 10:12:44  4 archivos  \n20261127-093015-482-31207  2026-11-27 09:30:15  3 archivos  ")}
+${cmd("renome-cli undo 20261127-093015-482-31207", "0 archivos restaurados\nError: IMG 0001.jpg — archivo no encontrado (¿se movió o se borró?)\nError: IMG 0002.jpg — archivo no encontrado (¿se movió o se borró?)\nError: informe final v2.txt — archivo no encontrado (¿se movió o se borró?)")}
+${cmd("renome-cli history", "20261127-101244-097-31544  2026-11-27 10:12:44  4 archivos  \n20261127-093015-482-31207  2026-11-27 09:30:15  3 archivos  No se pudo deshacer")}
+<p>Cuando algo no pudo volver (un archivo se movió, se borró o ya tiene otro nombre), el programa cuenta cuántos volvieron, lista los que fallaron y termina con el código <code>1</code>; la entrada queda marcada <b>No se pudo deshacer</b> en el Historial.</p>
+<p><b><code>renome-cli history delete ID</code></b>: borra <b>solo la entrada</b> del Historial. <b>Los archivos quedan como están</b> (con el nombre nuevo) y, sin la entrada, ese renombrado ya no se puede deshacer con el programa. Sirve para limpiar entradas que no va a deshacer más.</p>
+${cmd("renome-cli history delete 20261127-093015-482-31207", "Entrada 20261127-093015-482-31207 borrada.")}
+${cmd("renome-cli history", "20261127-101244-097-31544  2026-11-27 10:12:44  4 archivos  deshecho")}
+<p><b><code>renome-cli history clear</code></b>: borra <b>todas</b> las entradas. Tampoco toca los archivos. No pregunta nada, así que úselo con cuidado.</p>
+${cmd("renome-cli history clear", "1 entrada borrada.")}
+${cmd("renome-cli history", "El Historial está vacío.")}
+<h4>sets: conjuntos de reglas guardados</h4>
+<p>Un conjunto es una lista de reglas con un nombre, los mismos <b>Conjuntos</b> de la ventana. Para guardar, escriba las reglas como en <code>apply</code> (con <code>-r</code>, <code>--set</code>, <code>--rules</code> o <code>--saved</code>) y póngale nombre:</p>
+${cmd("renome-cli sets save 'Clases del curso' -r 'removeRange:from=text,fromText=Clase ,to=text,toText= - ,inclusive=yes' -r case", "Conjunto Clases del curso guardado, con 2 reglas.")}
+<p><code>sets list</code> lista los conjuntos con cuántas reglas tiene cada uno; <code>sets show NOMBRE</code> muestra las reglas en el mismo formato de <code>-r</code> (se pueden copiar y volver a usar):</p>
+${cmd("renome-cli sets list", "Clases del curso  2 reglas")}
+${cmd("renome-cli sets show 'Clases del curso'", "-r 'removeRange:fromText=\"Clase \",toText=\" - \"'\n-r case")}
+<p>Para usar un conjunto, <code>--set NOMBRE</code> en <code>preview</code> o <code>apply</code>:</p>
+${cmd("renome-cli preview . --set 'Clases del curso'", "~/Clases\n  Clase 01 - Intro.mp4 → Intro.mp4\n  Clase 02 - Basico.mp4 → Basico.mp4\n  Clase 03 - Final.mp4 → Final.mp4\n3 archivos · 3 modificados")}
+<p><code>sets export NOMBRE ARCHIVO</code> graba el conjunto en un archivo JSON, el mismo formato que exporta la ventana; sin el archivo (o con <code>-</code>) escribe en pantalla, para ver o redirigir (<code>… &gt; clases.json</code>). <code>sets import ARCHIVO</code> lee un archivo así y lo guarda como conjunto, con el nombre del archivo (<code>clases.json</code> pasa a ser el conjunto <code>clases</code>). Un archivo de reglas también se puede usar directamente, sin importar, con <code>--rules</code>:</p>
+${cmd("renome-cli sets export 'Clases del curso' clases.json")}
+${cmd("renome-cli sets export 'Clases del curso'", "[\n  {\n    \"enabled\": true,\n    \"id\": \"s1a21b2c157000\",\n    \"rule\": {\n      \"from\": \"text\",\n      \"fromPosition\": 1,\n      \"fromText\": \"Clase \",\n      \"inclusive\": true,\n      \"to\": \"text\",\n      \"toPosition\": 1,\n      \"toText\": \" - \",\n      \"type\": \"removeRange\"\n    }\n  },\n  {\n    \"enabled\": true,\n    \"id\": \"s1a21b2c157010\",\n    \"rule\": {\n      \"keepWords\": \"\",\n      \"mode\": \"titleSmart\",\n      \"target\": \"name\",\n      \"type\": \"case\"\n    }\n  }\n]")}
+${cmd("renome-cli sets import clases.json", "Conjunto clases guardado, con 2 reglas.")}
+${cmd("renome-cli preview . --rules clases.json --filter '*.mp4'", "~/Clases\n  Clase 01 - Intro.mp4 → Intro.mp4\n  Clase 02 - Basico.mp4 → Basico.mp4\n  Clase 03 - Final.mp4 → Final.mp4\n3 de 4 archivos (filtro) · 3 modificados")}
+<p><code>sets rename NOMBRE NUEVO</code> cambia el nombre y <code>sets delete NOMBRE</code> borra (solo el conjunto guardado; ningún archivo suyo):</p>
+${cmd("renome-cli sets rename 'Clases del curso' 'Limpiar clases'", "El conjunto Clases del curso ahora se llama Limpiar clases.")}
+${cmd("renome-cli sets list", "clases  2 reglas\nLimpiar clases  2 reglas")}
+${cmd("renome-cli sets delete 'Limpiar clases'", "Conjunto Limpiar clases borrado.")}
+${cmd("renome-cli sets list", "clases  2 reglas")}
+<h4>options: las Opciones del programa</h4>
+<p>Las mismas Opciones del engranaje de la ventana. <code>options list</code> muestra todas, con el valor actual y lo que hace cada una. Las marcadas "solo de la ventana" no afectan a la terminal (tema, tamaño del texto…), pero se pueden leer y cambiar.</p>
+${cmd("renome-cli options list", "lang = es\n    Idioma · uno de pt, en, es\nincludeHidden = false\n    Incluir archivos ocultos al añadir carpetas · sí/no\nwarnWindows = true\n    Avisar sobre nombres que Windows no acepta · sí/no\nnumberClashes = false\n    Si dos archivos quedan con el mismo nombre, añadir (2), (3)… · sí/no\ntmdbLang = \n    Idioma de los títulos · uno de auto, pt-BR, pt-PT, en-US, en-GB, es-ES, es-MX, fr-FR, it-IT, de-DE, ja-JP\ncacheDays = 7\n    Guardar las respuestas durante · uno de 0, 1, 7, 30, 180\ncheckUpdates = true\n    Buscar versiones nuevas al abrir · sí/no\ntheme = system (solo de la ventana)\n    Tema · uno de light, dark, system\ntextSize = normal (solo de la ventana)\n    Tamaño del texto · uno de normal, large, larger\nconfirmApply = true (solo de la ventana)\n    Pedir confirmación antes de renombrar · sí/no\ndisableRulesAfterApply = true (solo de la ventana)\n    Desactivar las reglas después de renombrar · sí/no\nrememberRules = true (solo de la ventana)\n    Recordar las reglas al cerrar el programa · sí/no\nshowMissing = true (solo de la ventana)\n    Mostrar en la lista las filas atenuadas de lo que falta. Desmarcada, desaparecen, pero siguen contadas aquí y en la exportación. · sí/no")}
+<p><code>options get NOMBRE</code> muestra el valor de una; <code>options set NOMBRE VALOR</code> lo cambia; <code>options reset NOMBRE</code> la devuelve al valor por defecto. Los valores aceptados aparecen en la lista (<code>uno de …</code>, <code>sí/no</code>, número); un valor fuera de la lista da error y no cambia nada:</p>
+${cmd("renome-cli options get lang", "es")}
+${cmd("renome-cli options set cacheDays 30", "cacheDays = 30. Con la ventana abierta, puede escribir encima al cerrarse.")}
+${cmd("renome-cli options set warnWindows no", "warnWindows = false. Con la ventana abierta, puede escribir encima al cerrarse.")}
+${cmd("renome-cli options set cacheDays 5", "Error: Valor inválido para options.cacheDays: 5 (se esperaba: uno de 0, 1, 7, 30, 180)")}
+${cmd("renome-cli options get language", "Error: Opción desconocida: language (vea renome-cli options list)")}
+${cmd("renome-cli options reset cacheDays", "cacheDays = —. Con la ventana abierta, puede escribir encima al cerrarse.")}
+<p>En sí/no, escriba <code>yes</code> o <code>no</code> (también valen <code>sí</code>, <code>true</code> y <code>false</code>). Después de <code>reset</code> el programa muestra <code>—</code>: la opción ya no tiene valor guardado y vale el de por defecto. <b>Atención</b>: cambie las Opciones con la ventana cerrada. Si está abierta, graba las Opciones que tiene al cerrarse y puede deshacer su cambio (es el aviso que el programa repite).</p>
+<h4>cache: las respuestas guardadas de las búsquedas</h4>
+<p>Las respuestas de los catálogos se guardan en el disco (las Opciones dicen por cuánto tiempo). <code>cache size</code> dice cuánto ocupan; <code>cache clear</code> borra todo (las claves y contraseñas no están ahí), para que una búsqueda nueva muestre lo que cambió en el catálogo:</p>
+${cmd("renome-cli cache size", "Las respuestas guardadas ocupan 0 B.")}
+${cmd("renome-cli cache clear", "Respuestas guardadas borradas.")}
+<h4>keys: claves y cuentas de los servicios</h4>
+<p>Las búsquedas en línea necesitan claves de API o cuentas gratuitas. <code>keys</code> las guarda en el <b>almacén de contraseñas del sistema</b>, como la ventana, y nunca muestra los valores.</p>
+<ul>
+  <li><code>renome-cli keys list</code>: lista las claves y si están definidas (nunca los valores). Los nombres son: <code>tmdb</code>, <code>google-books</code>, <code>comicvine</code>, <code>metron</code>, <code>discogs</code>, <code>opensubtitles-key</code>, <code>opensubtitles-user</code>, <code>opensubtitles-password</code>, <code>subdl</code>, <code>subsource</code>, <code>gcd-email</code>, <code>gcd-password</code>.</li>
+  <li><code>renome-cli keys set tmdb</code>: pide el valor y usted lo escribe <b>sin que aparezca</b> en pantalla. En un script, <code>--stdin</code> lee el valor de la entrada, para que la clave no acabe en el historial de la terminal: <code>printf '%s' "$CLAVE" | renome-cli keys set tmdb --stdin</code>. <b>Cuidado</b>: un valor vacío borra la clave.</li>
+  <li><code>renome-cli keys test tmdb</code>: prueba la clave o la cuenta, como el botón <b>Probar</b> de las Opciones, y dice si el servicio respondió y la aceptó.</li>
+  <li><code>renome-cli keys delete tmdb</code>: borra la clave del almacén.</li>
+</ul>
+<p>En sistemas sin almacén de contraseñas, la clave va al archivo de opciones, sin cifrar, y el programa lo avisa.</p>
+<h4>servers: avisar a los servidores de medios</h4>
+<p>Después de renombrar, Renome puede avisar a Jellyfin, Emby o Plex de que esas carpetas cambiaron, como en la pestaña <b>Servidor de medios</b> de las Opciones. Cada servidor tiene un <b>ID</b>, que se ve en <code>servers list</code>.</p>
+<ol>
+  <li><code>renome-cli servers add jellyfin http://192.168.0.10:8096</code> (use <code>jellyfin</code> también para Emby; para Plex, <code>plex</code>): añade el servidor, <b>pide la clave</b> (en Plex, el token; <code>--stdin</code> la lee de la entrada) y lee las bibliotecas enseguida.</li>
+  <li><code>renome-cli servers list</code>: lista los servidores y las carpetas de cada biblioteca, diciendo cuál se avisa y cuál no tiene carpeta en este equipo.</li>
+  <li><code>renome-cli servers pair ID CARPETA_EN_EL_SERVIDOR CARPETA_AQUÍ</code>: cuando el servidor ve la carpeta con otra ruta (en un contenedor, o en otro equipo), dice qué carpeta de aquí es la misma. Ejemplo: <code>renome-cli servers pair ID /media/peliculas ~/Peliculas</code>.</li>
+  <li><code>renome-cli servers on ID CARPETA_EN_EL_SERVIDOR</code> avisa sobre esa carpeta; <code>servers off ID CARPETA_EN_EL_SERVIDOR</code> deja de avisar.</li>
+  <li><code>renome-cli servers libraries ID</code>: lee de nuevo las bibliotecas (para una biblioteca creada después en el servidor); los pares se quedan.</li>
+  <li><code>renome-cli servers test ID</code>: prueba la dirección y la clave.</li>
+  <li><code>renome-cli servers remove ID</code>: quita el servidor.</li>
+</ol>
+<p>Para renombrar sin avisar: <code>--no-server</code> en cualquier comando que renombre.</p>
+<h4>duplicates: archivos repetidos</h4>
+<p><code>renome-cli duplicates CARPETAS</code> busca repeticiones (las carpetas entran con sus subcarpetas) y <b>no borra nada</b>. Elija qué buscar:</p>
+<ul>
+  <li><code>--identical</code>: copias idénticas, byte a byte, aunque tengan nombres distintos.</li>
+  <li><code>--repeated</code>: la misma canción, película, episodio, cómic o libro en varios archivos (formatos o calidades distintos); la mejor de cada grupo se marca con ★.</li>
+  <li><code>--similar</code>: fotos parecidas (más lento, pues compara las imágenes).</li>
+  <li>Sin ninguna de las tres, busca las copias idénticas y las obras repetidas.</li>
+</ul>
+${cmd("renome-cli duplicates . --identical", "2 archivos con copia idéntica\n  1\n    ~/Fotos/copia de foto2.jpg (14 B)\n    ~/Fotos/photo2.jpg (14 B)")}
+<p>Los grupos vienen numerados, y el programa no elige por usted (solo <code>--repeated</code> marca la mejor con ★). Para quedarse con uno de cada, envíe los otros a la <b>Papelera</b> con <code>--trash ARCHIVO…</code>, que recibe los archivos que enviar y <b>no busca nada</b>. El programa lista los archivos y pregunta antes (<code>--yes</code> no pregunta). Esto <b>no</b> se puede deshacer desde el Historial, pero la Papelera del sistema guarda los archivos y se pueden restaurar desde allí:</p>
+<p><code>renome-cli duplicates --trash "copia de foto2.jpg"</code></p>
+<p>También aceptan <code>--hidden</code> (incluye archivos ocultos) y <code>--no-recursive</code> (sin subcarpetas).</p>
+<h4>update: la versión nueva</h4>
+<ul>
+  <li><code>renome-cli update check</code>: solo busca, y dice si hay versión nueva y la dirección de su página. (<code>renome-cli update</code> a secas solo muestra la ayuda.)</li>
+  <li><code>renome-cli update install</code>: descarga la versión nueva, comprueba la firma del proyecto (un archivo alterado en el camino se descarta) y la instala, en el AppImage, en Windows y en macOS. Con <code>.deb</code> o <code>.rpm</code>, descargue el paquete de la página de la versión; en Flatpak, el propio Flatpak actualiza.</li>
+</ul>
+<h4>manual: este manual</h4>
+<p><code>renome-cli manual</code> muestra el índice, con el código de cada capítulo; <code>renome-cli manual CÓDIGO</code> muestra un capítulo (vale también el comienzo del título: <code>renome-cli manual numerar</code>); <code>--all</code> muestra el manual entero, que puede leer poco a poco: <code>renome-cli manual --all | less</code>. Con <code>--json</code>, la salida es para que la lea un programa.</p>
+${cmd("renome-cli manual", "  start          Primeros pasos\n  files          Lista de archivos\n  rules          Cómo funcionan las reglas\n  Por tipo de archivo\n    r-comic        Cómic\n    r-photo        Foto\n    r-book         Libro (Open Library, Google Books)\n    r-music        Música (etiquetas)\n    r-movie        Película (TMDB)\n    r-series       Serie (TMDB, AniList)\n    r-subtitle     Subtítulo\n  Texto del nombre\n    r-charAt       Carácter en posición\n    r-convert      Convertir caracteres\n    r-regex        Expresión regular\n    r-extension    Extensión\n    r-insert       Insertar\n    r-case         Mayúsculas / minúsculas\n    r-list         Nombres de una lista\n    r-number       Numerar\n    r-remove       Quitar caracteres\n    r-removeRange  Quitar fragmento\n    r-replace      Reemplazar texto\n    r-rearrange    Reorganizar partes\n  preview        Vista previa y conflictos\n  identical      Copias idénticas\n  apply          Renombrar y deshacer\n  recipes        Recetas\n  shortcuts      Atajos de teclado\n  options        Opciones\n  cli            Línea de comandos\n\nPara leer un capítulo: renome-cli manual CÓDIGO")}
+<h4>completions: Tab completa los comandos</h4>
+<p><code>renome-cli completions SHELL</code> escribe el complemento, y usted lo guarda donde su terminal lo lee. Después, <kbd>Tab</kbd> completa comandos, opciones y hasta los tipos de regla. Vuelva a abrir la terminal después de instalarlo.</p>
+<table>
+  <tr><td>bash</td><td><code>renome-cli completions bash &gt; ~/.local/share/bash-completion/completions/renome-cli</code></td></tr>
+  <tr><td>zsh</td><td><code>mkdir -p ~/.zfunc &amp;&amp; renome-cli completions zsh &gt; ~/.zfunc/_renome-cli</code>, y en <code>~/.zshrc</code>: <code>fpath+=(~/.zfunc)</code> y <code>autoload -U compinit &amp;&amp; compinit</code></td></tr>
+  <tr><td>fish</td><td><code>renome-cli completions fish &gt; ~/.config/fish/completions/renome-cli.fish</code></td></tr>
+  <tr><td>PowerShell</td><td><code>renome-cli completions powershell | Out-File -Append $PROFILE</code></td></tr>
+  <tr><td>elvish</td><td><code>renome-cli completions elvish</code> (guárdelo donde lo lee su elvish)</td></tr>
+</table>`,
+  },
+  {
+    id: "cli-scripts",
+    title: "Línea de comandos: scripts y limitaciones",
+    sub: true,
+    html: `
+<h4>Salida para programas: --json</h4>
+<p><code>--json</code> escribe el resultado en JSON (los nombres de los campos están en inglés y no cambian, en ningún idioma). <code>preview</code> trae cada archivo (<code>path</code>, <code>newPath</code>, <code>status</code>, <code>problem</code>) y los totales:</p>
+${cmd("renome-cli preview . -r case:mode=upper --json", "{\n  \"items\": [\n    {\n      \"isDir\": false,\n      \"manual\": false,\n      \"newPath\": \"/home/ana/Fotos/A.txt\",\n      \"path\": \"/home/ana/Fotos/a.txt\",\n      \"problem\": null,\n      \"status\": \"ok\",\n      \"tags\": []\n    }\n  ],\n  \"missing\": [],\n  \"notes\": [],\n  \"totals\": {\n    \"changed\": 1,\n    \"conflicts\": 0,\n    \"files\": 1,\n    \"leftFolders\": 0,\n    \"sameThere\": 0\n  },\n  \"trash\": [],\n  \"trashFolders\": []\n}")}
+<p>Los otros comandos también: <code>history --json</code> lista las entradas (<code>failed</code> mayor que cero es una entrada que no se pudo deshacer), <code>undo --json</code> dice cuántos volvieron y cuáles fallaron, <code>duplicates --json</code> trae los grupos.</p>
+${cmd("renome-cli history --json", "[\n  {\n    \"id\": \"20261127-101244-097-31544\",\n    \"created\": \"2026-11-27T10:12:44.482911037-03:00\",\n    \"count\": 4,\n    \"undone\": false,\n    \"reverted\": 0,\n    \"failed\": 0,\n    \"extra\": 0,\n    \"tagged\": 0\n  },\n  {\n    \"id\": \"20261127-093015-482-31207\",\n    \"created\": \"2026-11-27T09:30:15.482911037-03:00\",\n    \"count\": 3,\n    \"undone\": false,\n    \"reverted\": 0,\n    \"failed\": 3,\n    \"extra\": 0,\n    \"tagged\": 0\n  }\n]")}
+${cmd("renome-cli undo --json", "{\"failed\":[],\"restored\":4}")}
+${cmd("renome-cli duplicates . --identical --json", "{\n  \"identical\": [\n    [\n      \"/home/ana/Fotos/copia de foto2.jpg\",\n      \"/home/ana/Fotos/photo2.jpg\"\n    ]\n  ],\n  \"similar\": [],\n  \"songs\": [],\n  \"works\": []\n}")}
+<p>Con <code>jq</code> (un programa de terminal para leer JSON): <code>renome-cli history --json | jq -r '.[0].id'</code> escribe el ID de la entrada más nueva.</p>
+<h4>Códigos de salida</h4>
+<p>El código de salida dice cómo terminó; en bash, <code>echo $?</code> muestra el del último comando (en PowerShell, <code>$LASTEXITCODE</code>).</p>
+<table>
+  <tr><td><code>0</code></td><td>salió bien</td></tr>
+  <tr><td><code>1</code></td><td>algún archivo falló (no se pudo renombrar, o no pudo volver)</td></tr>
+  <tr><td><code>2</code></td><td>quedaron conflictos, o casos dudosos sin elección. Lo que estaba bien se renombró (con <code>--strict</code>, nada)</td></tr>
+  <tr><td><code>3</code></td><td>comando, regla, opción o valor equivocados (no se hizo nada)</td></tr>
+  <tr><td><code>130</code></td><td>detenido con <kbd>Ctrl</kbd>+<kbd>C</kbd></td></tr>
 </table>
-<p>Cada comando tiene <code>--help</code>. Los mensajes siguen el idioma de las Opciones; <code>--lang en</code> lo cambia solo esa vez.</p>
-<h4>En scripts</h4>
-<p><code>--json</code> escribe el resultado en JSON (nombres de campos en inglés, que no cambian), <code>--quiet</code> solo los errores, <code>--color never</code> sin colores (también con la variable <code>NO_COLOR</code>). El código de salida es <code>0</code> cuando salió bien, <code>1</code> cuando algún archivo falló, <code>2</code> cuando quedaron casos dudosos sin elección y <code>3</code> para un comando o regla equivocados, <code>130</code> cuando se detiene con <kbd>Ctrl</kbd>+<kbd>C</kbd>. Sin terminal, <code>apply</code> pide <code>--yes</code>, y sin <code>--choose</code> los casos dudosos se tratan como <code>auto</code>.</p>
-<p><b>Limitaciones:</b> convertir un libro a <b>PDF</b> necesita la ventana (es ella la que imprime las páginas); desde la terminal, la conversión a PDF lo avisa y el libro queda como está. La ventana y la terminal nunca renombran al mismo tiempo: una espera a que la otra termine. Pero una Opción cambiada desde la terminal con la ventana abierta puede deshacerse cuando la ventana se cierra, porque ella graba las Opciones que tiene; cambie las Opciones con la ventana cerrada. Las elecciones en la terminal muestran texto, no las portadas que compara la ventana. En Windows, en una sesión SSH las claves no se pueden leer ni guardar (Windows no abre el Administrador de credenciales para ella): use una terminal de la propia sesión. En macOS, en una sesión SSH las claves se pueden leer pero no guardar (el llavero lo rechaza): la clave va al archivo de opciones, y renome-cli lo avisa. La primera vez que renome-cli lee las claves guardadas por la ventana, macOS pide la contraseña de la sesión: elija <b>Permitir siempre</b>.</p>`,
+<p>Un ejemplo de script en bash: renombra y solo muestra el mensaje final si no hubo problema.</p>
+<p><code>if renome-cli apply ~/Fotos -r 'case:mode=lower' --yes --strict; then echo "todo bien"; else echo "se detuvo, código $?"; fi</code></p>
+<h4>En scripts y tareas programadas</h4>
+<ul>
+  <li>Sin terminal para preguntar, <code>apply</code> exige <code>--yes</code> y, sin <code>--choose</code>, los casos dudosos se tratan como <code>auto</code> (solo lo que es seguro).</li>
+  <li><code>--color never</code> (o la variable <code>NO_COLOR</code>) quita los colores de lo que va a un archivo de registro.</li>
+  <li>Use <code>--strict</code> cuando prefiera no renombrar nada a renombrar a medias.</li>
+  <li>Guarde el ID de la entrada (<code>history --json</code>) si quiere deshacer después.</li>
+</ul>
+<h4>Limitaciones</h4>
+<ul>
+  <li>Convertir un libro a <b>PDF</b> necesita la ventana (es ella la que imprime las páginas); desde la terminal, la conversión a PDF lo avisa y el libro queda como está.</li>
+  <li>La ventana y la terminal nunca renombran al mismo tiempo: una espera a que la otra termine.</li>
+  <li>Una Opción cambiada desde la terminal con la ventana abierta puede deshacerse cuando la ventana se cierra, porque ella graba las Opciones que tiene; cambie las Opciones con la ventana cerrada.</li>
+  <li>Las elecciones en la terminal muestran texto, no las portadas que compara la ventana.</li>
+  <li>En Windows, en una sesión SSH las claves no se pueden leer ni guardar (Windows no abre el Administrador de credenciales para ella): use una terminal de la propia sesión.</li>
+  <li>En macOS, en una sesión SSH las claves se pueden leer pero no guardar (el llavero lo rechaza): la clave va al archivo de opciones, y renome-cli lo avisa. La primera vez que renome-cli lee las claves guardadas por la ventana, macOS pide la contraseña de la sesión: elija <b>Permitir siempre</b>.</li>
+  <li><code>history show</code> y <code>undo ID</code> piden el ID entero, y <code>history clear</code> y <code>duplicates --trash</code> no se pueden deshacer con el programa.</li>
+</ul>`,
   },
 ];

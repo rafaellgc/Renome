@@ -327,6 +327,29 @@
     background: var(--surface-2);
   }
   .content :global(.ex span) { color: var(--accent); font-weight: 700; }
+  .content :global(.cmd) {
+    margin: 8px 0;
+    border-radius: 6px;
+    background: var(--surface-2);
+    border: 1px solid var(--row-line);
+    overflow-x: auto;
+  }
+  .content :global(.cmd code.in) {
+    display: block;
+    border: 0;
+    border-radius: 0;
+    padding: 7px 10px;
+    background: transparent;
+    font-weight: 600;
+  }
+  .content :global(.cmd .ps) { color: var(--accent); user-select: none; margin-right: 4px; }
+  .content :global(.cmd pre) {
+    margin: 0;
+    padding: 0 10px 7px;
+    font: 12.5px ui-monospace, monospace;
+    color: var(--muted);
+    white-space: pre;
+  }
   .content :global(.tip) {
     padding: 8px 10px;
     border-left: 3px solid var(--accent);

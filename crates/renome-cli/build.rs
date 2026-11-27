@@ -127,7 +127,10 @@ fn js_string(s: &str) -> (String, &str) {
     let mut chars = s.char_indices().skip(1);
     while let Some((i, c)) = chars.next() {
         match c {
-            '\\' => value.push(chars.next().unwrap().1),
+            '\\' => match chars.next().unwrap().1 {
+                'n' => value.push('\n'),
+                c => value.push(c),
+            },
             c if c == quote => return (value, &s[i + 1..]),
             c => value.push(c),
         }
@@ -155,6 +158,18 @@ fn template(s: &str) -> (String, &str) {
                 let (to, rest) = js_string(rest);
                 let rest = rest.trim_start().strip_prefix(")}").unwrap();
                 write!(value, "<ex>{}\u{1}{}</ex>", from, to).unwrap();
+                i = s.len() - rest.len();
+            }
+            b'$' if s[i..].starts_with("${cmd(") => {
+                let (line, rest) = js_string(&s[i + 6..]);
+                let rest = rest.trim_start();
+                let (output, rest) = match rest.strip_prefix(',') {
+                    Some(r) => js_string(r.trim_start()),
+                    None => (String::new(), rest),
+                };
+                let rest = rest.trim_start().strip_prefix(")}").unwrap();
+                let esc = |t: &str| t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+                write!(value, "<cmd>{}\u{1}{}</cmd>", esc(&line), esc(&output)).unwrap();
                 i = s.len() - rest.len();
             }
             _ => {
@@ -246,6 +261,24 @@ fn to_text(html: &str) -> String {
                 line = l;
                 // Spaces inside an example are part of the names.
                 out.push_str(&line);
+                out.push('\n');
+                line.clear();
+            }
+            ("cmd", false) => {
+                flush(&mut out, &mut line);
+                line.push_str("    $ ");
+            }
+            ("cmd", true) => {
+                // The command, then what it prints, indented as written
+                // (the spaces in the output are its alignment).
+                let (command, output) = line.split_once('\u{1}').unwrap_or((&line, ""));
+                out.push_str(command.trim_end());
+                out.push('\n');
+                for l in output.split('\n').filter(|l| !l.trim().is_empty()) {
+                    out.push_str("    ");
+                    out.push_str(l);
+                    out.push('\n');
+                }
                 out.push('\n');
                 line.clear();
             }

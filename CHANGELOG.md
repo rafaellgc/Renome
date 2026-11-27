@@ -3,6 +3,17 @@
 Release notes are written for each GitHub release. This file lists what
 changed in the code between releases and is kept for the unreleased work.
 
+## Unreleased
+
+### Documentation
+- The command-line chapter of the manual (pt, en, es) is rewritten in four
+  parts, for people who never used a terminal: a first walk-through, every
+  rule and every `preview`/`apply` option with an example, every subcommand
+  (history, sets, options, keys, servers, duplicates, update, manual, cache,
+  completions), and scripts, exit codes and limitations. The examples are
+  real runs, shown as command and output blocks in the window and in
+  `renome-cli manual`.
+
 ## 0.39.0
 
 ### Fixes
